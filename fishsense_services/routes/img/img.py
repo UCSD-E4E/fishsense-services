@@ -34,7 +34,7 @@ async def upload_img():
         raise HTTPException(status_code=404, detail="User does not exist")
     
     
-@img_router.get("/img/{username}/{img_id}", status_code=200)
+@img_router.get("/{username}/{img_id}", status_code=200)
 async def get_img(username: str, img_id: str):
     
     try:
@@ -45,7 +45,7 @@ async def get_img(username: str, img_id: str):
         raise HTTPException(status_code=404, detail=e.args)
     
     
-@img_router.delete("/img/{username}/{img_name}", status_code=200)
+@img_router.delete("/{username}/{img_name}", status_code=200)
 async def delete_img(username: str, img_name: str):
     
     try:
@@ -53,13 +53,7 @@ async def delete_img(username: str, img_name: str):
         return
     
     except ValueError as e:
-        raise HTTPException(status_code=404, detail="User does not exist")
-    
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail="Image does not exist")
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=404, detail=e.args)
     
         
     

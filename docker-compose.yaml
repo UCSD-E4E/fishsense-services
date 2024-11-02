@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  db:
+    container_name: postgres
+    image: postgres
+    expose:
+      - "5432"
+    environment:
+      POSTGRES_USER: placeholder_superuser
+      POSTGRES_PASSWORD: placeholder_pw
+      PGDATA: /data/postgres
+      POSTGRES_DB: fishsense_db
+    volumes:
+      - db:/data/postgres
+    ports:
+      - "5332:5432"
+    networks:
+      - fishsense_network
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $$POSTGRES_DB -U $$POSTGRES_USER"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  fishsense-database:
+    build:
+      context: ./fishsense-database
+    environment:
+      DB_HOST: db
+      DB_NAME: fishsense_db
+      DB_USER: placeholder_superuser
+      DB_PASSWORD: placeholder_pw
+    networks:
+      - fishsense_network
+    depends_on:
+      - db
+
+  fishsense-services:
+    build:
+      context: ./
+    environment:
+      DB_HOST: db
+      DB_NAME: fishsense_db
+      DB_USER: placeholder_superuser
+      DB_PASSWORD: placeholder_pw
+      PYTHONPATH: /app:/app/fishsense-database:/app/fishsense-database/fishsense_database 
+    ports:
+      - "8000:8000" # fishsense-services port
+    networks:
+      - fishsense_network
+    depends_on:
+      - db
+      - fishsense-database
+
+networks:
+  fishsense_network:
+    driver: bridge
+
+volumes:
+  db:

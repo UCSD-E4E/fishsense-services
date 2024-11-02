@@ -12,7 +12,7 @@ CLIENT_ID = "585544089882-2e8mni8kmbs39kekip1k6d09q5gjmqvv.apps.googleuserconten
 login_router = APIRouter()
 
 
-# possible routes: reset passwrod, need to check if there is account associated with it
+# possible routes:  need to check if there is account associated with it
 
 @login_router.post("/api/login")
 def verify_token():
