@@ -14,6 +14,10 @@ async def create_usr_route(request: Request):
     data = await request.json()
     
     try:
+        required_fields = ["username", "email"]
+        for field in required_fields:
+            if field not in data or data[field] is None:
+                raise ValueError(f"{field} cannot be null.")
         
         success = False
         with database as db:
@@ -71,7 +75,7 @@ async def get_usr_route(username: str):
         )
     
 @usr_router.get("/", status_code=200)
-async def all_usrs_route():
+async def get_all_usrs_route():
 
     try:
         success = False
@@ -92,6 +96,7 @@ async def all_usrs_route():
             status_code=400,
             content={"detail": str(e)}  # Send the error message as string
         )
+
 
 # @usr_router.put("/update", status_code=200)
 # async def update_usr_route(request: Request):
