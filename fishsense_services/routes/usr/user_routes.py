@@ -21,10 +21,10 @@ async def create_usr_route(request: Request):
         
         success = False
         with database as db:
-            time_diff = int((datetime.datetime.now(datetime.timezone.utc) - db.time).total_seconds())
+            time_diff = db.calc_time_diff(datetime.datetime.now(datetime.timezone.utc))
 
             data["created_utc"] = time_diff
-            data["last_login_utc"] = time_diff # TODO fix time stamp 
+            data["last_login_utc"] = time_diff # TODO fix time stamp
             success = db.exec_script("fishsense-database/scripts/insert_scripts/insert_user.sql", HTTP_CODES.POST, data) 
 
         if not success:

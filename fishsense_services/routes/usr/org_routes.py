@@ -129,6 +129,9 @@ async def add_user_to_organization(request: Request):
             user_id = db.exec_script("fishsense-database/scripts/get_scripts/get_users_scripts/get_user_by_username.sql", HTTP_CODES.GET.value, data)[0][0]
             org_id = db.exec_script("fishsense-database/scripts/get_scripts/get_org_scripts/get_org_by_name.sql", HTTP_CODES.GET.value, data)[0][0]
             
+            user_id = user_id[0]
+            org_id = org_id[0]
+            
             parameters = {"user_id": user_id, "org_id": org_id}
             
             success = db.exec_script("fishsense-database/scripts/insert_scripts/insert_user_organization.sql", HTTP_CODES.POST.value, parameters) 

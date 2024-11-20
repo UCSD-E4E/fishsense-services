@@ -54,6 +54,8 @@ services:
       - db
       - fishsense-database
 
+  
+
 networks:
   fishsense_network:
     driver: bridge
