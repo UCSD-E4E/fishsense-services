@@ -1,64 +1,39 @@
 version: '3.8'
 
 services:
-  db:
-    container_name: postgres
-    image: postgres
-    expose:
-      - "5432"
-    environment:
-      POSTGRES_USER: placeholder_superuser
-      POSTGRES_PASSWORD: placeholder_pw
-      PGDATA: /data/postgres
-      POSTGRES_DB: fishsense_db
+  fishsense_database:
+    extends:
+      file: ./fishsense-database/docker-compose.yaml
+      service: db
     volumes:
-      - db:/data/postgres
-    ports:
-      - "5332:5432"
-    networks:
-      - fishsense_network
-    restart: always
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -d $$POSTGRES_DB -U $$POSTGRES_USER"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-
-  fishsense-database:
-    build:
-      context: ./fishsense-database
-    environment:
-      DB_HOST: db
-      DB_NAME: fishsense_db
-      DB_USER: placeholder_superuser
-      DB_PASSWORD: placeholder_pw
-    networks:
-      - fishsense_network
-    depends_on:
-      - db
+      - ./fishsense_database:/fishsense_database
+  adminer:
+    extends:
+      file: ./fishsense-database/docker-compose.yaml
+      service: adminer
 
   fishsense-services:
     build:
       context: ./
-    environment:
-      DB_HOST: db
-      DB_NAME: fishsense_db
-      DB_USER: placeholder_superuser
-      DB_PASSWORD: placeholder_pw
-      PYTHONPATH: /app:/app/fishsense-database:/app/fishsense-database/fishsense_database 
+      dockerfile: Dockerfile
+    volumes:
+      - ./fishsense_services:/fishsense_services/fishsense_services
+      - ./fishsense-database/fishsense_database:/fishsense_services/fishsense_database
     ports:
-      - "8000:8000" # fishsense-services port
-    networks:
-      - fishsense_network
+      - "8000:8000"
+    # networks:
+    #   - fishsense_network
     depends_on:
-      - db
-      - fishsense-database
+      - fishsense_database
+    env_file:
+      - ./fishsense-database/.env
+      # - DATABASE_URL=postgresql://fishsense:fishsense@fishsense_database:5432/fishsense
 
   
 
-networks:
-  fishsense_network:
-    driver: bridge
+# networks:
+#   fishsense_network:
+#     driver: bridge
 
-volumes:
-  db:
+# volumes:
+#   db:

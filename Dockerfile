@@ -2,8 +2,10 @@ FROM python:3.11-bullseye
 RUN pip install --upgrade pip
 RUN pip install poetry
 RUN poetry config virtualenvs.create false
-WORKDIR /app
-COPY . /app
+WORKDIR /fishsense_services
+COPY . /fishsense_services
+COPY ./fishsense-database/fishsense_database /fishsense_services/fishsense_database
+
 
 ENV PYTHONUNBUFFERED 1
 
