@@ -1,13 +1,14 @@
+from datetime import date
 import json
 from typing import Dict, Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from google.auth.transport import requests
 from google.oauth2 import id_token
 import os
 
-from fishsense_services.helper.usr_helper import get_user_by_email, update_last_login
+from fishsense_services.helper.usr_helper import get_user_by_email, update_last_login, create_user
 
 login_router = APIRouter()
 
@@ -24,12 +25,28 @@ class createUserRequest(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     DOB: Optional[date] = None
+    oauth_id: str
     credential: str
-
+    organization_name: Optional[str] = None #TODO need to add to form later
+    
 @login_router.post("/api/account")
+async def verify_token(request : Request):
+    try:
+        token: Dict[str, str] = await request.json()
+        idinfo = id_token.verify_oauth2_token(
+            token["credential"], requests.Request(), CLIENT_ID
+        )
+
+        userid: str = idinfo["sub"]
+        return userid
+    except ValueError as e:
+        raise HTTPException(401, description=e.args)
+
+@login_router.post("/")
 async def login_with_google(token: TokenRequest):
     try:
         print("Credential:", token.credential)
+        print(type(token))
 
         idinfo = id_token.verify_oauth2_token(
             token.credential, requests.Request(), CLIENT_ID
@@ -49,34 +66,68 @@ async def login_with_google(token: TokenRequest):
         
         if not res:
             print("doesn't exist :(")
-            return JSONResponse(
-                content={
-                    "Status": "User not found"
-                }
-            )
+            raise HTTPException(status_code=404, detail="User not found")#TODO make less repetitive
+        
         print("updating last login")
         update_last_login(query_params)
         print("returning values")
+        print(res)
         
         return JSONResponse(
             content={
-                "username": res[1],
-                "email": res[2],
-                "creation_date": res[3],
-                "last login date": res[4],
-                "first name": res[5],
-                "last name": res[6],
-                "DOB": res[7]
+                "username": res[0][0][1],
+                "email": res[0][0][2],
+                "creation_date": res[0][0][3],
+                "last login date": res[0][0][4],
+                "first name": res[0][0][5],
+                "last name": res[0][0][6],
+                "DOB": res[0][0][7],
+                "google_photo": user_picture
             },
           
         )
 
-    except Exception as e:
-        print("Login failed:", str(e))
-        raise HTTPException(status_code=401, detail="Unauthorized")
+    except HTTPException as e:
+        if e.status_code == 404:
+            print("Caught 404: Not Found")
+            raise HTTPException(status_code=404, detail="User not found")
+        else:
+            raise HTTPException(status_code=401, detail="Unauthorized")
     
-@login_router.get("/create_user")
-def create_user(
+@login_router.post("/create-user")
+async def create_account(userRequest: createUserRequest):
+    
+    print(type(userRequest))
+    
+    try:
+        print("Creating query")
+        
+        query_params = userRequest.model_dump()
+        del query_params['credential']
+        
+        print("calling exec script")
+        
+        res = create_user(query_params)
+        
+        if not res:
+            print("unable to create user")
+            raise HTTPException(status_code=409, detail="Conflict: Username or Email already exists")#TODO make less repetitive
+
+        return JSONResponse(
+            content={
+                "status": "Success"
+            },
+            
+        )
+    except HTTPException as e:
+        if e.status_code == 409:
+            print("Caught 404: Not Found")
+            raise HTTPException(status_code=409, detail="Conflict: Username or Email already exists")
+        else:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    
+
     
 
     

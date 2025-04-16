@@ -1,7 +1,7 @@
 from fishsense_database.create_db import database 
-import datetime
+from datetime import datetime, timezone
 
-def get_user_by_email(query_params : str):
+def get_user_by_email(query_params):
     try:
         with database as db:
             user = db.exec_script("fishsense-database/fishsense_database/scripts/get_scripts/get_users_scripts/get_user.sql", query_params)
@@ -12,10 +12,10 @@ def get_user_by_email(query_params : str):
         print("Error fetching user by email:", e)
         return None
     
-def update_last_login(query_params : str):
+def update_last_login(query_params):
     
     try:
-        time = unix_time_calc(datetime.now(datetime.timezone.utc))
+        time = unix_time_calc(datetime.now(timezone.utc))
         query_params['last_login'] = time
         
         with database as db:
@@ -31,3 +31,20 @@ def unix_time_calc(date : datetime):
     
     unix_time = int(date.timestamp())
     return unix_time
+
+def create_user(query_params):
+    
+    try:
+        time = unix_time_calc(datetime.now(timezone.utc))
+        query_params['last_login_utc'] = time
+        query_params['created_utc'] = time
+        print(query_params)
+
+        with database as db:
+            res = db.exec_script("fishsense-database/fishsense_database/scripts/insert_scripts/create_user.sql", query_params)
+            
+            return res
+        
+    except Exception as e:
+        print("Error creating user:", e)
+        return None

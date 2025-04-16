@@ -6,6 +6,8 @@ services:
       file: ./fishsense-database/docker-compose.yaml
       service: db
     volumes:
+      - ./fishsense-database/data/postgres:/var/lib/postgresql/data
+      - ./fishsense-database/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
       - ./fishsense_database:/fishsense_database
   adminer:
     extends:
