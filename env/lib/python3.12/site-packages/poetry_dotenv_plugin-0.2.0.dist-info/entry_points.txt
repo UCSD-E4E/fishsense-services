@@ -1,0 +1,3 @@
+[poetry.application.plugin]
+poetry-dotenv-plugin=poetry_dotenv_plugin.dotenv_plugin:DotenvPlugin
+
