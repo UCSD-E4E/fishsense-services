@@ -22,7 +22,7 @@ pyjwt = "^2.10.1"
 black = "^24.3.0"
 
 [tool.poetry.group.prod.dependencies]
-gunicorn = "^22.0.0"
+gunicorn = "^23.0.0"
 
 [build-system]
 requires = ["poetry-core"]
