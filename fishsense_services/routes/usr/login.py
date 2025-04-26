@@ -13,7 +13,7 @@ from fishsense_services.helper.usr_helper import generate_jwt, get_user_by_email
 login_router = APIRouter()
 
 # Google client ID
-CLIENT_ID = "931946598531-mbukvvb7g21kdifbf67g64igk036ect4.apps.googleusercontent.com"
+CLIENT_ID = "931946598531-u2kdslb2ht5gbhrkb1t9hhre2br71c23.apps.googleusercontent.com"
 CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")  # Load from env vars securely
 
 class TokenRequest(BaseModel):
@@ -28,16 +28,26 @@ class createUserRequest(BaseModel):
     credential: str
     organization_name: Optional[str] = None
     
+# @login_router.options("/api/account")
+# async def preflight_handler():
+#     print("OPTIONS preflight hit!", flush=True)
+#     return JSONResponse(status_code=200, content={"message": "OK"})
+    
 @login_router.post("/api/account")
 async def verify_token(request : Request):
     try:
+        # print("CORS", flush = True)
+
         token: Dict[str, str] = await request.json()
+        
+        
         idinfo = id_token.verify_oauth2_token(
             token["credential"], requests.Request(), CLIENT_ID
         )
 
         userid: str = idinfo["sub"]
         return userid
+    
     except ValueError as e:
         raise HTTPException(401, description=e.args)
 

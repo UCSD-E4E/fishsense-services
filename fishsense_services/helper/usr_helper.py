@@ -68,8 +68,7 @@ def generate_jwt(user_id, email): # TODO add refresh token flow?
         "iat": datetime.now(timezone.utc)
     }
     
-    print("JWT_SECRET:", os.getenv("JWT_SECRET"))
-    print("JWT_ALGORITHM:", os.getenv("JWT_ALGORITHM"))
+
 
     token = jwt.encode(payload, os.getenv("JWT_SECRET"), algorithm=os.getenv("JWT_ALGORITHM"))
     return token
