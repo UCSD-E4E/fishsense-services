@@ -64,19 +64,20 @@ def generate_jwt(user_id, email): # TODO add refresh token flow?
     payload = {
         "user_id": user_id,
         "email": email,
-        "exp": datetime.now(timezone.utc) + timedelta(int(os.getenv("JWT_EXP_DELTA_SECONDS"))),
+        "exp":datetime.now(timezone.utc) + timedelta(seconds=int(os.getenv("JWT_EXP_DELTA_SECONDS"))),
         "iat": datetime.now(timezone.utc)
     }
     
-    print("JWT_SECRET:", os.getenv("JWT_SECRET"))
-    print("JWT_ALGORITHM:", os.getenv("JWT_ALGORITHM"))
-
-    token = jwt.encode(payload, os.getenv("JWT_SECRET"), algorithm=os.getenv("JWT_ALGORITHM"))
+    token = jwt.encode(payload, key=os.getenv("JWT_SECRET_KEY"), algorithm=os.getenv("JWT_SECRET_ALGORITHM"))
     return token
 
-def validate_jwt(token: str): #TODO needs testing (maybe by setting exp rlly low)
+def validate_jwt(token: str, email : str): #TODO needs testing (maybe by setting exp rlly low)
     try:
-        payload = jwt.decode(token, os.getenv("JWT_SECRET"), algorithm=os.getenv("JWT_ALGORITHM"))
+        payload = jwt.decode(token, key=os.getenv("JWT_SECRET_KEY"), algorithms=[os.getenv("JWT_SECRET_ALGORITHM")])
+        
+        if email != payload["email"]:
+            raise jwt.InvalidTokenError("Email in token does not match provided email.")
+        
         return {
             "valid": True,
             "payload": payload

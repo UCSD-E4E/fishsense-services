@@ -17,6 +17,7 @@ services:
   fishsense-services:
     environment:
       - PYTHONPATH=/fishsense_services
+      - JWT_EXPIRATION_DELTA=3600
     build:
       context: ./
       dockerfile: Dockerfile
