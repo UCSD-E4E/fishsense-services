@@ -1,0 +1,33 @@
+[tool.poetry]
+name = "fishsense_services"
+version = "0.1.0"
+description = ""
+authors = []
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.115.3"
+google-auth = "^2.35.0"
+requests = "^2.32.3"
+uvicorn = "^0.32.0"
+psycopg2 = "^2.9.10"
+backoff = "^2.2.1"
+gitpython = "^3.1.43"
+httpx = "^0.28.1"
+authlib = "^1.5.2"
+pyFishSenseDev = { git = "https://github.com/UCSD-E4E/pyFishSenseDev", branch = "m1-changes" }
+pyjwt = "^2.10.1"
+matplotlib = "^3.10.3"
+python-multipart = "^0.0.20"
+torchvision = "^0.22.0"
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.3.0"
+
+[tool.poetry.group.prod.dependencies]
+gunicorn = "^22.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

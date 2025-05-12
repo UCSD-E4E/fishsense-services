@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  fishsense_database:
+    extends:
+      file: ./fishsense-database/docker-compose.yaml
+      service: db
+    volumes:
+      - ./fishsense-database/data/postgres:/var/lib/postgresql/data
+      - ./fishsense-database/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
+      - ./fishsense_database:/fishsense_database
+  adminer:
+    extends:
+      file: ./fishsense-database/docker-compose.yaml
+      service: adminer
+
+  fishsense-services:
+    environment:
+      - PYTHONPATH=/fishsense_services
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    volumes:
+      - ./fishsense_services:/fishsense_services/fishsense_services
+      - ./fishsense-database/fishsense_database:/fishsense_services/fishsense_database
+    ports:
+      - "8000:8000"
+    # networks:
+    #   - fishsense_network
+    depends_on:
+      - fishsense_database
+    env_file:
+      - ./fishsense-database/.env
+      - .env
+      # - DATABASE_URL=postgresql://fishsense:fishsense@fishsense_database:5432/fishsense
+
+
+  
+
+# networks:
+#   fishsense_network:
+#     driver: bridge
+
+# volumes:
+#   db:

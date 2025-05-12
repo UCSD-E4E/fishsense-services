@@ -1,0 +1,4 @@
+[submodule "fishsense-database"]
+	path = fishsense-database
+	url = https://github.com/UCSD-E4E/fishsense-database.git
+	branch = kyle_199
