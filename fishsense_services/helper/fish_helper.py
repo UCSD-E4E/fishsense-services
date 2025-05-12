@@ -83,7 +83,6 @@ def fish(input_file):
         fish_dict["laser_img"] = fig_to_base64(fig)
         fish_dict["laser_coords"] = laser_coords.tolist()
         plt.close(fig)
-
         
         fish_segmentation_inference = FishSegmentationFishialOnnx()
 
