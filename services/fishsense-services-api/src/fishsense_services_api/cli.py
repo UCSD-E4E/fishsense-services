@@ -10,7 +10,7 @@ from collections.abc import Sequence
 
 from pydantic import ValidationError
 
-from fishsense_services_api.migrations import upgrade
+from fishsense_services_api.migrations import head_revision, upgrade
 from fishsense_services_api.settings import MigrationSettings
 
 ENV_PREFIX = "FISHSENSE_"
@@ -38,6 +38,7 @@ async def _migrate() -> int:
         settings.migration_database_url.get_secret_value(),
         app_role=settings.app_role,
     )
+    print(f"schema at revision {head_revision()}")
     return 0
 
 

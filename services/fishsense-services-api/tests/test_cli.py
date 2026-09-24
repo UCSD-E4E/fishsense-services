@@ -42,11 +42,14 @@ async def _version(url: str) -> str:
         await engine.dispose()
 
 
-async def test_migrate_brings_an_empty_database_to_head(empty_database, monkeypatch):
+async def test_migrate_brings_an_empty_database_to_head(
+    empty_database, monkeypatch, capsys
+):
     monkeypatch.setenv("FISHSENSE_MIGRATION_DATABASE_URL", empty_database)
 
     assert await main(["migrate"]) == 0
     assert await _version(empty_database) == head_revision()
+    assert f"schema at revision {head_revision()}" in capsys.readouterr().out
 
 
 async def test_migrate_twice_is_a_no_op(empty_database, monkeypatch):
