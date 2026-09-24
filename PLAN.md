@@ -711,9 +711,14 @@ Grouped by when they need answering. Each has: **the decision**, *what it blocks
   - the app role neither owns the tables nor has `BYPASSRLS`, and tables use
     `FORCE ROW LEVEL SECURITY`;
   - migrations run as a separate role.
-- *Provisioning:* the invite puts `org` into the token, but nothing yet turns that into a v2
-  `Membership` row (just-in-time on first login? admin-created?). `org` is also single-valued,
-  while memberships are many-to-many.
+- *Provisioning:* ***decided 2026-09-23*** — a `users` row is created **just-in-time on the
+  first valid token** (keyed on `sub`; the app role may insert only the caller's own row).
+  v2 keeps **no local credentials**: Authentik stays the only IdP, and the API validates
+  bearer tokens itself rather than trusting forward-auth headers (mobile sends bearer tokens;
+  tenancy needs per-request membership; nothing that bypasses Traefik can claim an identity).
+  **Memberships are granted administratively.** Still open: turning a partner invite's `org`
+  claim into a membership automatically — `org` is single-valued, while memberships are
+  many-to-many.
 - *Token:* validate the client's own bearer token (issuer, audience = the web and mobile
   client ids, expiry, JWKS signature). Trust the proxy's `X-authentik-jwt` only if nothing
   can reach the API without going through Traefik.
