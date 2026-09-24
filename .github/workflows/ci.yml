@@ -54,3 +54,18 @@ jobs:
           done
           docker logs api
           exit 1
+
+  e2e:
+    name: end to end (built image under compose)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.17"
+          enable-cache: true
+      - name: Install
+        run: uv sync --all-packages --frozen
+      - name: End-to-end tests
+        working-directory: services/fishsense-services-api
+        run: uv run pytest -q -m e2e
