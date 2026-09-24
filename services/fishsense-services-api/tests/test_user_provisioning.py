@@ -41,3 +41,19 @@ async def test_a_caller_cannot_create_someone_elses_user(owner_engine, app_engin
             await provision_user(conn, "sub-mallory")
 
     assert await _subs(owner_engine) == []
+
+
+async def test_the_insert_policy_itself_refuses_someone_elses_user(
+    owner_engine, app_engine
+):
+    """Pins the INSERT policy alone.
+
+    ``provision_user`` uses RETURNING, which the SELECT policy also guards, so
+    the test above would still pass if the INSERT policy were loosened. A bare
+    INSERT is checked by the INSERT policy and nothing else.
+    """
+    with pytest.raises(DBAPIError, match="row-level security"):
+        async with principal_transaction(app_engine, "sub-alice") as conn:
+            await conn.execute(text("INSERT INTO users (sub) VALUES ('sub-mallory')"))
+
+    assert await _subs(owner_engine) == []
