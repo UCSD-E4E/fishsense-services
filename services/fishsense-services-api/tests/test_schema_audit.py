@@ -129,6 +129,51 @@ async def test_a_restrictive_policy_can_only_narrow_so_it_is_fine(scratch):
     assert await _audit(scratch) == []
 
 
+async def _well_scoped_table(scratch, name: str, extra_columns: str) -> None:
+    """A table that passes every per-table rule, to isolate the FK rule."""
+    await scratch.execute(text(f"""
+            CREATE TABLE {name} (
+                id int PRIMARY KEY,
+                tenant_id uuid NOT NULL REFERENCES tenants (id),
+                {extra_columns}
+            )
+            """))
+    await scratch.execute(text(f"ALTER TABLE {name} ENABLE ROW LEVEL SECURITY"))
+    await scratch.execute(text(f"ALTER TABLE {name} FORCE ROW LEVEL SECURITY"))
+    await scratch.execute(text(f"""
+            CREATE POLICY tenant_isolation ON {name}
+                USING (tenant_id = {ACTIVE_TENANT})
+                WITH CHECK (tenant_id = {ACTIVE_TENANT})
+            """))
+
+
+async def test_a_tenant_reference_without_tenant_id_is_flagged(scratch):
+    """``dive_id REFERENCES dives (id)`` can point into another tenant."""
+    await _well_scoped_table(scratch, "leaky", "dive_id uuid REFERENCES dives (id)")
+
+    violations = await _audit(scratch)
+
+    assert any("leaky" in v and "dives" in v for v in violations)
+
+
+async def test_a_composite_tenant_reference_is_fine(scratch):
+    await _well_scoped_table(
+        scratch,
+        "tidy",
+        "dive_id uuid, FOREIGN KEY (tenant_id, dive_id) REFERENCES dives (tenant_id, id)",
+    )
+
+    assert await _audit(scratch) == []
+
+
+async def test_a_reference_to_global_data_needs_no_tenant_id(scratch):
+    await _well_scoped_table(
+        scratch, "labelled", "species_id uuid REFERENCES species (id)"
+    )
+
+    assert await _audit(scratch) == []
+
+
 async def test_a_nullable_or_unreferenced_tenant_id_is_flagged(scratch):
     await scratch.execute(
         text("CREATE TABLE loose (id int PRIMARY KEY, tenant_id uuid)")
