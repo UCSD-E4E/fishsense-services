@@ -130,7 +130,9 @@ class FishModelReference(Base):
     __table_args__ = (UniqueConstraint("name", "valid_from"),)
 
     id: Mapped[uuid.UUID] = _id()
-    name: Mapped[str] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(
+        Text, ForeignKey("fish_models.name", onupdate="CASCADE")
+    )
     known_length_m: Mapped[float] = mapped_column(Double)
     is_provisional: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     notes: Mapped[str | None] = mapped_column(Text)
@@ -560,3 +562,79 @@ class HeadTailPrediction(_PredictionCore, Base):
                 ["laser_labels.tenant_id", "laser_labels.id"],
             ),
         )
+
+
+class FishModel(Base):
+    """A physical fish model or calibration target, reached by key (global)."""
+
+    __tablename__ = "fish_models"
+
+    id: Mapped[uuid.UUID] = _id()
+    name: Mapped[str] = mapped_column(Text, unique=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class Fish(Base):
+    """A real animal of a species, or a fish model -- never both; never deleted."""
+
+    __tablename__ = "fish"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        UniqueConstraint("tenant_id", "fish_model_id"),
+        CheckConstraint(
+            "species_id IS NULL OR fish_model_id IS NULL",
+            name="fish_species_or_model_check",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    v1_id: Mapped[int | None] = _v1_id()
+    species_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("species.id"))
+    fish_model_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("fish_models.id")
+    )
+    created_at: Mapped[datetime] = _created_at()
+
+
+class DiveFrameCluster(Base):
+    __tablename__ = "dive_frame_clusters"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        ForeignKeyConstraint(["tenant_id", "dive_id"], ["dives.tenant_id", "dives.id"]),
+        ForeignKeyConstraint(["tenant_id", "fish_id"], ["fish.tenant_id", "fish.id"]),
+        CheckConstraint(
+            "formed_by IN ('prediction', 'label_studio')",
+            name="dive_frame_clusters_formed_by_check",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    v1_id: Mapped[int | None] = _v1_id()
+    dive_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    formed_by: Mapped[str | None] = mapped_column(Text)
+    fish_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _created_at()
+
+
+class DiveFrameClusterCapture(Base):
+    """A capture's membership in a cluster; goes with the cluster."""
+
+    __tablename__ = "dive_frame_cluster_captures"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "cluster_id"],
+            ["dive_frame_clusters.tenant_id", "dive_frame_clusters.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "capture_id"], ["captures.tenant_id", "captures.id"]
+        ),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    cluster_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)

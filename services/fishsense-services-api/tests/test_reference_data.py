@@ -21,6 +21,7 @@ from fishsense_services_api.db import principal_transaction
 REFERENCE_TABLES = [
     "species",
     "calibration_targets",
+    "fish_models",
     "fish_model_references",
     "slate_templates",
 ]
@@ -60,6 +61,7 @@ async def test_the_app_role_cannot_write_reference_data(app_engine, table):
 
 
 async def test_a_corrected_reference_length_is_a_new_version(owner_engine, app_engine):
+    await _insert(owner_engine, "INSERT INTO fish_models (name) VALUES ('Weasly Fish')")
     for length, valid_from in [
         (0.310, datetime(2026, 8, 4, tzinfo=UTC)),
         (0.313, datetime(2026, 9, 12, tzinfo=UTC)),
@@ -125,4 +127,16 @@ async def test_a_species_scientific_name_is_unique(owner_engine):
         await _insert(
             owner_engine,
             "INSERT INTO species (scientific_name) VALUES ('Mycteroperca')",
+        )
+
+
+async def test_a_length_can_be_recorded_only_for_a_registered_fish_model(
+    owner_engine,
+):
+    """The model's identity is a row, not a string that might be misspelled."""
+    with pytest.raises(DBAPIError, match="foreign key"):
+        await _insert(
+            owner_engine,
+            "INSERT INTO fish_model_references (name, known_length_m) "
+            "VALUES ('Wesly Fish', 0.313)",
         )

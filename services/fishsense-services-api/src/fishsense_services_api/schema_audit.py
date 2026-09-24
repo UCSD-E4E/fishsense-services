@@ -33,7 +33,13 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 CALLER_SCOPED_TABLES = frozenset({"users", "memberships", "tenants"})
 GLOBAL_REFERENCE_TABLES = frozenset(
-    {"species", "calibration_targets", "fish_model_references", "slate_templates"}
+    {
+        "species",
+        "calibration_targets",
+        "fish_models",
+        "fish_model_references",
+        "slate_templates",
+    }
 )
 
 #: The only permissive policies caller-scoped tables may carry: (name, command).
