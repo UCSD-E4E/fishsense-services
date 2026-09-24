@@ -53,6 +53,10 @@ class StaticKeySource:
 class JwksKeySource:
     """The issuer's published keys (Authentik's ``jwks_uri``), cached.
 
+    Only the key *set* is cached, for ``cache_seconds``; individual keys are
+    never cached beyond it. So a key revoked in Authentik (e.g. after a leak)
+    stops validating within ``cache_seconds``, not at the next restart.
+
     An unknown ``kid`` triggers one refetch before it is rejected, so a key
     rotation in Authentik is picked up without restarting the API. Forced
     refetches are at least ``refetch_cooldown_seconds`` apart, so tokens naming
@@ -66,9 +70,10 @@ class JwksKeySource:
         cache_seconds: float = 300,
         refetch_cooldown_seconds: float = 30,
     ) -> None:
+        # No `cache_keys=True`: it memoizes each key per kid with no expiry,
+        # which would keep a revoked key trusted for the life of the process.
         self._client = jwt.PyJWKClient(
             url,
-            cache_keys=True,
             lifespan=cache_seconds,
             cooldown_duration=refetch_cooldown_seconds,
         )

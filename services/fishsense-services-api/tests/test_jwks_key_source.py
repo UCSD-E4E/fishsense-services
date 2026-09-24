@@ -114,6 +114,23 @@ def test_a_rotated_key_is_picked_up_without_a_restart(jwks):
     assert validator.validate(_token(new, "new")).sub == "s"
 
 
+def test_a_revoked_key_stops_validating_once_the_cache_expires(jwks):
+    """Rotating a leaked key out of Authentik must lock its forgeries out.
+
+    Revocation takes effect within ``cache_seconds``, never "at next restart".
+    """
+    old, new = _rsa_key(), _rsa_key()
+    jwks.keys = [_jwk(old, "old")]
+    validator = _validator(jwks.url, cache_seconds=0.2)
+    assert validator.validate(_token(old, "old")).sub == "s"
+
+    jwks.keys = [_jwk(new, "new")]
+    time.sleep(0.3)
+
+    with pytest.raises(InvalidToken):
+        validator.validate(_token(old, "old"))
+
+
 def test_unknown_key_ids_cannot_make_us_hammer_the_issuer(jwks):
     """Tokens naming random kids trigger at most one refetch per cooldown."""
     jwks.keys = [_jwk(_rsa_key(), "k1")]
