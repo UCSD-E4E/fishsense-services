@@ -38,10 +38,41 @@ def _tenant_scoped(table: str, app_role: str) -> None:
     op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {table} TO {app_role}")
 
 
+class UnmappableDeviceKinds(Exception):
+    """Rows written before kinds were checked that 0005 can't map honestly."""
+
+
+def _normalize_device_kinds(kinds: str) -> None:
+    """Before 0005 any kind was accepted. Fold case/whitespace variants of known
+    kinds (' LITE ' -> 'lite'); refuse anything else, by name, rather than invent
+    a kind. The migration runs in one transaction, so a refusal changes nothing.
+    """
+    op.execute(f"""
+        UPDATE devices SET kind = lower(btrim(kind))
+        WHERE kind <> lower(btrim(kind)) AND lower(btrim(kind)) IN ({kinds})
+        """)
+    unmappable = (
+        op.get_bind()
+        .exec_driver_sql(
+            f"SELECT kind, count(*) FROM devices WHERE kind NOT IN ({kinds}) "
+            "GROUP BY kind ORDER BY kind"
+        )
+        .all()
+    )
+    if unmappable:
+        found = ", ".join(f"{kind!r} ({n} rows)" for kind, n in unmappable)
+        raise UnmappableDeviceKinds(
+            f"devices have kinds 0005 can't map: {found}. Known kinds: "
+            f"{', '.join(DEVICE_KINDS)}. Correct or delete those rows, then re-run "
+            "migrate."
+        )
+
+
 def upgrade() -> None:
     app_role = _app_role()
     kinds = ", ".join(f"'{k}'" for k in DEVICE_KINDS)
 
+    _normalize_device_kinds(kinds)
     op.execute(f"""
         ALTER TABLE devices
             ADD COLUMN v1_id bigint UNIQUE,

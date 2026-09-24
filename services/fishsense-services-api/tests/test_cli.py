@@ -13,7 +13,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from fishsense_services_api.cli import main
-from fishsense_services_api.migrations import head_revision
+from fishsense_services_api.migrations import head_revision, upgrade
 
 APP_ROLE = "fishsense_app"  # created by the session fixtures in conftest
 
@@ -72,6 +72,49 @@ async def test_migrate_refuses_a_schema_that_breaks_tenancy(
 
     assert await main(["migrate"]) != 0
     assert "rogue" in capsys.readouterr().err
+
+
+async def _database_at_0004_with_device_kind(url: str, kind: str) -> None:
+    await upgrade(url, app_role=APP_ROLE, revision="0004")
+    engine = create_async_engine(url)
+    async with engine.begin() as conn:
+        tenant = (
+            await conn.execute(
+                text("INSERT INTO tenants (slug, name) VALUES ('t', 't') RETURNING id")
+            )
+        ).scalar_one()
+        await conn.execute(
+            text("INSERT INTO devices (tenant_id, kind, serial) VALUES (:t, :k, 'S1')"),
+            {"t": tenant, "k": kind},
+        )
+    await engine.dispose()
+
+
+async def test_migrate_normalizes_known_kinds_written_before_they_were_checked(
+    empty_database, monkeypatch
+):
+    """Before 0005 any kind was accepted; ' LITE ' is plainly 'lite'."""
+    await _database_at_0004_with_device_kind(empty_database, " LITE ")
+    monkeypatch.setenv("FISHSENSE_MIGRATION_DATABASE_URL", empty_database)
+
+    assert await main(["migrate"]) == 0
+    engine = create_async_engine(empty_database)
+    async with engine.connect() as conn:
+        kind = (await conn.execute(text("SELECT kind FROM devices"))).scalar_one()
+    await engine.dispose()
+    assert kind == "lite"
+
+
+async def test_migrate_refuses_unknown_kinds_clearly_and_leaves_the_schema(
+    empty_database, monkeypatch, capsys
+):
+    """Never invent data: an unmappable kind stops the migration, named."""
+    await _database_at_0004_with_device_kind(empty_database, "camera")
+    monkeypatch.setenv("FISHSENSE_MIGRATION_DATABASE_URL", empty_database)
+
+    assert await main(["migrate"]) != 0
+    assert "camera" in capsys.readouterr().err
+    assert await _version(empty_database) == "0004"
 
 
 async def test_migrate_without_an_owner_dsn_fails_naming_it(monkeypatch, capsys):

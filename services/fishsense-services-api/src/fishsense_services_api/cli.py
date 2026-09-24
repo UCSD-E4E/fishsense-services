@@ -37,7 +37,11 @@ async def _migrate() -> int:
         print(f"missing or invalid configuration: {', '.join(names)}", file=sys.stderr)
         return 2
     database_url = settings.migration_database_url.get_secret_value()
-    await upgrade(database_url, app_role=settings.app_role)
+    try:
+        await upgrade(database_url, app_role=settings.app_role)
+    except Exception as error:  # report, don't traceback: this is a deploy step
+        print(f"migration FAILED -- nothing applied: {error}", file=sys.stderr)
+        return 1
     print(f"schema at revision {head_revision()}")
 
     violations = await _audit(database_url, settings.app_role)

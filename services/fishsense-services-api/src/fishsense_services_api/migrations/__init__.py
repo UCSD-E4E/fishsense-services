@@ -27,6 +27,6 @@ def head_revision() -> str:
     return ScriptDirectory.from_config(_config("", "")).get_current_head()
 
 
-async def upgrade(database_url: str, *, app_role: str) -> None:
-    """Migrate to head, granting the runtime privileges to ``app_role``."""
-    await asyncio.to_thread(command.upgrade, _config(database_url, app_role), "head")
+async def upgrade(database_url: str, *, app_role: str, revision: str = "head") -> None:
+    """Migrate to ``revision``, granting the runtime privileges to ``app_role``."""
+    await asyncio.to_thread(command.upgrade, _config(database_url, app_role), revision)
