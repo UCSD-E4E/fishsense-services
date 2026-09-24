@@ -476,3 +476,87 @@ class LabelStudioSyncCursor(Base):
     kind: Mapped[str] = mapped_column(Text)
     ls_project_id: Mapped[int] = mapped_column(Integer)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# --- Model predictions: append-only, latest ``seq`` per capture ----------------
+
+
+class _PredictionCore:
+    """Columns every prediction kind shares (migration 0011)."""
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    v1_id: Mapped[int | None] = _v1_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    width: Mapped[int | None] = mapped_column(Integer)
+    height: Mapped[int | None] = mapped_column(Integer)
+    confidence: Mapped[float] = mapped_column(Double, server_default=text("0"))
+    predictor_version: Mapped[int | None] = mapped_column(Integer)
+    checkpoint: Mapped[str | None] = mapped_column(Text)
+    core_version: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+    @declared_attr.directive
+    def __table_args__(cls) -> tuple:
+        return (
+            UniqueConstraint("tenant_id", "id"),
+            ForeignKeyConstraint(
+                ["tenant_id", "capture_id"], ["captures.tenant_id", "captures.id"]
+            ),
+            *cls._extra_table_args(),
+        )
+
+    @classmethod
+    def _extra_table_args(cls) -> tuple:
+        return ()
+
+
+class LaserPrediction(_PredictionCore, Base):
+    __tablename__ = "laser_predictions"
+
+    x: Mapped[float | None] = mapped_column(Double)
+    y: Mapped[float | None] = mapped_column(Double)
+    color: Mapped[str | None] = mapped_column(Text)
+    color_margin: Mapped[float | None] = mapped_column(Double)
+    rejected_out_of_region: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false")
+    )
+    auto_accept: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    gate_verdict: Mapped[str | None] = mapped_column(Text)
+    line_offset_px: Mapped[float | None] = mapped_column(Double)
+    line_position_z: Mapped[float | None] = mapped_column(Double)
+
+
+class SlatePrediction(_PredictionCore, Base):
+    __tablename__ = "slate_predictions"
+
+    reference_points: Mapped[list | None] = mapped_column(JSONB)
+    rejected_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class HeadTailPrediction(_PredictionCore, Base):
+    __tablename__ = "head_tail_predictions"
+
+    head_x: Mapped[float | None] = mapped_column(Double)
+    head_y: Mapped[float | None] = mapped_column(Double)
+    tail_x: Mapped[float | None] = mapped_column(Double)
+    tail_y: Mapped[float | None] = mapped_column(Double)
+    mask_area_px: Mapped[int | None] = mapped_column(Integer)
+    silhouette_ratio: Mapped[float | None] = mapped_column(Double)
+    crop_x: Mapped[int | None] = mapped_column(Integer)
+    crop_y: Mapped[int | None] = mapped_column(Integer)
+    laser_label_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    status: Mapped[str] = mapped_column(Text, server_default=text("'predicted'::text"))
+    rejected_low_confidence: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false")
+    )
+
+    @classmethod
+    def _extra_table_args(cls) -> tuple:
+        return (
+            ForeignKeyConstraint(
+                ["tenant_id", "laser_label_id"],
+                ["laser_labels.tenant_id", "laser_labels.id"],
+            ),
+        )
