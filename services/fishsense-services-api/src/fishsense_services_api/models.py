@@ -20,6 +20,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Index,
+    Identity,
     Integer,
     MetaData,
     Text,
@@ -259,4 +260,52 @@ class Capture(Base):
         Text, server_default=text("'md5'::text")
     )
     is_canonical: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    created_at: Mapped[datetime] = _created_at()
+
+
+class CameraCalibration(Base):
+    """Intrinsics per device; append-only (current = latest ``seq`` per device)."""
+
+    __tablename__ = "camera_calibrations"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "device_id"], ["devices.tenant_id", "devices.id"]
+        ),
+        CheckConstraint(
+            "camera_model IN ('pinhole', 'axial_refractive')",
+            name="camera_calibrations_camera_model_check",
+        ),
+        CheckConstraint(
+            "medium IN ('air', 'water')", name="camera_calibrations_medium_check"
+        ),
+        CheckConstraint(
+            "coordinate_frame IN ('jpeg', 'raw_sensor')",
+            name="camera_calibrations_coordinate_frame_check",
+        ),
+        CheckConstraint("rms_px >= 0", name="camera_calibrations_rms_px_check"),
+        CheckConstraint(
+            "camera_model <> 'axial_refractive' OR port_model IS NOT NULL",
+            name="camera_calibrations_axial_needs_port_check",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    v1_id: Mapped[int | None] = _v1_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    device_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    camera_model: Mapped[str] = mapped_column(
+        Text, server_default=text("'pinhole'::text")
+    )
+    medium: Mapped[str | None] = mapped_column(Text)
+    coordinate_frame: Mapped[str | None] = mapped_column(Text)
+    camera_matrix: Mapped[list] = mapped_column(JSONB)
+    distortion_coefficients: Mapped[list] = mapped_column(JSONB)
+    calibration_target_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("calibration_targets.id")
+    )
+    rms_px: Mapped[float | None] = mapped_column(Double)
+    port_model: Mapped[str | None] = mapped_column(Text)
+    port_model_version: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
