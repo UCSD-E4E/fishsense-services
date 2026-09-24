@@ -21,6 +21,10 @@ class InvalidToken(Exception):
     """The token is malformed, unsigned, mis-signed, expired or not for us."""
 
 
+class KeysUnavailable(Exception):
+    """The issuer's signing keys can't be fetched: an outage, not a bad token."""
+
+
 @dataclass(frozen=True)
 class Principal:
     """The authenticated caller, identified by the IdP's stable subject."""
@@ -44,6 +48,38 @@ class StaticKeySource:
             return self._keys[kid]
         except KeyError:
             raise InvalidToken(f"unknown signing key {kid!r}") from None
+
+
+class JwksKeySource:
+    """The issuer's published keys (Authentik's ``jwks_uri``), cached.
+
+    An unknown ``kid`` triggers one refetch before it is rejected, so a key
+    rotation in Authentik is picked up without restarting the API. Forced
+    refetches are at least ``refetch_cooldown_seconds`` apart, so tokens naming
+    random kids can't turn the API into a flood against Authentik.
+    """
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        cache_seconds: float = 300,
+        refetch_cooldown_seconds: float = 30,
+    ) -> None:
+        self._client = jwt.PyJWKClient(
+            url,
+            cache_keys=True,
+            lifespan=cache_seconds,
+            cooldown_duration=refetch_cooldown_seconds,
+        )
+
+    def key_for(self, kid: str | None) -> Any:
+        try:
+            return self._client.get_signing_key(kid).key
+        except jwt.PyJWKClientConnectionError as error:
+            raise KeysUnavailable(str(error)) from error
+        except jwt.PyJWKClientError as error:
+            raise InvalidToken(str(error)) from error
 
 
 class TokenValidator:
