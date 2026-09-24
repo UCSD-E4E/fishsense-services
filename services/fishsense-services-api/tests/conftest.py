@@ -69,4 +69,4 @@ async def clean_tables(request: pytest.FixtureRequest) -> AsyncIterator[None]:
         return
     owner_engine: AsyncEngine = request.getfixturevalue("owner_engine")
     async with owner_engine.begin() as conn:
-        await conn.execute(text("TRUNCATE tenants CASCADE"))
+        await conn.execute(text("TRUNCATE tenants, users CASCADE"))
