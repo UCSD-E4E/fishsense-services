@@ -15,6 +15,7 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from fishsense_services_api.app import DeviceKind, create_app
 from fishsense_services_api.auth import (
@@ -46,10 +47,21 @@ def _validator(keys=None) -> TokenValidator:
     )
 
 
+_OFFLINE_ENGINE = create_async_engine("postgresql+asyncpg://nobody@127.0.0.1:1/none")
+
+
 async def _client(app) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://api.test"
     )
+
+
+@pytest.fixture
+async def offline_client() -> AsyncIterator[httpx.AsyncClient]:
+    """For requests refused before any query: its engine never connects."""
+    app = create_app(engine=_OFFLINE_ENGINE, validator=_validator())
+    async with await _client(app) as c:
+        yield c
 
 
 @pytest.fixture
@@ -63,27 +75,27 @@ async def client(app_engine) -> AsyncIterator[httpx.AsyncClient]:
 # --- authentication ---------------------------------------------------------
 
 
-async def test_no_token_is_401_with_a_bearer_challenge(client):
-    response = await client.get("/tenants/lab/devices")
+async def test_no_token_is_401_with_a_bearer_challenge(offline_client):
+    response = await offline_client.get("/tenants/lab/devices")
 
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Bearer"
 
 
-async def test_a_bad_token_is_401(client):
-    response = await client.get(
+async def test_a_bad_token_is_401(offline_client):
+    response = await offline_client.get(
         "/tenants/lab/devices", headers={"Authorization": "Bearer not.a.token"}
     )
 
     assert response.status_code == 401
 
 
-async def test_an_unreachable_identity_provider_is_503_not_401(app_engine):
+async def test_an_unreachable_identity_provider_is_503_not_401():
     class Down:
         def key_for(self, kid):
             raise KeysUnavailable("jwks unreachable")
 
-    app = create_app(engine=app_engine, validator=_validator(keys=Down()))
+    app = create_app(engine=_OFFLINE_ENGINE, validator=_validator(keys=Down()))
     async with await _client(app) as client:
         response = await client.get("/tenants/lab/devices", headers=_bearer(ALICE))
 
@@ -210,9 +222,9 @@ async def test_a_member_cannot_create_in_a_tenant_they_do_not_belong_to(
 # --- API contract --------------------------------------------------------------
 
 
-async def test_every_operation_has_an_explicit_operation_id(client):
+async def test_every_operation_has_an_explicit_operation_id(offline_client):
     """PLAN.md §3: generated clients depend on clean, stable operation ids."""
-    spec = (await client.get("/openapi.json")).json()
+    spec = (await offline_client.get("/openapi.json")).json()
     ids = [op["operationId"] for path in spec["paths"].values() for op in path.values()]
 
     assert sorted(ids) == ["create_device", "list_devices"]

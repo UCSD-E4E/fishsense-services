@@ -20,6 +20,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Index,
+    Identity,
     Integer,
     MetaData,
     Text,
@@ -260,3 +261,123 @@ class Capture(Base):
     )
     is_canonical: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime] = _created_at()
+
+
+class CameraCalibration(Base):
+    """Intrinsics per device; append-only (current = latest ``seq`` per device)."""
+
+    __tablename__ = "camera_calibrations"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "device_id"], ["devices.tenant_id", "devices.id"]
+        ),
+        CheckConstraint(
+            "camera_model IN ('pinhole', 'axial_refractive')",
+            name="camera_calibrations_camera_model_check",
+        ),
+        CheckConstraint(
+            "medium IN ('air', 'water')", name="camera_calibrations_medium_check"
+        ),
+        CheckConstraint(
+            "coordinate_frame IN ('jpeg', 'raw_sensor')",
+            name="camera_calibrations_coordinate_frame_check",
+        ),
+        CheckConstraint("rms_px >= 0", name="camera_calibrations_rms_px_check"),
+        CheckConstraint(
+            "camera_model <> 'axial_refractive' OR port_model IS NOT NULL",
+            name="camera_calibrations_axial_needs_port_check",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    v1_id: Mapped[int | None] = _v1_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    device_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    camera_model: Mapped[str] = mapped_column(
+        Text, server_default=text("'pinhole'::text")
+    )
+    medium: Mapped[str | None] = mapped_column(Text)
+    coordinate_frame: Mapped[str | None] = mapped_column(Text)
+    camera_matrix: Mapped[list] = mapped_column(JSONB)
+    distortion_coefficients: Mapped[list] = mapped_column(JSONB)
+    calibration_target_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("calibration_targets.id")
+    )
+    rms_px: Mapped[float | None] = mapped_column(Double)
+    port_model: Mapped[str | None] = mapped_column(Text)
+    port_model_version: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class LaserCalibration(Base):
+    """Per dive, append-only; ``refused`` rows replace v1's dive columns."""
+
+    __tablename__ = "laser_calibrations"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        ForeignKeyConstraint(["tenant_id", "dive_id"], ["dives.tenant_id", "dives.id"]),
+        ForeignKeyConstraint(
+            ["tenant_id", "camera_calibration_id"],
+            ["camera_calibrations.tenant_id", "camera_calibrations.id"],
+        ),
+        CheckConstraint(
+            "producer IN ('slate', 'checkerboard', 'dots_range', 'dots_two_ranges',"
+            " 'dots_apparent_size', 'bench')",
+            name="laser_calibrations_producer_check",
+        ),
+        CheckConstraint(
+            "outcome IN ('accepted', 'refused')",
+            name="laser_calibrations_outcome_check",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    v1_id: Mapped[int | None] = _v1_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    dive_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    camera_calibration_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    producer: Mapped[str | None] = mapped_column(Text)
+    outcome: Mapped[str] = mapped_column(Text)
+    laser_position: Mapped[list | None] = mapped_column(JSONB)
+    laser_axis: Mapped[list | None] = mapped_column(JSONB)
+    refusal_reason: Mapped[str | None] = mapped_column(Text)
+    inputs_as_of: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    gate_verdicts: Mapped[dict | None] = mapped_column(JSONB)
+    lever_arm_m: Mapped[float | None] = mapped_column(Double)
+    observation_count: Mapped[int | None] = mapped_column(Integer)
+    residual_m: Mapped[float | None] = mapped_column(Double)
+    core_version: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class DiveLaserLine(Base):
+    """The within-dive laser-dot line fit; append-only (latest ``seq`` per dive)."""
+
+    __tablename__ = "dive_laser_lines"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        ForeignKeyConstraint(["tenant_id", "dive_id"], ["dives.tenant_id", "dives.id"]),
+        CheckConstraint(
+            "inlier_count <= n_points",
+            name="dive_laser_lines_inliers_within_points_check",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    v1_id: Mapped[int | None] = _v1_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    dive_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    a: Mapped[float] = mapped_column(Double)
+    b: Mapped[float] = mapped_column(Double)
+    c: Mapped[float] = mapped_column(Double)
+    n_points: Mapped[int] = mapped_column(Integer)
+    inlier_count: Mapped[int] = mapped_column(Integer)
+    inlier_fraction: Mapped[float] = mapped_column(Double)
+    residual_std: Mapped[float] = mapped_column(Double)
+    label_noise_mad: Mapped[float] = mapped_column(Double)
+    line_confidence: Mapped[float] = mapped_column(Double)
+    fitted_at: Mapped[datetime] = _created_at()
