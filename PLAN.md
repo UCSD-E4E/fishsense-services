@@ -691,7 +691,13 @@ Grouped by when they need answering. Each has: **the decision**, *what it blocks
   runaway tenant with **fair-share `select-next` selectors + per-tenant concurrency limits**
   (§4.5), not namespaces.
 
-**9.10 — Tenant resolution & RLS mechanics** *(blocks the schema)* — *open*
+**9.10 — Tenant resolution & RLS mechanics** *(blocks the schema)* — *partly decided
+2026-09-23*
+- ***Decided:*** the active tenant is named in the **URL path** (`/tenants/{slug}/…`), and the
+  API checks membership on every request. **Sharing is deferred:** every row has exactly one
+  owning `tenant_id`, RLS is a plain equality, and a share table arrives later as an additive
+  policy. The first vertical slice is this **tenancy foundation** (roles, RLS, JWT validation,
+  memberships), built TDD against real Postgres.
 - *Active tenant:* users ↔ tenants is many-to-many, so a `sub` → membership lookup can
   return several tenants. The request must name its **active tenant** (a header or URL path),
   and the API must check it against the user's memberships.
