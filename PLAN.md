@@ -236,13 +236,73 @@ how they read data. v2 must serve them as first-class consumers, not break them.
 | **Storage** | **The e4e Garage is the single durable, tenant-partitioned source of truth. NAS retired.** Three *independent* Garages exist (e4e / krg / phone-cluster); **e4e owns the data** → v2 starts on e4e, **may migrate to the phone-cluster Garage later** (an explicit data move, not sync). *(The NAS is also v1's ingest source and backup target — retirement order is §9.15.)* |
 | **Reproducibility** | Raw capture = durable truth. **Measurements are append-only and versioned** by `algorithm + version + run_id + core_version + model_version`, and **name every input** (calibration, labels) — v1's input-naming + mismatch-recompute model (§2.1), plus history. Device-provided measurements stored alongside raw. *("Current" semantics open — §9.13.)* |
 | **Models** | Processor is **model-heavy** (laser detector, SAM 3.1 landed in v1). Models are **versioned source-of-truth inputs**; every measurement records the model version. Registry: **MLflow (already in krg) backed by Garage** — *under review: v1 versions weights in a plain Garage `model-weights` bucket, not MLflow (§9.12)*. §4.7. |
-| **Language — app tier** | **Python** — API + orchestrator + data-worker (thin shell). Evolve FastAPI; first-class Temporal SDK. |
+| **Language — app tier** | **Python** — API + orchestrator + data-worker (thin shell), FastAPI. Rationale and the TypeScript alternative: §3.1. |
+| **Data layer** | **SQLAlchemy 2.0 typed models** (`Mapped[]`) + separate Pydantic schemas + asyncpg + Alembic — **not SQLModel** (a deliberate departure from v1): RLS needs explicit control of the transaction and `SET LOCAL`, and v2 must not import v1's model classes (§3.1). |
+| **Development practice** | **Always TDD.** Every change starts with a failing test, then the minimum code to pass it, then refactor. No production code without a test that demanded it. Isolation and RLS are tested against **real Postgres** (not mocks or SQLite), because the property under test lives in the database. |
 | **Language — libraries** | **Rust** (`fishsense-core`, `pixel-finch`) via **PyO3 bindings**. All real logic lives here. |
 | **Language — web** | **TypeScript** (Next.js). |
 | **API↔frontend typing** | **Generated from the FastAPI OpenAPI schema, done right**: `openapi-typescript` (types) + `openapi-fetch` (tiny typed client) + **zod** for runtime validation at the boundary (zod schemas must themselves be generated, not hand-kept). Requires cleaning up FastAPI `operation_id`s. v1's Python SDK already codegens models from OpenAPI with drift tests — reuse that CI pattern. (Not `openapi-generator` — the class-soup output that soured the v1 attempt.) tRPC-style *inferred* types are unavailable because the API is Python. |
-| **Ruled out** | **Go** (nobody in-org) and **Rust for the app tier** (Rust talent is CV/systems). |
+| **Ruled out** | **Go** (nobody in-org), **Rust for the app tier** (Rust talent is CV/systems), and **TypeScript for the app tier** (for now — §3.1 has the case both ways and the triggers to revisit). |
 | **Processing** | Keep the **two-worker split** (Temporal **workflow** orchestrator + **activity** processor). **Processor floats** — NRP today, phones later — and is model/GPU/TPU-capable. |
 | **Deployment** | **Control plane + state** (API, orchestrator, Postgres) → **krg Incus slot, Docker-Compose** (like v1; *no kube*). **Processor** → **Kubernetes**: NRP `amd64` now → junkyard/Pixel-Fold **ARM64** later. **Garage** and **Temporal** are external/shared. **ARM64/Knative are processor-only, future concerns.** |
+
+### 3.1 Why Python, not TypeScript, for the app tier *(decided 2026-09-23)*
+
+The processor is **forced to Python**: `fishsense-core`'s bindings are PyO3, the models are
+PyTorch (SAM 3.1, the laser detector), and preprocessing is rawpy/cv2/skimage. The real
+question was the **API and orchestrator**.
+
+**For TypeScript:**
+- The API needs nothing from Python: it never touches bytes or `fishsense-core`. Tenancy,
+  authz, CRUD, presign and enqueue are TypeScript's home ground.
+- One language with the Next.js web app, shared zod schemas and inferred end-to-end types
+  (Hono RPC / ts-rest) would remove the OpenAPI codegen pipeline that soured v1.
+- The TypeScript Temporal SDK is arguably the strongest (a V8-isolate determinism sandbox),
+  and Temporal is designed to be polyglot: TS workflows can dispatch to Python activity
+  queues along the orchestrator/processor seam v1 already has.
+- A language break would *enforce* the strangler discipline: v2 couldn't import v1's
+  models, only the language-neutral contract §9.1 already demands.
+- Explicit SQL builders (Kysely, Drizzle) keep the transaction and `SET LOCAL` visible, and
+  SQLModel is a leaky layer for RLS.
+- Web-facing contributors tend to write TypeScript.
+
+**Against:**
+- **The orchestrator is where v1's hard-won, weekly-churning domain logic lives**: the
+  auto-accept gate, Label Studio populate/sync, sentinel handling, the drain and wedge rules,
+  k8s scaling, and ~17 selector endpoints of careful SQL (v1's selectors live in the *API*).
+  A TypeScript v2 would port all of it and keep re-porting as v1 changes, turning
+  "v2 **inherits** PhD progress" into "v2 **chases** it" (§6).
+- **There are two backend languages regardless**, because the processor is Python: two
+  toolchains, CI pipelines, dependency ecosystems and image builds. The contract is still
+  generated into both, so codegen moves rather than disappears.
+- **Inferred types only help the smallest client.** Mobile is Flutter/Dart and needs an
+  OpenAPI spec and a generated client anyway; the web app is an admin/review portal.
+- **The people are Python people**: the lab, the PhD, three research repos, the backfill and
+  the research DB role (§9.20). In a student lab with turnover, a TypeScript backend in a
+  Python science org has a bus factor of whoever wrote it.
+- The TypeScript wins are mostly available in Python. The v1 codegen failure was
+  `openapi-generator` specifically. SQLAlchemy 2.0 gives explicit session control. Temporal's
+  Python sandbox already runs v1's 21 schedules. Contract-first is discipline, not language.
+
+**Decision: Python for the API and orchestrator; TypeScript only for the web.** It turns on
+the first "against" point: TypeScript wins clearly only on the API, but the API and
+orchestrator share the domain logic, so a TypeScript API alone would split the domain model
+across two languages, and a TypeScript orchestrator would chase v1.
+
+**What the TypeScript case earned — binding commitments on the Python stack:**
+- **Contract-first, language-neutral schema** (§9.1). v2 does not import v1's models. It
+  ports logic deliberately, and shared rules move into a library both versions depend on.
+- **SQLAlchemy 2.0 typed models, not SQLModel**, for explicit transaction and `SET LOCAL`
+  control.
+- **Generated, drift-tested clients**: `openapi-typescript` + `openapi-fetch` + generated zod
+  for web, a generated Dart client for mobile, and a CI check that fails when spec and
+  clients diverge.
+- **Temporal's Python workflow sandbox stays strict**, never disabled.
+
+**Revisit if** the API's main maintainers turn out to be web developers rather than lab
+researchers; or v1's domain logic has settled into shared libraries and stopped churning; or
+the orchestrator is being rewritten anyway (e.g. the native-Rust processor move). At that
+point a TypeScript API + orchestrator over Python activity queues becomes the better trade.
 
 ## 4. Architecture
 
@@ -843,6 +903,7 @@ hands off to the phone-cluster platform's own tenancy when it arrives.
 - **API↔frontend typing** → `openapi-typescript` + `openapi-fetch` + zod, cleaned `operation_id`s (§3).
 - **Garage topology** → three independent stores; start on e4e, may migrate later (§4.6).
 - **Language / stack, deployment split, Garage-as-durable, strangler delivery** → §3.
+- **Python vs TypeScript for the app tier; SQLAlchemy 2.0 over SQLModel; always TDD** → §3, §3.1.
 
 ## 10. Reference links
 - Current service (Lite): https://github.com/UCSD-E4E/fishsense-lite/
