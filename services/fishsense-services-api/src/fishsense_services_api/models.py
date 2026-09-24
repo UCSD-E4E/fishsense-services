@@ -309,3 +309,45 @@ class CameraCalibration(Base):
     port_model: Mapped[str | None] = mapped_column(Text)
     port_model_version: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
+
+
+class LaserCalibration(Base):
+    """Per dive, append-only; ``refused`` rows replace v1's dive columns."""
+
+    __tablename__ = "laser_calibrations"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        ForeignKeyConstraint(["tenant_id", "dive_id"], ["dives.tenant_id", "dives.id"]),
+        ForeignKeyConstraint(
+            ["tenant_id", "camera_calibration_id"],
+            ["camera_calibrations.tenant_id", "camera_calibrations.id"],
+        ),
+        CheckConstraint(
+            "producer IN ('slate', 'checkerboard', 'dots_range', 'dots_two_ranges',"
+            " 'dots_apparent_size', 'bench')",
+            name="laser_calibrations_producer_check",
+        ),
+        CheckConstraint(
+            "outcome IN ('accepted', 'refused')",
+            name="laser_calibrations_outcome_check",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    v1_id: Mapped[int | None] = _v1_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    dive_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    camera_calibration_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    producer: Mapped[str | None] = mapped_column(Text)
+    outcome: Mapped[str] = mapped_column(Text)
+    laser_position: Mapped[list | None] = mapped_column(JSONB)
+    laser_axis: Mapped[list | None] = mapped_column(JSONB)
+    refusal_reason: Mapped[str | None] = mapped_column(Text)
+    inputs_as_of: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    gate_verdicts: Mapped[dict | None] = mapped_column(JSONB)
+    lever_arm_m: Mapped[float | None] = mapped_column(Double)
+    observation_count: Mapped[int | None] = mapped_column(Integer)
+    residual_m: Mapped[float | None] = mapped_column(Double)
+    core_version: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
