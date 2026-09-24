@@ -60,6 +60,20 @@ async def test_migrate_twice_is_a_no_op(empty_database, monkeypatch):
     assert await _version(empty_database) == head_revision()
 
 
+async def test_migrate_refuses_a_schema_that_breaks_tenancy(
+    empty_database, monkeypatch, capsys
+):
+    """A table without isolation fails the deploy step, naming the table."""
+    engine = create_async_engine(empty_database)
+    async with engine.begin() as conn:
+        await conn.execute(text("CREATE TABLE rogue (id int PRIMARY KEY)"))
+    await engine.dispose()
+    monkeypatch.setenv("FISHSENSE_MIGRATION_DATABASE_URL", empty_database)
+
+    assert await main(["migrate"]) != 0
+    assert "rogue" in capsys.readouterr().err
+
+
 async def test_migrate_without_an_owner_dsn_fails_naming_it(monkeypatch, capsys):
     monkeypatch.delenv("FISHSENSE_MIGRATION_DATABASE_URL", raising=False)
 
