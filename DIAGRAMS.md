@@ -8,6 +8,8 @@ Companion to [PLAN.md](PLAN.md). Mermaid renders natively on GitHub.
 
 Where each tier actually runs. Note the control plane is **Incus + Docker-Compose (no kube)**;
 only the **processor** is Kubernetes, and it **floats** (NRP today → phone cluster later).
+Orchestrator and processor never call each other: both poll Temporal. The orchestrator only
+scales the processor Deployments.
 
 ```mermaid
 flowchart TB
@@ -19,7 +21,7 @@ flowchart TB
     subgraph krgshared["krg-prod — shared lab services"]
         authentik["Authentik<br/>OIDC + invite enrollment"]
         temporal["Temporal<br/>mTLS, namespace 'fishsense'"]
-        mlflow["MLflow<br/>model registry"]
+        mlflow["Model registry<br/>MLflow, or Garage model-weights<br/>(PLAN §9.12)"]
         bao["OpenBao<br/>secrets"]
     end
 
@@ -35,7 +37,7 @@ flowchart TB
     end
 
     subgraph nrp["NRP / Nautilus — k8s, amd64 (TODAY)"]
-        proc["Processor<br/>Temporal activity worker<br/>fishsense-core + models"]
+        proc["Processor<br/>Temporal activity worker<br/>cpu / light / gpu queues<br/>fishsense-core + models"]
     end
 
     subgraph phones["Phone cluster — k8s, ARM64 (LATER)"]
@@ -53,14 +55,15 @@ flowchart TB
     web -->|direct upload| garage
     mob -->|direct upload| garage
     api -->|enqueue| temporal
-    orch --> temporal
-    orch -->|activities| proc
+    orch -->|workflows + schedules| temporal
+    proc -->|polls activity queues| temporal
+    orch -.->|scales 0↔N| proc
     proc --> garage
     proc -->|pull pinned model| mlflow
     proc --> api
     bao -.->|secrets| slot
     proc2 -.->|future| garage
-    orch -.->|future| proc2
+    proc2 -.->|future, polls| temporal
 
     classDef future stroke-dasharray: 5 5
     class proc2,garage2 future
@@ -71,7 +74,15 @@ flowchart TB
 ## 2. Domain model — tenancy, devices, captures
 
 Every domain entity carries `tenant_id` (enforced by app scoping **and** Postgres RLS).
-Device-specific data hangs off `Capture` via a per-`DeviceKind` extension.
+Device-specific data hangs off `Capture` via a per-`DeviceKind` extension. Laser calibration
+and the dive slate are **per dive**, not per capture. They belong to the Calibration entity
+(PLAN §4.3) and are referenced from each Measurement.
+
+*Not yet drawn* (PLAN §4.3, §9.21):
+- **device components** (housing/port, air lens, laser mount);
+- **camera calibration** kept separate from laser calibration;
+- per-dive **water conditions**;
+- the **Session/Experiment** grouping used by the research repos.
 
 ```mermaid
 classDiagram
@@ -118,8 +129,6 @@ classDiagram
     }
     class LiteExtension {
         +ref camera_intrinsics
-        +ref laser_extrinsics
-        +ref dive_slate
     }
     class MobileExtension {
         +string depth_object_key
@@ -153,6 +162,13 @@ classDiagram
 
 `Measurement` is **append-only** — every row records exactly what produced it, so a length is
 always traceable and re-runnable. This is the core reproducibility contract.
+
+*Not yet drawn* (see PLAN §4.3):
+- **Prediction** and **Calibration** entities (producer, gates, refusal);
+- the calibration and label ids each Measurement must name;
+- `Label.source` (human / auto-accept / model).
+
+"Current" semantics are open (PLAN §9.13).
 
 ```mermaid
 classDiagram
@@ -346,6 +362,10 @@ sequenceDiagram
 
 ## 7. Capture lifecycle
 
+*Draft. This mixes upload state with processing state and omits states v1 has proved
+necessary: priority park, calibration refusal, awaiting labels, and "tried, made no
+progress". Being reworked under PLAN §9.16.*
+
 ```mermaid
 stateDiagram-v2
     [*] --> Reserved: reserve (ids + presigned URLs)
@@ -377,80 +397,121 @@ stateDiagram-v2
 
 ## 8. Processor — dive-level stage pipeline (current `fishsense-lite`)
 
-The numbered stages as they exist today. Note this is **not one long automated pipeline** — it
-is *preprocess → human labeling in Label Studio → sync labels back → calibrate → measure*.
-The orchestrator drives it with hourly, staggered, `overlap=SKIP` schedules, each firing
-selecting **one dive** via a `select-next/*` selector.
+*Snapshot: `fishsense-lite` @ `a8b2c3bc` (2026-09-21). Source of truth: v1's `CLAUDE.md`
+(stage table) and `fishsense-api-workflow-worker/worker.py` (schedules).*
+
+The pipeline is **not one long automated run**. It is four label tracks (laser, species,
+head/tail, slate), each with a **model-assisted** Label Studio loop, feeding **calibration →
+depth → measure**. The orchestrator drives it with **21 hourly schedules**:
+- 17 staggered by minute offset, `overlap=SKIP`;
+- 4 Label Studio syncs, `ALLOW_ALL`.
+
+Each firing selects **one dive** (`select-next/*`, `priority=HIGH`, `ORDER BY id`).
+Calibration, depth and measure select on **mismatch** — a row whose recorded calibration is no
+longer the dive's current one — so a recalibration re-drains everything downstream on its own.
 
 ```mermaid
 flowchart TB
-    sel["Orchestrator selectors<br/>select-next/*, priority=HIGH<br/>one dive per firing, staggered hourly"]
+    ingest["Ingest (operator-run)<br/>NAS folder → md5 → Image rows<br/>dive LOW → finalize → HIGH"]
+    raw[("Garage fishsense-lite · raw/ scratch<br/>staged from NAS per dive, deleted after use<br/>read by 0.1 · 2 · 5.1 · 9 · checkerboard")]
+    jpg[("Garage labels-fishsense-lite<br/>durable JPEGs written by 0.1 · 2 · 5.1 · 9<br/>presigned by Label Studio")]
+    wts[("Garage model-weights<br/>+ laser detector baked in image")]
 
-    raw[("Garage: raw/ prefix, .ORF<br/>staged by api-worker, deleted after use")]
-    jpg[("Garage: processed JPEGs<br/>preprocess_jpeg / groups / headtail / slate")]
+    subgraph laser["Laser track"]
+        s01[":00 · 0.1 preprocess laser"]
+        pl[":10 · predict laser (GPU)<br/>LaserPrediction"]
+        aa[":22 · auto-accept gate<br/>fits dive's own line"]
+        s03[":12 · 0.3 populate LS"]
+        ll["LS: laser review<br/>declined + audit-sampled frames"]
+        sl["sync → LaserLabel<br/>RANSAC validator supersedes outliers"]
+    end
 
-    s01["stage 0.1 — preprocess laser images"]
-    s1["stage 1 — cluster dive frames"]
-    s2["stage 2 — preprocess species images"]
-    s51["stage 5.1 — preprocess headtail images"]
-    s9["stage 9 — preprocess slate images"]
-    s13["stage 13 — perform laser calibration"]
-    s14["stage 14 — measure fish"]
+    subgraph species["Species track"]
+        s1[":05 · 1 cluster dive frames"]
+        s2[":15 · 2 preprocess species"]
+        s4[":20 · 4 populate LS<br/>pre-annotated from stored judgements"]
+        ls["LS: species labeling<br/>(all human)"]
+        s42["4.2 sync → SpeciesLabel / Fish"]
+        s61["6.1 regroup (on demand)"]
+    end
 
-    l1["laser point labels"]
-    l3["head/tail labels"]
-    l4["dive slate labels"]
-    l2["species labels"]
+    subgraph headtail["Head/tail track"]
+        s51[":30 · 5.1 preprocess headtail"]
+        ph[":32 · predict headtail<br/>SAM 3.1 on laser-centred crop<br/>(CPU ONNX fallback)"]
+        s53[":34 · 5.3 populate LS"]
+        lh["LS: head/tail review<br/>(every frame)"]
+        sh["sync → HeadTailLabel"]
+    end
 
-    ext[("LaserExtrinsics<br/>append, latest by created_at")]
-    meas[("Measurement")]
+    subgraph slate["Slate track"]
+        s9[":45 · 9 preprocess slate"]
+        s11["11 populate LS"]
+        lsl["LS: dive slate labeling"]
+        s12["12 sync → DiveSlateLabel"]
+    end
 
-    sel --> s01
-    sel --> s1
-    sel --> s2
-    sel --> s51
-    sel --> s9
-    sel --> s13
-    sel --> s14
+    subgraph calib["Calibration → measure"]
+        s13[":50 · 13 laser calibration<br/>from slate labels"]
+        cb[":52 · checkerboard calibration"]
+        gates{"4 gates: geometry ·<br/>self-consistency ·<br/>baseline 9.7–14.5 cm ·<br/>describes-dive"}
+        ext[("LaserExtrinsics<br/>one per dive, overwritten")]
+        ref[("Dive calibration refusal<br/>expires on newer label")]
+        dep[":35 · laser depth<br/>on calibration mismatch"]
+        s14[":40 · 14 measure fish<br/>on calibration mismatch"]
+        meas[("Measurement<br/>upsert (image, fish)<br/>+ laser_extrinsics_id")]
+    end
 
-    raw --> s01
-    raw --> s2
-    raw --> s51
-    raw --> s9
+    ingest --> raw
+    raw ~~~ jpg
+    wts --> pl & ph
 
-    s01 --> jpg
-    s2 --> jpg
-    s51 --> jpg
-    s9 --> jpg
+    s01 --> pl --> aa --> s03 --> ll --> sl
+    s1 --> s2 --> s4 --> ls --> s42
+    s42 -.-> s61
+    sl --> s51
+    s51 --> ph --> s53 --> lh --> sh
+    s9 --> s11 --> lsl --> s12
 
-    jpg -->|presigned read| l1
-    jpg -->|presigned read| l3
-    jpg -->|presigned read| l4
-    jpg -->|presigned read| l2
-
-    s1 --> s2
-    l1 -.->|hourly sync workflow| s13
-    l4 -.->|needs 2+ completed| s13
-    s13 --> ext
+    sl --> s13
+    s12 --> s13
+    s13 --> gates
+    cb --> gates
+    gates -->|pass| ext
+    gates -->|refuse| ref
+    ext --> dep
+    sl --> dep
     ext --> s14
-    l1 -.->|sync| s14
-    l3 -.->|sync| s14
+    sh --> s14
+    s42 --> s14
+    dep -.-> s14
     s14 --> meas
 
-    classDef human fill:#fde,stroke:#c69
-    class l1,l2,l3,l4 human
+    classDef human fill:#ffd6e7,stroke:#c0396b
+    classDef model fill:#d6ecff,stroke:#2b6cb0
+    class ll,ls,lh,lsl,s61 human
+    class pl,aa,ph model
 ```
 
-*Pink = human-in-the-loop.* The data worker owns **zero** schedules (so scale-to-zero can't
-drop them) and is scaled 0↔1 by the orchestrator.
+*Pink = human-in-the-loop (Label Studio, hosted `app.heartex.com`, one project per dive per
+stage). Blue = model output recorded as a prediction before any human sees it.* Not drawn:
+`:25` reconcile-labeling-configs and `:55` scale-down-idle-data-worker. The data worker owns
+**zero** schedules (so scale-to-zero can't drop them). The orchestrator scales its four
+Deployments (cpu / light / gpu / gpu-cpu-fallback) 0↔N.
+
+**What v2 must carry over from this picture** (PLAN §9.14, §9.16):
+- the human steps;
+- two calibration producers with gates and refusals;
+- mismatch-driven recompute;
+- per-dive priority as the commit/park flag.
 
 ---
 
 ## 9. Processor — per-capture compute path (`fishsense-core`)
 
 The actual call chain. Two things worth reading off this: **where Lite and Mobile diverge**
-(only in how depth is obtained) and **where the incoming models land** (replacing human
-keypoint labeling on the server, converging on what mobile already does).
+(only in how depth is obtained) and **where the models have landed**. On the server, models
+now propose laser points and head/tail and a human confirms them (§8). Mobile runs fully
+automatic on-device.
 
 ```mermaid
 flowchart TB
@@ -458,11 +519,11 @@ flowchart TB
 
     d1["RawImage — rawpy decode"]
     d2["auto-gamma from HSV mean brightness"]
-    d3["CLAHE — equalize_adapthist"]
+    d3["contrast stretch + CLAHE<br/>(CLAHE off by default)"]
     d4["RectifiedImage — cv2.undistort with K and dist"]
 
-    human["SERVER TODAY<br/>human labels via Label Studio<br/>laser point + head/tail"]
-    ml["MOBILE TODAY / SERVER SOON<br/>ONNX segmentation, then<br/>FishHeadTailDetector — PCA + polygon"]
+    human["SERVER TODAY — model-assisted, human-confirmed<br/>laser: detector + auto-accept gate<br/>head/tail: SAM 3.1 pre-annotation, human review<br/>(Label Studio)"]
+    ml["MOBILE TODAY<br/>ONNX segmentation, then<br/>FishHeadTailDetector — PCA + polygon"]
 
     laser["LITE — laser triangulation<br/>calibrate_laser gives origin + axis<br/>compute_world_point_from_laser"]
     lidar["MOBILE — LiDAR sceneDepth f32<br/>mask-bounded RANSAC plane fit<br/>compute_world_point_from_depth"]
@@ -476,7 +537,7 @@ flowchart TB
     d4 --> ml
     human --> laser
     ml --> lidar
-    ml -.->|models landing here| laser
+    human -.->|as models mature, review shrinks| ml
     laser --> wp
     lidar --> wp
     wp --> len --> out
@@ -488,9 +549,11 @@ flowchart TB
 ```
 
 *Blue = the preprocessing block moving from Python into the Rust core (Phase 0, `fishsense-core`
-issue #54). Green = the device-specific step — the **only** place Lite and Mobile differ; both
+issue #54; still Python as of v4.0.0). Green = the device-specific step — the **only** place Lite and Mobile differ; both
 converge on `WorldPointHandler` → length. That convergence point is exactly the extension seam
-Mono/Multilens/Scout plug into.*
+Mono/Multilens/Scout plug into. One caveat: `WorldPointHandler` is a **pinhole** (K⁻¹)
+back-projection. The flat-port Lite (wuwnet, PLAN §8) is an axial refractive camera, so for it
+the seam moves up a level, to a camera model dispatched in core.*
 
 ---
 
