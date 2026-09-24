@@ -12,14 +12,19 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    BigInteger,
+    Boolean,
     DateTime,
+    Double,
     ForeignKey,
+    Integer,
     MetaData,
     Text,
     UniqueConstraint,
     Uuid,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 NAMING_CONVENTION = {
@@ -78,6 +83,70 @@ class Membership(Base):
     )
     role: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
+
+
+# --- Global reference data: shared by all tenants, read-only to the app role --
+
+
+def _v1_id() -> Mapped[int | None]:
+    return mapped_column(BigInteger, unique=True, nullable=True)
+
+
+class Species(Base):
+    __tablename__ = "species"
+
+    id: Mapped[uuid.UUID] = _id()
+    scientific_name: Mapped[str | None] = mapped_column(Text, unique=True)
+    common_name: Mapped[str | None] = mapped_column(Text)
+    v1_id: Mapped[int | None] = _v1_id()
+    created_at: Mapped[datetime] = _created_at()
+
+
+class CalibrationTarget(Base):
+    """A checkerboard; versioned by ``valid_from``, pitch per axis."""
+
+    __tablename__ = "calibration_targets"
+    __table_args__ = (UniqueConstraint("name", "valid_from"),)
+
+    id: Mapped[uuid.UUID] = _id()
+    name: Mapped[str] = mapped_column(Text)
+    interior_rows: Mapped[int] = mapped_column(Integer)
+    interior_cols: Mapped[int] = mapped_column(Integer)
+    pitch_x_m: Mapped[float] = mapped_column(Double)
+    pitch_y_m: Mapped[float] = mapped_column(Double)
+    notes: Mapped[str | None] = mapped_column(Text)
+    valid_from: Mapped[datetime] = _created_at()
+    v1_id: Mapped[int | None] = _v1_id()
+
+
+class FishModelReference(Base):
+    """A physical fish model's known length; versioned by ``valid_from``."""
+
+    __tablename__ = "fish_model_references"
+    __table_args__ = (UniqueConstraint("name", "valid_from"),)
+
+    id: Mapped[uuid.UUID] = _id()
+    name: Mapped[str] = mapped_column(Text)
+    known_length_m: Mapped[float] = mapped_column(Double)
+    is_provisional: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    notes: Mapped[str | None] = mapped_column(Text)
+    valid_from: Mapped[datetime] = _created_at()
+    v1_id: Mapped[int | None] = _v1_id()
+
+
+class SlateTemplate(Base):
+    __tablename__ = "slate_templates"
+
+    id: Mapped[uuid.UUID] = _id()
+    name: Mapped[str] = mapped_column(Text, unique=True)
+    dpi: Mapped[int | None] = mapped_column(Integer)
+    source_path: Mapped[str | None] = mapped_column(Text)
+    reference_points: Mapped[list] = mapped_column(JSONB)
+    v1_id: Mapped[int | None] = _v1_id()
+    created_at: Mapped[datetime] = _created_at()
+
+
+# --- Tenant-scoped data -----------------------------------------------------
 
 
 class Device(Base):

@@ -16,7 +16,10 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from fishsense_services_api.schema_audit import tenancy_violations
+from fishsense_services_api.schema_audit import (
+    GLOBAL_REFERENCE_TABLES,
+    tenancy_violations,
+)
 
 APP_ROLE = "fishsense_app"
 ACTIVE_TENANT = "NULLIF(current_setting('app.tenant_id', true), '')::uuid"
@@ -96,7 +99,9 @@ async def test_a_global_table_the_app_role_can_only_read_is_fine(scratch):
     await scratch.execute(text("CREATE TABLE lookup (id int PRIMARY KEY)"))
     await scratch.execute(text(f"GRANT SELECT ON lookup TO {APP_ROLE}"))
 
-    assert await _audit(scratch, global_tables={"lookup"}) == []
+    assert (
+        await _audit(scratch, global_tables=GLOBAL_REFERENCE_TABLES | {"lookup"}) == []
+    )
 
 
 async def test_a_table_owned_by_the_app_role_is_flagged(scratch):
