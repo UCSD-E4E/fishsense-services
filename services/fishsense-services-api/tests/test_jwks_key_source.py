@@ -116,6 +116,27 @@ def test_a_jwks_that_is_not_a_usable_key_set_is_an_outage(jwks, body):
         _validator(jwks.url).validate(_token(rsa_key(), "k1"))
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(b"{}", id="empty-object"),
+        pytest.param(b"<html>down for maintenance</html>", id="html-page"),
+        pytest.param(b'{"keys": []}', id="no-keys"),
+    ],
+)
+def test_a_failed_refetch_during_rotation_is_an_outage(jwks, body):
+    """A good cache, then a new kid whose refetch comes back unusable: 503."""
+    key = rsa_key()
+    jwks.keys = [jwk(key, "k1")]
+    validator = _validator(jwks.url, refetch_cooldown_seconds=0)
+    assert validator.validate(_token(key, "k1")).sub == "s"
+
+    jwks.raw_body = body
+
+    with pytest.raises(KeysUnavailable):
+        validator.validate(_token(rsa_key(), "rotated-in"))
+
+
 def test_an_unreachable_jwks_is_an_outage_not_a_bad_token():
     with JwksServer() as gone:
         url = gone.url

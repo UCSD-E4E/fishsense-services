@@ -5,6 +5,8 @@ the issuer's keys and checks issuer, audience and expiry itself. The caller's
 identity is the stable ``sub`` claim -- never email, which admins can change.
 """
 
+import threading
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -72,27 +74,50 @@ class JwksKeySource:
     ) -> None:
         # No `cache_keys=True`: it memoizes each key per kid with no expiry,
         # which would keep a revoked key trusted for the life of the process.
-        self._client = jwt.PyJWKClient(
-            url,
-            lifespan=cache_seconds,
-            cooldown_duration=refetch_cooldown_seconds,
-        )
+        self._client = jwt.PyJWKClient(url, lifespan=cache_seconds)
+        self._cooldown = refetch_cooldown_seconds
+        self._last_refetch: float | None = None
+        self._lock = threading.Lock()  # FastAPI calls us from a threadpool
 
     def key_for(self, kid: str | None) -> Any:
-        # Two failure domains, kept apart. Obtaining a usable key set can only
-        # fail as an outage (unreachable, a non-JSON 200 such as a proxy's
-        # maintenance page, not a key set, no keys) -> 503. Only once a usable
-        # set is in hand can a missing kid mean a bad token -> 401.
+        # Two failure domains, kept apart. Every attempt to obtain a usable key
+        # set -- the cached load *and* a rotation refetch -- can only fail as an
+        # outage (unreachable, a non-JSON 200 such as a proxy's maintenance
+        # page, `{}`, no keys) -> 503. Only a kid that is missing from a usable
+        # set means a bad token -> 401. PyJWT's get_signing_key blurs the two
+        # during its refetch, so the refetch is done here.
+        key = _match(self._signing_keys(refresh=False), kid)
+        if key is None and self._may_refetch():
+            key = _match(self._signing_keys(refresh=True), kid)
+        if key is None:
+            raise InvalidToken(f"unknown signing key {kid!r}")
+        return key.key
+
+    def _may_refetch(self) -> bool:
+        with self._lock:
+            now = time.monotonic()
+            if self._last_refetch is not None and now - self._last_refetch < (
+                self._cooldown
+            ):
+                return False
+            self._last_refetch = now
+            return True
+
+    def _signing_keys(self, *, refresh: bool) -> list[jwt.PyJWK]:
         try:
-            self._client.get_signing_keys()
+            keys = self._client.get_signing_keys(refresh=refresh)
         except (jwt.PyJWKClientError, jwt.PyJWKSetError, ValueError) as error:
             raise KeysUnavailable(str(error)) from error
-        try:
-            return self._client.get_signing_key(kid).key
-        except (jwt.PyJWKClientConnectionError, ValueError) as error:
-            raise KeysUnavailable(str(error)) from error
-        except (jwt.PyJWKClientError, jwt.PyJWKSetError) as error:
-            raise InvalidToken(str(error)) from error
+        with self._lock:
+            # The very first load is a fresh fetch too: it starts the cooldown,
+            # so a burst of unknown kids right after startup refetches nothing.
+            if self._last_refetch is None:
+                self._last_refetch = time.monotonic()
+        return keys
+
+
+def _match(keys: list[jwt.PyJWK], kid: str | None) -> jwt.PyJWK | None:
+    return next((key for key in keys if key.key_id == kid), None)
 
 
 class TokenValidator:
