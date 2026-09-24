@@ -638,3 +638,88 @@ class DiveFrameClusterCapture(Base):
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
     cluster_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     capture_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+
+
+# --- Results: append-only, with their inputs -----------------------------------
+
+
+class LaserDepth(Base):
+    __tablename__ = "laser_depths"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "capture_id"], ["captures.tenant_id", "captures.id"]
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "laser_label_id"],
+            ["laser_labels.tenant_id", "laser_labels.id"],
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "laser_calibration_id"],
+            ["laser_calibrations.tenant_id", "laser_calibrations.id"],
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    v1_id: Mapped[int | None] = _v1_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    laser_label_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    laser_calibration_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    depth_m: Mapped[float] = mapped_column(Double)
+    range_m: Mapped[float | None] = mapped_column(Double)
+    residual_m: Mapped[float | None] = mapped_column(Double)
+    core_version: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class Measurement(Base):
+    """A length, with its inputs; current per §9.13 (``current_measurements``)."""
+
+    __tablename__ = "measurements"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "capture_id"], ["captures.tenant_id", "captures.id"]
+        ),
+        ForeignKeyConstraint(["tenant_id", "fish_id"], ["fish.tenant_id", "fish.id"]),
+        ForeignKeyConstraint(
+            ["tenant_id", "laser_calibration_id"],
+            ["laser_calibrations.tenant_id", "laser_calibrations.id"],
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "laser_depth_id"],
+            ["laser_depths.tenant_id", "laser_depths.id"],
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "laser_label_id"],
+            ["laser_labels.tenant_id", "laser_labels.id"],
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "head_tail_label_id"],
+            ["head_tail_labels.tenant_id", "head_tail_labels.id"],
+        ),
+        CheckConstraint(
+            "source IN ('server', 'device')", name="measurements_source_check"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    v1_id: Mapped[int | None] = _v1_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    capture_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    fish_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    source: Mapped[str] = mapped_column(Text)
+    length_m: Mapped[float | None] = mapped_column(Double)
+    laser_calibration_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    laser_depth_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    laser_label_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    head_tail_label_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    algorithm: Mapped[str | None] = mapped_column(Text)
+    algorithm_version: Mapped[str | None] = mapped_column(Text)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    core_version: Mapped[str | None] = mapped_column(Text)
+    model_version: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()

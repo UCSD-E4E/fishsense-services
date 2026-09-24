@@ -847,11 +847,11 @@ decided; role revised 2026-09-23 for the big-bang cutover*
 - *Either way:* one scheme for every model, including the laser detector, loaded through
   `fishsense-core`.
 
-**9.13 — What "current" means for a measurement** — *open; proposal adopted for calibrations
-(2026-09-24, overridable)*
+**9.13 — What "current" means for a measurement** — *decided 2026-09-24 (proposal adopted,
+overridable); built in migration 0013*
 - *Adopted for calibrations:* append-only rows; **current = the latest row per dive**; a
   refusal is itself a row (outcome `refused`), replacing v1's refusal columns on `dive`.
-- *Proposed for measurements (decide when that table lands):* append-only; current = the
+- *Adopted for measurements (`current_measurements`):* append-only; current = the
   latest row per `(capture, fish, source)` whose inputs (laser calibration, labels) still
   match the current ones -- v1's mismatch model, plus history.
 - Candidates: latest per `(capture, fish, source)`, explicit promotion of a run, or the
