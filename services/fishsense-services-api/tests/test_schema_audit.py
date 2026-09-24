@@ -78,6 +78,57 @@ async def test_a_tenant_table_without_a_tenant_policy_is_flagged(scratch):
     assert any("unguarded" in v and "policy" in v for v in await _audit(scratch))
 
 
+async def test_an_extra_permissive_policy_on_a_tenant_table_is_flagged(scratch):
+    """Permissive policies are OR-ed: one ``USING (true)`` opens every tenant."""
+    await scratch.execute(
+        text("CREATE POLICY read_all ON dives FOR SELECT USING (true)")
+    )
+
+    assert any("dives" in v and "read_all" in v for v in await _audit(scratch))
+
+
+async def test_a_loosened_tenant_policy_is_flagged(scratch):
+    """Mentioning app.tenant_id isn't enough; the expression must be exact."""
+    await scratch.execute(text("DROP POLICY tenant_isolation ON dives"))
+    await scratch.execute(text(f"""
+            CREATE POLICY tenant_isolation ON dives
+                USING (tenant_id = {ACTIVE_TENANT} OR true)
+                WITH CHECK (tenant_id = {ACTIVE_TENANT})
+            """))
+
+    assert any("dives" in v for v in await _audit(scratch))
+
+
+async def test_a_tenant_policy_that_skips_some_roles_is_flagged(scratch):
+    await scratch.execute(text("DROP POLICY tenant_isolation ON dives"))
+    await scratch.execute(text(f"""
+            CREATE POLICY tenant_isolation ON dives TO {APP_ROLE}
+                USING (tenant_id = {ACTIVE_TENANT})
+                WITH CHECK (tenant_id = {ACTIVE_TENANT})
+            """))
+
+    assert any("dives" in v for v in await _audit(scratch))
+
+
+async def test_an_extra_permissive_policy_on_a_caller_table_is_flagged(scratch):
+    await scratch.execute(
+        text("CREATE POLICY everyone ON users FOR SELECT USING (true)")
+    )
+
+    assert any("users" in v and "everyone" in v for v in await _audit(scratch))
+
+
+async def test_a_restrictive_policy_can_only_narrow_so_it_is_fine(scratch):
+    await scratch.execute(
+        text(
+            "CREATE POLICY no_parked ON dives AS RESTRICTIVE FOR SELECT "
+            "USING (priority <> 'none')"
+        )
+    )
+
+    assert await _audit(scratch) == []
+
+
 async def test_a_nullable_or_unreferenced_tenant_id_is_flagged(scratch):
     await scratch.execute(
         text("CREATE TABLE loose (id int PRIMARY KEY, tenant_id uuid)")
