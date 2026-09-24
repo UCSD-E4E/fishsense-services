@@ -131,6 +131,22 @@ async def test_a_member_creates_and_lists_devices_in_their_tenant(
     assert [d["serial"] for d in listed.json()] == ["TG6-001"]
 
 
+async def test_a_duplicate_serial_in_the_same_tenant_is_a_409(client, seed_memberships):
+    await seed_memberships({ALICE: {"lab": "member"}})
+    device = {"kind": "lite", "serial": "TG6-001"}
+
+    first = await client.post(
+        "/tenants/lab/devices", json=device, headers=_bearer(ALICE)
+    )
+    again = await client.post(
+        "/tenants/lab/devices", json=device, headers=_bearer(ALICE)
+    )
+    listed = await client.get("/tenants/lab/devices", headers=_bearer(ALICE))
+
+    assert (first.status_code, again.status_code) == (201, 409)
+    assert [d["serial"] for d in listed.json()] == ["TG6-001"]
+
+
 async def test_a_member_sees_only_their_own_tenants_devices(client, seed_memberships):
     await seed_memberships({ALICE: {"lab": "admin"}, BOB: {"partner": "admin"}})
     for sub, slug, serial in [(ALICE, "lab", "LAB-1"), (BOB, "partner", "PARTNER-1")]:

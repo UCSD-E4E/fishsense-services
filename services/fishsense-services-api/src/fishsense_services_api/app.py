@@ -17,6 +17,7 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from fishsense_services_api.auth import (
@@ -28,6 +29,8 @@ from fishsense_services_api.auth import (
 from fishsense_services_api.db import principal_transaction, tenant_transaction
 from fishsense_services_api.memberships import Membership, resolve_membership
 from fishsense_services_api.users import provision_user
+
+UNIQUE_VIOLATION = "23505"  # Postgres SQLSTATE
 
 
 class DeviceCreate(BaseModel):
@@ -97,20 +100,32 @@ def create_app(*, engine: AsyncEngine, validator: TokenValidator) -> FastAPI:
         status_code=status.HTTP_201_CREATED,
     )
     async def create_device(body: DeviceCreate, member: Member) -> Device:
-        async with tenant_transaction(engine, member.tenant_id) as conn:
-            row = (
-                await conn.execute(
-                    text("""
-                        INSERT INTO devices (tenant_id, kind, serial)
-                        VALUES (:tenant_id, :kind, :serial)
-                        RETURNING id, kind, serial
-                        """),
-                    {"tenant_id": member.tenant_id, **body.model_dump()},
-                )
-            ).one()
-            return Device(**row._mapping)
+        try:
+            async with tenant_transaction(engine, member.tenant_id) as conn:
+                row = (
+                    await conn.execute(
+                        text("""
+                            INSERT INTO devices (tenant_id, kind, serial)
+                            VALUES (:tenant_id, :kind, :serial)
+                            RETURNING id, kind, serial
+                            """),
+                        {"tenant_id": member.tenant_id, **body.model_dump()},
+                    )
+                ).one()
+        except IntegrityError as error:
+            if _is_unique_violation(error):
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "a device with this serial already exists in this tenant",
+                ) from None
+            raise
+        return Device(**row._mapping)
 
     return app
+
+
+def _is_unique_violation(error: IntegrityError) -> bool:
+    return getattr(error.orig, "sqlstate", None) == UNIQUE_VIOLATION
 
 
 def _unauthorized() -> HTTPException:
