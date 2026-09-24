@@ -76,6 +76,11 @@ def create_app(*, engine: AsyncEngine, validator: TokenValidator) -> FastAPI:
 
     Member = Annotated[Membership, Depends(membership)]
 
+    # Liveness for orchestration; no auth, and not part of the client API.
+    @app.get("/healthz", include_in_schema=False)
+    async def health() -> dict[str, str]:
+        return {"status": "ok"}
+
     @app.get(
         "/tenants/{slug}/devices",
         operation_id="list_devices",
