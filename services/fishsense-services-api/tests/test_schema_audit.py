@@ -174,6 +174,26 @@ async def test_a_reference_to_global_data_needs_no_tenant_id(scratch):
     assert await _audit(scratch) == []
 
 
+async def test_a_view_that_runs_as_its_owner_is_flagged(scratch):
+    """A view runs with its *owner's* rights by default, bypassing RLS."""
+    await scratch.execute(text("CREATE VIEW all_dives AS SELECT * FROM dives"))
+
+    assert any(
+        "all_dives" in v and "security_invoker" in v for v in await _audit(scratch)
+    )
+
+
+async def test_a_view_that_runs_as_its_caller_is_fine(scratch):
+    await scratch.execute(
+        text(
+            "CREATE VIEW my_dives WITH (security_invoker = true) "
+            "AS SELECT * FROM dives"
+        )
+    )
+
+    assert await _audit(scratch) == []
+
+
 async def test_a_nullable_or_unreferenced_tenant_id_is_flagged(scratch):
     await scratch.execute(
         text("CREATE TABLE loose (id int PRIMARY KEY, tenant_id uuid)")
