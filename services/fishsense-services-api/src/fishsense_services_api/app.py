@@ -11,7 +11,7 @@ Each request goes through the same four steps before touching tenant data:
 """
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -33,14 +33,18 @@ from fishsense_services_api.users import provision_user
 UNIQUE_VIOLATION = "23505"  # Postgres SQLSTATE
 
 
+# Must equal the devices_kind_check constraint (a test compares them).
+DeviceKind = Literal["lite", "lite_flatport", "mobile", "multilens", "mono", "scout"]
+
+
 class DeviceCreate(BaseModel):
-    kind: str
+    kind: DeviceKind
     serial: str
 
 
 class Device(BaseModel):
     id: uuid.UUID
-    kind: str
+    kind: DeviceKind
     serial: str
 
 

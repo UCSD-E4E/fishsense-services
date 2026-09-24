@@ -5,8 +5,10 @@ caller's user row on first sight, resolves membership in the tenant named by
 the path, and only then touches tenant data -- under RLS as the app role.
 """
 
+import re
 import time
 from collections.abc import AsyncIterator
+from typing import get_args
 
 import httpx
 import jwt
@@ -14,7 +16,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from sqlalchemy import text
 
-from fishsense_services_api.app import create_app
+from fishsense_services_api.app import DeviceKind, create_app
 from fishsense_services_api.auth import (
     KeysUnavailable,
     StaticKeySource,
@@ -145,6 +147,33 @@ async def test_a_duplicate_serial_in_the_same_tenant_is_a_409(client, seed_membe
 
     assert (first.status_code, again.status_code) == (201, 409)
     assert [d["serial"] for d in listed.json()] == ["TG6-001"]
+
+
+async def test_an_unknown_device_kind_is_a_422_not_a_500(client, seed_memberships):
+    await seed_memberships({ALICE: {"lab": "member"}})
+
+    response = await client.post(
+        "/tenants/lab/devices",
+        json={"kind": "camera", "serial": "X-1"},
+        headers=_bearer(ALICE),
+    )
+
+    assert response.status_code == 422
+
+
+async def test_the_api_accepts_exactly_the_kinds_the_database_allows(owner_engine):
+    """One list in the API, one CHECK in the schema: they must not drift."""
+    async with owner_engine.connect() as conn:
+        definition = (
+            await conn.execute(
+                text(
+                    "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                    "WHERE conname = 'devices_kind_check'"
+                )
+            )
+        ).scalar_one()
+
+    assert set(re.findall(r"'(\w+)'", definition)) == set(get_args(DeviceKind))
 
 
 async def test_a_member_sees_only_their_own_tenants_devices(client, seed_memberships):
