@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: format and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.17"
+          enable-cache: true
+      - name: Install
+        run: uv sync --all-packages --frozen
+      - name: Format
+        run: uv run black --check services
+      # Tests run against real Postgres in Docker (testcontainers); the
+      # hosted runner provides the daemon.
+      - name: Tests
+        working-directory: services/fishsense-services-api
+        run: uv run pytest -q
+
+  image:
+    name: image builds and starts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: docker build -t fishsense-services-api:ci .
+      - name: Starts and reports healthy
+        run: |
+          docker run -d --name api -p 8000:8000 \
+            -e FISHSENSE_DATABASE_URL=postgresql+asyncpg://app:unused@127.0.0.1:1/none \
+            -e FISHSENSE_OIDC_ISSUER=https://auth.example.invalid/application/o/fishsense/ \
+            -e FISHSENSE_OIDC_AUDIENCES=fishsense-web,fishsense-mobile \
+            fishsense-services-api:ci
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/healthz && exit 0
+            sleep 1
+          done
+          docker logs api
+          exit 1
