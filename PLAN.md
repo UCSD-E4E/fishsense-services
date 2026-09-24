@@ -409,6 +409,28 @@ table, not a rewrite. Maps onto existing tables where possible.
 
 Everything except the reference tables above carries `tenant_id`.
 
+**Schema conventions** *(decided 2026-09-24; enforced by tests)*:
+- **Isolation is audited, not remembered.** `schema_audit.tenancy_violations` classifies
+  every table: tenant-scoped (the default: non-null `tenant_id` → `tenants`, forced RLS, a
+  read+write policy on `app.tenant_id`), caller-scoped (`users`, `memberships`, `tenants`),
+  or global reference (read-only to the app role). The app role owns nothing. `migrate`
+  fails the deploy on any violation.
+- **Same-tenant references are enforced by the database.** A tenant-scoped table
+  references another through a **composite foreign key** `(tenant_id, parent_id) →
+  parent (tenant_id, id)`, so a row can never point into another tenant, even when written
+  as the owner.
+- **Ids:** `uuid` primary keys. Migrated rows keep **`v1_id bigint UNIQUE`** (PLAN §6.4).
+- **Enumerations:** `text` + `CHECK`, not Postgres enums, which are painful to evolve. v1's
+  enums are nullable at the DB level; v2's are `NOT NULL` with explicit defaults.
+- **JSON:** `jsonb`. **Timestamps:** `timestamptz`.
+- **Deletes:** `ON DELETE CASCADE` only from `tenants` (removing a tenant removes its
+  data). References within a tenant are `RESTRICT` (v1 had no ON DELETE rules at all), so
+  a delete can never silently take history with it.
+- **Measured reference values are versioned** by `valid_from`, never edited; `current_*`
+  views give the latest.
+- **Models mirror migrations.** Migrations are hand-written (policies and grants), the
+  typed `models.py` mirrors them, and a drift test compares the two.
+
 ### 4.4 Ingestion flows
 - **Lite (TG-6)** — batch/offline: a lab member offloads the SD card, uploads a
   dive/batch attributed to **their tenant + user**; raw images (+ slate, calibration,
