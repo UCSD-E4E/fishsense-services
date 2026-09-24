@@ -79,11 +79,19 @@ class JwksKeySource:
         )
 
     def key_for(self, kid: str | None) -> Any:
+        # Two failure domains, kept apart. Obtaining a usable key set can only
+        # fail as an outage (unreachable, a non-JSON 200 such as a proxy's
+        # maintenance page, not a key set, no keys) -> 503. Only once a usable
+        # set is in hand can a missing kid mean a bad token -> 401.
+        try:
+            self._client.get_signing_keys()
+        except (jwt.PyJWKClientError, jwt.PyJWKSetError, ValueError) as error:
+            raise KeysUnavailable(str(error)) from error
         try:
             return self._client.get_signing_key(kid).key
-        except jwt.PyJWKClientConnectionError as error:
+        except (jwt.PyJWKClientConnectionError, ValueError) as error:
             raise KeysUnavailable(str(error)) from error
-        except jwt.PyJWKClientError as error:
+        except (jwt.PyJWKClientError, jwt.PyJWKSetError) as error:
             raise InvalidToken(str(error)) from error
 
 

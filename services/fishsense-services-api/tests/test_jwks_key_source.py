@@ -47,13 +47,14 @@ class _Jwks:
 
     def __init__(self) -> None:
         self.keys: list[dict] = []
+        self.raw_body: bytes | None = None  # served instead of the key set
         self.fetches = 0
         jwks = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:
                 jwks.fetches += 1
-                body = json.dumps({"keys": jwks.keys}).encode()
+                body = jwks.raw_body or json.dumps({"keys": jwks.keys}).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
@@ -142,6 +143,22 @@ def test_unknown_key_ids_cannot_make_us_hammer_the_issuer(jwks):
 
     # The initial load starts the cooldown, so none of the five refetches.
     assert jwks.fetches == 1
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(b"<html>down for maintenance</html>", id="html-page"),
+        pytest.param(b"[]", id="json-not-an-object"),
+        pytest.param(b'{"keys": []}', id="no-keys"),
+    ],
+)
+def test_a_jwks_that_is_not_a_usable_key_set_is_an_outage(jwks, body):
+    """A 200 that isn't a key set (e.g. a proxy's maintenance page) is 503."""
+    jwks.raw_body = body
+
+    with pytest.raises(KeysUnavailable):
+        _validator(jwks.url).validate(_token(_rsa_key(), "k1"))
 
 
 def test_an_unreachable_jwks_is_an_outage_not_a_bad_token():
