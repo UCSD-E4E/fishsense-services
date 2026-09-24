@@ -14,9 +14,12 @@ from datetime import datetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     Double,
     ForeignKey,
+    ForeignKeyConstraint,
+    Index,
     Integer,
     MetaData,
     Text,
@@ -30,7 +33,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 NAMING_CONVENTION = {
     "pk": "%(table_name)s_pkey",
     "uq": "%(table_name)s_%(column_0_N_name)s_key",
-    "fk": "%(table_name)s_%(column_0_name)s_fkey",
+    "fk": "%(table_name)s_%(column_0_N_name)s_fkey",
     "ix": "%(table_name)s_%(column_0_N_name)s_idx",
 }
 
@@ -151,10 +154,109 @@ class SlateTemplate(Base):
 
 class Device(Base):
     __tablename__ = "devices"
-    __table_args__ = (UniqueConstraint("tenant_id", "serial"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "serial"),
+        UniqueConstraint("tenant_id", "id"),
+        CheckConstraint(
+            "kind IN ('lite', 'lite_flatport', 'mobile', 'multilens', 'mono', 'scout')",
+            name="devices_kind_check",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = _id()
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
     kind: Mapped[str] = mapped_column(Text)
     serial: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+    v1_id: Mapped[int | None] = _v1_id()
+
+
+class Dive(Base):
+    """A Lite offload session; ``priority`` is v1's commit/park flag."""
+
+    __tablename__ = "dives"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        UniqueConstraint("tenant_id", "source_path"),
+        ForeignKeyConstraint(
+            ["tenant_id", "device_id"], ["devices.tenant_id", "devices.id"]
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "calibration_source_dive_id"],
+            ["dives.tenant_id", "dives.id"],
+        ),
+        CheckConstraint(
+            "priority IN ('low', 'high', 'none')", name="dives_priority_check"
+        ),
+        CheckConstraint(
+            "calibration_source_dive_id <> id", name="dives_calibration_not_self_check"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    v1_id: Mapped[int | None] = _v1_id()
+    name: Mapped[str | None] = mapped_column(Text)
+    source_path: Mapped[str] = mapped_column(Text)
+    dived_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    priority: Mapped[str] = mapped_column(Text, server_default=text("'low'::text"))
+    notes: Mapped[str | None] = mapped_column(Text)
+    flip_dive_slate: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    device_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    slate_template_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("slate_templates.id")
+    )
+    calibration_target_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("calibration_targets.id")
+    )
+    calibration_source_dive_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class Capture(Base):
+    """One frame; v1's ``image``. At most one canonical copy per tenant."""
+
+    __tablename__ = "captures"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        UniqueConstraint("tenant_id", "source_path"),
+        ForeignKeyConstraint(["tenant_id", "dive_id"], ["dives.tenant_id", "dives.id"]),
+        ForeignKeyConstraint(
+            ["tenant_id", "device_id"], ["devices.tenant_id", "devices.id"]
+        ),
+        CheckConstraint(
+            "checksum_algorithm IN ('md5', 'sha256')",
+            name="captures_checksum_algorithm_check",
+        ),
+        CheckConstraint(
+            "source_path IS NOT NULL OR raw_object_key IS NOT NULL",
+            name="captures_located_check",
+        ),
+        CheckConstraint(
+            "checksum_algorithm <> 'md5' OR checksum ~ '^[0-9a-f]{32}$'",
+            name="captures_md5_format_check",
+        ),
+        Index(
+            "captures_canonical_checksum_key",
+            "tenant_id",
+            "checksum_algorithm",
+            "checksum",
+            unique=True,
+            postgresql_where=text("is_canonical"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    v1_id: Mapped[int | None] = _v1_id()
+    dive_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    device_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    source_path: Mapped[str | None] = mapped_column(Text)
+    raw_object_key: Mapped[str | None] = mapped_column(Text)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    checksum: Mapped[str] = mapped_column(Text)
+    checksum_algorithm: Mapped[str] = mapped_column(
+        Text, server_default=text("'md5'::text")
+    )
+    is_canonical: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime] = _created_at()
