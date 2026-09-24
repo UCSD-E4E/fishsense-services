@@ -9,6 +9,7 @@ tests run against real Postgres -- never SQLite, never mocks. Two engines:
   runs as. Every assertion about isolation goes through this one.
 """
 
+import uuid
 from collections.abc import AsyncIterator
 
 import pytest
@@ -60,6 +61,48 @@ async def app_engine(
     engine = create_async_engine(app_url)
     yield engine
     await engine.dispose()
+
+
+@pytest.fixture
+def seed_memberships(owner_engine: AsyncEngine):
+    """Seed as the owner: ``{sub: {tenant_slug: role}}`` -> tenant ids by slug.
+
+    Memberships are granted administratively, never through the API, so tests
+    create them the way an admin would: directly, as the schema owner.
+    """
+
+    async def seed(memberships: dict[str, dict[str, str]]) -> dict[str, uuid.UUID]:
+        slugs = {slug for tenants in memberships.values() for slug in tenants}
+        async with owner_engine.begin() as conn:
+            tenant_ids = {}
+            for slug in sorted(slugs):
+                tenant_ids[slug] = (
+                    await conn.execute(
+                        text(
+                            "INSERT INTO tenants (slug, name) VALUES (:s, :s) "
+                            "RETURNING id"
+                        ),
+                        {"s": slug},
+                    )
+                ).scalar_one()
+            for sub, tenants in memberships.items():
+                user_id = (
+                    await conn.execute(
+                        text("INSERT INTO users (sub) VALUES (:sub) RETURNING id"),
+                        {"sub": sub},
+                    )
+                ).scalar_one()
+                for slug, role in tenants.items():
+                    await conn.execute(
+                        text(
+                            "INSERT INTO memberships (tenant_id, user_id, role) "
+                            "VALUES (:t, :u, :r)"
+                        ),
+                        {"t": tenant_ids[slug], "u": user_id, "r": role},
+                    )
+        return tenant_ids
+
+    return seed
 
 
 @pytest.fixture(autouse=True)
