@@ -41,3 +41,18 @@ class Settings(BaseSettings):
         if self.oidc_jwks_url is None:
             self.oidc_jwks_url = f"{self.oidc_issuer.rstrip('/')}/jwks/"
         return self
+
+
+class MigrationSettings(BaseSettings):
+    """For the one-shot ``migrate`` command only -- never the running API.
+
+    Kept separate from :class:`Settings` so the API process is never
+    configured with, and so can never leak, the schema owner's credentials.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="FISHSENSE_")
+
+    #: DSN for the schema *owner* role, which runs migrations.
+    migration_database_url: SecretStr
+    #: The role the API runs as; migrations grant it its runtime privileges.
+    app_role: str = "fishsense_app"

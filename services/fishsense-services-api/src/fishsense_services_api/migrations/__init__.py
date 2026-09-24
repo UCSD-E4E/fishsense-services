@@ -9,6 +9,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 
 _SCRIPT_LOCATION = Path(__file__).parent
 
@@ -19,6 +20,11 @@ def _config(database_url: str, app_role: str) -> Config:
     config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
     config.attributes["app_role"] = app_role
     return config
+
+
+def head_revision() -> str:
+    """The newest migration's revision id."""
+    return ScriptDirectory.from_config(_config("", "")).get_current_head()
 
 
 async def upgrade(database_url: str, *, app_role: str) -> None:
