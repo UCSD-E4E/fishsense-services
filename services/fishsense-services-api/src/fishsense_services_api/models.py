@@ -29,7 +29,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, declared_attr, mapped_column
 
 NAMING_CONVENTION = {
     "pk": "%(table_name)s_pkey",
@@ -381,3 +381,98 @@ class DiveLaserLine(Base):
     label_noise_mad: Mapped[float] = mapped_column(Double)
     line_confidence: Mapped[float] = mapped_column(Double)
     fitted_at: Mapped[datetime] = _created_at()
+
+
+# --- Label Studio labels: one shared core, four kinds -------------------------
+
+LABEL_SOURCES = "('human', 'auto_accept', 'pre_annotation', 'import')"
+
+
+class _LabelCore:
+    """Columns every label kind shares (migration 0010)."""
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    v1_id: Mapped[int | None] = _v1_id()
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    source: Mapped[str | None] = mapped_column(Text)
+    ls_project_id: Mapped[int | None] = mapped_column(Integer)
+    ls_task_id: Mapped[int | None] = mapped_column(Integer)
+    ls_labeler_id: Mapped[int | None] = mapped_column(Integer)
+    ls_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    superseded: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    needs_reprocess: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    ls_payload: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = _created_at()
+
+    @declared_attr.directive
+    def __table_args__(cls) -> tuple:
+        table = cls.__tablename__
+        return (
+            UniqueConstraint("tenant_id", "id"),
+            UniqueConstraint("tenant_id", "ls_task_id"),
+            UniqueConstraint("tenant_id", "capture_id", "ls_project_id"),
+            ForeignKeyConstraint(
+                ["tenant_id", "capture_id"], ["captures.tenant_id", "captures.id"]
+            ),
+            CheckConstraint(f"source IN {LABEL_SOURCES}", name=f"{table}_source_check"),
+        )
+
+
+class LaserLabel(_LabelCore, Base):
+    __tablename__ = "laser_labels"
+
+    x: Mapped[float | None] = mapped_column(Double)
+    y: Mapped[float | None] = mapped_column(Double)
+    label: Mapped[str | None] = mapped_column(Text)
+
+
+class HeadTailLabel(_LabelCore, Base):
+    __tablename__ = "head_tail_labels"
+
+    head_x: Mapped[float | None] = mapped_column(Double)
+    head_y: Mapped[float | None] = mapped_column(Double)
+    tail_x: Mapped[float | None] = mapped_column(Double)
+    tail_y: Mapped[float | None] = mapped_column(Double)
+
+
+class SlateLabel(_LabelCore, Base):
+    __tablename__ = "slate_labels"
+
+    upside_down: Mapped[bool | None] = mapped_column(Boolean)
+    reference_points: Mapped[list | None] = mapped_column(JSONB)
+    slate_rectangle: Mapped[list | None] = mapped_column(JSONB)
+    skipped_points: Mapped[list | None] = mapped_column(JSONB)
+    image_url: Mapped[str | None] = mapped_column(Text)
+
+
+class SpeciesLabel(_LabelCore, Base):
+    __tablename__ = "species_labels"
+
+    image_url: Mapped[str | None] = mapped_column(Text)
+    grouping: Mapped[str | None] = mapped_column(Text)
+    top_three_photos_of_group: Mapped[bool | None] = mapped_column(Boolean)
+    content_of_image: Mapped[str | None] = mapped_column(Text)
+    fish_measurable_category: Mapped[str | None] = mapped_column(Text)
+    fish_angle_category: Mapped[str | None] = mapped_column(Text)
+    fish_curved_category: Mapped[str | None] = mapped_column(Text)
+    fish_angle_degrees: Mapped[float | None] = mapped_column(Double)
+
+
+class LabelStudioSyncCursor(Base):
+    __tablename__ = "label_studio_sync_cursors"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "kind", "ls_project_id"),
+        CheckConstraint(
+            "kind IN ('laser', 'head_tail', 'slate', 'species')",
+            name="label_studio_sync_cursors_kind_check",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    v1_id: Mapped[int | None] = _v1_id()
+    kind: Mapped[str] = mapped_column(Text)
+    ls_project_id: Mapped[int] = mapped_column(Integer)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
