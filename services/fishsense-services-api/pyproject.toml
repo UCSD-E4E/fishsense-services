@@ -29,3 +29,11 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
+# Tiers, assigned in conftest by what a test touches (see its docstring).
+# e2e is opt-in: `pytest -m e2e`.
+addopts = "-m 'not e2e' --strict-markers"
+markers = [
+    "unit: in-process only -- no Docker, no sockets",
+    "integration: real Postgres (Docker) or real local sockets",
+    "e2e: the built image under compose, over real HTTP (opt-in)",
+]

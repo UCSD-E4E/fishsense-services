@@ -22,11 +22,17 @@ jobs:
         run: uv sync --all-packages --frozen
       - name: Format
         run: uv run black --check services
+      # Proves the unit tier is in-process: it must pass with Docker unreachable.
+      - name: Unit tests (no Docker)
+        working-directory: services/fishsense-services-api
+        env:
+          DOCKER_HOST: unix:///nonexistent/docker.sock
+        run: uv run pytest -q -m unit
       # Tests run against real Postgres in Docker (testcontainers); the
       # hosted runner provides the daemon.
-      - name: Tests
+      - name: Integration tests
         working-directory: services/fishsense-services-api
-        run: uv run pytest -q
+        run: uv run pytest -q -m integration
 
   image:
     name: image builds and starts

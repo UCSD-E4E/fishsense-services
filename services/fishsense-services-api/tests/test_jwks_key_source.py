@@ -20,6 +20,9 @@ from fishsense_services_api.auth import (
     TokenValidator,
 )
 
+# Real sockets to a local JWKS server: fast, but not in-process.
+pytestmark = pytest.mark.integration
+
 ISSUER = "https://auth.example.test/application/o/fishsense/"
 AUDIENCE = "fishsense-web"
 
