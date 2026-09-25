@@ -6,6 +6,7 @@ requires-python = "==3.13.*"
 members = [
     "fishsense-services",
     "fishsense-services-api",
+    "fishsense-services-orchestrator",
 ]
 
 [[package]]
@@ -307,6 +308,11 @@ requires-dist = [
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.40" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.35.0" },
 ]
+
+[[package]]
+name = "fishsense-services-orchestrator"
+version = "0.0.0"
+source = { editable = "services/fishsense-services-orchestrator" }
 
 [[package]]
 name = "greenlet"

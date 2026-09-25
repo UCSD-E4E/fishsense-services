@@ -28,6 +28,11 @@ jobs:
         env:
           DOCKER_HOST: unix:///nonexistent/docker.sock
         run: uv run pytest -q -m unit
+      - name: Orchestrator unit tests (no Docker)
+        working-directory: services/fishsense-services-orchestrator
+        env:
+          DOCKER_HOST: unix:///nonexistent/docker.sock
+        run: uv run pytest -q
       # Tests run against real Postgres in Docker (testcontainers); the
       # hosted runner provides the daemon.
       - name: Integration tests
