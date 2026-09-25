@@ -24,17 +24,14 @@ v2 changes:
 """
 
 import uuid
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncConnection
 
-from fishsense_services_api.db import principal_transaction, tenant_transaction
-from fishsense_services_api.memberships import resolve_membership
+from fishsense_services_api.service_principal import NotAMember, ServicePrincipal
 
 __all__ = [
     "ContentOverlap",
@@ -327,48 +324,10 @@ async def slate_template_by_name(conn: AsyncConnection, name: str) -> uuid.UUID 
     ).scalar_one_or_none()
 
 
-class NotAMember(PermissionError):
-    """The orchestrator is not (or is no longer) a member of the tenant."""
-
-
-class IngestCatalog:
-    """Ingest's database side, as a service principal.
-
-    The orchestrator acts for a tenant only as a member of it (PLAN.md §9.11).
-    `resolve_tenant` goes through the same membership check a person's request
-    does; every tenant-keyed call **re-checks** it before opening that tenant's
-    transaction, so a tenant id obtained earlier is not a standing licence -- an
-    ingest whose membership is revoked mid-flight stops at its next call.
-    Satisfies the orchestrator's ``Catalog`` protocol.
-    """
-
-    def __init__(self, engine: AsyncEngine, *, sub: str) -> None:
-        self._engine = engine
-        self._sub = sub
-
-    async def resolve_tenant(self, slug: str) -> uuid.UUID | None:
-        async with principal_transaction(self._engine, self._sub) as conn:
-            membership = await resolve_membership(conn, self._sub, slug)
-        return None if membership is None else membership.tenant_id
-
-    @asynccontextmanager
-    async def _tenant(self, tenant_id: uuid.UUID) -> AsyncIterator[AsyncConnection]:
-        async with principal_transaction(self._engine, self._sub) as conn:
-            member = (
-                await conn.execute(
-                    text("""
-                        SELECT EXISTS (
-                            SELECT 1 FROM memberships m JOIN users u ON u.id = m.user_id
-                            WHERE u.sub = :sub AND m.tenant_id = :tenant
-                        )
-                        """),
-                    {"sub": self._sub, "tenant": tenant_id},
-                )
-            ).scalar_one()
-        if not member:
-            raise NotAMember(f"{self._sub} is not a member of tenant {tenant_id}")
-        async with tenant_transaction(self._engine, tenant_id) as conn:
-            yield conn
+class IngestCatalog(ServicePrincipal):
+    """Ingest's database side, as the orchestrator's service principal (see
+    `ServicePrincipal`: every call re-checks the membership). Satisfies the
+    orchestrator's ``Catalog`` protocol."""
 
     async def resolve_device(
         self, tenant_id: uuid.UUID, serial: str
