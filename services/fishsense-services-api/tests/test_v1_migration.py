@@ -613,3 +613,81 @@ def test_fish_and_clusters_are_accounted_for_and_idempotent(v1, v2):
     assert report["diveframecluster"] == (2, 2)
     assert report["diveframeclusterimagemapping"] == (2, 2)
     assert again.discrepancies() == {}
+
+
+# --- cycle 6: depths and measurements ------------------------------------------------
+
+
+def _seed_results(v1: Engine) -> None:
+    """A depth on frame 100; measurements on frame 100 (dive 10, calibration
+    still effective) and frame 101 (dive 12, whose calibration was refused
+    after it was measured)."""
+    with v1.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO laserdepth (id, depth_m, range_m, residual_m, created_at,
+                image_id, laser_label_id, laser_extrinsics_id)
+            VALUES (1, 1.5, 1.52, 0.001, '2026-08-18', 100, 1, 1);
+            INSERT INTO measurement (id, length_m, image_id, fish_id,
+                                     laser_extrinsics_id)
+            VALUES (1, 0.412, 100, 1, 1), (2, 0.377, 101, 1, 2);
+            """))
+
+
+def _seed_everything(v1: Engine) -> None:
+    for seed in (_seed_v1, _seed_calibrations, _seed_labels, _seed_fish, _seed_results):
+        seed(v1)
+
+
+def test_depths_keep_their_label_and_calibration(v1, v2):
+    _seed_everything(v1)
+
+    _run(v1, v2)
+
+    assert _rows(
+        v2,
+        "SELECT d.v1_id, c.v1_id, l.v1_id, k.v1_id, d.depth_m, d.core_version "
+        "FROM laser_depths d JOIN captures c ON c.id = d.capture_id "
+        "JOIN laser_labels l ON l.id = d.laser_label_id "
+        "JOIN laser_calibrations k ON k.id = d.laser_calibration_id",
+    ) == [(1, 100, 1, 1, 1.5, None)]
+
+
+def test_measurements_arrive_as_server_results_with_unknown_provenance(v1, v2):
+    _seed_everything(v1)
+
+    _run(v1, v2)
+
+    assert _rows(
+        v2,
+        "SELECT m.v1_id, c.v1_id, f.v1_id, m.source, m.length_m, k.v1_id, "
+        "m.algorithm, m.core_version FROM measurements m "
+        "JOIN captures c ON c.id = m.capture_id JOIN fish f ON f.id = m.fish_id "
+        "JOIN laser_calibrations k ON k.id = m.laser_calibration_id "
+        "ORDER BY m.v1_id",
+    ) == [
+        (1, 100, 1, "server", 0.412, 1, None, None),
+        (2, 101, 1, "server", 0.377, 2, None, None),
+    ]
+
+
+def test_a_measurement_on_a_later_refused_dive_is_not_current(v1, v2):
+    """v1 keeps showing it; v2's §9.13 rule does not -- a documented change."""
+    _seed_everything(v1)
+
+    _run(v1, v2)
+
+    assert _rows(
+        v2,
+        "SELECT m.v1_id FROM current_measurements m ORDER BY m.v1_id",
+    ) == [(1,)]
+
+
+def test_results_are_accounted_for_and_idempotent(v1, v2):
+    _seed_everything(v1)
+
+    report = _run(v1, v2)
+    again = _run(v1, v2)
+
+    assert report["laserdepth"] == (1, 1)
+    assert report["measurement"] == (2, 2)
+    assert again.discrepancies() == {}

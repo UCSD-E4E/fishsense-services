@@ -583,6 +583,52 @@ def _fish_and_clusters(v1, v2, tenant, report) -> None:
     )
 
 
+def _results(v1, v2, tenant, report) -> None:
+    """Depths and measurements. v1 recorded which calibration a result used and
+    nothing else about how it was made: algorithm, versions and input labels
+    stay unknown (v2 allows that only for migrated rows)."""
+    captures, fish = _ids(v2, "captures"), _ids(v2, "fish")
+    laser_labels = _ids(v2, "laser_labels")
+    calibrations = _ids(v2, "laser_calibrations")  # v1 laserextrinsics ids
+
+    _insert(
+        v2,
+        "INSERT INTO laser_depths (tenant_id, v1_id, capture_id, laser_label_id, "
+        "laser_calibration_id, depth_m, range_m, residual_m, created_at) VALUES "
+        "(:tenant, :id, :capture, :laser_label, :calibration, :depth_m, :range_m, "
+        ":residual_m, coalesce(:created_at, now())) ON CONFLICT DO NOTHING",
+        (
+            {
+                **r,
+                "tenant": tenant,
+                "capture": captures.get(r["image_id"]),
+                "laser_label": laser_labels.get(r["laser_label_id"]),
+                "calibration": calibrations.get(r["laser_extrinsics_id"]),
+            }
+            for r in _rows(v1, "SELECT * FROM laserdepth ORDER BY id")
+        ),
+    )
+    _account(v1, v2, report, "laserdepth", "laser_depths")
+
+    _insert(
+        v2,
+        "INSERT INTO measurements (tenant_id, v1_id, capture_id, fish_id, source, "
+        "length_m, laser_calibration_id) VALUES (:tenant, :id, :capture, :fish, "
+        "'server', :length_m, :calibration) ON CONFLICT DO NOTHING",
+        (
+            {
+                **r,
+                "tenant": tenant,
+                "capture": captures.get(r["image_id"]),
+                "fish": fish.get(r["fish_id"]),
+                "calibration": calibrations.get(r["laser_extrinsics_id"]),
+            }
+            for r in _rows(v1, "SELECT * FROM measurement ORDER BY id")
+        ),
+    )
+    _account(v1, v2, report, "measurement", "measurements")
+
+
 STEPS: list[Callable] = [
     _reference_data,
     _devices,
@@ -595,4 +641,5 @@ STEPS: list[Callable] = [
     _sync_cursors,
     _predictions,
     _fish_and_clusters,
+    _results,
 ]
