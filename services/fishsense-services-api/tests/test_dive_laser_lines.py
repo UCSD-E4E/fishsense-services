@@ -106,3 +106,10 @@ async def test_current_is_the_latest_fit_per_dive(owner):
     )
 
     assert current == latest
+
+
+async def test_line_confidence_is_an_unbounded_stability_signal(owner):
+    """Not a probability: v1's real values run from ~2.6 to ~270 000."""
+    tenant, dive = await _tenant_and_dive(owner, "lab")
+
+    await _fit(owner, tenant, dive, line_confidence=270256.98)

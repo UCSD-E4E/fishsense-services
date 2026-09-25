@@ -154,3 +154,20 @@ async def test_a_new_slate_prediction_has_points_or_a_rejection_not_both(owner):
         with pytest.raises(IntegrityError, match="check"):
             async with owner.begin_nested():
                 await _predict(owner, table, tenant, capture, **bad)
+
+
+async def test_every_gate_verdict_v1_records_is_accepted(owner):
+    """Includes ``auto_accepted``, which production holds but the inventory missed."""
+    tenant, capture = await _tenant_and_capture(owner, "lab")
+
+    for verdict in (
+        "auto_accepted",
+        "off_line",
+        "along_line_outlier",
+        "audit_sample",
+        "dive_ineligible",
+        "no_prediction",
+    ):
+        await _predict(
+            owner, "laser_predictions", tenant, capture, gate_verdict=verdict
+        )
