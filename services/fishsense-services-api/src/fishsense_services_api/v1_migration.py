@@ -243,4 +243,119 @@ def _captures(v1, v2, tenant, report) -> None:
     _account(v1, v2, report, "image", "captures")
 
 
-STEPS: list[Callable] = [_reference_data, _devices, _dives, _captures]
+def _camera_calibrations(v1, v2, tenant, report) -> None:
+    devices = _ids(v2, "devices")
+    _insert(
+        v2,
+        # v1 never recorded the medium or coordinate frame: they stay unknown.
+        "INSERT INTO camera_calibrations (tenant_id, v1_id, device_id, camera_model, "
+        "camera_matrix, distortion_coefficients) VALUES (:tenant, :id, :device, "
+        "'pinhole', CAST(:camera_matrix AS jsonb), "
+        "CAST(:distortion_coefficients AS jsonb)) ON CONFLICT DO NOTHING",
+        (
+            {**r, "tenant": tenant, "device": devices.get(r["camera_id"])}
+            for r in _rows(
+                v1,
+                "SELECT id, camera_id, camera_matrix::text AS camera_matrix, "
+                "distortion_coefficients::text AS distortion_coefficients "
+                "FROM cameraintrinsics ORDER BY id",
+            )
+        ),
+    )
+    _account(v1, v2, report, "cameraintrinsics", "camera_calibrations")
+
+
+def _laser_calibrations(v1, v2, tenant, report) -> None:
+    """Extrinsics become accepted rows; dive refusals become refused rows.
+
+    All of a dive's rows are appended in time order, so ``current`` (latest
+    ``seq``) matches v1's state. A producer is named only when certain: a dive
+    with no calibration target can only have been calibrated from its slate.
+    """
+    dives = _ids(v2, "dives")
+    camera_calibrations = {
+        camera_id: v2_id
+        for camera_id, v2_id in v2.execute(
+            text(
+                "SELECT d.v1_id, min(c.id::text)::uuid FROM camera_calibrations c "
+                "JOIN devices d ON d.id = c.device_id WHERE c.v1_id IS NOT NULL "
+                "GROUP BY d.v1_id HAVING count(*) = 1"
+            )
+        )
+    }
+    events = _rows(
+        v1,
+        """
+        SELECT 'accepted' AS outcome, e.id AS v1_id, NULL::bigint AS refusal_dive,
+               e.dive_id, e.camera_id, e.laser_position::text AS position,
+               e.laser_axis::text AS axis, NULL AS reason, NULL AS inputs_as_of,
+               e.created_at, d.calibration_target_id IS NULL AS slate_only
+        FROM laserextrinsics e JOIN dive d ON d.id = e.dive_id
+        UNION ALL
+        SELECT 'refused', NULL, d.id, d.id, d.camera_id, NULL, NULL,
+               d.calibration_refused_reason, d.calibration_refused_labels_at,
+               d.calibration_refused_at, d.calibration_target_id IS NULL
+        FROM dive d WHERE d.calibration_refused_at IS NOT NULL
+        ORDER BY created_at, outcome
+        """,
+    )
+    _insert(
+        v2,
+        "INSERT INTO laser_calibrations (tenant_id, v1_id, v1_refusal_dive_id, "
+        "dive_id, camera_calibration_id, producer, outcome, laser_position, "
+        "laser_axis, refusal_reason, inputs_as_of, created_at) VALUES (:tenant, "
+        ":v1_id, :refusal_dive, :dive, :camera_calibration, :producer, :outcome, "
+        "CAST(:position AS jsonb), CAST(:axis AS jsonb), :reason, :inputs_as_of, "
+        "coalesce(:created_at, now())) ON CONFLICT DO NOTHING",
+        (
+            {
+                **r,
+                "tenant": tenant,
+                "dive": dives.get(r["dive_id"]),
+                "camera_calibration": camera_calibrations.get(r["camera_id"]),
+                "producer": "slate" if r["slate_only"] else None,
+            }
+            for r in events
+        ),
+    )
+    _account(v1, v2, report, "laserextrinsics", "laser_calibrations")
+    report.counts["dive refusals"] = (
+        v1.execute(
+            text("SELECT count(*) FROM dive WHERE calibration_refused_at IS NOT NULL")
+        ).scalar_one(),
+        v2.execute(
+            text(
+                "SELECT count(*) FROM laser_calibrations "
+                "WHERE v1_refusal_dive_id IS NOT NULL"
+            )
+        ).scalar_one(),
+    )
+
+
+def _dive_laser_lines(v1, v2, tenant, report) -> None:
+    dives = _ids(v2, "dives")
+    _insert(
+        v2,
+        "INSERT INTO dive_laser_lines (tenant_id, v1_id, dive_id, a, b, c, n_points, "
+        "inlier_count, inlier_fraction, residual_std, label_noise_mad, "
+        "line_confidence, fitted_at) VALUES (:tenant, :id, :dive, :a, :b, :c, "
+        ":n_points, :inlier_count, :inlier_fraction, :residual_std, "
+        ":label_noise_mad, :line_confidence, coalesce(:fitted_at, now())) "
+        "ON CONFLICT DO NOTHING",
+        (
+            {**r, "tenant": tenant, "dive": dives.get(r["dive_id"])}
+            for r in _rows(v1, "SELECT * FROM divelaserline ORDER BY fitted_at, id")
+        ),
+    )
+    _account(v1, v2, report, "divelaserline", "dive_laser_lines")
+
+
+STEPS: list[Callable] = [
+    _reference_data,
+    _devices,
+    _dives,
+    _captures,
+    _camera_calibrations,
+    _laser_calibrations,
+    _dive_laser_lines,
+]

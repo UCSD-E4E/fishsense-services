@@ -242,3 +242,119 @@ def test_the_report_accounts_for_every_v1_row(v1, v2):
     assert report["dive"] == (3, 3)
     assert report["image"] == (3, 3)
     assert report.discrepancies() == {}
+
+
+# --- cycle 2: calibrations ------------------------------------------------------
+
+
+def _seed_calibrations(v1: Engine) -> None:
+    """Intrinsics per camera; extrinsics on d10 (has a target) and d12 (none);
+    a refusal on d12 *after* its extrinsics; a laser line on d10."""
+    with v1.begin() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO cameraintrinsics (id, camera_matrix,
+                                              distortion_coefficients, camera_id)
+                VALUES (1, '[[2800, 0, 2000], [0, 2800, 1500], [0, 0, 1]]', '[0.1, -0.2, 0, 0, 0]', 1),
+                       (2, '[[2800, 0, 2000], [0, 2800, 1500], [0, 0, 1]]', '[0.1, -0.2, 0, 0, 0]', 2);
+                INSERT INTO laserextrinsics (id, laser_position, laser_axis,
+                                             created_at, dive_id, camera_id)
+                VALUES (1, '[0.104, 0, 0]', '[0, 0, 1]', '2026-08-01', 10, 1),
+                       (2, '[0.101, 0, 0]', '[0, 0.01, 1]', '2026-08-01', 12, 2);
+                UPDATE dive SET calibration_refused_at = '2026-08-20',
+                    calibration_refused_reason = 'baseline 8.9 cm implausible',
+                    calibration_refused_labels_at = '2026-08-19'
+                WHERE id = 12;
+                INSERT INTO divelaserline (id, dive_id, a, b, c, n_points,
+                    inlier_count, inlier_fraction, residual_std, label_noise_mad,
+                    line_confidence, fitted_at)
+                VALUES (1, 10, 0.6, 0.8, -1200, 40, 37, 0.925, 1.4, 0.9,
+                        270256.98, '2026-08-02');
+                """),
+        )
+
+
+def test_intrinsics_become_pinhole_calibrations_with_unknowns_kept_unknown(v1, v2):
+    _seed_v1(v1)
+    _seed_calibrations(v1)
+
+    _run(v1, v2)
+
+    assert _rows(
+        v2,
+        "SELECT c.v1_id, d.v1_id, c.camera_model, c.medium, c.coordinate_frame "
+        "FROM camera_calibrations c JOIN devices d ON d.id = c.device_id "
+        "ORDER BY c.v1_id",
+    ) == [(1, 1, "pinhole", None, None), (2, 2, "pinhole", None, None)]
+
+
+def test_extrinsics_become_accepted_calibrations_naming_only_what_is_certain(v1, v2):
+    _seed_v1(v1)
+    _seed_calibrations(v1)
+
+    _run(v1, v2)
+
+    assert _rows(
+        v2,
+        "SELECT lc.v1_id, d.v1_id, lc.outcome, lc.producer, cc.v1_id "
+        "FROM laser_calibrations lc JOIN dives d ON d.id = lc.dive_id "
+        "LEFT JOIN camera_calibrations cc ON cc.id = lc.camera_calibration_id "
+        "WHERE lc.outcome = 'accepted' ORDER BY lc.v1_id",
+    ) == [
+        # d10 has a checkerboard target: slate or checkerboard -- unknown.
+        (1, 10, "accepted", None, 1),
+        # d12 has none: only the slate could have calibrated it.
+        (2, 12, "accepted", "slate", 2),
+    ]
+
+
+def test_a_refusal_becomes_a_refused_row_and_v1s_current_state_holds(v1, v2):
+    _seed_v1(v1)
+    _seed_calibrations(v1)
+
+    _run(v1, v2)
+
+    assert _rows(
+        v2,
+        "SELECT d.v1_id, c.outcome, c.refusal_reason, c.inputs_as_of::date::text "
+        "FROM current_laser_calibrations c JOIN dives d ON d.id = c.dive_id "
+        "ORDER BY d.v1_id",
+    ) == [
+        (10, "accepted", None, None),
+        (12, "refused", "baseline 8.9 cm implausible", "2026-08-19"),
+    ]
+    # d11 borrows d10's; d12's refusal leaves it with nothing to measure with.
+    assert _rows(
+        v2,
+        "SELECT d.v1_id, src.v1_id FROM effective_laser_calibrations e "
+        "JOIN dives d ON d.id = e.dive_id JOIN dives src ON src.id = e.source_dive_id "
+        "ORDER BY d.v1_id",
+    ) == [(10, 10), (11, 10)]
+
+
+def test_laser_lines_arrive_intact(v1, v2):
+    _seed_v1(v1)
+    _seed_calibrations(v1)
+
+    _run(v1, v2)
+
+    assert _rows(
+        v2,
+        "SELECT l.v1_id, d.v1_id, l.line_confidence FROM dive_laser_lines l "
+        "JOIN dives d ON d.id = l.dive_id",
+    ) == [(1, 10, 270256.98)]
+
+
+def test_calibrations_are_accounted_for_and_idempotent(v1, v2):
+    _seed_v1(v1)
+    _seed_calibrations(v1)
+
+    report = _run(v1, v2)
+    again = _run(v1, v2)
+
+    assert report["cameraintrinsics"] == (2, 2)
+    assert report["laserextrinsics"] == (2, 2)
+    assert report["dive refusals"] == (1, 1)
+    assert report["divelaserline"] == (1, 1)
+    assert again.discrepancies() == {}
+    assert _rows(v2, "SELECT count(*) FROM laser_calibrations") == [(3,)]

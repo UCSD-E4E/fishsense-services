@@ -340,6 +340,9 @@ class LaserCalibration(Base):
     id: Mapped[uuid.UUID] = _id()
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
     v1_id: Mapped[int | None] = _v1_id()
+    v1_refusal_dive_id: Mapped[int | None] = mapped_column(
+        BigInteger, unique=True, nullable=True
+    )
     seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
     dive_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     camera_calibration_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
