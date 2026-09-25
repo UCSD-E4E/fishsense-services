@@ -4,8 +4,16 @@ version = "0.0.0"
 description = "FishSense v2 orchestrator: Temporal workflows, ported from v1's api-worker."
 requires-python = ">=3.13,<3.14"
 dependencies = [
+    # >=0.2.0: SMB-preferred + throttled NAS transfers (fixes FileStation
+    # download 502s). The lab's own PyO3 wheel, pinned like v1 (below).
+    "synology-filestation>=0.2.0",
+    "temporalio>=1.15.0",
     "pydantic>=2.11",
+    "pydantic-settings>=2.10.0",
 ]
+
+[tool.uv.sources]
+synology-filestation = { url = "https://github.com/UCSD-E4E/synology-filestation/releases/download/synology_filestation-v0.2.0/synology_filestation-0.2.0-cp310-abi3-manylinux_2_34_x86_64.whl" }
 
 [build-system]
 requires = ["hatchling"]
