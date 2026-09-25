@@ -485,3 +485,65 @@ def test_labels_are_accounted_for_and_idempotent(v1, v2):
     ]:
         assert report[table] == (n, n)
     assert again.discrepancies() == {}
+
+
+# --- cycle 4: predictions ---------------------------------------------------------
+
+
+def _seed_predictions(v1: Engine) -> None:
+    """On top of _seed_labels' laser prediction: a slate prediction with both
+    points and a reason (49 such rows in production) and a head/tail
+    prediction cropped around laser label 1."""
+    with v1.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO slateprediction (id, reference_points, confidence,
+                rejected_reason, width, height, created_at, image_id)
+            VALUES (1, '[[1.0, 2.0]]', 0.4, 'low_confidence', 4000, 3000,
+                    '2026-08-02', 102);
+            INSERT INTO headtailprediction (id, head_x, head_y, tail_x, tail_y,
+                laser_label_id, predictor_version, checkpoint, core_version,
+                status, rejected_low_confidence, created_at, image_id)
+            VALUES (1, 1, 2, 3, 4, 1, 2, 'sam3.1_multiplex.pt', '4.0.0',
+                    'predicted', false, '2026-09-03', 100);
+            """))
+
+
+def test_predictions_keep_their_provenance_and_links(v1, v2):
+    _seed_v1(v1)
+    _seed_labels(v1)
+    _seed_predictions(v1)
+
+    _run(v1, v2)
+
+    assert _rows(
+        v2,
+        "SELECT p.v1_id, c.v1_id, p.auto_accept, p.gate_verdict, "
+        "p.predictor_version FROM laser_predictions p "
+        "JOIN captures c ON c.id = p.capture_id",
+    ) == [(1, 101, True, "auto_accepted", 2)]
+    assert _rows(
+        v2,
+        "SELECT p.v1_id, p.status, p.checkpoint, l.v1_id FROM head_tail_predictions p "
+        "JOIN laser_labels l ON l.id = p.laser_label_id",
+    ) == [(1, "predicted", "sam3.1_multiplex.pt", 1)]
+    assert _rows(
+        v2,
+        "SELECT v1_id, rejected_reason, reference_points::text FROM slate_predictions",
+    ) == [(1, "low_confidence", "[[1.0, 2.0]]")]
+
+
+def test_predictions_are_accounted_for_and_current(v1, v2):
+    _seed_v1(v1)
+    _seed_labels(v1)
+    _seed_predictions(v1)
+
+    report = _run(v1, v2)
+
+    for table in ("laserprediction", "slateprediction", "headtailprediction"):
+        assert report[table] == (1, 1)
+    assert _rows(
+        v2,
+        "SELECT (SELECT count(*) FROM current_laser_predictions), "
+        "(SELECT count(*) FROM current_slate_predictions), "
+        "(SELECT count(*) FROM current_head_tail_predictions)",
+    ) == [(1, 1, 1)]

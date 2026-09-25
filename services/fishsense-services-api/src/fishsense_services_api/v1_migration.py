@@ -443,6 +443,71 @@ def _sync_cursors(v1, v2, tenant, report) -> None:
     _account(v1, v2, report, "labelstudiosynccursor", "label_studio_sync_cursors")
 
 
+def _predictions(v1, v2, tenant, report) -> None:
+    """One v1 prediction per image becomes one appended v2 prediction."""
+    captures = _ids(v2, "captures")
+    laser_labels = _ids(v2, "laser_labels")
+
+    def with_links(rows):
+        for r in rows:
+            yield {
+                **r,
+                "tenant": tenant,
+                "capture": captures.get(r["image_id"]),
+                "laser_label": laser_labels.get(r.get("laser_label_id")),
+            }
+
+    common = "tenant_id, v1_id, capture_id, width, height, confidence, created_at"
+    common_values = (
+        ":tenant, :id, :capture, :width, :height, :confidence, "
+        "coalesce(:created_at, now())"
+    )
+    _insert(
+        v2,
+        f"INSERT INTO laser_predictions ({common}, x, y, color, color_margin, "
+        "rejected_out_of_region, predictor_version, checkpoint, core_version, "
+        "auto_accept, gate_verdict, line_offset_px, line_position_z) "
+        f"VALUES ({common_values}, :x, :y, :color, :color_margin, "
+        ":rejected_out_of_region, :predictor_version, :checkpoint, :core_version, "
+        ":auto_accept, :gate_verdict, :line_offset_px, :line_position_z) "
+        "ON CONFLICT DO NOTHING",
+        with_links(_rows(v1, "SELECT * FROM laserprediction ORDER BY id")),
+    )
+    _account(v1, v2, report, "laserprediction", "laser_predictions")
+
+    _insert(
+        v2,
+        f"INSERT INTO slate_predictions ({common}, reference_points, "
+        f"rejected_reason) VALUES ({common_values}, "
+        "CAST(:reference_points AS jsonb), :rejected_reason) ON CONFLICT DO NOTHING",
+        with_links(
+            _rows(
+                v1,
+                "SELECT *, reference_points::text AS reference_points "
+                "FROM slateprediction ORDER BY id",
+            )
+        ),
+    )
+    _account(v1, v2, report, "slateprediction", "slate_predictions")
+
+    _insert(
+        v2,
+        f"INSERT INTO head_tail_predictions ({common}, head_x, head_y, tail_x, "
+        "tail_y, mask_area_px, silhouette_ratio, crop_x, crop_y, laser_label_id, "
+        "predictor_version, checkpoint, core_version, status, "
+        f"rejected_low_confidence) VALUES ({common_values}, :head_x, :head_y, "
+        ":tail_x, :tail_y, :mask_area_px, :silhouette_ratio, :crop_x, :crop_y, "
+        ":laser_label, :predictor_version, :checkpoint, :core_version, :status, "
+        ":rejected_low_confidence) ON CONFLICT DO NOTHING",
+        with_links(
+            # v1 head/tail predictions have no confidence; v2's NOT NULL column
+            # takes its default, 0 -- the same default v1 used for the others.
+            _rows(v1, "SELECT *, 0.0 AS confidence FROM headtailprediction ORDER BY id")
+        ),
+    )
+    _account(v1, v2, report, "headtailprediction", "head_tail_predictions")
+
+
 STEPS: list[Callable] = [
     _reference_data,
     _devices,
@@ -453,4 +518,5 @@ STEPS: list[Callable] = [
     _dive_laser_lines,
     _labels,
     _sync_cursors,
+    _predictions,
 ]
