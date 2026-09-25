@@ -1,14 +1,21 @@
-# Local development only: Postgres, a one-shot migration, then the API.
+# Local development only: Postgres, a one-shot migration, then the API; and
+# Temporal's dev server with the orchestrator serving it.
 #
 #   docker compose up --build
 #   curl localhost:8000/healthz
+#   open http://localhost:8233   (Temporal's UI)
 #
 # Passwords here are dev-only. Locally the owner is the image's superuser; in
 # production the owner is a dedicated non-superuser role, and neither DSN is
 # ever given to the other process.
 #
 # Real tokens need a real issuer: set FISHSENSE_OIDC_ISSUER (and, if needed,
-# FISHSENSE_OIDC_AUDIENCES) in your shell or a .env file before `up`.
+# FISHSENSE_OIDC_AUDIENCES) in your shell or a .env file before `up`. Ingest
+# needs the NAS: set FISHSENSE_NAS_* the same way. Without them the
+# orchestrator still starts and serves its queue; only NAS calls fail.
+#
+# The orchestrator acts for a tenant only as a member of it: grant
+# `service:fishsense-orchestrator` a membership, as an admin, before ingesting.
 
 services:
   postgres:
@@ -28,7 +35,9 @@ services:
       retries: 30
 
   migrate:
-    build: .
+    build:
+      context: .
+      target: api
     command: ["fishsense-services-api", "migrate"]
     environment:
       FISHSENSE_MIGRATION_DATABASE_URL: postgresql+psycopg://fishsense_owner:owner-dev-only@postgres/fishsense
@@ -38,7 +47,9 @@ services:
         condition: service_healthy
 
   api:
-    build: .
+    build:
+      context: .
+      target: api
     environment:
       FISHSENSE_DATABASE_URL: postgresql+asyncpg://fishsense_app:app-dev-only@postgres/fishsense
       FISHSENSE_OIDC_ISSUER: ${FISHSENSE_OIDC_ISSUER:-https://auth.example.invalid/application/o/fishsense/}
@@ -48,6 +59,37 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+
+  temporal:
+    image: temporalio/temporal:1.9.1
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--namespace", "fishsense"]
+    ports:
+      - "127.0.0.1:8233:8233"
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "namespace", "describe",
+             "--namespace", "fishsense", "--address", "127.0.0.1:7233"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  orchestrator:
+    build:
+      context: .
+      target: orchestrator
+    environment:
+      FISHSENSE_DATABASE_URL: postgresql+asyncpg://fishsense_app:app-dev-only@postgres/fishsense
+      FISHSENSE_ORCHESTRATOR_SUB: service:fishsense-orchestrator
+      FISHSENSE_TEMPORAL_ADDRESS: temporal:7233
+      FISHSENSE_TEMPORAL_NAMESPACE: fishsense
+      FISHSENSE_NAS_URL: ${FISHSENSE_NAS_URL:-https://nas.example.invalid:6021}
+      FISHSENSE_NAS_USERNAME: ${FISHSENSE_NAS_USERNAME:-}
+      FISHSENSE_NAS_PASSWORD: ${FISHSENSE_NAS_PASSWORD:-}
+      FISHSENSE_NAS_RAW_ROOT_PATH: ${FISHSENSE_NAS_RAW_ROOT_PATH:-/fishsense_data/REEF/data}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      temporal:
+        condition: service_healthy
 
 volumes:
   postgres-data:
