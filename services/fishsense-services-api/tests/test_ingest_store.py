@@ -30,7 +30,7 @@ from fishsense_services_api.ingest_store import (
     dives_with_leaf,
     finalize_dive,
     register_capture,
-    registered_paths,
+    registered_captures,
     resolve_device,
     slate_template_by_name,
 )
@@ -186,14 +186,23 @@ async def test_canonical_is_decided_per_tenant(owner_engine, app_engine):
     assert theirs.is_canonical is True
 
 
-async def test_registered_paths_are_what_a_resumed_scan_skips(owner_engine, app_engine):
+async def test_registered_captures_are_what_a_resumed_scan_skips(
+    owner_engine, app_engine
+):
+    """Path -> captured_at: a skipped frame still feeds the dive's max timestamp,
+    so a fully-ingested re-run can report it without downloading anything."""
     lab = await _tenant(owner_engine, "lab")
     d1 = await _dive(app_engine, lab, "d1")
+    d2 = await _dive(app_engine, lab, "d2")
+    await _register(app_engine, lab, d2, "d2/P1.ORF", C)
     await _register(app_engine, lab, d1, "d1/P1.ORF", A)
     await _register(app_engine, lab, d1, "d1/P2.ORF", B)
 
     async with tenant_transaction(app_engine, lab) as conn:
-        assert await registered_paths(conn, lab, d1) == {"d1/P1.ORF", "d1/P2.ORF"}
+        assert await registered_captures(conn, lab, d1) == {
+            "d1/P1.ORF": T0,
+            "d1/P2.ORF": T0,
+        }
 
 
 # --- finalize and containment ----------------------------------------------------
@@ -377,7 +386,7 @@ async def test_the_catalog_writes_a_dive_through_the_commit_protocol(
         lab, dive_id=dive, device_id=device, source_path=f"{path}/A.ORF",
         captured_at=T0, checksum=A,
     )  # fmt: skip
-    assert await catalog.registered_paths(lab, dive) == {f"{path}/A.ORF"}
+    assert await catalog.registered_captures(lab, dive) == {f"{path}/A.ORF": T0}
     assert registered.is_canonical
     await catalog.finalize_dive(lab, dive, priority="high", dived_at=T0)
     assert await catalog.content_overlap(lab, dive) == []

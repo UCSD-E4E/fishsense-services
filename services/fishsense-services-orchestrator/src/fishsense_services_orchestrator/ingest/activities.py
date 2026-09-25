@@ -11,10 +11,13 @@ methods; tests pass fakes instead of monkeypatching module globals.
 from __future__ import annotations
 
 import asyncio
+import os
+import tempfile
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import List
 
 from synology_filestation import DSMError
@@ -40,7 +43,10 @@ from fishsense_services_orchestrator.ingest.nas_frames import (
     EXIF_HEADER_BYTES,
     NasSettings,
     build_nas_client,
+    file_checksum,
     parse_taken_datetime,
+    read_taken_datetime,
+    resolve_nas_path,
 )
 
 # Case-insensitive: Olympus writes `.ORF`, but operators and copy tools produce
@@ -59,6 +65,7 @@ INCOMPLETE_INGEST_TYPE = "IncompleteIngest"
 __all__ = [
     "EXIF_HEADER_BYTES",
     "INCOMPLETE_INGEST_TYPE",
+    "BatchResult",
     "IngestTotals",
     "MAX_PATH_LENGTH",
     "DiveFolderListing",
@@ -89,6 +96,18 @@ class IngestTotals:
     registered: int = 0
     skipped_existing: int = 0
     rejected: List[RejectedImage] = field(default_factory=list)
+    max_taken_datetime: datetime | None = None
+
+
+@dataclass
+class BatchResult:
+    """What one scan batch did, for the workflow to accumulate."""
+
+    registered: int = 0
+    skipped_existing: int = 0
+    rejected: List[RejectedImage] = field(default_factory=list)
+    #: MAX of the frames' timestamps -- how every existing dive's datetime was
+    #: derived, and this is the only step that reads whole frames.
     max_taken_datetime: datetime | None = None
 
 
@@ -458,6 +477,120 @@ class IngestActivities:
             committed=True,
             duplicate_overlap=overlap,
         )
+
+    @activity.defn(name="scan_and_register")
+    async def scan_and_register(
+        self,
+        tenant_id: uuid.UUID,
+        dive_id: uuid.UUID,
+        paths: List[str],
+        device_id: uuid.UUID | None,
+    ) -> BatchResult:
+        """Download a batch of frames, hash them, and register their captures.
+
+        Per frame, in order:
+
+        1. **Skip if the path is already registered -- before downloading.**
+           The dive's registered captures are fetched once per batch.
+        2. Download the whole file into a temp dir.
+        3. **Stream md5** (`file_checksum`) -- the convention all ~131k migrated
+           rows follow. Getting it wrong does not error: duplicate detection
+           would silently report zero overlap.
+        4. EXIF tag 0x0132, stamped UTC, offset deliberately not applied.
+        5. Register it. Canonicality is the store's decision; there is no way
+           to send it.
+
+        **Reject, never default**: a frame with no readable timestamp is
+        recorded and the batch carries on -- `finalize` refuses a dive with any
+        rejection, and reporting all of them beats aborting on the first.
+
+        Retry belongs to the Temporal policy, never an inner loop. A permanent
+        Synology error is non-retryable; a transient one propagates. Ingest is
+        trying to *do* something, so a missing frame is a failure, not a
+        finding (the opposite of checksum verification).
+        """
+        result = BatchResult()
+        nas = self._nas_client_factory()
+        # One call, not one per frame: the point is to skip BEFORE paying for a
+        # download.
+        existing = await self._catalog.registered_captures(tenant_id, dive_id)
+
+        for index, path in enumerate(paths):
+            # Heartbeat for liveness and progress only -- NOT as a resume
+            # cursor. Skipping frames below a heartbeat index drops their
+            # outcomes from this result, so a transient 502 mid-batch could
+            # erase an earlier rejection and let `finalize` promote a dive with
+            # a missing frame. Resume is DB-backed instead: `existing` is what
+            # a prior attempt actually persisted.
+            activity.heartbeat(index)
+
+            if path in existing:
+                result.skipped_existing += 1
+                _note_timestamp(result, existing[path])
+                continue
+
+            checksum, taken = await asyncio.to_thread(
+                _read_frame, nas, resolve_nas_path(path, self._nas_settings)
+            )
+            if taken is None:
+                result.rejected.append(
+                    RejectedImage(
+                        path=path,
+                        reason=(
+                            "no readable EXIF timestamp (tag 0x0132 or 0x9003); "
+                            "refusing to default one because stage-1 clustering "
+                            "is pure timestamp arithmetic"
+                        ),
+                    )
+                )
+                continue
+
+            await self._catalog.register_capture(
+                tenant_id,
+                dive_id=dive_id,
+                device_id=device_id,
+                source_path=path,
+                captured_at=taken,
+                checksum=checksum,
+            )
+            result.registered += 1
+            _note_timestamp(result, taken)
+
+        activity.logger.info(
+            "scanned dive_id=%s frames=%d registered=%d skipped=%d rejected=%d",
+            dive_id,
+            len(paths),
+            result.registered,
+            result.skipped_existing,
+            len(result.rejected),
+        )
+        return result
+
+
+def _read_frame(nas: NasClient, src_path: str) -> tuple[str, datetime | None]:
+    """Download to a temp dir and return `(checksum, taken_datetime)`. Runs in a
+    worker thread: the download, the hash and the EXIF read all block."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        try:
+            nas.download_to(src_path=src_path, dest_dir=tmpdir)
+        except DSMError as exc:
+            raise_if_permanent_dsm_error(exc, context=src_path)
+            raise
+        local = Path(tmpdir) / os.path.basename(src_path)
+        return file_checksum(local), read_taken_datetime(local)
+
+
+def _note_timestamp(result: BatchResult, taken: datetime | None) -> None:
+    """Fold one frame's timestamp into the batch maximum -- skipped frames as
+    well as new ones, or a re-run of an ingested dive reports no datetime.
+    Tolerates a naive value (still UTC by the migration's construction):
+    comparing naive to aware raises rather than ordering wrongly."""
+    if taken is None:
+        return
+    if taken.tzinfo is None:
+        taken = taken.replace(tzinfo=timezone.utc)
+    if result.max_taken_datetime is None or taken > result.max_taken_datetime:
+        result.max_taken_datetime = taken
 
 
 def stored_path(absolute_path: str, settings: NasSettings) -> str:

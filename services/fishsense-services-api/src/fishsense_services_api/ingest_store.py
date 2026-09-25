@@ -48,7 +48,7 @@ __all__ = [
     "dives_with_leaf",
     "finalize_dive",
     "register_capture",
-    "registered_paths",
+    "registered_captures",
     "resolve_device",
     "slate_template_by_name",
 ]
@@ -217,19 +217,20 @@ async def register_capture(
     return RegisteredCapture(capture_id, not canonical_elsewhere)
 
 
-async def registered_paths(
+async def registered_captures(
     conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
-) -> set[str]:
-    """Paths already registered for the dive: what a resumed scan skips without
-    downloading."""
+) -> dict[str, datetime]:
+    """Path -> captured_at for frames already registered to the dive: what a
+    resumed scan skips without downloading, and still counts towards the dive's
+    max timestamp."""
     rows = await conn.execute(
         text(
-            "SELECT source_path FROM captures "
+            "SELECT source_path, captured_at FROM captures "
             "WHERE tenant_id = :tenant AND dive_id = :dive"
         ),
         {"tenant": tenant_id, "dive": dive_id},
     )
-    return set(rows.scalars())
+    return {r.source_path: r.captured_at for r in rows}
 
 
 async def finalize_dive(
@@ -399,11 +400,11 @@ class IngestCatalog:
         async with self._tenant(tenant_id) as conn:
             return await register_capture(conn, tenant_id, **capture)
 
-    async def registered_paths(
+    async def registered_captures(
         self, tenant_id: uuid.UUID, dive_id: uuid.UUID
-    ) -> set[str]:
+    ) -> dict[str, datetime]:
         async with self._tenant(tenant_id) as conn:
-            return await registered_paths(conn, tenant_id, dive_id)
+            return await registered_captures(conn, tenant_id, dive_id)
 
     async def finalize_dive(
         self,

@@ -58,10 +58,10 @@ class Catalog(Protocol):
     ) -> RegisteredCapture:
         """Upsert one frame on its path."""
 
-    async def registered_paths(
+    async def registered_captures(
         self, tenant_id: uuid.UUID, dive_id: uuid.UUID
-    ) -> set[str]:
-        """Paths already registered for the dive."""
+    ) -> dict[str, datetime]:
+        """Path -> captured_at for frames already registered to the dive."""
 
     async def finalize_dive(
         self,
