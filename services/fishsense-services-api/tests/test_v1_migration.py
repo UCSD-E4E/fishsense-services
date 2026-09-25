@@ -22,10 +22,7 @@ APP_ROLE = "fishsense_app"
 MD5 = "0123456789abcdef0123456789abcdef"
 
 
-def _database(owner_engine_sync: Engine, owner_url: str, prefix: str) -> str:
-    name = f"{prefix}_{uuid.uuid4().hex[:8]}"
-    with owner_engine_sync.connect() as conn:
-        conn.execute(text(f"CREATE DATABASE {name}"))
+def _url(owner_url: str, name: str) -> str:
     return (
         make_url(owner_url)
         .set(drivername="postgresql+psycopg", database=name)
@@ -33,25 +30,32 @@ def _database(owner_engine_sync: Engine, owner_url: str, prefix: str) -> str:
     )
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def server(owner_url, owner_engine) -> Iterator[Engine]:
-    """A sync, autocommit connection to the test server, for CREATE DATABASE."""
+    """A sync, autocommit connection to the test server, for CREATE DATABASE.
+
+    Databases aren't dropped: the whole test container is discarded after the
+    session, and dropping them cost ~20 s.
+    """
     url = make_url(owner_url).set(drivername="postgresql+psycopg")
     engine = create_engine(url, isolation_level="AUTOCOMMIT")
-    created: list[str] = []
-    engine.created = created  # type: ignore[attr-defined]
     yield engine
-    with engine.connect() as conn:
-        for name in created:
-            conn.execute(text(f"DROP DATABASE IF EXISTS {name} WITH (FORCE)"))
     engine.dispose()
 
 
-@pytest.fixture
-def v1(server, owner_url) -> Iterator[Engine]:
-    url = _database(server, owner_url, "v1")
-    server.created.append(make_url(url).database)
-    engine = create_engine(url)
+def _create(server: Engine, prefix: str, template: str | None = None) -> str:
+    name = f"{prefix}_{uuid.uuid4().hex[:8]}"
+    clause = f" TEMPLATE {template}" if template else ""
+    with server.connect() as conn:
+        conn.execute(text(f"CREATE DATABASE {name}{clause}"))
+    return name
+
+
+@pytest.fixture(scope="session")
+def v1_template(server, owner_url) -> str:
+    """v1's schema, loaded once; each test clones it."""
+    name = _create(server, "v1tmpl")
+    engine = create_engine(_url(owner_url, name))
     # Raw driver, no parameters: the schema contains literal % characters.
     raw = engine.raw_connection()
     try:
@@ -59,16 +63,28 @@ def v1(server, owner_url) -> Iterator[Engine]:
         raw.commit()
     finally:
         raw.close()
+        engine.dispose()
+    return name
+
+
+@pytest.fixture(scope="session")
+async def v2_template(server, owner_url) -> str:
+    """v2 migrated to head, once; each test clones it."""
+    name = _create(server, "v2tmpl")
+    await upgrade(_url(owner_url, name), app_role=APP_ROLE)
+    return name
+
+
+@pytest.fixture
+def v1(server, owner_url, v1_template) -> Iterator[Engine]:
+    engine = create_engine(_url(owner_url, _create(server, "v1", v1_template)))
     yield engine
     engine.dispose()
 
 
 @pytest.fixture
-async def v2(server, owner_url) -> Engine:
-    url = _database(server, owner_url, "v2")
-    server.created.append(make_url(url).database)
-    await upgrade(url, app_role=APP_ROLE)
-    engine = create_engine(url)
+def v2(server, owner_url, v2_template) -> Iterator[Engine]:
+    engine = create_engine(_url(owner_url, _create(server, "v2", v2_template)))
     yield engine
     engine.dispose()
 
