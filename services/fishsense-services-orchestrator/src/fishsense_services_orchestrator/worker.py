@@ -18,6 +18,7 @@ from temporalio.worker import Worker
 from fishsense_services_api.clustering_store import ClusteringCatalog
 from fishsense_services_contracts.temporal import connect_options
 from fishsense_services_api.ingest_store import IngestCatalog
+from fishsense_services_api.label_sync_store import LabelSyncCatalog
 from fishsense_services_orchestrator.clustering.activities import (
     ClusteringActivities,
 )
@@ -27,6 +28,14 @@ from fishsense_services_orchestrator.clustering.workflow import (
 from fishsense_services_orchestrator.ingest.activities import IngestActivities
 from fishsense_services_orchestrator.ingest.nas_frames import NasSettings
 from fishsense_services_orchestrator.ingest.workflow import IngestDiveWorkflow
+from fishsense_services_orchestrator.labels.activities import LabelSyncActivities
+from fishsense_services_orchestrator.labels.label_studio import (
+    LabelStudioClient,
+    LabelStudioSettings,
+)
+from fishsense_services_orchestrator.labels.workflow import (
+    SyncLabelStudioLaserLabelsWorkflow,
+)
 from fishsense_services_orchestrator.schedules import ensure_schedules
 from fishsense_services_orchestrator.settings import (
     DEFAULT_TASK_QUEUE,
@@ -47,7 +56,11 @@ log = logging.getLogger(__name__)
 
 
 #: Every workflow the orchestrator serves.
-WORKFLOWS = [IngestDiveWorkflow, ClusterDiveFramesParentWorkflow]
+WORKFLOWS = [
+    IngestDiveWorkflow,
+    ClusterDiveFramesParentWorkflow,
+    SyncLabelStudioLaserLabelsWorkflow,
+]
 
 
 def build_worker(
@@ -55,6 +68,7 @@ def build_worker(
     *,
     ingest: IngestActivities,
     clustering: ClusteringActivities,
+    labels: LabelSyncActivities,
     task_queue: str,
 ) -> Worker:
     """Register every workflow and activity the orchestrator serves."""
@@ -71,6 +85,8 @@ def build_worker(
             clustering.select_next_dive_for_clustering,
             clustering.resolve_clustering_inputs,
             clustering.persist_prediction_clusters,
+            labels.laser_label_projects,
+            labels.sync_laser_labels,
         ],
     )
 
@@ -90,6 +106,11 @@ async def main() -> None:
             nas_settings=nas, catalog=IngestCatalog(engine, sub=sub)
         )
         clustering = ClusteringActivities(catalog=ClusteringCatalog(engine, sub=sub))
+        label_studio = LabelStudioSettings()
+        labels = LabelSyncActivities(
+            catalog=LabelSyncCatalog(engine, sub=sub),
+            label_studio_factory=lambda: LabelStudioClient.from_settings(label_studio),
+        )
         options = connect_options(temporal)
         log.info(
             "connecting to Temporal address=%s namespace=%s queue=%s tls=%s",
@@ -104,6 +125,7 @@ async def main() -> None:
             client,
             ingest=ingest,
             clustering=clustering,
+            labels=labels,
             task_queue=temporal.task_queue,
         ).run()
     finally:

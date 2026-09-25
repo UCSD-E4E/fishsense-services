@@ -46,6 +46,7 @@ from fishsense_services_orchestrator.ingest.contracts import IngestDiveRequest
 from fishsense_services_orchestrator.ingest.nas import NasEntry
 from fishsense_services_orchestrator.ingest.nas_frames import NasSettings
 from fishsense_services_orchestrator.ingest.workflow import IngestDiveWorkflow
+from fishsense_services_orchestrator.labels.activities import LabelSyncActivities
 from fishsense_services_orchestrator.settings import (
     OrchestratorSettings,
     TemporalSettings,
@@ -60,6 +61,9 @@ from fishsense_services_processor.clustering.workflow import (
 )
 
 from ._tiff_builder import build_orf
+
+# Registered, never called: these tests drive other workflows.
+_UNUSED_LABELS = LabelSyncActivities(catalog=None, label_studio_factory=lambda: None)
 
 ROOT = "/fishsense_data/REEF/data"
 FOLDER = "2024.06.20.REEF/082929_FishModels_FSL07"
@@ -170,6 +174,7 @@ async def test_a_whole_ingest_runs_through_the_real_worker():
             env.client,
             ingest=activities,
             clustering=ClusteringActivities(catalog=_ClusteringCatalog()),
+            labels=_UNUSED_LABELS,
             task_queue="wiring",
         ):
             report = await env.client.execute_workflow(
@@ -244,6 +249,7 @@ async def test_stage_1_runs_across_the_orchestrator_and_the_processor():
                 env.client,
                 ingest=ingest,
                 clustering=ClusteringActivities(catalog=catalog),
+                labels=_UNUSED_LABELS,
                 task_queue="wiring",
             ),
             Worker(

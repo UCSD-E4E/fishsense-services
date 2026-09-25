@@ -63,3 +63,23 @@ def test_every_scheduled_workflow_is_one_the_worker_serves():
 
     assert {s.workflow for s in SCHEDULES} <= set(WORKFLOWS)
     assert ClusterDiveFramesParentWorkflow in WORKFLOWS
+
+
+async def test_the_laser_label_sync_is_scheduled_hourly_and_may_overlap():
+    """v1's schedule: hourly on the hour, a 3h run timeout (a first run over a
+    backlog project pages every task), and overlap allowed -- the cursor only
+    moves forward, so two runs can't rewind each other."""
+    async with await WorkflowEnvironment.start_local(
+        data_converter=pydantic_data_converter
+    ) as env:
+        await ensure_schedules(env.client, task_queue=QUEUE)
+        schedule = (
+            await _describe(env.client, "sync-label-studio-laser-labels")
+        ).schedule
+
+    (interval,) = schedule.spec.intervals
+    assert interval.every == timedelta(hours=1)
+    assert not interval.offset  # on the hour: Temporal reports zero as None
+    assert schedule.policy.overlap == ScheduleOverlapPolicy.ALLOW_ALL
+    assert schedule.action.workflow == "SyncLabelStudioLaserLabelsWorkflow"
+    assert schedule.action.run_timeout == timedelta(hours=3)

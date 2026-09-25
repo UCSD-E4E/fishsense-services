@@ -13,7 +13,7 @@ import pytest
 from temporalio.api.enums.v1 import TaskQueueType
 from temporalio.api.taskqueue.v1 import TaskQueue
 from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
-from temporalio.client import Client, ScheduleOverlapPolicy
+from temporalio.client import Client
 from temporalio.service import RPCError
 
 pytestmark = pytest.mark.e2e
@@ -59,12 +59,15 @@ def test_the_orchestrator_runs_unprivileged_and_without_owner_credentials(stack)
     assert "owner-dev-only" not in environment
 
 
-def test_the_orchestrator_creates_its_schedules_at_startup(stack):
-    """Stage 1 runs hourly at :05, skipping a firing while one is in flight."""
+@pytest.mark.parametrize(
+    "schedule_id", ["cluster-dive-frames", "sync-label-studio-laser-labels"]
+)
+def test_the_orchestrator_creates_its_schedules_at_startup(stack, schedule_id):
+    """Each is created by the deployed worker, on its own queue."""
 
     async def describe():
         client = await Client.connect(stack.temporal_address, namespace=NAMESPACE)
-        return await client.get_schedule_handle("cluster-dive-frames").describe()
+        return await client.get_schedule_handle(schedule_id).describe()
 
     deadline = time.monotonic() + 60
     while True:
@@ -77,4 +80,3 @@ def test_the_orchestrator_creates_its_schedules_at_startup(stack):
             time.sleep(1)
 
     assert schedule.action.task_queue == QUEUE
-    assert schedule.policy.overlap == ScheduleOverlapPolicy.SKIP
