@@ -643,3 +643,76 @@ STEPS: list[Callable] = [
     _fish_and_clusters,
     _results,
 ]
+
+
+# --- go / no-go ------------------------------------------------------------------
+
+
+def preflight(target_url: str, head: str) -> list[str]:
+    """Reasons not to start, checked before any data is touched."""
+    engine = create_engine(target_url)
+    try:
+        with engine.connect() as v2:
+            can_bypass = v2.execute(
+                text(
+                    "SELECT rolsuper OR rolbypassrls FROM pg_roles "
+                    "WHERE rolname = current_user"
+                )
+            ).scalar_one()
+            if not can_bypass:
+                return [
+                    "the target role can't bypass RLS: FORCE ROW LEVEL SECURITY "
+                    "binds the owner too, so migrate as a superuser or BYPASSRLS role"
+                ]
+            at = v2.execute(
+                text(
+                    "SELECT version_num FROM alembic_version "
+                    "WHERE to_regclass('alembic_version') IS NOT NULL"
+                )
+            ).scalar_one_or_none()
+            if at != head:
+                return [
+                    f"target schema is at {at or 'nothing'}, not {head}: "
+                    "run `fishsense-services-api migrate` first"
+                ]
+    finally:
+        engine.dispose()
+    return []
+
+
+# v1's rule for a fresh measurement: measured with its dive's current
+# extrinsics (own, or the source's when borrowing). ``refused`` marks dives
+# whose effective calibration is currently refused -- v1 still shows those
+# measurements, v2 intentionally doesn't (PLAN.md §9.13).
+_V1_FRESH = """
+    SELECT count(*) FILTER (WHERE NOT refused), count(*) FILTER (WHERE refused)
+    FROM (
+        SELECT CASE WHEN d.calibration_dive_id IS NOT NULL
+                    THEN src.calibration_refused_at IS NOT NULL
+                    ELSE d.calibration_refused_at IS NOT NULL END AS refused
+        FROM measurement m
+        JOIN image i ON i.id = m.image_id
+        JOIN dive d ON d.id = i.dive_id
+        LEFT JOIN dive src ON src.id = d.calibration_dive_id
+        JOIN laserextrinsics e
+          ON e.dive_id = coalesce(d.calibration_dive_id, d.id)
+         AND e.id = m.laser_extrinsics_id
+    ) fresh
+"""
+
+
+def measurement_parity(source_url: str, target_url: str) -> tuple[int, int, int]:
+    """(current in v2, fresh in v1 excluding refused dives, on refused dives)."""
+    source, target = create_engine(source_url), create_engine(target_url)
+    try:
+        with source.connect() as v1, target.connect() as v2:
+            fresh, refused = v1.execute(text(_V1_FRESH)).one()
+            current = v2.execute(
+                text(
+                    "SELECT count(*) FROM current_measurements WHERE v1_id IS NOT NULL"
+                )
+            ).scalar_one()
+    finally:
+        source.dispose()
+        target.dispose()
+    return current, fresh, refused

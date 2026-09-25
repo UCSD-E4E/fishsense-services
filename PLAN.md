@@ -665,6 +665,21 @@ v2 must do everything v1 does in production (§2) before a date is set:
 - **Validation report (go/no-go):** row counts per table, every image checksum carried over,
   every Label Studio project mapped, and per-dive measurement parity after v2 re-measures
   the migrated dives.
+- ***Built and rehearsed (2026-09-25):*** `fishsense-services-api migrate` then
+  `fishsense-services-api migrate-v1` (source `FISHSENSE_V1_DATABASE_URL`). One transaction,
+  idempotent by `v1_id`, never inventing values v1 didn't record. On the 2026-09-25
+  production dump: every row of all 24 v1 tables accounted, **~43 s**, tenancy audit
+  passes, and **measurement parity 2,968 = 2,968** (v2's `current_measurements` vs v1's own
+  freshness rule). It exits non-zero (NO-GO) on any unaccounted row, audit violation or
+  parity gap, and refuses to start on a schema not at head.
+- **The migrating role must bypass RLS** (superuser or `BYPASSRLS`): `FORCE ROW LEVEL
+  SECURITY` binds the table owner too, so a plain owner would be blocked by the very
+  policies it writes under. `migrate-v1` checks this before touching data.
+- **v1 data issue found by the rehearsal:** dive 509 ("2023-08-18 Nathans Pool 04") borrows
+  calibration from dive 508, which has no extrinsics -- its 162 measurements are stale in v1
+  and v2 alike. Fix in v1 (or accept) before cutover.
+- **Rehearsal hygiene:** production dumps are restored only into throwaway local
+  containers; the committed test fixture is v1's schema only (`pg_dump --schema-only`).
 
 ### 6.5 Shared services during rehearsals and cutover
 Before cutover, v2 never runs against production shared services with production names:

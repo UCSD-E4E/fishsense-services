@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.engine import make_url
 
+from fishsense_services_api.cli import main
 from fishsense_services_api.migrations import upgrade
 from fishsense_services_api.v1_migration import migrate_v1
 
@@ -691,3 +692,64 @@ def test_results_are_accounted_for_and_idempotent(v1, v2):
     assert report["laserdepth"] == (1, 1)
     assert report["measurement"] == (2, 2)
     assert again.discrepancies() == {}
+
+
+# --- cycle 7: the migrate-v1 command and its go/no-go validation --------------------
+
+
+def _cli_env(monkeypatch, v1: Engine, v2: Engine) -> None:
+    monkeypatch.setenv("FISHSENSE_V1_DATABASE_URL", v1.url.render_as_string(False))
+    monkeypatch.setenv(
+        "FISHSENSE_MIGRATION_DATABASE_URL", v2.url.render_as_string(False)
+    )
+
+
+async def test_migrate_v1_says_go_when_everything_checks_out(
+    v1, v2, monkeypatch, capsys
+):
+    _seed_everything(v1)
+    _cli_env(monkeypatch, v1, v2)
+
+    assert await main(["migrate-v1"]) == 0
+    out = capsys.readouterr().out
+    assert "GO" in out and "NO-GO" not in out
+    assert "measurement parity: 1 current in v2 = 1 fresh in v1" in out
+    # v1 still shows it; v2 intentionally doesn't (PLAN 9.13) -- reported, not a gap.
+    assert "1 on refused dives" in out
+
+
+async def test_migrate_v1_says_no_go_on_a_schema_not_at_head(
+    v1, server, owner_url, monkeypatch, capsys
+):
+    behind = _create(server, "behind")
+    await upgrade(_url(owner_url, behind), app_role=APP_ROLE, revision="0010")
+    monkeypatch.setenv("FISHSENSE_V1_DATABASE_URL", v1.url.render_as_string(False))
+    monkeypatch.setenv("FISHSENSE_MIGRATION_DATABASE_URL", _url(owner_url, behind))
+
+    assert await main(["migrate-v1"]) != 0
+    assert "run `fishsense-services-api migrate` first" in capsys.readouterr().err
+
+
+async def test_migrate_v1_refuses_a_role_that_rls_would_block(
+    v1, v2, monkeypatch, capsys
+):
+    """FORCE RLS binds the table owner too: only a role that bypasses RLS can
+    write every tenant's rows. The app role can't, so it's refused up front."""
+    as_app = v2.url.set(username=APP_ROLE, password=APP_ROLE)
+    monkeypatch.setenv("FISHSENSE_V1_DATABASE_URL", v1.url.render_as_string(False))
+    monkeypatch.setenv(
+        "FISHSENSE_MIGRATION_DATABASE_URL", as_app.render_as_string(False)
+    )
+
+    assert await main(["migrate-v1"]) != 0
+    assert "BYPASSRLS" in capsys.readouterr().err
+
+
+async def test_migrate_v1_names_missing_configuration(monkeypatch, capsys):
+    monkeypatch.delenv("FISHSENSE_V1_DATABASE_URL", raising=False)
+    monkeypatch.delenv("FISHSENSE_MIGRATION_DATABASE_URL", raising=False)
+
+    assert await main(["migrate-v1"]) != 0
+    err = capsys.readouterr().err
+    assert "FISHSENSE_V1_DATABASE_URL" in err
+    assert "FISHSENSE_MIGRATION_DATABASE_URL" in err

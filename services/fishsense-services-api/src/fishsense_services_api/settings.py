@@ -56,3 +56,19 @@ class MigrationSettings(BaseSettings):
     migration_database_url: SecretStr
     #: The role the API runs as; migrations grant it its runtime privileges.
     app_role: str = "fishsense_app"
+
+
+class V1MigrationSettings(BaseSettings):
+    """For the one-shot ``migrate-v1`` command (PLAN.md §6.4) only.
+
+    The target must be written by a role that bypasses RLS (superuser or
+    BYPASSRLS): FORCE ROW LEVEL SECURITY binds the table owner too.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="FISHSENSE_")
+
+    #: v2, as a role that can write every tenant's rows (see above).
+    migration_database_url: SecretStr
+    #: v1's ``fishsense`` database, read-only use.
+    v1_database_url: SecretStr
+    app_role: str = "fishsense_app"
