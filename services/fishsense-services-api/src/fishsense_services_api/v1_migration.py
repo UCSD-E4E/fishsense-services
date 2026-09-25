@@ -508,6 +508,81 @@ def _predictions(v1, v2, tenant, report) -> None:
     _account(v1, v2, report, "headtailprediction", "head_tail_predictions")
 
 
+def _fish_and_clusters(v1, v2, tenant, report) -> None:
+    """A named v1 fish is a fish model, now reached by key: v1 matched the
+    name as a string. Membership rows have no v1 id; their key is idempotent."""
+    species = _ids(v2, "species")
+    models = dict(
+        (name, v2_id)
+        for name, v2_id in v2.execute(text("SELECT name, id FROM fish_models"))
+    )
+    _insert(
+        v2,
+        "INSERT INTO fish (tenant_id, v1_id, species_id, fish_model_id) "
+        "VALUES (:tenant, :id, :species, :model) ON CONFLICT DO NOTHING",
+        (
+            {
+                "tenant": tenant,
+                "id": r["id"],
+                "species": species.get(r["species_id"]),
+                "model": models.get(r["name"]),
+            }
+            for r in _rows(v1, "SELECT * FROM fish ORDER BY id")
+        ),
+    )
+    _account(v1, v2, report, "fish", "fish")
+
+    dives, fish = _ids(v2, "dives"), _ids(v2, "fish")
+    _insert(
+        v2,
+        "INSERT INTO dive_frame_clusters (tenant_id, v1_id, dive_id, formed_by, "
+        "fish_id, updated_at) VALUES (:tenant, :id, :dive, :formed_by, :fish, "
+        ":updated_at) ON CONFLICT DO NOTHING",
+        (
+            {
+                **r,
+                "tenant": tenant,
+                "dive": dives.get(r["dive_id"]),
+                "fish": fish.get(r["fish_id"]),
+                "formed_by": r["data_source"] and r["data_source"].lower(),
+            }
+            for r in _rows(
+                v1,
+                "SELECT id, dive_id, fish_id, updated_at, data_source::text "
+                "AS data_source FROM diveframecluster ORDER BY id",
+            )
+        ),
+    )
+    _account(v1, v2, report, "diveframecluster", "dive_frame_clusters")
+
+    clusters, captures = _ids(v2, "dive_frame_clusters"), _ids(v2, "captures")
+    _insert(
+        v2,
+        "INSERT INTO dive_frame_cluster_captures (tenant_id, cluster_id, "
+        "capture_id) VALUES (:tenant, :cluster, :capture) ON CONFLICT DO NOTHING",
+        (
+            {
+                "tenant": tenant,
+                "cluster": clusters.get(r["dive_frame_cluster_id"]),
+                "capture": captures.get(r["image_id"]),
+            }
+            for r in _rows(v1, "SELECT * FROM diveframeclusterimagemapping")
+        ),
+    )
+    report.counts["diveframeclusterimagemapping"] = (
+        v1.execute(
+            text("SELECT count(*) FROM diveframeclusterimagemapping")
+        ).scalar_one(),
+        v2.execute(
+            text(
+                "SELECT count(*) FROM dive_frame_cluster_captures m "
+                "JOIN dive_frame_clusters k ON k.id = m.cluster_id "
+                "WHERE k.v1_id IS NOT NULL"
+            )
+        ).scalar_one(),
+    )
+
+
 STEPS: list[Callable] = [
     _reference_data,
     _devices,
@@ -519,4 +594,5 @@ STEPS: list[Callable] = [
     _labels,
     _sync_cursors,
     _predictions,
+    _fish_and_clusters,
 ]

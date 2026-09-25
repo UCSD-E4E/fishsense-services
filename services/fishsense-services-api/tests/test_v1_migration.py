@@ -547,3 +547,69 @@ def test_predictions_are_accounted_for_and_current(v1, v2):
         "(SELECT count(*) FROM current_slate_predictions), "
         "(SELECT count(*) FROM current_head_tail_predictions)",
     ) == [(1, 1, 1)]
+
+
+# --- cycle 5: fish and clusters -----------------------------------------------------
+
+
+def _seed_fish(v1: Engine) -> None:
+    """A real hogfish, the Ruler model, and two clusters on d10."""
+    with v1.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO fish (id, name, species_id) VALUES (1, NULL, 1),
+                                                           (2, 'Ruler', NULL);
+            INSERT INTO diveframecluster (id, data_source, updated_at, dive_id,
+                                          fish_id)
+            VALUES (1, 'PREDICTION', now(), 10, NULL),
+                   (2, 'LABEL_STUDIO', now(), 10, 1);
+            INSERT INTO diveframeclusterimagemapping (dive_frame_cluster_id,
+                                                      image_id)
+            VALUES (1, 100), (2, 100);
+            """))
+
+
+def test_fish_reach_their_species_or_model_by_key(v1, v2):
+    _seed_v1(v1)
+    _seed_fish(v1)
+
+    _run(v1, v2)
+
+    assert _rows(
+        v2,
+        "SELECT f.v1_id, s.scientific_name, m.name FROM fish f "
+        "LEFT JOIN species s ON s.id = f.species_id "
+        "LEFT JOIN fish_models m ON m.id = f.fish_model_id ORDER BY f.v1_id",
+    ) == [(1, "Lachnolaimus maximus", None), (2, None, "Ruler")]
+
+
+def test_clusters_keep_their_formation_fish_and_members(v1, v2):
+    _seed_v1(v1)
+    _seed_fish(v1)
+
+    _run(v1, v2)
+
+    assert _rows(
+        v2,
+        "SELECT k.v1_id, k.formed_by, d.v1_id, f.v1_id FROM dive_frame_clusters k "
+        "JOIN dives d ON d.id = k.dive_id LEFT JOIN fish f ON f.id = k.fish_id "
+        "ORDER BY k.v1_id",
+    ) == [(1, "prediction", 10, None), (2, "label_studio", 10, 1)]
+    assert _rows(
+        v2,
+        "SELECT k.v1_id, c.v1_id FROM dive_frame_cluster_captures m "
+        "JOIN dive_frame_clusters k ON k.id = m.cluster_id "
+        "JOIN captures c ON c.id = m.capture_id ORDER BY k.v1_id",
+    ) == [(1, 100), (2, 100)]
+
+
+def test_fish_and_clusters_are_accounted_for_and_idempotent(v1, v2):
+    _seed_v1(v1)
+    _seed_fish(v1)
+
+    report = _run(v1, v2)
+    again = _run(v1, v2)
+
+    assert report["fish"] == (2, 2)
+    assert report["diveframecluster"] == (2, 2)
+    assert report["diveframeclusterimagemapping"] == (2, 2)
+    assert again.discrepancies() == {}
