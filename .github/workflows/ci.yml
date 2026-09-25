@@ -31,6 +31,11 @@ jobs:
       - name: Contract tests
         working-directory: services/fishsense-services-contracts
         run: uv run pytest -q
+      - name: Processor unit tests (no Docker)
+        working-directory: services/fishsense-services-processor
+        env:
+          DOCKER_HOST: unix:///nonexistent/docker.sock
+        run: uv run pytest -q
       - name: Orchestrator unit tests (no Docker)
         working-directory: services/fishsense-services-orchestrator
         env:
