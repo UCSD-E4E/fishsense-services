@@ -356,6 +356,17 @@ async def test_an_empty_folder_fails():
     assert any("No .ORF frames" in e for e in preflight.errors)
 
 
+async def test_an_empty_folder_reports_only_that_it_is_empty():
+    """v2, found by the dry run on real data: a parent folder submitted by
+    mistake also got "no camera serial found" -- true, but only because there
+    were no frames to read it from. A consequence reported as a second fault
+    sends the operator looking for a camera problem that does not exist."""
+    preflight = await _run(_request(), _listing(names=()))
+
+    assert len(preflight.errors) == 1, preflight.errors
+    assert "No .ORF frames" in preflight.errors[0]
+
+
 # -- reporting ----------------------------------------------------------------------
 
 
@@ -392,6 +403,24 @@ async def test_a_leaf_name_collision_with_an_existing_dive_warns():
 
     assert preflight.errors == []
     assert any(str(existing) in w for w in preflight.warnings)
+
+
+async def test_re_ingesting_the_same_path_says_the_dive_will_drop_to_low():
+    """v2, found by the dry run on real data. A collision at the *same* path is
+    not "may be a re-ingest" -- it is one, and create's upsert re-opens that
+    dive at low until finalize promotes it again, so a committed dive leaves
+    the hourly cohorts for the duration. The operator should know before
+    submitting."""
+    existing = uuid.uuid4()
+    catalog = FakeCatalog(dives={"2024.06.20.REEF/082929_FishModels_FSL07": existing})
+
+    preflight = await _run(_request(), _listing(), catalog=catalog)
+
+    assert preflight.errors == []
+    (warning,) = preflight.warnings
+    assert str(existing) in warning
+    assert "already ingested at this path" in warning
+    assert "low" in warning
 
 
 # -- the stored path has to survive the round trip -----------------------------------

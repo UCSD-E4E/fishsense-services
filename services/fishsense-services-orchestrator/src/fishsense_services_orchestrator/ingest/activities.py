@@ -293,7 +293,9 @@ class IngestActivities:
             )
 
         device = None
-        if tenant_id is not None:
+        # An empty folder has no serial to resolve; saying so as well would
+        # report a consequence as a second fault.
+        if tenant_id is not None and listing.files:
             device = await _resolve_device(
                 catalog, tenant_id, request, serials, artists, errors, warnings
             )
@@ -309,7 +311,18 @@ class IngestActivities:
         # containment needs checksums, so it runs after the scan.
         if tenant_id is not None:
             leaf = listing.folder_path.rstrip("/").rsplit("/", 1)[-1]
+            here = stored_path(listing.folder_path, self._nas_settings)
             for dive_id, dive_path in await catalog.dives_with_leaf(tenant_id, leaf):
+                if dive_path == here:
+                    # Not "may be": create upserts on the path, so this re-opens
+                    # that dive at low until finalize promotes it again.
+                    warnings.append(
+                        f"Dive {dive_id} is already ingested at this path. "
+                        "Ingesting again re-opens it at low -- out of every "
+                        "hourly cohort -- until finalize promotes it; frames "
+                        "already registered are skipped."
+                    )
+                    continue
                 warnings.append(
                     f"Dive {dive_id} has the same folder name ({leaf!r}) at "
                     f"{dive_path}. Dive names are not unique; this may be a "
