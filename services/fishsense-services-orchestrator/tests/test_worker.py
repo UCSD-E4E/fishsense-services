@@ -2,12 +2,12 @@
 
 v1 (fishsense-lite@a8b2c3bc fishsense_api_workflow_worker/worker.py) read a
 global Dynaconf object; v2 reads typed ``FISHSENSE_*`` settings, validated at
-startup, and builds the worker from them. Two v1 lessons are pinned here:
+startup, and builds the worker from them. Its v1 lessons:
 
-* **the namespace is required**: OSS Temporal mTLS does not pin a client to a
-  namespace, so a worker that omits it silently lands in ``default``;
-* **the payload converter is pydantic's**, on the client, or UUIDs and
-  datetimes inside the contracts do not survive the trip.
+* **the namespace is required**, and **the payload converter is pydantic's**
+  -- both now in the shared connection settings, tested with them
+  (fishsense-services-contracts tests/test_temporal.py);
+* the orchestrator's own queue is never v1's.
 
 The wiring tests run whole workflows through the real worker with the real
 activities and fake catalogs: an ingest (with a fake NAS), and stage 1 across
@@ -23,8 +23,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
-from pydantic import ValidationError
 from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
@@ -55,7 +53,6 @@ from fishsense_services_orchestrator.settings import (
 from fishsense_services_orchestrator.worker import (
     DEFAULT_TASK_QUEUE,
     build_worker,
-    connect_options,
 )
 from fishsense_services_processor.clustering.activities import cluster_dive_frames
 from fishsense_services_processor.clustering.workflow import (
@@ -74,14 +71,6 @@ DEVICE = uuid.uuid4()
 # -- settings ------------------------------------------------------------------
 
 
-def test_the_namespace_is_required(monkeypatch):
-    """Without it the worker would silently serve ``default`` -- v1's lesson."""
-    monkeypatch.delenv("FISHSENSE_TEMPORAL_NAMESPACE", raising=False)
-
-    with pytest.raises(ValidationError, match="namespace"):
-        TemporalSettings()
-
-
 def test_temporal_settings_read_the_environment_with_safe_defaults(monkeypatch):
     monkeypatch.setenv("FISHSENSE_TEMPORAL_NAMESPACE", "fishsense")
 
@@ -95,14 +84,6 @@ def test_temporal_settings_read_the_environment_with_safe_defaults(monkeypatch):
     assert settings.client_cert is None
 
 
-def test_a_client_cert_without_its_key_fails_at_startup(monkeypatch, tmp_path):
-    monkeypatch.setenv("FISHSENSE_TEMPORAL_NAMESPACE", "fishsense")
-    monkeypatch.setenv("FISHSENSE_TEMPORAL_CLIENT_CERT", str(tmp_path / "c.pem"))
-
-    with pytest.raises(ValidationError, match="together"):
-        TemporalSettings()
-
-
 def test_the_orchestrator_settings_hold_its_identity_and_database(monkeypatch):
     monkeypatch.setenv("FISHSENSE_DATABASE_URL", "postgresql+asyncpg://u:secret@db/x")
     monkeypatch.setenv("FISHSENSE_ORCHESTRATOR_SUB", "service:fishsense-orchestrator")
@@ -111,37 +92,6 @@ def test_the_orchestrator_settings_hold_its_identity_and_database(monkeypatch):
 
     assert settings.orchestrator_sub == "service:fishsense-orchestrator"
     assert "secret" not in repr(settings)
-
-
-# -- the connection ------------------------------------------------------------
-
-
-def test_connect_options_carry_the_namespace_and_the_pydantic_converter():
-    options = connect_options(TemporalSettings(namespace="fishsense"))
-
-    assert options["target_host"] == "localhost:7233"
-    assert options["namespace"] == "fishsense"
-    assert options["data_converter"] is pydantic_data_converter
-    assert options["tls"] is False
-
-
-def test_tls_is_built_from_the_certificate_files(tmp_path: Path):
-    for name in ("cert.pem", "key.pem", "ca.pem"):
-        (tmp_path / name).write_bytes(name.encode())
-    settings = TemporalSettings(
-        namespace="fishsense",
-        client_cert=tmp_path / "cert.pem",
-        client_private_key=tmp_path / "key.pem",
-        server_root_ca_cert=tmp_path / "ca.pem",
-        domain="temporal.example",
-    )
-
-    tls = connect_options(settings)["tls"]
-
-    assert tls.client_cert == b"cert.pem"
-    assert tls.client_private_key == b"key.pem"
-    assert tls.server_root_ca_cert == b"ca.pem"
-    assert tls.domain == "temporal.example"
 
 
 # -- the wiring: a whole ingest through the real worker -------------------------

@@ -12,6 +12,9 @@ dependencies = [
     "scikit-learn==1.9.0",
 ]
 
+[project.scripts]
+fishsense-services-processor = "fishsense_services_processor.worker:run"
+
 [tool.uv.sources]
 fishsense-services-contracts = { workspace = true }
 

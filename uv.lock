@@ -326,10 +326,16 @@ version = "0.0.0"
 source = { editable = "services/fishsense-services-contracts" }
 dependencies = [
     { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "temporalio" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2.11" }]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.11" },
+    { name = "pydantic-settings", specifier = ">=2.10.0" },
+    { name = "temporalio", specifier = ">=1.15.0" },
+]
 
 [[package]]
 name = "fishsense-services-orchestrator"

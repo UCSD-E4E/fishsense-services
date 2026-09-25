@@ -7,9 +7,11 @@
 #     migrations:  `fishsense-services-api migrate`, runs as the schema owner
 #   orchestrator (`--target orchestrator`):
 #     the Temporal worker, also as the app role
+#   processor (`--target processor`):
+#     the compute worker; no database or NAS access, only Temporal
 #
 # amd64 only for now: the orchestrator's synology-filestation wheel is built for
-# manylinux x86_64 (the processor is the part that goes ARM64, PLAN §3).
+# manylinux x86_64. The processor is the part that goes ARM64 later (PLAN §3).
 
 FROM ghcr.io/astral-sh/uv:0.12.17 AS uv
 
@@ -40,6 +42,12 @@ COPY services/fishsense-services-contracts services/fishsense-services-contracts
 COPY services/fishsense-services-orchestrator services/fishsense-services-orchestrator
 RUN uv sync --frozen --no-dev --package fishsense-services-orchestrator --no-editable
 
+FROM build-base AS build-processor
+RUN uv sync --frozen --no-dev --package fishsense-services-processor --no-install-workspace
+COPY services/fishsense-services-contracts services/fishsense-services-contracts
+COPY services/fishsense-services-processor services/fishsense-services-processor
+RUN uv sync --frozen --no-dev --package fishsense-services-processor --no-editable
+
 FROM python:3.13-slim AS runtime
 RUN useradd --system --uid 10001 --no-create-home app
 ENV PATH=/app/.venv/bin:$PATH \
@@ -49,6 +57,11 @@ FROM runtime AS orchestrator
 COPY --from=build-orchestrator /app/.venv /app/.venv
 USER app
 CMD ["fishsense-services-orchestrator"]
+
+FROM runtime AS processor
+COPY --from=build-processor /app/.venv /app/.venv
+USER app
+CMD ["fishsense-services-processor"]
 
 FROM runtime AS api
 COPY --from=build-api /app/.venv /app/.venv

@@ -11,14 +11,12 @@ their dependencies; the schedules are ensured at startup.
 
 import asyncio
 import logging
-from typing import Any
-
 from sqlalchemy.ext.asyncio import create_async_engine
-from temporalio.client import Client, TLSConfig
-from temporalio.contrib.pydantic import pydantic_data_converter
+from temporalio.client import Client
 from temporalio.worker import Worker
 
 from fishsense_services_api.clustering_store import ClusteringCatalog
+from fishsense_services_contracts.temporal import connect_options
 from fishsense_services_api.ingest_store import IngestCatalog
 from fishsense_services_orchestrator.clustering.activities import (
     ClusteringActivities,
@@ -46,29 +44,6 @@ __all__ = [
 ]
 
 log = logging.getLogger(__name__)
-
-
-def connect_options(settings: TemporalSettings) -> dict[str, Any]:
-    """Keyword arguments for `Client.connect`."""
-    tls: TLSConfig | bool = False
-    if settings.client_cert is not None:
-        tls = TLSConfig(
-            client_cert=settings.client_cert.read_bytes(),
-            client_private_key=settings.client_private_key.read_bytes(),
-            server_root_ca_cert=(
-                settings.server_root_ca_cert.read_bytes()
-                if settings.server_root_ca_cert
-                else None
-            ),
-            domain=settings.domain,
-        )
-    return {
-        "target_host": settings.address,
-        "namespace": settings.namespace,
-        "tls": tls,
-        # The contracts are pydantic models carrying UUIDs and datetimes.
-        "data_converter": pydantic_data_converter,
-    }
 
 
 #: Every workflow the orchestrator serves.
