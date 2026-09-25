@@ -29,7 +29,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, declared_attr, mapped_column
 
 NAMING_CONVENTION = {
     "pk": "%(table_name)s_pkey",
@@ -130,7 +130,9 @@ class FishModelReference(Base):
     __table_args__ = (UniqueConstraint("name", "valid_from"),)
 
     id: Mapped[uuid.UUID] = _id()
-    name: Mapped[str] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(
+        Text, ForeignKey("fish_models.name", onupdate="CASCADE")
+    )
     known_length_m: Mapped[float] = mapped_column(Double)
     is_provisional: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     notes: Mapped[str | None] = mapped_column(Text)
@@ -381,3 +383,343 @@ class DiveLaserLine(Base):
     label_noise_mad: Mapped[float] = mapped_column(Double)
     line_confidence: Mapped[float] = mapped_column(Double)
     fitted_at: Mapped[datetime] = _created_at()
+
+
+# --- Label Studio labels: one shared core, four kinds -------------------------
+
+LABEL_SOURCES = "('human', 'auto_accept', 'pre_annotation', 'import')"
+
+
+class _LabelCore:
+    """Columns every label kind shares (migration 0010)."""
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    v1_id: Mapped[int | None] = _v1_id()
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    source: Mapped[str | None] = mapped_column(Text)
+    ls_project_id: Mapped[int | None] = mapped_column(Integer)
+    ls_task_id: Mapped[int | None] = mapped_column(Integer)
+    ls_labeler_id: Mapped[int | None] = mapped_column(Integer)
+    ls_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    superseded: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    needs_reprocess: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    ls_payload: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = _created_at()
+
+    @declared_attr.directive
+    def __table_args__(cls) -> tuple:
+        table = cls.__tablename__
+        return (
+            UniqueConstraint("tenant_id", "id"),
+            UniqueConstraint("tenant_id", "ls_task_id"),
+            UniqueConstraint("tenant_id", "capture_id", "ls_project_id"),
+            ForeignKeyConstraint(
+                ["tenant_id", "capture_id"], ["captures.tenant_id", "captures.id"]
+            ),
+            CheckConstraint(f"source IN {LABEL_SOURCES}", name=f"{table}_source_check"),
+        )
+
+
+class LaserLabel(_LabelCore, Base):
+    __tablename__ = "laser_labels"
+
+    x: Mapped[float | None] = mapped_column(Double)
+    y: Mapped[float | None] = mapped_column(Double)
+    label: Mapped[str | None] = mapped_column(Text)
+
+
+class HeadTailLabel(_LabelCore, Base):
+    __tablename__ = "head_tail_labels"
+
+    head_x: Mapped[float | None] = mapped_column(Double)
+    head_y: Mapped[float | None] = mapped_column(Double)
+    tail_x: Mapped[float | None] = mapped_column(Double)
+    tail_y: Mapped[float | None] = mapped_column(Double)
+
+
+class SlateLabel(_LabelCore, Base):
+    __tablename__ = "slate_labels"
+
+    upside_down: Mapped[bool | None] = mapped_column(Boolean)
+    reference_points: Mapped[list | None] = mapped_column(JSONB)
+    slate_rectangle: Mapped[list | None] = mapped_column(JSONB)
+    skipped_points: Mapped[list | None] = mapped_column(JSONB)
+    image_url: Mapped[str | None] = mapped_column(Text)
+
+
+class SpeciesLabel(_LabelCore, Base):
+    __tablename__ = "species_labels"
+
+    image_url: Mapped[str | None] = mapped_column(Text)
+    grouping: Mapped[str | None] = mapped_column(Text)
+    top_three_photos_of_group: Mapped[bool | None] = mapped_column(Boolean)
+    content_of_image: Mapped[str | None] = mapped_column(Text)
+    fish_measurable_category: Mapped[str | None] = mapped_column(Text)
+    fish_angle_category: Mapped[str | None] = mapped_column(Text)
+    fish_curved_category: Mapped[str | None] = mapped_column(Text)
+    fish_angle_degrees: Mapped[float | None] = mapped_column(Double)
+
+
+class LabelStudioSyncCursor(Base):
+    __tablename__ = "label_studio_sync_cursors"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "kind", "ls_project_id"),
+        CheckConstraint(
+            "kind IN ('laser', 'head_tail', 'slate', 'species')",
+            name="label_studio_sync_cursors_kind_check",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    v1_id: Mapped[int | None] = _v1_id()
+    kind: Mapped[str] = mapped_column(Text)
+    ls_project_id: Mapped[int] = mapped_column(Integer)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# --- Model predictions: append-only, latest ``seq`` per capture ----------------
+
+
+class _PredictionCore:
+    """Columns every prediction kind shares (migration 0011)."""
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    v1_id: Mapped[int | None] = _v1_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    width: Mapped[int | None] = mapped_column(Integer)
+    height: Mapped[int | None] = mapped_column(Integer)
+    confidence: Mapped[float] = mapped_column(Double, server_default=text("0"))
+    predictor_version: Mapped[int | None] = mapped_column(Integer)
+    checkpoint: Mapped[str | None] = mapped_column(Text)
+    core_version: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+    @declared_attr.directive
+    def __table_args__(cls) -> tuple:
+        return (
+            UniqueConstraint("tenant_id", "id"),
+            ForeignKeyConstraint(
+                ["tenant_id", "capture_id"], ["captures.tenant_id", "captures.id"]
+            ),
+            *cls._extra_table_args(),
+        )
+
+    @classmethod
+    def _extra_table_args(cls) -> tuple:
+        return ()
+
+
+class LaserPrediction(_PredictionCore, Base):
+    __tablename__ = "laser_predictions"
+
+    x: Mapped[float | None] = mapped_column(Double)
+    y: Mapped[float | None] = mapped_column(Double)
+    color: Mapped[str | None] = mapped_column(Text)
+    color_margin: Mapped[float | None] = mapped_column(Double)
+    rejected_out_of_region: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false")
+    )
+    auto_accept: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    gate_verdict: Mapped[str | None] = mapped_column(Text)
+    line_offset_px: Mapped[float | None] = mapped_column(Double)
+    line_position_z: Mapped[float | None] = mapped_column(Double)
+
+
+class SlatePrediction(_PredictionCore, Base):
+    __tablename__ = "slate_predictions"
+
+    reference_points: Mapped[list | None] = mapped_column(JSONB)
+    rejected_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class HeadTailPrediction(_PredictionCore, Base):
+    __tablename__ = "head_tail_predictions"
+
+    head_x: Mapped[float | None] = mapped_column(Double)
+    head_y: Mapped[float | None] = mapped_column(Double)
+    tail_x: Mapped[float | None] = mapped_column(Double)
+    tail_y: Mapped[float | None] = mapped_column(Double)
+    mask_area_px: Mapped[int | None] = mapped_column(Integer)
+    silhouette_ratio: Mapped[float | None] = mapped_column(Double)
+    crop_x: Mapped[int | None] = mapped_column(Integer)
+    crop_y: Mapped[int | None] = mapped_column(Integer)
+    laser_label_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    status: Mapped[str] = mapped_column(Text, server_default=text("'predicted'::text"))
+    rejected_low_confidence: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false")
+    )
+
+    @classmethod
+    def _extra_table_args(cls) -> tuple:
+        return (
+            ForeignKeyConstraint(
+                ["tenant_id", "laser_label_id"],
+                ["laser_labels.tenant_id", "laser_labels.id"],
+            ),
+        )
+
+
+class FishModel(Base):
+    """A physical fish model or calibration target, reached by key (global)."""
+
+    __tablename__ = "fish_models"
+
+    id: Mapped[uuid.UUID] = _id()
+    name: Mapped[str] = mapped_column(Text, unique=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class Fish(Base):
+    """A real animal of a species, or a fish model -- never both; never deleted."""
+
+    __tablename__ = "fish"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        UniqueConstraint("tenant_id", "fish_model_id"),
+        CheckConstraint(
+            "species_id IS NULL OR fish_model_id IS NULL",
+            name="fish_species_or_model_check",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    v1_id: Mapped[int | None] = _v1_id()
+    species_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("species.id"))
+    fish_model_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("fish_models.id")
+    )
+    created_at: Mapped[datetime] = _created_at()
+
+
+class DiveFrameCluster(Base):
+    __tablename__ = "dive_frame_clusters"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        ForeignKeyConstraint(["tenant_id", "dive_id"], ["dives.tenant_id", "dives.id"]),
+        ForeignKeyConstraint(["tenant_id", "fish_id"], ["fish.tenant_id", "fish.id"]),
+        CheckConstraint(
+            "formed_by IN ('prediction', 'label_studio')",
+            name="dive_frame_clusters_formed_by_check",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    v1_id: Mapped[int | None] = _v1_id()
+    dive_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    formed_by: Mapped[str | None] = mapped_column(Text)
+    fish_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _created_at()
+
+
+class DiveFrameClusterCapture(Base):
+    """A capture's membership in a cluster; goes with the cluster."""
+
+    __tablename__ = "dive_frame_cluster_captures"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "cluster_id"],
+            ["dive_frame_clusters.tenant_id", "dive_frame_clusters.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "capture_id"], ["captures.tenant_id", "captures.id"]
+        ),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    cluster_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+
+
+# --- Results: append-only, with their inputs -----------------------------------
+
+
+class LaserDepth(Base):
+    __tablename__ = "laser_depths"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "capture_id"], ["captures.tenant_id", "captures.id"]
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "laser_label_id"],
+            ["laser_labels.tenant_id", "laser_labels.id"],
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "laser_calibration_id"],
+            ["laser_calibrations.tenant_id", "laser_calibrations.id"],
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    v1_id: Mapped[int | None] = _v1_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    laser_label_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    laser_calibration_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    depth_m: Mapped[float] = mapped_column(Double)
+    range_m: Mapped[float | None] = mapped_column(Double)
+    residual_m: Mapped[float | None] = mapped_column(Double)
+    core_version: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class Measurement(Base):
+    """A length, with its inputs; current per §9.13 (``current_measurements``)."""
+
+    __tablename__ = "measurements"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "capture_id"], ["captures.tenant_id", "captures.id"]
+        ),
+        ForeignKeyConstraint(["tenant_id", "fish_id"], ["fish.tenant_id", "fish.id"]),
+        ForeignKeyConstraint(
+            ["tenant_id", "laser_calibration_id"],
+            ["laser_calibrations.tenant_id", "laser_calibrations.id"],
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "laser_depth_id"],
+            ["laser_depths.tenant_id", "laser_depths.id"],
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "laser_label_id"],
+            ["laser_labels.tenant_id", "laser_labels.id"],
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "head_tail_label_id"],
+            ["head_tail_labels.tenant_id", "head_tail_labels.id"],
+        ),
+        CheckConstraint(
+            "source IN ('server', 'device')", name="measurements_source_check"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    v1_id: Mapped[int | None] = _v1_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    capture_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    fish_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    source: Mapped[str] = mapped_column(Text)
+    length_m: Mapped[float | None] = mapped_column(Double)
+    laser_calibration_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    laser_depth_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    laser_label_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    head_tail_label_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    algorithm: Mapped[str | None] = mapped_column(Text)
+    algorithm_version: Mapped[str | None] = mapped_column(Text)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    core_version: Mapped[str | None] = mapped_column(Text)
+    model_version: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
