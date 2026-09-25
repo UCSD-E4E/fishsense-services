@@ -6,6 +6,7 @@ requires-python = "==3.13.*"
 members = [
     "fishsense-services",
     "fishsense-services-api",
+    "fishsense-services-contracts",
     "fishsense-services-orchestrator",
 ]
 
@@ -310,11 +311,23 @@ requires-dist = [
 ]
 
 [[package]]
+name = "fishsense-services-contracts"
+version = "0.0.0"
+source = { editable = "services/fishsense-services-contracts" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.11" }]
+
+[[package]]
 name = "fishsense-services-orchestrator"
 version = "0.0.0"
 source = { editable = "services/fishsense-services-orchestrator" }
 dependencies = [
     { name = "fishsense-services-api" },
+    { name = "fishsense-services-contracts" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "synology-filestation" },
@@ -324,6 +337,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "fishsense-services-api", editable = "services/fishsense-services-api" },
+    { name = "fishsense-services-contracts", editable = "services/fishsense-services-contracts" },
     { name = "pydantic", specifier = ">=2.11" },
     { name = "pydantic-settings", specifier = ">=2.10.0" },
     { name = "synology-filestation", url = "https://github.com/UCSD-E4E/synology-filestation/releases/download/synology_filestation-v0.2.0/synology_filestation-0.2.0-cp310-abi3-manylinux_2_34_x86_64.whl" },

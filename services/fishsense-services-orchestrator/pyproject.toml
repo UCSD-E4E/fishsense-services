@@ -7,6 +7,7 @@ dependencies = [
     # The control plane's database side (ingest_store): activities call it
     # directly, with no HTTP hop (PLAN.md §6.3).
     "fishsense-services-api",
+    "fishsense-services-contracts",
     # >=0.2.0: SMB-preferred + throttled NAS transfers (fixes FileStation
     # download 502s). The lab's own PyO3 wheel, pinned like v1 (below).
     "synology-filestation>=0.2.0",
@@ -19,6 +20,7 @@ dependencies = [
 fishsense-services-orchestrator = "fishsense_services_orchestrator.worker:run"
 
 [tool.uv.sources]
+fishsense-services-contracts = { workspace = true }
 fishsense-services-api = { workspace = true }
 synology-filestation = { url = "https://github.com/UCSD-E4E/synology-filestation/releases/download/synology_filestation-v0.2.0/synology_filestation-0.2.0-cp310-abi3-manylinux_2_34_x86_64.whl" }
 
