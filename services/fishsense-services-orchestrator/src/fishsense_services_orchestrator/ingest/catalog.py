@@ -3,7 +3,8 @@
 Preflight and the later activities depend on this protocol, not on a database:
 the unit tests (ported from v1, whose tests faked the API client the same way)
 answer it from memory, and the real implementation answers it from Postgres,
-tenant-scoped, as the orchestrator's service principal.
+tenant-scoped, as the orchestrator's service principal. That one is
+`fishsense_services_api.ingest_store.IngestCatalog`.
 
 **The orchestrator acts for a tenant only as a member of it** (PLAN.md §9.11):
 `resolve_tenant` resolves a slug the way a person's request does, so an
@@ -15,18 +16,11 @@ bypass.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
 from typing import Protocol
 
+from fishsense_services_api.ingest_store import ResolvedDevice
+
 __all__ = ["Catalog", "ResolvedDevice"]
-
-
-@dataclass(frozen=True)
-class ResolvedDevice:
-    device_id: uuid.UUID
-    name: str | None
-    #: A camera calibration exists -- without one, stage 14 can never measure.
-    has_camera_calibration: bool
 
 
 class Catalog(Protocol):

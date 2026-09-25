@@ -28,18 +28,25 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
+
+from fishsense_services_api.db import principal_transaction, tenant_transaction
+from fishsense_services_api.memberships import resolve_membership
 
 __all__ = [
     "ContentOverlap",
+    "IngestCatalog",
     "RegisteredCapture",
     "ResolvedDevice",
     "content_overlap",
     "create_dive",
+    "dive_by_path",
+    "dives_with_leaf",
     "finalize_dive",
     "register_capture",
     "registered_paths",
     "resolve_device",
+    "slate_template_by_name",
 ]
 
 
@@ -269,3 +276,86 @@ async def content_overlap(
         {"tenant": tenant_id, "dive": dive_id},
     )
     return [ContentOverlap(r.dive_id, r.source_path, r.n, r.containment) for r in rows]
+
+
+async def dive_by_path(
+    conn: AsyncConnection, tenant_id: uuid.UUID, path: str
+) -> uuid.UUID | None:
+    """The tenant's dive at exactly this path."""
+    return (
+        await conn.execute(
+            text(
+                "SELECT id FROM dives WHERE tenant_id = :tenant AND source_path = :path"
+            ),
+            {"tenant": tenant_id, "path": path},
+        )
+    ).scalar_one_or_none()
+
+
+async def dives_with_leaf(
+    conn: AsyncConnection, tenant_id: uuid.UUID, leaf: str
+) -> list[tuple[uuid.UUID, str]]:
+    """The tenant's dives whose folder name is exactly ``leaf``.
+
+    Compared as a suffix, not with LIKE: dive names are full of ``_``, which
+    LIKE would treat as a wildcard.
+    """
+    rows = await conn.execute(
+        text("""
+            SELECT id, source_path FROM dives
+            WHERE tenant_id = :tenant
+              AND (source_path = :leaf
+                   OR right(source_path, length(:leaf) + 1) = '/' || :leaf)
+            ORDER BY source_path
+            """),
+        {"tenant": tenant_id, "leaf": leaf},
+    )
+    return [(r.id, r.source_path) for r in rows]
+
+
+async def slate_template_by_name(conn: AsyncConnection, name: str) -> uuid.UUID | None:
+    """The (global) slate template with exactly this name."""
+    return (
+        await conn.execute(
+            text("SELECT id FROM slate_templates WHERE name = :name"), {"name": name}
+        )
+    ).scalar_one_or_none()
+
+
+class IngestCatalog:
+    """What ingest's preflight asks, answered as a service principal.
+
+    The orchestrator acts for a tenant only as a member of it (PLAN.md §9.11):
+    `resolve_tenant` goes through the same membership check a person's request
+    does, and the other lookups run in that tenant's transaction, under RLS.
+    Satisfies the orchestrator's ``Catalog`` protocol.
+    """
+
+    def __init__(self, engine: AsyncEngine, *, sub: str) -> None:
+        self._engine = engine
+        self._sub = sub
+
+    async def resolve_tenant(self, slug: str) -> uuid.UUID | None:
+        async with principal_transaction(self._engine, self._sub) as conn:
+            membership = await resolve_membership(conn, self._sub, slug)
+        return None if membership is None else membership.tenant_id
+
+    async def resolve_device(
+        self, tenant_id: uuid.UUID, serial: str
+    ) -> ResolvedDevice | None:
+        async with tenant_transaction(self._engine, tenant_id) as conn:
+            return await resolve_device(conn, tenant_id, serial)
+
+    async def dive_by_path(self, tenant_id: uuid.UUID, path: str) -> uuid.UUID | None:
+        async with tenant_transaction(self._engine, tenant_id) as conn:
+            return await dive_by_path(conn, tenant_id, path)
+
+    async def dives_with_leaf(
+        self, tenant_id: uuid.UUID, leaf: str
+    ) -> list[tuple[uuid.UUID, str]]:
+        async with tenant_transaction(self._engine, tenant_id) as conn:
+            return await dives_with_leaf(conn, tenant_id, leaf)
+
+    async def slate_template(self, name: str) -> uuid.UUID | None:
+        async with self._engine.connect() as conn:
+            return await slate_template_by_name(conn, name)

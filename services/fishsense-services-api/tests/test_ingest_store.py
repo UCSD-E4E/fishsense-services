@@ -22,12 +22,16 @@ from sqlalchemy import text
 
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.ingest_store import (
+    IngestCatalog,
     content_overlap,
     create_dive,
+    dive_by_path,
+    dives_with_leaf,
     finalize_dive,
     register_capture,
     registered_paths,
     resolve_device,
+    slate_template_by_name,
 )
 
 T0 = datetime(2025, 3, 6, 17, 0, 15, tzinfo=UTC)
@@ -251,3 +255,104 @@ async def test_re_registering_the_canonical_copy_after_a_duplicate_keeps_it(
         ).scalar_one()
     assert again.is_canonical is True
     assert canonical == 1
+
+
+# --- lookups preflight makes ---------------------------------------------------
+
+
+async def test_a_dive_is_found_by_its_path_only_within_the_tenant(
+    owner_engine, app_engine
+):
+    lab, partner = await _tenant(owner_engine, "lab"), await _tenant(
+        owner_engine, "partner"
+    )
+    mine = await _dive(app_engine, lab, "2025/03/06/082929_FishModels_FSL07")
+    await _dive(app_engine, partner, "2025/03/06/other")
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        assert (
+            await dive_by_path(conn, lab, "2025/03/06/082929_FishModels_FSL07") == mine
+        )
+        assert await dive_by_path(conn, lab, "2025/03/06/other") is None
+        assert await dive_by_path(conn, lab, "2025/03/06") is None
+
+
+async def test_dives_sharing_a_folder_name_are_found_exactly(owner_engine, app_engine):
+    """The prod case: dives 64 and 66 are both `082929_FishModels_FSL07`. The
+    match is on the whole leaf -- `_` in a dive name is not a wildcard, and a
+    longer name ending in the leaf is a different folder."""
+    lab, partner = await _tenant(owner_engine, "lab"), await _tenant(
+        owner_engine, "partner"
+    )
+    leaf = "082929_FishModels_FSL07"
+    first = await _dive(app_engine, lab, f"2025/03/06/{leaf}")
+    second = await _dive(app_engine, lab, f"backup/{leaf}")
+    bare = await _dive(app_engine, lab, leaf)
+    await _dive(app_engine, lab, f"2025/03/06/x{leaf}")
+    await _dive(app_engine, lab, "2025/03/06/082929XFishModelsXFSL07")
+    await _dive(app_engine, partner, f"2025/03/06/{leaf}")
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        found = await dives_with_leaf(conn, lab, leaf)
+
+    assert sorted(found, key=lambda r: r[1]) == sorted(
+        [
+            (bare, leaf),
+            (first, f"2025/03/06/{leaf}"),
+            (second, f"backup/{leaf}"),
+        ],
+        key=lambda r: r[1],
+    )
+
+
+async def test_a_slate_template_is_found_by_name(owner_engine, app_engine):
+    async with owner_engine.begin() as conn:
+        slate = (
+            await conn.execute(
+                text(
+                    "INSERT INTO slate_templates (name, reference_points) "
+                    "VALUES ('PVC 12in', '[]') RETURNING id"
+                )
+            )
+        ).scalar_one()
+    lab = await _tenant(owner_engine, "lab")
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        assert await slate_template_by_name(conn, "PVC 12in") == slate
+        assert await slate_template_by_name(conn, "pvc 12in") is None
+
+
+# --- the catalog the orchestrator asks, as its service principal --------------
+
+ORCHESTRATOR = "service:fishsense-orchestrator"
+
+
+async def test_the_orchestrator_resolves_only_tenants_it_is_a_member_of(
+    app_engine, seed_memberships
+):
+    tenants = await seed_memberships(
+        {ORCHESTRATOR: {"lab": "member"}, "someone-else": {"partner": "owner"}}
+    )
+    catalog = IngestCatalog(app_engine, sub=ORCHESTRATOR)
+
+    assert await catalog.resolve_tenant("lab") == tenants["lab"]
+    assert await catalog.resolve_tenant("partner") is None
+    assert await catalog.resolve_tenant("nonexistent") is None
+
+
+async def test_the_catalog_answers_within_the_tenant(
+    owner_engine, app_engine, seed_memberships
+):
+    tenants = await seed_memberships({ORCHESTRATOR: {"lab": "member"}})
+    lab = tenants["lab"]
+    device = await _device(owner_engine, lab)
+    dive = await _dive(app_engine, lab, "2025/03/06/082929_FishModels_FSL07")
+    catalog = IngestCatalog(app_engine, sub=ORCHESTRATOR)
+
+    resolved = await catalog.resolve_device(lab, "BJ6C67989")
+    assert (resolved.device_id, resolved.has_camera_calibration) == (device, False)
+    assert await catalog.dive_by_path(lab, "2025/03/06/082929_FishModels_FSL07") == dive
+    assert await catalog.dives_with_leaf(lab, "082929_FishModels_FSL07") == [
+        (dive, "2025/03/06/082929_FishModels_FSL07")
+    ]
+    assert await catalog.slate_template("missing") is None
