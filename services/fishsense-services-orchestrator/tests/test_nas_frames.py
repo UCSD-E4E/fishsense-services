@@ -14,6 +14,7 @@ in, instead of a global Dynaconf object read at call time.
 """
 
 import hashlib
+import secrets
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
@@ -30,10 +31,14 @@ from fishsense_services_orchestrator.ingest.nas_frames import (
 
 from ._tiff_builder import build_orf
 
+# Generated per run, never written in the source: a password-shaped literal
+# trips secret scanners even when it is fake.
+NAS_PASSWORD = secrets.token_hex(8)
+
 SETTINGS = {
     "FISHSENSE_NAS_URL": "https://nas.example.test:6021",
     "FISHSENSE_NAS_USERNAME": "svc",
-    "FISHSENSE_NAS_PASSWORD": "s3cret-nas",
+    "FISHSENSE_NAS_PASSWORD": NAS_PASSWORD,
     "FISHSENSE_NAS_RAW_ROOT_PATH": "/fishsense_data/",
 }
 
@@ -103,9 +108,9 @@ def test_the_client_is_built_from_the_settings(settings, monkeypatch):
     build_nas_client(settings)
 
     login.assert_called_once_with(
-        "nas.example.test", 6021, "svc", "s3cret-nas", https=True
+        "nas.example.test", 6021, "svc", NAS_PASSWORD, https=True
     )
 
 
 def test_the_nas_password_never_appears_in_the_settings_repr(settings):
-    assert "s3cret-nas" not in repr(settings)
+    assert NAS_PASSWORD not in repr(settings)
