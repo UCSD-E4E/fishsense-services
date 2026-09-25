@@ -3,7 +3,9 @@ name = "fishsense-services-orchestrator"
 version = "0.0.0"
 description = "FishSense v2 orchestrator: Temporal workflows, ported from v1's api-worker."
 requires-python = ">=3.13,<3.14"
-dependencies = []
+dependencies = [
+    "pydantic>=2.11",
+]
 
 [build-system]
 requires = ["hatchling"]
