@@ -24,8 +24,11 @@ v2 changes:
 """
 
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
@@ -36,6 +39,7 @@ from fishsense_services_api.memberships import resolve_membership
 __all__ = [
     "ContentOverlap",
     "IngestCatalog",
+    "NotAMember",
     "RegisteredCapture",
     "ResolvedDevice",
     "content_overlap",
@@ -322,12 +326,18 @@ async def slate_template_by_name(conn: AsyncConnection, name: str) -> uuid.UUID 
     ).scalar_one_or_none()
 
 
-class IngestCatalog:
-    """What ingest's preflight asks, answered as a service principal.
+class NotAMember(PermissionError):
+    """The orchestrator is not (or is no longer) a member of the tenant."""
 
-    The orchestrator acts for a tenant only as a member of it (PLAN.md §9.11):
+
+class IngestCatalog:
+    """Ingest's database side, as a service principal.
+
+    The orchestrator acts for a tenant only as a member of it (PLAN.md §9.11).
     `resolve_tenant` goes through the same membership check a person's request
-    does, and the other lookups run in that tenant's transaction, under RLS.
+    does; every tenant-keyed call **re-checks** it before opening that tenant's
+    transaction, so a tenant id obtained earlier is not a standing licence -- an
+    ingest whose membership is revoked mid-flight stops at its next call.
     Satisfies the orchestrator's ``Catalog`` protocol.
     """
 
@@ -340,22 +350,76 @@ class IngestCatalog:
             membership = await resolve_membership(conn, self._sub, slug)
         return None if membership is None else membership.tenant_id
 
+    @asynccontextmanager
+    async def _tenant(self, tenant_id: uuid.UUID) -> AsyncIterator[AsyncConnection]:
+        async with principal_transaction(self._engine, self._sub) as conn:
+            member = (
+                await conn.execute(
+                    text("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM memberships m JOIN users u ON u.id = m.user_id
+                            WHERE u.sub = :sub AND m.tenant_id = :tenant
+                        )
+                        """),
+                    {"sub": self._sub, "tenant": tenant_id},
+                )
+            ).scalar_one()
+        if not member:
+            raise NotAMember(f"{self._sub} is not a member of tenant {tenant_id}")
+        async with tenant_transaction(self._engine, tenant_id) as conn:
+            yield conn
+
     async def resolve_device(
         self, tenant_id: uuid.UUID, serial: str
     ) -> ResolvedDevice | None:
-        async with tenant_transaction(self._engine, tenant_id) as conn:
+        async with self._tenant(tenant_id) as conn:
             return await resolve_device(conn, tenant_id, serial)
 
     async def dive_by_path(self, tenant_id: uuid.UUID, path: str) -> uuid.UUID | None:
-        async with tenant_transaction(self._engine, tenant_id) as conn:
+        async with self._tenant(tenant_id) as conn:
             return await dive_by_path(conn, tenant_id, path)
 
     async def dives_with_leaf(
         self, tenant_id: uuid.UUID, leaf: str
     ) -> list[tuple[uuid.UUID, str]]:
-        async with tenant_transaction(self._engine, tenant_id) as conn:
+        async with self._tenant(tenant_id) as conn:
             return await dives_with_leaf(conn, tenant_id, leaf)
 
     async def slate_template(self, name: str) -> uuid.UUID | None:
         async with self._engine.connect() as conn:
             return await slate_template_by_name(conn, name)
+
+    async def create_dive(self, tenant_id: uuid.UUID, **dive: Any) -> uuid.UUID:
+        async with self._tenant(tenant_id) as conn:
+            return await create_dive(conn, tenant_id, **dive)
+
+    async def register_capture(
+        self, tenant_id: uuid.UUID, **capture: Any
+    ) -> RegisteredCapture:
+        async with self._tenant(tenant_id) as conn:
+            return await register_capture(conn, tenant_id, **capture)
+
+    async def registered_paths(
+        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    ) -> set[str]:
+        async with self._tenant(tenant_id) as conn:
+            return await registered_paths(conn, tenant_id, dive_id)
+
+    async def finalize_dive(
+        self,
+        tenant_id: uuid.UUID,
+        dive_id: uuid.UUID,
+        *,
+        priority: str,
+        dived_at: datetime,
+    ) -> None:
+        async with self._tenant(tenant_id) as conn:
+            await finalize_dive(
+                conn, tenant_id, dive_id, priority=priority, dived_at=dived_at
+            )
+
+    async def content_overlap(
+        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    ) -> list[ContentOverlap]:
+        async with self._tenant(tenant_id) as conn:
+            return await content_overlap(conn, tenant_id, dive_id)

@@ -14,16 +14,21 @@ import asyncio
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import List
 
 from synology_filestation import DSMError
 from temporalio import activity
+from temporalio.exceptions import ApplicationError
 
 from fishsense_services_orchestrator.ingest.catalog import Catalog, ResolvedDevice
 from fishsense_services_orchestrator.ingest.contracts import (
+    DuplicateOverlap,
     IngestDiveRequest,
     IngestPreflight,
+    IngestReport,
     PreflightImage,
+    RejectedImage,
     SubfolderReport,
 )
 from fishsense_services_orchestrator.ingest.exif import read_exif
@@ -48,8 +53,13 @@ _RAW_SUFFIX = ".orf"
 # work to it. Checked against the *stored*, share-relative form.
 MAX_PATH_LENGTH = 255
 
+# `type` on finalize's non-retryable refusal, so a retry policy can name it.
+INCOMPLETE_INGEST_TYPE = "IncompleteIngest"
+
 __all__ = [
     "EXIF_HEADER_BYTES",
+    "INCOMPLETE_INGEST_TYPE",
+    "IngestTotals",
     "MAX_PATH_LENGTH",
     "DiveFolderListing",
     "IngestActivities",
@@ -69,6 +79,24 @@ class DiveFolderListing:
     #: Immediate subdirectories that hold `.ORF`s -- separate dives, reported
     #: for the operator to submit themselves.
     subfolders: List[SubfolderReport] = field(default_factory=list)
+
+
+@dataclass
+class IngestTotals:
+    """What the scan batches added up to, accumulated by the workflow."""
+
+    total: int = 0
+    registered: int = 0
+    skipped_existing: int = 0
+    rejected: List[RejectedImage] = field(default_factory=list)
+    max_taken_datetime: datetime | None = None
+
+
+def leaf_name(path: str) -> str:
+    """The folder's own name, which is what a dive is called by default. The
+    name feeds the per-dive Label Studio project title, so leaving it unset
+    gives labelers a project called just its id."""
+    return path.rstrip("/").rsplit("/", 1)[-1]
 
 
 def resolve_nas_folder(relative_path: str, settings: NasSettings) -> str:
@@ -288,6 +316,147 @@ class IngestActivities:
             total_bytes=sum(e.size for e in listing.files),
             errors=errors,
             warnings=warnings,
+        )
+
+    @activity.defn(name="create_dive")
+    async def create_dive(
+        self, request: IngestDiveRequest, preflight: IngestPreflight
+    ) -> uuid.UUID:
+        """Create the dive, always at **low** -- half of a two-phase commit.
+
+        Every hourly cohort selects on high, so a dive created high before its
+        images exist would be picked up mid-ingest and processed against a
+        partial set. Priority is the commit flag, and this is the half that
+        keeps it closed; v2's store takes no priority here at all. The store
+        upserts on the path, so re-running an interrupted ingest finds the same
+        dive rather than making a second one.
+        """
+        if preflight.errors or preflight.tenant_id is None:
+            raise ApplicationError(
+                "refusing to create a dive from a failed preflight: "
+                + "; ".join(preflight.errors[:3] or ["no tenant resolved"]),
+                non_retryable=True,
+            )
+        # `dived_at` is NOT NULL and no frame has been hashed yet, so seed it
+        # from preflight's headers. Finalize replaces it with the scan's max,
+        # which read every frame rather than a 1 MB prefix.
+        stamps = [i.taken_datetime for i in preflight.images if i.taken_datetime]
+        if not stamps:
+            raise ApplicationError(
+                "preflight produced no usable timestamps; refusing to create a "
+                "dive with a fabricated datetime",
+                non_retryable=True,
+            )
+
+        dive_id = await self._catalog.create_dive(
+            preflight.tenant_id,
+            source_path=request.dive_path,
+            name=request.dive_name or leaf_name(request.dive_path),
+            dived_at=max(stamps),
+            device_id=preflight.resolved_device_id,
+            slate_template_id=preflight.resolved_slate_template_id,
+            # NULL means "self-calibrates". A link on a self-calibrating dive
+            # would be a lie the resolver happens to ignore (own wins).
+            calibration_source_dive_id=preflight.resolved_calibration_source_dive_id,
+            flip_dive_slate=request.flip_dive_slate,
+        )
+        activity.logger.info(
+            "created dive id=%s path=%s at low (commit flag closed)",
+            dive_id,
+            request.dive_path,
+        )
+        return dive_id
+
+    @activity.defn(name="finalize_dive")
+    async def finalize_dive(
+        self,
+        tenant_id: uuid.UUID,
+        dive_id: uuid.UUID,
+        request: IngestDiveRequest,
+        totals: IngestTotals,
+    ) -> IngestReport:
+        """Verify the set is complete, then flip the dive to its real priority.
+
+        Two refusals, both non-retryable because neither is transient -- the
+        fix is an operator reading the report:
+
+        * **any rejection**: a frame with no readable timestamp was refused
+          rather than given a fabricated one, so the dive is missing an image;
+        * **registered + skipped != total**: a frame was neither written nor
+          recognised as already present -- silence rather than a reported
+          failure, which is worse.
+
+        Content overlap is computed here because it needs every frame's
+        checksum, which only exists once the scan has written the rows. It is
+        **reported, never blocking**: re-ingesting the same frames under a
+        second path is legitimate (prod dives 64 and 66), and the duplicates
+        land non-canonical.
+        """
+        accounted = totals.registered + totals.skipped_existing
+        if totals.rejected:
+            raise ApplicationError(
+                f"refusing to promote dive {dive_id}: {len(totals.rejected)} "
+                "frame(s) rejected -- "
+                f"{'; '.join(r.reason for r in totals.rejected[:3])}. The dive "
+                "stays at low so no pipeline stage picks up a partial set.",
+                type=INCOMPLETE_INGEST_TYPE,
+                non_retryable=True,
+            )
+        if accounted != totals.total:
+            raise ApplicationError(
+                f"refusing to promote dive {dive_id}: {accounted} of "
+                f"{totals.total} frames accounted for. A frame was neither "
+                "written nor recognised as already present, which is silence "
+                "rather than a reported failure.",
+                type=INCOMPLETE_INGEST_TYPE,
+                non_retryable=True,
+            )
+
+        overlap = [
+            DuplicateOverlap(
+                dive_id=o.dive_id,
+                dive_path=o.dive_path,
+                shared_images=o.shared_images,
+                containment=o.containment,
+            )
+            for o in await self._catalog.content_overlap(tenant_id, dive_id)
+        ]
+        # THE COMMIT FLAG. The scan read every frame in full, so its max is the
+        # dive's datetime -- how every existing dive's was derived.
+        await self._catalog.finalize_dive(
+            tenant_id,
+            dive_id,
+            priority=request.priority,
+            dived_at=totals.max_taken_datetime,
+        )
+
+        for item in overlap:
+            activity.logger.warning(
+                "dive %s shares %d/%d frames with dive %s (containment %.2f); "
+                "those images are non-canonical",
+                dive_id,
+                item.shared_images,
+                totals.total,
+                item.dive_id,
+                item.containment,
+            )
+        activity.logger.info(
+            "committed dive %s at %s: registered=%d skipped=%d",
+            dive_id,
+            request.priority,
+            totals.registered,
+            totals.skipped_existing,
+        )
+        return IngestReport(
+            dive_path=request.dive_path,
+            dive_id=dive_id,
+            total=totals.total,
+            registered=totals.registered,
+            skipped_existing=totals.skipped_existing,
+            rejected=[],
+            dive_datetime=totals.max_taken_datetime,
+            committed=True,
+            duplicate_overlap=overlap,
         )
 
 

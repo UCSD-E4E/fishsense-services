@@ -16,11 +16,16 @@ bypass.
 from __future__ import annotations
 
 import uuid
-from typing import Protocol
+from datetime import datetime
+from typing import Any, Protocol
 
-from fishsense_services_api.ingest_store import ResolvedDevice
+from fishsense_services_api.ingest_store import (
+    ContentOverlap,
+    RegisteredCapture,
+    ResolvedDevice,
+)
 
-__all__ = ["Catalog", "ResolvedDevice"]
+__all__ = ["Catalog", "ContentOverlap", "RegisteredCapture", "ResolvedDevice"]
 
 
 class Catalog(Protocol):
@@ -42,3 +47,33 @@ class Catalog(Protocol):
 
     async def slate_template(self, name: str) -> uuid.UUID | None:
         """The (global) slate template with this name."""
+
+    # -- writes: the store's functions, keyword arguments passed through ------
+
+    async def create_dive(self, tenant_id: uuid.UUID, **dive: Any) -> uuid.UUID:
+        """Create or re-open the dive at its path, always at low."""
+
+    async def register_capture(
+        self, tenant_id: uuid.UUID, **capture: Any
+    ) -> RegisteredCapture:
+        """Upsert one frame on its path."""
+
+    async def registered_paths(
+        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    ) -> set[str]:
+        """Paths already registered for the dive."""
+
+    async def finalize_dive(
+        self,
+        tenant_id: uuid.UUID,
+        dive_id: uuid.UUID,
+        *,
+        priority: str,
+        dived_at: datetime,
+    ) -> None:
+        """Open the commit flag."""
+
+    async def content_overlap(
+        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    ) -> list[ContentOverlap]:
+        """How much of the dive already exists under other dives."""

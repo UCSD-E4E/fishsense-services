@@ -23,6 +23,7 @@ from sqlalchemy import text
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.ingest_store import (
     IngestCatalog,
+    NotAMember,
     content_overlap,
     create_dive,
     dive_by_path,
@@ -356,3 +357,57 @@ async def test_the_catalog_answers_within_the_tenant(
         (dive, "2025/03/06/082929_FishModels_FSL07")
     ]
     assert await catalog.slate_template("missing") is None
+
+
+async def test_the_catalog_writes_a_dive_through_the_commit_protocol(
+    owner_engine, app_engine, seed_memberships
+):
+    """create at low, register, finalize to high -- the same store functions,
+    as the orchestrator."""
+    lab = (await seed_memberships({ORCHESTRATOR: {"lab": "member"}}))["lab"]
+    device = await _device(owner_engine, lab)
+    catalog = IngestCatalog(app_engine, sub=ORCHESTRATOR)
+    path = "2025/03/06/082929_FishModels_FSL07"
+
+    dive = await catalog.create_dive(
+        lab, source_path=path, name="082929_FishModels_FSL07", dived_at=T0,
+        device_id=device,
+    )  # fmt: skip
+    registered = await catalog.register_capture(
+        lab, dive_id=dive, device_id=device, source_path=f"{path}/A.ORF",
+        captured_at=T0, checksum=A,
+    )  # fmt: skip
+    assert await catalog.registered_paths(lab, dive) == {f"{path}/A.ORF"}
+    assert registered.is_canonical
+    await catalog.finalize_dive(lab, dive, priority="high", dived_at=T0)
+    assert await catalog.content_overlap(lab, dive) == []
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        priority = (
+            await conn.execute(
+                text("SELECT priority FROM dives WHERE id = :d"), {"d": dive}
+            )
+        ).scalar_one()
+    assert priority == "high"
+
+
+async def test_the_catalog_rechecks_membership_on_every_tenant_call(
+    owner_engine, app_engine, seed_memberships
+):
+    """A tenant id from preflight is not a standing licence: an ingest that
+    loses its membership mid-flight stops at its next call, rather than
+    finishing on the strength of an earlier check."""
+    tenants = await seed_memberships(
+        {ORCHESTRATOR: {"lab": "member"}, "someone-else": {"partner": "owner"}}
+    )
+    catalog = IngestCatalog(app_engine, sub=ORCHESTRATOR)
+
+    with pytest.raises(NotAMember):
+        await catalog.dive_by_path(tenants["partner"], "anything")
+
+    assert await catalog.dive_by_path(tenants["lab"], "anything") is None
+    async with owner_engine.begin() as conn:
+        await conn.execute(text("DELETE FROM memberships WHERE tenant_id = :t"),
+                           {"t": tenants["lab"]})  # fmt: skip
+    with pytest.raises(NotAMember):
+        await catalog.dive_by_path(tenants["lab"], "anything")
