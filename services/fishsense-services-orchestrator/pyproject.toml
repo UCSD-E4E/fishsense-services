@@ -15,6 +15,9 @@ dependencies = [
     "pydantic-settings>=2.10.0",
 ]
 
+[project.scripts]
+fishsense-services-orchestrator = "fishsense_services_orchestrator.worker:run"
+
 [tool.uv.sources]
 fishsense-services-api = { workspace = true }
 synology-filestation = { url = "https://github.com/UCSD-E4E/synology-filestation/releases/download/synology_filestation-v0.2.0/synology_filestation-0.2.0-cp310-abi3-manylinux_2_34_x86_64.whl" }
