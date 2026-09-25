@@ -11,6 +11,7 @@ methods; tests pass fakes instead of monkeypatching module globals.
 from __future__ import annotations
 
 import asyncio
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import List
@@ -18,17 +19,23 @@ from typing import List
 from synology_filestation import DSMError
 from temporalio import activity
 
+from fishsense_services_orchestrator.ingest.catalog import Catalog, ResolvedDevice
 from fishsense_services_orchestrator.ingest.contracts import (
     IngestDiveRequest,
+    IngestPreflight,
+    PreflightImage,
     SubfolderReport,
 )
+from fishsense_services_orchestrator.ingest.exif import read_exif
 from fishsense_services_orchestrator.ingest.nas import NasClient, NasEntry
 from fishsense_services_orchestrator.ingest.nas_errors import (
     raise_if_permanent_dsm_error,
 )
 from fishsense_services_orchestrator.ingest.nas_frames import (
+    EXIF_HEADER_BYTES,
     NasSettings,
     build_nas_client,
+    parse_taken_datetime,
 )
 
 # Case-insensitive: Olympus writes `.ORF`, but operators and copy tools produce
@@ -37,7 +44,18 @@ from fishsense_services_orchestrator.ingest.nas_frames import (
 # were never listed in the first place.
 _RAW_SUFFIX = ".orf"
 
-__all__ = ["DiveFolderListing", "IngestActivities", "resolve_nas_folder"]
+# Kept from v1's varchar(255) paths: the research repos and the NAS itself still
+# work to it. Checked against the *stored*, share-relative form.
+MAX_PATH_LENGTH = 255
+
+__all__ = [
+    "EXIF_HEADER_BYTES",
+    "MAX_PATH_LENGTH",
+    "DiveFolderListing",
+    "IngestActivities",
+    "resolve_nas_folder",
+    "stored_path",
+]
 
 
 @dataclass
@@ -93,8 +111,10 @@ class IngestActivities:
         *,
         nas_settings: NasSettings,
         nas_client_factory: Callable[[], NasClient] | None = None,
+        catalog: Catalog | None = None,
     ) -> None:
         self._nas_settings = nas_settings
+        self._catalog = catalog
         self._nas_client_factory = nas_client_factory or (
             lambda: build_nas_client(nas_settings)
         )
@@ -130,3 +150,239 @@ class IngestActivities:
         return DiveFolderListing(
             folder_path=folder_path, files=files, subfolders=subfolders
         )
+
+    @activity.defn(name="preflight")
+    async def preflight(
+        self, request: IngestDiveRequest, listing: DiveFolderListing
+    ) -> IngestPreflight:
+        """Decide whether the folder can become a dive, and say so completely:
+        **every problem at once, never first-wins.** Writes nothing."""
+        # pylint: disable=too-many-locals,too-many-branches
+        # Preflight is a checklist: the branch count IS the feature. Splitting it
+        # into per-check helpers would scatter the "collect, never raise" contract
+        # that makes the all-at-once report work.
+        catalog = self._catalog
+        if catalog is None:
+            raise RuntimeError("preflight needs a catalog")
+        errors: List[str] = []
+        warnings: List[str] = []
+
+        tenant_id = await catalog.resolve_tenant(request.tenant)
+        if tenant_id is None:
+            errors.append(
+                f"Tenant {request.tenant!r} is unknown, or the orchestrator is not "
+                "a member of it. Ingest acts for a tenant only as its member."
+            )
+
+        errors.extend(_check_calibration_intent(request))
+        source_dive_id = None
+        if request.calibration_source_path and tenant_id is not None:
+            source_dive_id = await catalog.dive_by_path(
+                tenant_id, request.calibration_source_path
+            )
+            if source_dive_id is None:
+                errors.append(
+                    f"No dive at {request.calibration_source_path!r} in tenant "
+                    f"{request.tenant!r} to borrow calibration from."
+                )
+
+        slate_template_id = None
+        if request.slate_template:
+            slate_template_id = await catalog.slate_template(request.slate_template)
+            if slate_template_id is None:
+                errors.append(f"No slate template named {request.slate_template!r}.")
+
+        if not listing.files:
+            errors.append(
+                f"No .ORF frames directly inside {listing.folder_path}. Ingest is "
+                "non-recursive -- a dive is exactly one directory."
+            )
+        for subfolder in listing.subfolders:
+            warnings.append(
+                f"{subfolder.path} contains {subfolder.orf_count} .ORF files. "
+                "Under the existing convention that is a separate dive -- submit it "
+                "as its own request; it is not included here."
+            )
+
+        nas = self._nas_client_factory()
+        images: List[PreflightImage] = []
+        serials: set[str] = set()
+        artists: set[str] = set()
+        for entry in listing.files:
+            activity.heartbeat(entry.path)
+            path = stored_path(entry.path, self._nas_settings)
+            if len(path) > MAX_PATH_LENGTH:
+                errors.append(
+                    f"Path exceeds {MAX_PATH_LENGTH} characters ({len(path)}): {path}"
+                )
+                continue
+            exif = read_exif(await _read_header(nas, entry.path))
+            taken = parse_taken_datetime(exif.date_time)
+            if taken is None:
+                errors.append(
+                    f"No readable EXIF timestamp in {path}. Stage-1 clustering is "
+                    "pure timestamp maths, so the frame cannot be ingested with a "
+                    "defaulted value."
+                )
+                continue
+            if exif.date_time_is_fallback:
+                warnings.append(
+                    f"{path} has no DateTime (0x0132); fell back to "
+                    "DateTimeOriginal (0x9003)."
+                )
+            if exif.serial_number:
+                serials.add(exif.serial_number)
+            if exif.artist:
+                artists.add(exif.artist)
+            images.append(
+                PreflightImage(
+                    path=path,
+                    size=entry.size,
+                    taken_datetime=taken,
+                    exif_offset=exif.offset_time,
+                    serial_number=exif.serial_number,
+                    artist=exif.artist,
+                )
+            )
+
+        device = None
+        if tenant_id is not None:
+            device = await _resolve_device(
+                catalog, tenant_id, request, serials, artists, errors, warnings
+            )
+        if device is not None and not device.has_camera_calibration:
+            errors.append(
+                f"Device {device.name or device.device_id} has no intrinsics (no "
+                "camera calibration). Stage 14 cannot measure this dive until "
+                "they exist."
+            )
+
+        # Layer 1 duplicate detection: leaf-name collision. Catches the real prod
+        # case -- dives 64 and 66 are both `082929_FishModels_FSL07`. Content-based
+        # containment needs checksums, so it runs after the scan.
+        if tenant_id is not None:
+            leaf = listing.folder_path.rstrip("/").rsplit("/", 1)[-1]
+            for dive_id, dive_path in await catalog.dives_with_leaf(tenant_id, leaf):
+                warnings.append(
+                    f"Dive {dive_id} has the same folder name ({leaf!r}) at "
+                    f"{dive_path}. Dive names are not unique; this may be a "
+                    "re-ingest."
+                )
+
+        activity.logger.info(
+            "preflight path=%s frames=%d errors=%d warnings=%d",
+            listing.folder_path,
+            len(images),
+            len(errors),
+            len(warnings),
+        )
+        return IngestPreflight(
+            dive_path=listing.folder_path,
+            tenant_id=tenant_id,
+            resolved_calibration_source_dive_id=source_dive_id,
+            resolved_slate_template_id=slate_template_id,
+            images=images,
+            subfolders=list(listing.subfolders),
+            resolved_device_id=device.device_id if device else None,
+            resolved_device_name=device.name if device else None,
+            total_bytes=sum(e.size for e in listing.files),
+            errors=errors,
+            warnings=warnings,
+        )
+
+
+def stored_path(absolute_path: str, settings: NasSettings) -> str:
+    """Strip the NAS raw root back off, giving the form the database stores.
+
+    A path **outside** the root keeps its leading slash, because that is the
+    only form that survives the round trip through `resolve_nas_path` -- a
+    relative path that is not under the root resolves to root + itself, a place
+    that does not exist (FileStation: a 502 per frame, forever). The 2025-01-17
+    pool test is the live case: same share, outside `REEF/data`.
+    """
+    root = settings.raw_root_path.rstrip("/") + "/"
+    if absolute_path.startswith(root):
+        return absolute_path[len(root) :]
+    return absolute_path
+
+
+async def _read_header(nas: NasClient, file_path: str) -> bytes:
+    """One ranged read. No inner retry -- Temporal's bounded policy owns
+    backoff, and an inner loop under it is what tripped the NAS auto-block."""
+    try:
+        return await asyncio.to_thread(
+            nas.download_range, file_path=file_path, offset=0, length=EXIF_HEADER_BYTES
+        )
+    except DSMError as exc:
+        raise_if_permanent_dsm_error(exc, context=file_path)
+        raise
+
+
+def _check_calibration_intent(request: IngestDiveRequest) -> List[str]:
+    """Exactly one of the two must be given. Both is contradictory: own-wins
+    would silently ignore the link. Neither leaves a dive that can never be
+    measured and never says why."""
+    borrows = request.calibration_source_path is not None
+    if request.self_calibrates and borrows:
+        return [
+            "Contradictory calibration intent: self_calibrates=True and "
+            f"calibration_source_path={request.calibration_source_path!r}. A dive "
+            "with its own slate always self-calibrates, so the link would be "
+            "ignored -- pass exactly one."
+        ]
+    if not request.self_calibrates and not borrows:
+        return [
+            "No calibration intent given. Pass self_calibrates=True if this dive "
+            "has its own slate frames, or calibration_source_path=<dive path> to "
+            "borrow a sibling's calibration. Without one, stage 14 can never "
+            "measure this dive."
+        ]
+    return []
+
+
+async def _resolve_device(
+    catalog: Catalog,
+    tenant_id: uuid.UUID,
+    request: IngestDiveRequest,
+    serials: set[str],
+    artists: set[str],
+    errors: List[str],
+    warnings: List[str],
+) -> ResolvedDevice | None:
+    """Resolve the tenant's device, or None (with the reason in `errors`)."""
+    if len(serials) > 1:
+        errors.append(
+            "Frames span more than one camera serial "
+            f"({', '.join(sorted(serials))}). One folder is one rig -- split the "
+            "folder and submit each dive separately."
+        )
+        return None
+    if request.device_serial is not None:
+        match = await catalog.resolve_device(tenant_id, request.device_serial)
+        if match is None:
+            errors.append(f"No device with serial {request.device_serial!r}.")
+        return match
+    if not serials:
+        errors.append(
+            "No camera serial found in any frame's Olympus MakerNote, and no "
+            "device_serial override was given."
+        )
+        return None
+    serial = next(iter(serials))
+    match = await catalog.resolve_device(tenant_id, serial)
+    if match is None:
+        errors.append(
+            f"Camera serial {serial} matches no device. Add the device (with its "
+            "intrinsics) before ingesting. Deliberately not falling back to the "
+            "EXIF Artist tag -- a free-text rig label would bind the wrong "
+            "intrinsics and stage 14 would report confident wrong lengths."
+        )
+        return None
+    # The serial is authoritative; a disagreeing Artist means a mislabelled
+    # device name or a re-housed body. Nothing else would ever notice.
+    for artist in sorted(a for a in artists if a and a != match.name):
+        warnings.append(
+            f"EXIF Artist {artist!r} disagrees with the resolved device's name "
+            f"{match.name!r} (serial {serial})."
+        )
+    return match

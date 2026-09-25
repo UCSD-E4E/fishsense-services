@@ -122,6 +122,10 @@ class IngestPreflight(BaseModel):
     """Everything preflight found. Non-empty `errors` means nothing is written."""
 
     dive_path: str
+    #: v2: resolved here, once, and handed to the later steps as ids.
+    tenant_id: uuid.UUID | None = None
+    resolved_calibration_source_dive_id: uuid.UUID | None = None
+    resolved_slate_template_id: uuid.UUID | None = None
     images: List[PreflightImage] = []
     subfolders: List[SubfolderReport] = []
     #: v2: the tenant's device the frames resolve to.

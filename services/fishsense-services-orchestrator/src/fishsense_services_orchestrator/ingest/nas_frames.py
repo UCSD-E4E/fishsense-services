@@ -49,6 +49,7 @@ __all__ = [
     "NasSettings",
     "build_nas_client",
     "file_checksum",
+    "parse_taken_datetime",
     "read_taken_datetime",
     "resolve_nas_path",
 ]
@@ -112,7 +113,12 @@ def read_taken_datetime(path: Path) -> datetime | None:
     """
     with open(path, "rb") as handle:
         header = handle.read(EXIF_HEADER_BYTES)
-    raw = read_exif(header).date_time
+    return parse_taken_datetime(read_exif(header).date_time)
+
+
+def parse_taken_datetime(raw: str | None) -> datetime | None:
+    """EXIF `"YYYY:MM:DD HH:MM:SS"` -> aware UTC, offset not applied (see
+    `read_taken_datetime`); None when absent or malformed."""
     if not raw:
         return None
     try:
