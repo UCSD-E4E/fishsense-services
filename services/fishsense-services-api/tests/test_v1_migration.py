@@ -358,3 +358,130 @@ def test_calibrations_are_accounted_for_and_idempotent(v1, v2):
     assert report["divelaserline"] == (1, 1)
     assert again.discrepancies() == {}
     assert _rows(v2, "SELECT count(*) FROM laser_calibrations") == [(3,)]
+
+
+# --- cycle 3: labels --------------------------------------------------------------
+
+
+def _seed_labels(v1: Engine) -> None:
+    """A labeler; laser labels on frames 100 (human) and 101 (gate auto-accepted);
+    head/tail and slate labels; a species sentinel; three sync cursors."""
+    with v1.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO "user" (id, email, first_name, label_studio_id)
+            VALUES (1, 'labeler@example.test', 'Pat', 55);
+            INSERT INTO laserlabel (id, label_studio_task_id, label_studio_project_id,
+                x, y, label, image_id, user_id, updated_at, completed, superseded,
+                needs_reprocess, label_studio_json)
+            VALUES (1, 70, 7, 10.5, 20.5, 'red', 100, 1, '2026-08-01', true, false,
+                    false, '{"id": 70}'),
+                   (2, 71, 7, 11.0, 21.0, 'red', 101, NULL, '2026-08-01', true,
+                    NULL, false, NULL);
+            INSERT INTO laserprediction (id, x, y, confidence, image_id,
+                auto_accept, gate_verdict, predictor_version)
+            VALUES (1, 11.0, 21.0, 0.97, 101, true, 'auto_accepted', 2);
+            INSERT INTO headtaillabel (id, label_studio_task_id,
+                label_studio_project_id, head_x, head_y, tail_x, tail_y, image_id,
+                user_id, completed, superseded, needs_reprocess)
+            VALUES (1, 80, 8, 1, 2, 3, 4, 100, 1, true, true, false);
+            INSERT INTO diveslatelabel (id, label_studio_task_id,
+                label_studio_project_id, image_id, user_id, completed, upside_down,
+                reference_points, skipped_points, needs_reprocess)
+            VALUES (1, 90, 9, 102, 1, true, false, '[[1, 2]]', '[3]', true);
+            INSERT INTO specieslabel (id, image_id, content_of_image, "grouping",
+                top_three_photos_of_group, needs_reprocess)
+            VALUES (1, 100, 'Fish, Hogfish (Lachnolaimus maximus)', NULL, true,
+                    false);
+            INSERT INTO labelstudiosynccursor (id, kind, label_studio_project_id,
+                                               last_synced_at)
+            VALUES (1, 'laser', 7, now()), (2, 'dive_slate', 9, now()),
+                   (3, 'headtail', 8, now());
+            """))
+
+
+def test_labels_keep_their_label_studio_identity_and_state(v1, v2):
+    _seed_v1(v1)
+    _seed_labels(v1)
+
+    _run(v1, v2)
+
+    assert _rows(
+        v2,
+        "SELECT l.v1_id, c.v1_id, l.ls_project_id, l.ls_task_id, l.ls_labeler_id, "
+        "l.completed, l.superseded, l.x, l.label, l.ls_payload::text "
+        "FROM laser_labels l JOIN captures c ON c.id = l.capture_id ORDER BY l.v1_id",
+    ) == [
+        (1, 100, 7, 70, 55, True, False, 10.5, "red", '{"id": 70}'),
+        (2, 101, 7, 71, None, True, False, 11.0, "red", None),
+    ]
+    assert _rows(v2, "SELECT v1_id, superseded, tail_y FROM head_tail_labels") == [
+        (1, True, 4.0)
+    ]
+    assert _rows(
+        v2,
+        "SELECT v1_id, needs_reprocess, reference_points::text, skipped_points::text "
+        "FROM slate_labels",
+    ) == [(1, True, "[[1, 2]]", "[3]")]
+
+
+def test_a_label_names_its_source_only_when_certain(v1, v2):
+    _seed_v1(v1)
+    _seed_labels(v1)
+
+    _run(v1, v2)
+
+    assert _rows(v2, "SELECT v1_id, source FROM laser_labels ORDER BY v1_id") == [
+        (1, None),  # a human or an accepted pre-annotation: v1 can't say
+        (2, "auto_accept"),  # the gate auto-accepted this frame's prediction
+    ]
+    assert _rows(v2, "SELECT source, ls_project_id FROM species_labels") == [
+        ("import", None)  # a sentinel carries an imported judgement
+    ]
+    assert _rows(v2, "SELECT source FROM head_tail_labels") == [(None,)]
+
+
+def test_no_labeler_email_or_name_crosses_into_v2(v1, v2):
+    _seed_v1(v1)
+    _seed_labels(v1)
+
+    _run(v1, v2)
+
+    with v2.connect() as conn:
+        dump = conn.execute(
+            text(
+                "SELECT string_agg(t::text, ' ') FROM "
+                "(SELECT * FROM laser_labels UNION ALL SELECT * FROM laser_labels) t"
+            )
+        ).scalar_one()
+        users = conn.execute(text("SELECT count(*) FROM users")).scalar_one()
+    assert "labeler@example.test" not in dump and "Pat" not in dump
+    assert users == 0
+
+
+def test_sync_cursors_map_v1_kind_names(v1, v2):
+    _seed_v1(v1)
+    _seed_labels(v1)
+
+    _run(v1, v2)
+
+    assert _rows(
+        v2, "SELECT kind, ls_project_id FROM label_studio_sync_cursors ORDER BY kind"
+    ) == [("head_tail", 8), ("laser", 7), ("slate", 9)]
+
+
+def test_labels_are_accounted_for_and_idempotent(v1, v2):
+    _seed_v1(v1)
+    _seed_labels(v1)
+
+    report = _run(v1, v2)
+    again = _run(v1, v2)
+
+    for table, n in [
+        ("laserlabel", 2),
+        ("headtaillabel", 1),
+        ("diveslatelabel", 1),
+        ("specieslabel", 1),
+        ("labelstudiosynccursor", 3),
+    ]:
+        assert report[table] == (n, n)
+    assert again.discrepancies() == {}

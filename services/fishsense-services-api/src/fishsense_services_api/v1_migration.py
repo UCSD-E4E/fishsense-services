@@ -350,6 +350,99 @@ def _dive_laser_lines(v1, v2, tenant, report) -> None:
     _account(v1, v2, report, "divelaserline", "dive_laser_lines")
 
 
+# v1 label table -> (v2 table, its kind-specific columns, which of them are JSON)
+LABEL_TABLES = {
+    "laserlabel": ("laser_labels", ["x", "y", "label"], []),
+    "headtaillabel": ("head_tail_labels", ["head_x", "head_y", "tail_x", "tail_y"], []),
+    "diveslatelabel": (
+        "slate_labels",
+        ["upside_down", "reference_points", "slate_rectangle", "skipped_points",
+         "image_url"],
+        ["reference_points", "slate_rectangle", "skipped_points"],
+    ),
+    "specieslabel": (
+        "species_labels",
+        ["image_url", "grouping", "top_three_photos_of_group", "content_of_image",
+         "fish_measurable_category", "fish_angle_category", "fish_curved_category",
+         "fish_angle_degrees"],
+        [],
+    ),
+}  # fmt: skip
+
+
+def _labels(v1, v2, tenant, report) -> None:
+    """The four label kinds. A source is named only when certain: a sentinel
+    (no project) carries an imported judgement; a laser label on a frame whose
+    prediction the gate auto-accepted came from the gate. Labelers become their
+    Label Studio user id -- v1's user emails and names are not copied."""
+    captures = _ids(v2, "captures")
+    for v1_table, (v2_table, columns, json_columns) in LABEL_TABLES.items():
+        auto_accepted = (
+            "WHEN EXISTS (SELECT 1 FROM laserprediction p "
+            "WHERE p.image_id = l.image_id AND p.auto_accept) THEN 'auto_accept' "
+            if v1_table == "laserlabel"
+            else ""
+        )
+        selected = ", ".join(
+            f'l."{c}"::text AS "{c}"' if c in json_columns else f'l."{c}"'
+            for c in columns
+        )
+        values = ", ".join(
+            f"CAST(:{c} AS jsonb)" if c in json_columns else f":{c}" for c in columns
+        )
+        quoted = ", ".join(f'"{c}"' for c in columns)
+        _insert(
+            v2,
+            f"INSERT INTO {v2_table} (tenant_id, v1_id, capture_id, source, "
+            f"ls_project_id, ls_task_id, ls_labeler_id, ls_updated_at, completed, "
+            f"superseded, needs_reprocess, ls_payload, {quoted}) VALUES (:tenant, "
+            f":id, :capture, :source, :label_studio_project_id, "
+            f":label_studio_task_id, :labeler, :updated_at, :completed, :superseded, "
+            f":needs_reprocess, CAST(:payload AS jsonb), {values}) "
+            f"ON CONFLICT DO NOTHING",
+            (
+                {
+                    **r,
+                    "tenant": tenant,
+                    "capture": captures.get(r["image_id"]),
+                    "completed": bool(r["completed"]),
+                    "superseded": bool(r["superseded"]),
+                }
+                for r in _rows(
+                    v1,
+                    f"SELECT l.id, l.image_id, l.label_studio_project_id, "
+                    f"l.label_studio_task_id, l.updated_at, l.completed, "
+                    f"l.superseded, l.needs_reprocess, "
+                    f"l.label_studio_json::text AS payload, "
+                    f"u.label_studio_id AS labeler, {selected}, "
+                    f"CASE WHEN l.label_studio_project_id IS NULL THEN 'import' "
+                    f"{auto_accepted}END AS source "
+                    f'FROM {v1_table} l LEFT JOIN "user" u ON u.id = l.user_id '
+                    f"ORDER BY l.id",
+                )
+            ),
+        )
+        _account(v1, v2, report, v1_table, v2_table)
+
+
+# v1 wrote some kinds differently.
+CURSOR_KINDS = {"dive_slate": "slate", "headtail": "head_tail"}
+
+
+def _sync_cursors(v1, v2, tenant, report) -> None:
+    _insert(
+        v2,
+        "INSERT INTO label_studio_sync_cursors (tenant_id, v1_id, kind, "
+        "ls_project_id, last_synced_at) VALUES (:tenant, :id, :kind, "
+        ":label_studio_project_id, :last_synced_at) ON CONFLICT DO NOTHING",
+        (
+            {**r, "tenant": tenant, "kind": CURSOR_KINDS.get(r["kind"], r["kind"])}
+            for r in _rows(v1, "SELECT * FROM labelstudiosynccursor ORDER BY id")
+        ),
+    )
+    _account(v1, v2, report, "labelstudiosynccursor", "label_studio_sync_cursors")
+
+
 STEPS: list[Callable] = [
     _reference_data,
     _devices,
@@ -358,4 +451,6 @@ STEPS: list[Callable] = [
     _camera_calibrations,
     _laser_calibrations,
     _dive_laser_lines,
+    _labels,
+    _sync_cursors,
 ]
