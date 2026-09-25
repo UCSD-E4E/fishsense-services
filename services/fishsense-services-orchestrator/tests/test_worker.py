@@ -9,16 +9,17 @@ startup, and builds the worker from them. Two v1 lessons are pinned here:
 * **the payload converter is pydantic's**, on the client, or UUIDs and
   datetimes inside the contracts do not survive the trip.
 
-The wiring test runs a whole ingest through the real worker with the real
-activities, a fake NAS and a fake catalog. Stubbed activities cannot catch a
-name the workflow calls that nothing registers, or a payload that does not
-round-trip -- this does.
+The wiring tests run whole workflows through the real worker with the real
+activities and fake catalogs: an ingest (with a fake NAS), and stage 1 across
+the orchestrator and the processor's real workflow and kernel. Stubbed
+activities cannot catch a name the workflow calls that nothing registers, or a
+payload that does not round-trip -- these do.
 """
 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -26,11 +27,21 @@ import pytest
 from pydantic import ValidationError
 from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.testing import WorkflowEnvironment
+from temporalio.worker import Worker
 
+from fishsense_services_api.clustering_store import ClusteringCandidate
 from fishsense_services_api.ingest_store import (
     ContentOverlap,
     RegisteredCapture,
     ResolvedDevice,
+)
+from fishsense_services_contracts import PROCESSOR_LIGHT_TASK_QUEUE
+from fishsense_services_orchestrator.clustering.activities import (
+    ClusteringActivities,
+    ClusteringTarget,
+)
+from fishsense_services_orchestrator.clustering.workflow import (
+    ClusterDiveFramesParentWorkflow,
 )
 from fishsense_services_orchestrator.ingest.activities import IngestActivities
 from fishsense_services_orchestrator.ingest.contracts import IngestDiveRequest
@@ -45,6 +56,10 @@ from fishsense_services_orchestrator.worker import (
     DEFAULT_TASK_QUEUE,
     build_worker,
     connect_options,
+)
+from fishsense_services_processor.clustering.activities import cluster_dive_frames
+from fishsense_services_processor.clustering.workflow import (
+    DiveFrameClusteringWorkflow,
 )
 
 from ._tiff_builder import build_orf
@@ -201,7 +216,12 @@ async def test_a_whole_ingest_runs_through_the_real_worker():
     async with await WorkflowEnvironment.start_time_skipping(
         data_converter=pydantic_data_converter
     ) as env:
-        async with build_worker(env.client, activities, task_queue="wiring"):
+        async with build_worker(
+            env.client,
+            ingest=activities,
+            clustering=ClusteringActivities(catalog=_ClusteringCatalog()),
+            task_queue="wiring",
+        ):
             report = await env.client.execute_workflow(
                 IngestDiveWorkflow.run,
                 IngestDiveRequest(tenant="lab", dive_path=FOLDER, self_calibrates=True),
@@ -220,3 +240,79 @@ async def test_a_whole_ingest_runs_through_the_real_worker():
     )
     assert report.duplicate_overlap[0].containment == 0.5
     assert report.preflight.resolved_device_id == DEVICE
+
+
+class _ClusteringCatalog:
+    """One tenant, one dive in the stage-1 cohort, two bursts of frames."""
+
+    def __init__(self):
+        self.dive = uuid.uuid4()
+        base = datetime(2024, 8, 21, 8, 0, tzinfo=timezone.utc)
+        self.captures = [
+            (
+                uuid.UUID(int=10 * burst + i),
+                base + timedelta(minutes=10 * burst, seconds=i),
+            )
+            for burst in range(2)
+            for i in range(3)
+        ]
+        self.persisted = None
+
+    async def member_tenants(self):
+        return [TENANT]
+
+    async def next_dive_for_clustering(self, tenant_id):
+        if self.persisted is not None:
+            return None
+        return ClusteringCandidate(self.dive, datetime.now(timezone.utc))
+
+    async def canonical_capture_times(self, tenant_id, dive_id):
+        return self.captures
+
+    async def persist_prediction_clusters(self, tenant_id, dive_id, clusters):
+        self.persisted = (tenant_id, dive_id, clusters)
+        return len(clusters)
+
+
+async def test_stage_1_runs_across_the_orchestrator_and_the_processor():
+    """The orchestrator's real parent and activities, the processor's real
+    workflow and kernel, on their real queues: the contract between the two
+    packages, exercised the way it deploys."""
+    catalog = _ClusteringCatalog()
+    ingest = IngestActivities(
+        nas_settings=NasSettings(url="https://nas.test:6021", username="u",
+                                 password="p", raw_root_path=ROOT),
+        nas_client_factory=lambda: None,
+        catalog=None,
+    )  # fmt: skip
+
+    async with await WorkflowEnvironment.start_time_skipping(
+        data_converter=pydantic_data_converter
+    ) as env:
+        async with (
+            build_worker(
+                env.client,
+                ingest=ingest,
+                clustering=ClusteringActivities(catalog=catalog),
+                task_queue="wiring",
+            ),
+            Worker(
+                env.client,
+                task_queue=PROCESSOR_LIGHT_TASK_QUEUE,
+                workflows=[DiveFrameClusteringWorkflow],
+                activities=[cluster_dive_frames],
+            ),
+        ):
+            target = await env.client.execute_workflow(
+                ClusterDiveFramesParentWorkflow.run,
+                id=f"wiring-{uuid.uuid4()}",
+                task_queue="wiring",
+            )
+
+    assert target == ClusteringTarget(tenant_id=TENANT, dive_id=catalog.dive)
+    tenant, dive, clusters = catalog.persisted
+    assert (tenant, dive) == (TENANT, catalog.dive)
+    assert sorted(sorted(c.int for c in cluster) for cluster in clusters) == [
+        [0, 1, 2],
+        [10, 11, 12],
+    ]

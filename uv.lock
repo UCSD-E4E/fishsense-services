@@ -344,6 +344,11 @@ dependencies = [
     { name = "temporalio" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "fishsense-services-processor" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "fishsense-services-api", editable = "services/fishsense-services-api" },
@@ -353,6 +358,9 @@ requires-dist = [
     { name = "synology-filestation", url = "https://github.com/UCSD-E4E/synology-filestation/releases/download/synology_filestation-v0.2.0/synology_filestation-0.2.0-cp310-abi3-manylinux_2_34_x86_64.whl" },
     { name = "temporalio", specifier = ">=1.15.0" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "fishsense-services-processor", editable = "services/fishsense-services-processor" }]
 
 [[package]]
 name = "fishsense-services-processor"

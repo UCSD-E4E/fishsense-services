@@ -4,7 +4,7 @@ Ported in shape from fishsense-lite@a8b2c3bc fishsense_api_workflow_worker/
 worker.py (connect with TLS and an explicit namespace, then run one worker).
 v2 changes: typed settings instead of global Dynaconf; the pydantic payload
 converter; activities are bound methods of `IngestActivities`, built once with
-their dependencies; ingest is the only workflow so far.
+their dependencies; the schedules are ensured at startup.
 
     python -m fishsense_services_orchestrator
 """
@@ -18,17 +18,32 @@ from temporalio.client import Client, TLSConfig
 from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.worker import Worker
 
+from fishsense_services_api.clustering_store import ClusteringCatalog
 from fishsense_services_api.ingest_store import IngestCatalog
+from fishsense_services_orchestrator.clustering.activities import (
+    ClusteringActivities,
+)
+from fishsense_services_orchestrator.clustering.workflow import (
+    ClusterDiveFramesParentWorkflow,
+)
 from fishsense_services_orchestrator.ingest.activities import IngestActivities
 from fishsense_services_orchestrator.ingest.nas_frames import NasSettings
 from fishsense_services_orchestrator.ingest.workflow import IngestDiveWorkflow
+from fishsense_services_orchestrator.schedules import ensure_schedules
 from fishsense_services_orchestrator.settings import (
     DEFAULT_TASK_QUEUE,
     OrchestratorSettings,
     TemporalSettings,
 )
 
-__all__ = ["DEFAULT_TASK_QUEUE", "build_worker", "connect_options", "main", "run"]
+__all__ = [
+    "DEFAULT_TASK_QUEUE",
+    "WORKFLOWS",
+    "build_worker",
+    "connect_options",
+    "main",
+    "run",
+]
 
 log = logging.getLogger(__name__)
 
@@ -56,20 +71,31 @@ def connect_options(settings: TemporalSettings) -> dict[str, Any]:
     }
 
 
+#: Every workflow the orchestrator serves.
+WORKFLOWS = [IngestDiveWorkflow, ClusterDiveFramesParentWorkflow]
+
+
 def build_worker(
-    client: Client, activities: IngestActivities, *, task_queue: str
+    client: Client,
+    *,
+    ingest: IngestActivities,
+    clustering: ClusteringActivities,
+    task_queue: str,
 ) -> Worker:
     """Register every workflow and activity the orchestrator serves."""
     return Worker(
         client,
         task_queue=task_queue,
-        workflows=[IngestDiveWorkflow],
+        workflows=WORKFLOWS,
         activities=[
-            activities.list_dive_folder,
-            activities.preflight,
-            activities.create_dive,
-            activities.scan_and_register,
-            activities.finalize_dive,
+            ingest.list_dive_folder,
+            ingest.preflight,
+            ingest.create_dive,
+            ingest.scan_and_register,
+            ingest.finalize_dive,
+            clustering.select_next_dive_for_clustering,
+            clustering.resolve_clustering_inputs,
+            clustering.persist_prediction_clusters,
         ],
     )
 
@@ -84,10 +110,11 @@ async def main() -> None:
         orchestrator.database_url.get_secret_value(), pool_pre_ping=True
     )
     try:
-        activities = IngestActivities(
-            nas_settings=nas,
-            catalog=IngestCatalog(engine, sub=orchestrator.orchestrator_sub),
+        sub = orchestrator.orchestrator_sub
+        ingest = IngestActivities(
+            nas_settings=nas, catalog=IngestCatalog(engine, sub=sub)
         )
+        clustering = ClusteringActivities(catalog=ClusteringCatalog(engine, sub=sub))
         options = connect_options(temporal)
         log.info(
             "connecting to Temporal address=%s namespace=%s queue=%s tls=%s",
@@ -97,7 +124,13 @@ async def main() -> None:
             bool(options["tls"]),
         )
         client = await Client.connect(**options)
-        await build_worker(client, activities, task_queue=temporal.task_queue).run()
+        await ensure_schedules(client, task_queue=temporal.task_queue)
+        await build_worker(
+            client,
+            ingest=ingest,
+            clustering=clustering,
+            task_queue=temporal.task_queue,
+        ).run()
     finally:
         await engine.dispose()
 

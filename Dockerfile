@@ -21,7 +21,9 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 COPY services/fishsense-services-api/pyproject.toml services/fishsense-services-api/
+COPY services/fishsense-services-contracts/pyproject.toml services/fishsense-services-contracts/
 COPY services/fishsense-services-orchestrator/pyproject.toml services/fishsense-services-orchestrator/
+COPY services/fishsense-services-processor/pyproject.toml services/fishsense-services-processor/
 
 # Dependencies first, in their own layer, so code changes don't reinstall them.
 FROM build-base AS build-api
@@ -31,8 +33,10 @@ RUN uv sync --frozen --no-dev --package fishsense-services-api --no-editable
 
 FROM build-base AS build-orchestrator
 RUN uv sync --frozen --no-dev --package fishsense-services-orchestrator --no-install-workspace
-# The orchestrator depends on the API package (its database side, ingest_store).
+# The orchestrator depends on the API package (its database side) and the
+# processing contract.
 COPY services/fishsense-services-api services/fishsense-services-api
+COPY services/fishsense-services-contracts services/fishsense-services-contracts
 COPY services/fishsense-services-orchestrator services/fishsense-services-orchestrator
 RUN uv sync --frozen --no-dev --package fishsense-services-orchestrator --no-editable
 
