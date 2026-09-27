@@ -568,7 +568,23 @@ Everything except the reference tables above carries `tenant_id`.
   (6 vCPU, 12 GiB, a 20 GB root disk), which v2's compose has to respect.
 - **Processor** → **Kubernetes**, kustomize: **NRP `amd64`** today (v1 has four Deployments —
   cpu / light / gpu / gpu-cpu-fallback — scaled 0↔N by the orchestrator), →
-  junkyard/Pixel-Fold **ARM64** later. **Multi-arch images**; ARM64/Knative
+  junkyard/Pixel-Fold **ARM64** later.
+  - **v2 stands the processor up and tears it down; it does not keep it scaled to zero.**
+    *(Decided 2026-09-27.)*
+    - **Why:** NRP deletes Deployments older than two weeks. v1's were `kubectl apply`'d
+      once and only had their replica counts changed, so an idle one sat at zero replicas
+      until the rule took it. That happened around 09-21, and five days of stages silently
+      didn't run.
+    - **The design:** when work arrives, the orchestrator applies the Deployment (a
+      server-side apply, so it's idempotent). When the queue is idle, it deletes the
+      Deployment. The manifests live in this repo, and the orchestrator applies them with
+      the release's image tag. No NRP exception is needed.
+    - **Costs to design for:**
+      - a cold start (image pull and weight download) on every wake, so the weights cache
+        from `fishsense-core`'s loader matters;
+      - the kubeconfig's role needs create and delete on Deployments, not just `scale`;
+      - the GPU fallback's "wedged" check has to tolerate a Deployment that doesn't exist
+        yet. **Multi-arch images**; ARM64/Knative
   are **processor-only, future** — not near-term control-plane concerns.
 - **Garage** (external, `s3.e4e.ucsd.edu`) and **Temporal** (shared krg-prod cluster,
   **mTLS**, **single `fishsense` namespace** — tenant scoping is in-workflow, not per-namespace;
