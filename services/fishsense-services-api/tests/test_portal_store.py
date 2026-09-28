@@ -534,7 +534,9 @@ async def test_the_store_scopes_to_the_tenant_itself_not_only_through_rls(
     ]
 
 
-async def test_a_verdict_the_v2_gate_recorded_counts(seed, owner_engine, app_engine, lab):
+async def test_a_verdict_the_v2_gate_recorded_counts(
+    seed, owner_engine, app_engine, lab
+):
     """The seam with the laser slice: v2's gate appends its verdict to
     laser_prediction_verdicts (migration 0021) and never writes over the
     append-only prediction. Reading the prediction row's own gate_verdict --

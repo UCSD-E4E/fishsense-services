@@ -747,7 +747,8 @@ async def test_a_new_slate_template_expires_a_slate_refusal(owner_engine, app_en
 async def test_a_migrated_refusal_expires_only_on_labels(owner_engine, app_engine):
     """A refusal carried over from v1 recorded no target (v1's dive columns
     held none), so the link comparison cannot apply to it; it still expires
-    on a newer label, and by an operator's clear."""
+    on a newer label, a link write (see the species-sync seam below), and an
+    operator's clear."""
     lab = await tenant(owner_engine)
     only = await _board_dive(owner_engine, lab)
     await laser_calibration(
@@ -1162,3 +1163,54 @@ async def test_a_dive_is_found_by_its_number_within_its_tenant(
     async with tenant_transaction(app_engine, lab) as conn:
         assert await dive_for_number(conn, lab, 493) == mine
         assert await dive_for_number(conn, lab, 495) is None
+
+
+# -- the seam with the species sync: a link write expires a refusal -----------------
+
+
+async def _link_written(owner_engine, dive_id, *, when):
+    """What the species sync does on writing a dive's slate or calibration
+    target, changed or not (species_store.set_dive_*; migration 0022)."""
+    async with owner_engine.begin() as conn:
+        await conn.execute(
+            text(f"UPDATE dives SET calibration_links_changed_at = {when} "
+                 "WHERE id = :d"),
+            {"d": dive_id},
+        )  # fmt: skip
+
+
+async def test_a_link_written_after_the_refusal_re_offers_the_dive(
+    owner_engine, app_engine
+):
+    """v1's `_clear_refusal` ran on every set_dive_slate/set_calibration_target,
+    even to the same value: a labeler re-choosing the target says "try again".
+    The value comparison alone misses that; the species sync's stamp doesn't."""
+    lab = await tenant(owner_engine)
+    only, _ = await _refused_board_dive(owner_engine, app_engine, lab)
+    await _link_written(owner_engine, only, when="now() + interval '1 second'")
+
+    assert await _board(app_engine, lab) == only
+
+
+async def test_a_link_written_after_a_migrated_refusal_re_offers_it_too(
+    owner_engine, app_engine
+):
+    lab = await tenant(owner_engine)
+    only = await _board_dive(owner_engine, lab)
+    await laser_calibration(
+        owner_engine, lab, only, outcome="refused", producer=None,
+        inputs_as_of=later(1), v1_refusal_dive_id=347,
+    )  # fmt: skip
+    await _link_written(owner_engine, only, when="now() + interval '1 second'")
+
+    assert await _board(app_engine, lab) == only
+
+
+async def test_a_link_written_before_the_refusal_does_not_expire_it(
+    owner_engine, app_engine
+):
+    lab = await tenant(owner_engine)
+    only, _ = await _refused_board_dive(owner_engine, app_engine, lab)
+    await _link_written(owner_engine, only, when="now() - interval '1 day'")
+
+    assert await _board(app_engine, lab) is None

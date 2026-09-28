@@ -71,6 +71,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from fishsense_services_api.service_principal import ServicePrincipal
+from fishsense_services_api.species_store import REFUSAL_OUTLIVED_SQL
 
 __all__ = [
     "MIN_SLATE_LASER_POINTS",
@@ -267,6 +268,9 @@ _REFUSAL_STANDS = f"""
           ))
           AND NOT {_NEWER_LABEL.format(table="laser_labels")}
           AND NOT {_NEWER_LABEL.format(table="slate_labels")}
+          -- v1's `_clear_refusal` on every set_dive_slate/set_calibration_target,
+          -- same value or not; the species sync stamps the write (0022).
+          AND NOT {REFUSAL_OUTLIVED_SQL}
     )
 """
 
