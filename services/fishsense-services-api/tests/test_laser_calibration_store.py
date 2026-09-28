@@ -81,6 +81,10 @@ from fishsense_services_api.laser_calibration_store import (
     record_laser_calibration,
     slate_calibration_inputs,
 )
+from fishsense_services_api.species_store import (
+    set_dive_calibration_target,
+    set_dive_slate_template,
+)
 
 ORCHESTRATOR = "service:fishsense-orchestrator"
 
@@ -1351,5 +1355,102 @@ async def test_a_link_written_before_the_refusal_does_not_expire_it(
     lab = await tenant(owner_engine)
     only, _ = await _refused_board_dive(owner_engine, app_engine, lab)
     await _link_written(owner_engine, only, when="now() - interval '1 day'")
+
+    assert await _board(app_engine, lab) is None
+
+
+# The same seam end to end: the species store's own setters, read back through
+# the cohorts, as the orchestrator will see them. (The tests above stamp the
+# column by hand; these pin that the setters are what stamps it.)
+
+
+async def _set_target(app_engine, lab, dive_id, target):
+    async with tenant_transaction(app_engine, lab) as conn:
+        assert await set_dive_calibration_target(conn, lab, dive_id, target)
+
+
+async def _set_slate(app_engine, lab, dive_id, slate):
+    async with tenant_transaction(app_engine, lab) as conn:
+        assert await set_dive_slate_template(conn, lab, dive_id, slate)
+
+
+async def test_re_choosing_the_same_target_re_offers_a_refused_board_dive(
+    owner_engine, app_engine
+):
+    """v1's `set_dive_calibration_target` cleared the refusal on every write,
+    the same target included: a labeler re-choosing it says "try again"."""
+    lab = await tenant(owner_engine)
+    only, target = await _refused_board_dive(owner_engine, app_engine, lab)
+    assert await _board(app_engine, lab) is None
+
+    await _set_target(app_engine, lab, only, target)
+
+    assert await _board(app_engine, lab) == only
+
+
+async def test_re_choosing_the_same_slate_re_offers_a_refused_slate_dive(
+    owner_engine, app_engine
+):
+    lab = await tenant(owner_engine)
+    only = await _slate_dive(owner_engine, lab)
+    slate = await _slate_of(owner_engine, only)
+    await _refuse(
+        app_engine, lab, only, producer="slate", inputs_as_of=later(99),
+        slate_template_id=slate,
+    )  # fmt: skip
+    assert await _stage13(app_engine, lab) is None
+
+    await _set_slate(app_engine, lab, only, slate)
+
+    assert await _stage13(app_engine, lab) == only
+
+
+async def test_a_target_set_after_a_slate_refusal_offers_the_dive_to_the_board(
+    owner_engine, app_engine
+):
+    """Across producers. Stage 13 refused the dive and it has too few slate
+    observations to be stage 13's; the labelers then name a board. The slate
+    refusal compared no target, so only the link write can expire it -- and
+    without that the dive would sit out of both cohorts."""
+    lab = await tenant(owner_engine)
+    only = await _slate_dive(owner_engine, lab, observations=1)
+    await laser_label(owner_engine, lab, await capture(owner_engine, lab, only))
+    await _refuse(
+        app_engine, lab, only, producer="slate", inputs_as_of=later(99),
+        slate_template_id=await _slate_of(owner_engine, only),
+    )  # fmt: skip
+    assert await _stage13(app_engine, lab) is None
+
+    await _set_target(app_engine, lab, only, await calibration_target(owner_engine))
+
+    assert await _board(app_engine, lab) == only
+
+
+async def test_a_link_write_re_offers_a_migrated_refusal(owner_engine, app_engine):
+    """A refusal carried over from v1 names no template or target, so a
+    link can only expire it by being written."""
+    lab = await tenant(owner_engine)
+    only = await _slate_dive(owner_engine, lab)
+    await laser_calibration(
+        owner_engine, lab, only, outcome="refused", producer=None,
+        inputs_as_of=later(99), v1_refusal_dive_id=347,
+    )  # fmt: skip
+    assert await _stage13(app_engine, lab) is None
+
+    await _set_slate(app_engine, lab, only, await _slate_of(owner_engine, only))
+
+    assert await _stage13(app_engine, lab) == only
+
+
+async def test_a_refusal_recorded_after_the_link_write_stands(owner_engine, app_engine):
+    """The write expires what was refused before it, not what is refused
+    after: a refit that is refused again stays out of the cohort."""
+    lab = await tenant(owner_engine)
+    only, target = await _refused_board_dive(owner_engine, app_engine, lab)
+    await _set_target(app_engine, lab, only, target)
+    assert await _board(app_engine, lab) == only
+
+    await _refuse(app_engine, lab, only, calibration_target_id=target,
+                  inputs_as_of=later(99))  # fmt: skip
 
     assert await _board(app_engine, lab) is None
