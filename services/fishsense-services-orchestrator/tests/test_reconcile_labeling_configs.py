@@ -352,16 +352,32 @@ def test_every_per_dive_kind_declares_its_labeling_config():
     """The integration seam: the reconcile discovers each kind's
     `<package>/labeling_config.py`, and the four populate slices were ported in
     parallel with it, so none declared one -- the reconcile would heal nothing.
-    v1 imported all four (reconcile_labeling_configs_activity._CONFIG_BY_SUFFIX)."""
-    from fishsense_services_orchestrator.ops.labeling_configs.registry import (
-        labeling_configs,
+    v1 imported all four (reconcile_labeling_configs_activity._CONFIG_BY_SUFFIX).
+
+    Exactly four declarations, one per kind -- a list, so a second declaration
+    for a kind can't be folded away as a dict would -- each carrying the XML
+    its owning slice creates projects with. A reconcile healing toward any
+    other XML would rewrite every labeler's project to a config populate never
+    made."""
+    # pylint: disable=import-outside-toplevel
+    from fishsense_services_orchestrator.headtail.labeling import (
+        HEADTAIL_LABELING_CONFIG_XML,
+    )
+    from fishsense_services_orchestrator.laser.annotations import (
+        LASER_LABELING_CONFIG_XML,
+    )
+    from fishsense_services_orchestrator.slates.populate import (
+        DIVE_SLATE_LABELING_CONFIG_XML,
+    )
+    from fishsense_services_orchestrator.species.labeling import (
+        SPECIES_LABELING_CONFIG_XML,
     )
 
-    declared = {c.kind: c.title_suffix for c in labeling_configs()}
+    declared = sorted((c.kind, c.title_suffix, c.xml) for c in labeling_configs())
 
-    assert declared == {
-        "laser": "Laser Calibration Labeling",
-        "species": "Species Labeling",
-        "head_tail": "HeadTail Labeling",
-        "slate": "Dive Slate Labeling",
-    }
+    assert declared == [
+        ("head_tail", "HeadTail Labeling", HEADTAIL_LABELING_CONFIG_XML),
+        ("laser", "Laser Calibration Labeling", LASER_LABELING_CONFIG_XML),
+        ("slate", "Dive Slate Labeling", DIVE_SLATE_LABELING_CONFIG_XML),
+        ("species", "Species Labeling", SPECIES_LABELING_CONFIG_XML),
+    ]
