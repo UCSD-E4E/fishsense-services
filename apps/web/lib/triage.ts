@@ -32,6 +32,8 @@ export type LsPrediction = { id: number; result: LsRegion[] };
 
 export type LsTask = {
   id: number;
+  /** The task's project; how `lib/tenant-tasks.ts` tells whose it is. */
+  project?: number;
   is_labeled?: boolean;
   annotations?: { id: number }[];
   predictions?: LsPrediction[];

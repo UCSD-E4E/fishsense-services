@@ -1,7 +1,15 @@
 // Ported from fishsense-lite@77e8f8e5 apps/fishsense-lite-web/lib/label-studio-tasks.test.ts.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetTokenCache } from "./label-studio";
-import { acceptPrediction, fetchTaskImage, listTasks } from "./label-studio-tasks";
+import {
+  acceptPrediction,
+  fetchTaskImage,
+  getAnnotation,
+  listTasks,
+} from "./label-studio-tasks";
+
+/** The tenant's projects, for `fetchTaskImage`'s ownership check. */
+const OWNED: ReadonlySet<number> = new Set([9]);
 
 beforeEach(() => {
   vi.stubEnv("LABEL_STUDIO_URL", "http://ls.test");
@@ -125,7 +133,7 @@ describe("fetchTaskImage", () => {
     return async (url: string) => {
       if (url.includes("/api/tasks/")) {
         expect(url).toContain("resolve_uri=true");
-        return json({ id: 42, data: { image } });
+        return json({ id: 42, project: 9, data: { image } });
       }
       return new Response("jpegbytes", {
         status: 200,
@@ -137,7 +145,7 @@ describe("fetchTaskImage", () => {
   it("fetches a presigned URL WITHOUT our Authorization header", async () => {
     vi.stubEnv("TRIAGE_IMAGE_HOSTS", "s3.example");
     const fetchMock = mockFetch(taskWith("https://s3.example/frame.JPG?sig=abc"));
-    const out = await fetchTaskImage(42);
+    const out = await fetchTaskImage(42, OWNED);
 
     expect(out.kind).toBe("response");
     // Compare the parsed host, not a string prefix: "https://s3.example.evil"
@@ -155,7 +163,7 @@ describe("fetchTaskImage", () => {
 
   it("fetches a Label Studio path WITH auth, resolved against the base", async () => {
     const fetchMock = mockFetch(taskWith("/data/upload/1/frame.JPG"));
-    const out = await fetchTaskImage(42);
+    const out = await fetchTaskImage(42, OWNED);
 
     expect(out.kind).toBe("response");
     const call = fetchMock.mock.calls.find(([u]) => u.includes("/data/upload/"));
@@ -173,7 +181,7 @@ describe("fetchTaskImage", () => {
   // network — and streams the body back.
   it("refuses a host that is not allowed, without fetching it", async () => {
     const fetchMock = mockFetch(taskWith("http://fishsense-api:8000/api/v1/dives/"));
-    const out = await fetchTaskImage(42);
+    const out = await fetchTaskImage(42, OWNED);
 
     expect(out).toMatchObject({ kind: "blocked", host: "fishsense-api:8000" });
     expect(fetchMock.mock.calls.some(([u]) => u.includes("fishsense-api:8000"))).toBe(false);
@@ -181,7 +189,7 @@ describe("fetchTaskImage", () => {
 
   it("refuses a cloud metadata address", async () => {
     const fetchMock = mockFetch(taskWith("http://169.254.169.254/latest/meta-data/"));
-    const out = await fetchTaskImage(42);
+    const out = await fetchTaskImage(42, OWNED);
 
     expect(out).toMatchObject({ kind: "blocked" });
     expect(fetchMock.mock.calls.some(([u]) => u.includes("169.254"))).toBe(false);
@@ -189,7 +197,7 @@ describe("fetchTaskImage", () => {
 
   it("allows the Label Studio host itself", async () => {
     mockFetch(taskWith("http://ls.test/data/frame.JPG"));
-    const out = await fetchTaskImage(42);
+    const out = await fetchTaskImage(42, OWNED);
     expect(out.kind).toBe("response");
   });
 
@@ -200,37 +208,83 @@ describe("fetchTaskImage", () => {
   it("allows the configured object store's host", async () => {
     vi.stubEnv("FISHSENSE_OBJECT_STORE_ENDPOINT_URL", "https://garage.e4e.test:3900");
     mockFetch(taskWith("https://garage.e4e.test:3900/fishsense-lite/tenants/x/f.JPG?X-Amz-Signature=s"));
-    const out = await fetchTaskImage(42);
+    const out = await fetchTaskImage(42, OWNED);
     expect(out.kind).toBe("response");
   });
 
   it("still refuses other hosts when the object store is configured", async () => {
     vi.stubEnv("FISHSENSE_OBJECT_STORE_ENDPOINT_URL", "https://garage.e4e.test:3900");
     mockFetch(taskWith("https://garage.e4e.test.evil.example/f.JPG"));
-    const out = await fetchTaskImage(42);
+    const out = await fetchTaskImage(42, OWNED);
     expect(out).toMatchObject({ kind: "blocked", host: "garage.e4e.test.evil.example" });
   });
 
   it("allows a host named in TRIAGE_IMAGE_HOSTS", async () => {
     vi.stubEnv("TRIAGE_IMAGE_HOSTS", "garage.internal:3900");
     mockFetch(taskWith("https://garage.internal:3900/bucket/frame.JPG?sig=x"));
-    const out = await fetchTaskImage(42);
+    const out = await fetchTaskImage(42, OWNED);
     expect(out.kind).toBe("response");
   });
 
   it("reports an unresolved s3 URI instead of fetching it", async () => {
     mockFetch(taskWith("s3://bucket/preprocess_jpeg/abc.JPG"));
-    const out = await fetchTaskImage(42);
+    const out = await fetchTaskImage(42, OWNED);
 
     expect(out).toEqual({ kind: "unresolved", uri: "s3://bucket/preprocess_jpeg/abc.JPG" });
   });
 
   it("reports a task carrying no image at all", async () => {
     mockFetch(async (url) =>
-      url.includes("/api/tasks/") ? json({ id: 42, data: {} }) : json({}),
+      url.includes("/api/tasks/") ? json({ id: 42, project: 9, data: {} }) : json({}),
     );
-    const out = await fetchTaskImage(42);
+    const out = await fetchTaskImage(42, OWNED);
     expect(out).toEqual({ kind: "unresolved", uri: "" });
+  });
+
+  // v2: every tenant's projects share one Label Studio workspace, so a task id
+  // is not the tenant's just because Label Studio has it. Checked on the task
+  // this already fetches, before the frame is.
+  it("refuses another tenant's task without fetching its frame", async () => {
+    const fetchMock = mockFetch(async (url) =>
+      url.includes("/api/tasks/")
+        ? json({ id: 42, project: 77, data: { image: "http://ls.test/data/frame.JPG" } })
+        : new Response("jpegbytes", { status: 200 }),
+    );
+
+    expect(await fetchTaskImage(42, OWNED)).toEqual({ kind: "foreign" });
+    expect(fetchMock.mock.calls.some(([u]) => u.includes("/data/frame.JPG"))).toBe(false);
+  });
+
+  it.each([
+    ["a task with no project", { id: 42, data: { image: "http://ls.test/f.JPG" } }],
+    ["no such task", null],
+  ])("refuses %s", async (_case, task) => {
+    mockFetch(async (url) =>
+      url.includes("/api/tasks/") && task ? json(task) : json({ detail: "Not found." }, 404),
+    );
+
+    expect(await fetchTaskImage(42, OWNED)).toEqual({ kind: "foreign" });
+  });
+});
+
+describe("getAnnotation", () => {
+  it("reads which task an annotation is on", async () => {
+    mockFetch(async (url) => {
+      expect(url).toBe("http://ls.test/api/annotations/77/");
+      return json({ id: 77, task: 41, result: [] });
+    });
+
+    expect(await getAnnotation(77)).toEqual({ id: 77, task: 41 });
+  });
+
+  it("answers null for an annotation that isn't there", async () => {
+    mockFetch(async () => json({ detail: "Not found." }, 404));
+    expect(await getAnnotation(77)).toBeNull();
+  });
+
+  it("throws on a real failure", async () => {
+    mockFetch(async () => new Response("boom", { status: 500 }));
+    await expect(getAnnotation(77)).rejects.toThrow(/500/);
   });
 });
 
