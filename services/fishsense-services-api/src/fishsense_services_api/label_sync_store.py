@@ -4,8 +4,9 @@ Ported from fishsense-lite@a8b2c3bc services/fishsense-api: the laser-label
 project ids (label_controller.get_laser_label_studio_project_ids), the sync
 cursor endpoints, and the laser-label PUT the hourly sync used. v1's semantics:
 the projects are those of live (not superseded) labels; a label is found by its
-Label Studio task, and a task with none is skipped; the cursor is per (kind,
-project).
+Label Studio task among live rows (a superseded one is frozen: the validator
+judges the full population and relies on it), and a task with none is skipped;
+the cursor is per (kind, project).
 
 v2 changes:
 
@@ -122,7 +123,9 @@ async def label_studio_projects(
 async def apply_laser_sync(
     conn: AsyncConnection, tenant_id: uuid.UUID, ls_task_id: int, sync: LaserSync
 ) -> bool:
-    """Update the tenant's laser label for this task. False when there is none."""
+    """Update the tenant's live laser label for this task. False when there
+    is none: v1 found it with `superseded == False`, so a superseded label
+    stays as the validator judged it."""
     has_point = sync.x is not None and sync.y is not None
     updated = await conn.execute(
         text("""
@@ -134,7 +137,7 @@ async def apply_laser_sync(
                 ls_labeler_id = COALESCE(:labeler, ls_labeler_id),
                 ls_updated_at = :updated_at,
                 ls_payload = CAST(:payload AS jsonb)
-            WHERE tenant_id = :tenant AND ls_task_id = :task
+            WHERE tenant_id = :tenant AND ls_task_id = :task AND NOT superseded
             """),
         {
             "completed": sync.completed,
