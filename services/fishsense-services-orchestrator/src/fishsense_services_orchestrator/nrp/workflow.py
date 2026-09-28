@@ -22,6 +22,7 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 __all__ = [
+    "GPU_WAKE_TIMEOUT",
     "SCALING_RETRY_POLICY",
     "TearDownIdleProcessorsWorkflow",
     "wake_gpu_processor",
@@ -36,6 +37,12 @@ SCALING_RETRY_POLICY = RetryPolicy(
     initial_interval=timedelta(seconds=2),
     maximum_attempts=3,
 )
+
+#: The most `wake_gpu_processor` can take, retries included. Longer than the
+#: other wakes' 5 minutes because this one waits for a pod (10 minutes by
+#: default) and may then wait for a second one after flipping to the CPU
+#: fallback. A parent's run timeout must cover it and its child.
+GPU_WAKE_TIMEOUT = timedelta(minutes=30)
 
 
 async def wake_per_image_processor() -> None:
@@ -82,10 +89,7 @@ async def wake_gpu_processor() -> str:
     """
     return await workflow.execute_activity(
         "ensure_gpu_processor_running",
-        # Longer than the other wakes' 5 minutes because this one waits for a
-        # pod (10 minutes by default) and may then wait for a second one after
-        # flipping to the CPU fallback.
-        schedule_to_close_timeout=timedelta(minutes=30),
+        schedule_to_close_timeout=GPU_WAKE_TIMEOUT,
         heartbeat_timeout=timedelta(minutes=5),
         retry_policy=SCALING_RETRY_POLICY,
         result_type=str,

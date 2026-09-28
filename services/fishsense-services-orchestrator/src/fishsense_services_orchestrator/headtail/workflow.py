@@ -73,6 +73,7 @@ with workflow.unsafe.imports_passed_through():
     from fishsense_services_orchestrator.labels.sync import LabelProject
     from fishsense_services_orchestrator.nrp.gpu_fallback import MODE_UNAVAILABLE
     from fishsense_services_orchestrator.nrp.workflow import (
+        GPU_WAKE_TIMEOUT,
         wake_gpu_processor,
         wake_per_image_processor,
     )
@@ -106,6 +107,26 @@ _DB_FAIL_FAST = RetryPolicy(
     initial_interval=timedelta(seconds=1),
     maximum_attempts=2,
     non_retryable_error_types=["NotAMember"],
+)
+
+#: The predict parent's steps, each the most it can take (retries included).
+PREDICT_SELECT_TIMEOUT = timedelta(minutes=5)
+PREDICT_RESOLVE_TIMEOUT = timedelta(minutes=5)
+#: Generous enough for the CPU fallback, which runs far slower per image.
+PREDICT_CHILD_TIMEOUT = timedelta(hours=6)
+PREDICT_PERSIST_TIMEOUT = timedelta(minutes=15)
+PREDICT_BACKFILL_TIMEOUT = timedelta(minutes=15)
+#: The predict parent's schedule run timeout: every step at its longest.
+#: v1's was 2 h, under its own 6 h child: the child is terminated with the
+#: parent (the default parent-close policy), so a slow CPU-fallback dive
+#: persisted nothing, firing after firing.
+PREDICT_RUN_TIMEOUT = (
+    PREDICT_SELECT_TIMEOUT
+    + PREDICT_RESOLVE_TIMEOUT
+    + GPU_WAKE_TIMEOUT
+    + PREDICT_CHILD_TIMEOUT
+    + PREDICT_PERSIST_TIMEOUT
+    + PREDICT_BACKFILL_TIMEOUT
 )
 
 #: Concurrent populate children (a handful of Label Studio calls each).
@@ -211,7 +232,7 @@ class PredictHeadtailImagesParentWorkflow:
     async def run(self) -> Optional[HeadtailTarget]:
         target: Optional[HeadtailTarget] = await workflow.execute_activity(
             "select_next_dive_for_headtail_prediction",
-            schedule_to_close_timeout=timedelta(minutes=5),
+            schedule_to_close_timeout=PREDICT_SELECT_TIMEOUT,
             retry_policy=_DB_FAIL_FAST,
             result_type=Optional[HeadtailTarget],
         )
@@ -221,7 +242,7 @@ class PredictHeadtailImagesParentWorkflow:
         inputs: PredictHeadtailImagesInput = await workflow.execute_activity(
             "resolve_headtail_predict_inputs",
             target,
-            schedule_to_close_timeout=timedelta(minutes=5),
+            schedule_to_close_timeout=PREDICT_RESOLVE_TIMEOUT,
             retry_policy=_DB_FAIL_FAST,
             result_type=PredictHeadtailImagesInput,
         )
@@ -250,9 +271,7 @@ class PredictHeadtailImagesParentWorkflow:
                     inputs,
                     id=f"predict-headtail-{target.dive_id}",
                     task_queue=PROCESSOR_GPU_TASK_QUEUE,
-                    # Generous enough for the CPU fallback, which runs far
-                    # slower per image.
-                    execution_timeout=timedelta(hours=6),
+                    execution_timeout=PREDICT_CHILD_TIMEOUT,
                     id_reuse_policy=CHILD_ID_REUSE,
                     result_type=List[HeadtailPredictionResult],
                 )
@@ -273,7 +292,7 @@ class PredictHeadtailImagesParentWorkflow:
             await workflow.execute_activity(
                 "persist_headtail_predictions",
                 args=(target, persistable),
-                schedule_to_close_timeout=timedelta(minutes=15),
+                schedule_to_close_timeout=PREDICT_PERSIST_TIMEOUT,
                 retry_policy=RetryPolicy(
                     initial_interval=timedelta(seconds=1),
                     maximum_attempts=2,
@@ -288,7 +307,7 @@ class PredictHeadtailImagesParentWorkflow:
         await workflow.execute_activity(
             "backfill_headtail_predictions_for_dive",
             target,
-            schedule_to_close_timeout=timedelta(minutes=15),
+            schedule_to_close_timeout=PREDICT_BACKFILL_TIMEOUT,
             retry_policy=_DB_FAIL_FAST,
         )
         return target
