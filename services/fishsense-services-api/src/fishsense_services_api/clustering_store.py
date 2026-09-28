@@ -48,7 +48,7 @@ VALID_LASER = "l.completed AND NOT l.superseded AND l.x IS NOT NULL AND l.y IS N
 #: The stage-1 cohort over dive `d`, but for the tenant and priority terms the
 #: selector adds: a valid laser label on a canonical capture, and no
 #: prediction cluster yet. Named so `dive_pipeline_status` reads the same
-#: predicate (migration pipeline_status_01).
+#: predicate (migration 0029).
 CLUSTERING_COHORT = f"""
     EXISTS (
         SELECT 1 FROM laser_labels l

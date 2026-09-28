@@ -336,7 +336,7 @@ NEEDS_LASER_JPEG = """(
 #: JPEG) and its cohort (the work, and a camera to rectify it with), but for
 #: the tenant and priority terms every selector adds. Named so
 #: `dive_pipeline_status` reads the same predicates (migration
-#: pipeline_status_01).
+#: 0029).
 LASER_PREPROCESS_WORK = (
     f"EXISTS (SELECT 1 FROM captures c WHERE {_CANONICAL} AND {NEEDS_LASER_JPEG})"
 )

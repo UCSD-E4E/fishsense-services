@@ -229,7 +229,7 @@ async def test_a_table_owned_by_the_app_role_is_flagged(scratch):
     assert any("usurped" in v and "owned" in v for v in violations)
 
 
-# --- the research views and role (research_01, research_02) ----------------------
+# --- the research views and role (0031, 0032) ----------------------
 
 RESEARCH = "fishsense_research"
 

@@ -126,7 +126,7 @@ _RENDERABLE = RECTIFIABLE_DIVE
 #: live head/tail row in a project, or a canonical capture whose live row is
 #: flagged for a redraw. Named, with the cohorts below, so
 #: `dive_pipeline_status` reads the same predicates (migration
-#: pipeline_status_01).
+#: 0029).
 HEADTAIL_PREPROCESS_WORK = f"""EXISTS (
     SELECT 1 FROM captures c
     WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id

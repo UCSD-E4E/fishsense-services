@@ -25,7 +25,7 @@ And on every table: the app role is not the owner. A new table that fits no
 class is a violation, so isolation can't be forgotten -- only opted out of,
 explicitly, by naming the table a global reference table.
 
-**The research role** (migration research_02; PLAN.md §9.20's lean), when it
+**The research role** (migration 0032; PLAN.md §9.20's lean), when it
 exists: never superuser or BYPASSRLS, never able to write a table or view, and
 bound to the lab on every tenant table it can read -- a restrictive policy
 (:data:`RESEARCH_LAB_BINDING`), because the canonical tenant policy opens a
@@ -64,7 +64,7 @@ CANONICAL_TENANT_EXPRESSION = (
     " ''::text))::uuid)"
 )
 
-#: The research read role and the tenant it is bound to (migration research_02).
+#: The research read role and the tenant it is bound to (migration 0032).
 RESEARCH_ROLE = "fishsense_research"
 RESEARCH_TENANT_SLUG = "lab"
 #: Its permissive policy (the lab's rows without a tenant setting) and its

@@ -4,7 +4,7 @@
 decision:** a named research role with read access scoped to the lab tenant,
 *not* `BYPASSRLS`. v1's researchers ran `psql -U postgres` over SSH -- a
 superuser, so every row and every write (§2.7). This role can read the
-research views (research_01) and what lies beneath them, and nothing else.
+research views (0031) and what lies beneath them, and nothing else.
 
 * **`fishsense_research`** is a NOLOGIN group role, created here if the
   cluster lacks it (roles are cluster-wide; a downgrade revokes but never drops
@@ -39,13 +39,13 @@ research views (research_01) and what lies beneath them, and nothing else.
 Not decided here (§9.20): a versioned view contract, as-of reads for frozen
 corpora, exports as a job; Superset's role (§9.18).
 
-Revision ID: research_02
-Revises: research_01
+Revision ID: 0032
+Revises: 0031
 """
 
 from alembic import op
 
-# Frozen at migration time (see research_01): the audit's names for the role
+# Frozen at migration time (see 0031): the audit's names for the role
 # and its policies are the ones created here.
 from fishsense_services_api.schema_audit import (
     RESEARCH_LAB_BINDING,
@@ -54,8 +54,8 @@ from fishsense_services_api.schema_audit import (
     RESEARCH_TENANT_SLUG,
 )
 
-revision = "research_02"
-down_revision = "research_01"
+revision = "0032"
+down_revision = "0031"
 
 #: The tenant tables beneath the research views.
 TENANT_TABLES = (
@@ -94,7 +94,7 @@ PUBLIC_VIEWS = (
     "current_laser_predictions_gated",
     "current_laser_depths",
 )
-#: The research views themselves (research_01).
+#: The research views themselves (0031).
 FISH_VIEWS = (
     "fish_model_measurement_accuracy",
     "fish_length_estimate",

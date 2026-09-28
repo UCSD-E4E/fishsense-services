@@ -134,7 +134,7 @@ HAS_LIVE_SPECIES_TASK = """
 #: species task and a prediction cluster, or a canonical capture whose live
 #: species row is flagged for a redraw. Named, with the cohort below, so
 #: `dive_pipeline_status` reads the same predicates (migration
-#: pipeline_status_01).
+#: 0029).
 SPECIES_PREPROCESS_WORK = f"""
     (
         EXISTS (

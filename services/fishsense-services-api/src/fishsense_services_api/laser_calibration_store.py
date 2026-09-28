@@ -324,7 +324,7 @@ def _cohort(where: str) -> str:
 #: The stage-13 (slate) and checkerboard cohorts over dive `d`, but for the
 #: tenant and priority terms the selector adds. Named so
 #: `dive_pipeline_status` reads the same predicates (migration
-#: pipeline_status_01).
+#: 0029).
 LASER_CALIBRATION_COHORT = _cohort(
     f"{_STAGE_13_CAN_CALIBRATE} AND {_HAS_CAMERA} AND {_TEMPLATE_CAN_SCALE}"
 )

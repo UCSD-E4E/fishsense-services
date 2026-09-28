@@ -63,10 +63,10 @@ references and calibration targets excluded). Their p90 is per fish, not the
 paper's per-(dive, model) cell (PLAN.md §9.18).
 
 Every view runs as its caller (`security_invoker`), so RLS decides whose rows
-it shows; research_02 grants them to the research role, bound to the lab.
+it shows; 0032 grants them to the research role, bound to the lab.
 Created in dependency order and dropped in reverse, never CASCADE.
 
-Revision ID: research_01
+Revision ID: 0031
 Revises: 0028
 """
 
@@ -77,8 +77,8 @@ from alembic import op
 from fishsense_services_api.camera_sql import RECTIFIABLE_CAMERA_MODEL
 from fishsense_services_api.taxonomy_sql import calibration_target_name_sql
 
-revision = "research_01"
-down_revision = "0028"
+revision = "0031"
+down_revision = "0030"
 
 #: The capture a row `t` belongs to, tenant to tenant.
 _CAPTURE = (
@@ -459,7 +459,7 @@ def upgrade() -> None:
     op.execute("CREATE SCHEMA v1")
     op.execute(
         "COMMENT ON SCHEMA v1 IS 'v1-shaped read-only views for the research "
-        "repos (migration research_01); ids are numbers'"
+        "repos (migration 0031); ids are numbers'"
     )
     for name, select in V1_VIEWS:
         op.execute(f"CREATE VIEW v1.{name} WITH (security_invoker = true) AS {select}")

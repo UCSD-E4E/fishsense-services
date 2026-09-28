@@ -7,7 +7,7 @@ measurement of a named model in a dive, with the dive, the frame and the model's
 Fish created on first use. v1 had one Fish per model (`uq_fish_name`); here one
 per model per tenant, found by its fish model.
 
-The views read the lab tenant only (research_02), so everything is seeded there.
+The views read the lab tenant only (0032), so everything is seeded there.
 Constructors, not fixtures -- except `references`, which isolates the global
 reference lengths a test sets.
 """

@@ -77,7 +77,7 @@ __all__ = [
 #: The cohort over dive `d`, but for the tenant and priority terms the
 #: selector adds: the dive has a row of migration 0026's `measurement_work`.
 #: Named so `dive_pipeline_status` reads the same predicate (migration
-#: pipeline_status_01).
+#: 0029).
 MEASUREMENT_COHORT = """EXISTS (
     SELECT 1 FROM measurement_work w
     WHERE w.tenant_id = d.tenant_id AND w.dive_id = d.id

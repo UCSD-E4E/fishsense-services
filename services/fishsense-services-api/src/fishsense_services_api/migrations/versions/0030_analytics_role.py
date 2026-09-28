@@ -34,14 +34,14 @@ The role is cluster-wide, so it is created only if missing. Creating it needs
 CREATEROLE, which the schema owner that runs migrations has in every
 deployment so far (the container's superuser).
 
-Revision ID: pipeline_status_02
-Revises: pipeline_status_01
+Revision ID: 0030
+Revises: 0029
 """
 
 from alembic import op
 
-revision = "pipeline_status_02"
-down_revision = "pipeline_status_01"
+revision = "0030"
+down_revision = "0029"
 
 ROLE = "fishsense_analytics"
 LAB_SLUG = "lab"

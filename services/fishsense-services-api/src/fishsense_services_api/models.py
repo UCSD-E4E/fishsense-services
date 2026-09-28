@@ -266,7 +266,7 @@ class Capture(Base):
             unique=True,
             postgresql_where=text("is_canonical"),
         ),
-        # A dive's captures, per dive (pipeline_status_01).
+        # A dive's captures, per dive (0029).
         Index("captures_tenant_id_dive_id_idx", "tenant_id", "dive_id"),
     )
 
@@ -780,7 +780,7 @@ class LaserDepth(Base):
             ["tenant_id", "laser_calibration_id"],
             ["laser_calibrations.tenant_id", "laser_calibrations.id"],
         ),
-        # A capture's depths, per capture (pipeline_status_01).
+        # A capture's depths, per capture (0029).
         Index("laser_depths_tenant_id_capture_id_idx", "tenant_id", "capture_id"),
     )
 

@@ -86,8 +86,7 @@ VIEW = "dive_pipeline_status"
 
 def _migration():
     return importlib.import_module(
-        "fishsense_services_api.migrations.versions."
-        "pipeline_status_01_dive_pipeline_status"
+        "fishsense_services_api.migrations.versions." "0029_dive_pipeline_status"
     )
 
 

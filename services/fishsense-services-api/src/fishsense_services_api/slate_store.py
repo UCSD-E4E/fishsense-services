@@ -239,7 +239,7 @@ def slate_preprocess_work(marker: str) -> str:
     """Dive `d` has stage-9 work: a canonical frame marked and unlabeled, or
     flagged for a redraw. `marker` is SQL for the stage-9 marker. Named, with
     the cohort, so `dive_pipeline_status` reads the same predicates
-    (migration pipeline_status_01)."""
+    (migration 0029)."""
     return f"""EXISTS (
         SELECT 1 FROM captures c
         WHERE {_CANONICAL_OF_DIVE}

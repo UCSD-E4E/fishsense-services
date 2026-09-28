@@ -72,7 +72,7 @@ versions spelled below. A change to any of them must ship a migration that
 recreates the function; `RENDERED_SHA256` and the version constants are
 pinned by tests so the change cannot be made silently.
 
-Revision ID: pipeline_status_01
+Revision ID: 0029
 Revises: 0028
 """
 
@@ -105,7 +105,7 @@ from fishsense_services_api.species_store import (
 )
 from fishsense_services_api.taxonomy_sql import SLATE_CONTENT_MARKER
 
-revision = "pipeline_status_01"
+revision = "0029"
 down_revision = "0028"
 
 VIEW = "dive_pipeline_status"
