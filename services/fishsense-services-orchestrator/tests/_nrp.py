@@ -6,7 +6,8 @@ missing one raise 404, as the apiserver does); its pods go Ready as soon as
 they are asked for, unless the Deployment is listed in ``broken`` -- which is
 exactly the shape of an unschedulable GPU request, an exhausted quota, or a
 CrashLoopBackOff. ConfigMaps take strategic-merge patches, where ``None``
-removes a key. (Ported in spirit from fishsense-lite@77e8f8e5
+removes a key. Secrets are only read: the Temporal leaf's fingerprint, which a
+wake stamps on the pods it stands up (see `ops.cert_sync`). (Ported in spirit from fishsense-lite@77e8f8e5
 tests/test_ensure_gpu_worker_running_activity.py `_Cluster`, which modelled
 v1's scale subresource and annotations.)
 """
@@ -38,6 +39,8 @@ GPU = "fishsense-processor-gpu"
 FALLBACK = "fishsense-processor-gpu-cpu-fallback"
 ALL_DEPLOYMENTS = [PER_IMAGE, GPU, FALLBACK, LIGHT]
 STATE = "fishsense-processor-gpu-fallback"
+TEMPORAL_CERTS = "fishsense-data-worker-temporal-certs"
+LEAF = "fishsense.e4e.ucsd.edu/leaf-sha256"
 
 
 def settings(**overrides) -> NrpSettings:
@@ -110,6 +113,13 @@ class _Core:
             else:
                 data[key] = value
 
+    def read_namespaced_secret(self, name, namespace):
+        assert namespace == self._cluster.namespace
+        if name not in self._cluster.secrets:
+            raise _not_found()
+        annotations = dict(self._cluster.secrets[name])
+        return SimpleNamespace(metadata=SimpleNamespace(annotations=annotations))
+
     def create_namespaced_config_map(self, namespace, body):
         name = body["metadata"]["name"]
         if (namespace, name) in self._cluster.config_maps:
@@ -128,6 +138,8 @@ class FakeCluster:
         self.deployments: dict[str, dict] = {}
         self.ready: dict[str, int] = {}
         self.config_maps: dict[tuple[str, str], dict[str, str]] = {}
+        #: Secret name -> its annotations
+        self.secrets: dict[str, dict[str, str]] = {}
         self.applies: list[tuple[str, dict]] = []
         self.apply_options: list[tuple[str | None, bool | None, dict]] = []
         self.deletes: list[str] = []
@@ -150,6 +162,16 @@ class FakeCluster:
             "spec": {"replicas": replicas},
         }
         self.ready[name] = replicas if ready is None else ready
+
+    def push_leaf(self, fingerprint: str) -> None:
+        """What `ops.cert_sync` leaves behind: the Temporal Secret, recording
+        which leaf it holds."""
+        self.secrets[TEMPORAL_CERTS] = {LEAF: fingerprint}
+
+    def template_annotations(self, name: str) -> dict[str, str]:
+        """The pod template's annotations in the last body applied."""
+        template = self.deployments[name]["spec"].get("template") or {}
+        return (template.get("metadata") or {}).get("annotations") or {}
 
     def state(self) -> dict[str, str]:
         return self.config_maps.get((self.namespace, STATE), {})

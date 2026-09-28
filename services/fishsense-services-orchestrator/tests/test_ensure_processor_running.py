@@ -20,6 +20,7 @@ from temporalio.testing import ActivityEnvironment
 from fishsense_services_orchestrator.nrp.activities import NrpActivities
 
 from ._nrp import (
+    LEAF,
     FakeCluster,
     LIGHT,
     PER_IMAGE,
@@ -116,3 +117,36 @@ async def test_overlapping_wakes_converge_rather_than_accumulate():
     (_, first), (_, second) = cluster.applies
     assert without_wake(first) == without_wake(second)
     assert cluster.replicas(LIGHT) == 2
+
+
+# -- the Temporal leaf the pods start on (ops.cert_sync) ---------------------------
+
+
+@pytest.mark.parametrize(
+    "wake, name",
+    [
+        ("ensure_per_image_processor_running", PER_IMAGE),
+        ("ensure_light_processor_running", LIGHT),
+    ],
+)
+async def test_a_wake_stamps_its_pods_with_the_leaf_they_mount(wake, name):
+    """The pods mount the Temporal Secret as it is now, so the wake records
+    which leaf that is on the pod template. The cert sync rolls a Deployment
+    whose pods started on an older leaf -- and, by this stamp, leaves alone
+    one stood up after the rotation rather than restarting it for nothing."""
+    cluster = FakeCluster()
+    cluster.push_leaf("sha-of-the-current-leaf")
+
+    await ActivityEnvironment().run(getattr(_activities(cluster), wake))
+
+    assert cluster.template_annotations(name)[LEAF] == "sha-of-the-current-leaf"
+
+
+async def test_a_wake_before_the_first_cert_sync_stamps_nothing():
+    """No Secret yet (a fresh namespace): nothing to record, and no reason to
+    refuse the wake -- the first sync rolls the pods onto the leaf it pushes."""
+    cluster = FakeCluster()
+
+    await ActivityEnvironment().run(_activities(cluster).ensure_light_processor_running)
+
+    assert LEAF not in cluster.template_annotations(LIGHT)

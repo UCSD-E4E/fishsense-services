@@ -30,10 +30,12 @@ metadata:
 ---
 # Exactly what the orchestrator does:
 #  - the wakes: server-side apply of a Deployment (`patch`, which creates it
-#    when missing, so also `create`), and `get` for the readiness reads;
+#    when missing, so also `create`), `get` for the readiness reads, and `get`
+#    on the Temporal Secret for the leaf they stamp on the pods;
 #  - the sweeper: `delete`;
 #  - the GPU fallback: get/create/patch on its one ConfigMap;
-#  - the Temporal cert sync: create, and get/patch on its one Secret.
+#  - the Temporal cert sync: create, and get/patch on its one Secret; then
+#    get/patch on each processor Deployment, to roll it onto the new leaf.
 # No pods, no other Secret, no watch, nothing cluster-scoped.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

@@ -130,8 +130,9 @@ spec:
       volumes:
         - name: temporal-certs
           # v1's Secret, same `CN=fishsense-worker` identity, which the slot's
-          # nrp_cert_sync already rotates. A pod created after a rotation mounts
-          # the current leaf, so tear-down needs no rollout-restart.
+          # nrp_cert_sync already rotates. The processor reads it once, at
+          # connect, so ops.cert_sync rolls every Deployment that is up when
+          # it pushes a new leaf; one stood up later mounts the current leaf.
           secret:
             secretName: fishsense-data-worker-temporal-certs
         # Ephemeral only; no PVC by design.

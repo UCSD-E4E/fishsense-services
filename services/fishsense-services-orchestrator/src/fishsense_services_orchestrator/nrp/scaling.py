@@ -47,6 +47,8 @@ from fishsense_services_contracts import (
 from fishsense_services_orchestrator.nrp import manifests as kinds
 from fishsense_services_orchestrator.nrp.gpu_fallback import FallbackPolicy, GpuState
 from fishsense_services_orchestrator.nrp.manifests import (
+    LEAF_SHA256,
+    TEMPORAL_CERT_SECRET,
     Manifest,
     WOKEN_AT,
     load_manifests,
@@ -87,6 +89,9 @@ class NrpSettings(BaseSettings):
     image_tag: str | None = None
     manifest_dir: Path = DEFAULT_MANIFEST_DIR
     state_config_map: str = DEFAULT_STATE_CONFIG_MAP
+    #: The Secret the pods mount their Temporal leaf from; `ops.cert_sync`
+    #: reads the same setting.
+    temporal_cert_secret: str = TEMPORAL_CERT_SECRET
     #: The per-image role's replicas: rawpy throughput on a memory-bound pod.
     active_replicas: int = 1
     light_active_replicas: int = 1
@@ -154,6 +159,7 @@ class ScalingConfig:
     gpu: GpuScalingConfig = field(default_factory=GpuScalingConfig)
     light: LightScalingConfig = field(default_factory=LightScalingConfig)
     state_config_map: str = DEFAULT_STATE_CONFIG_MAP
+    temporal_cert_secret: str = TEMPORAL_CERT_SECRET
 
     def manifest(self, name: str) -> Manifest:
         return self.manifests[name]
@@ -260,6 +266,7 @@ def resolve_scaling_config(settings: NrpSettings | None = None) -> ScalingConfig
             ),
         ),
         state_config_map=settings.state_config_map,
+        temporal_cert_secret=settings.temporal_cert_secret,
     )
 
 
@@ -269,7 +276,8 @@ def resolve_scaling_config(settings: NrpSettings | None = None) -> ScalingConfig
 @dataclass(frozen=True)
 class Kubernetes:
     """The two API groups the NRP stage uses, over one connection: ``apps``
-    for the Deployments, ``core`` for the GPU-fallback ConfigMap."""
+    for the Deployments, ``core`` for the GPU-fallback ConfigMap and the
+    Temporal Secret's fingerprint."""
 
     apps: Any
     core: Any
@@ -488,8 +496,28 @@ def delete_deployment(apps, namespace: str, name: str) -> bool:
     return True
 
 
+def current_leaf(core, config: ScalingConfig) -> str | None:
+    """The Temporal leaf the processor's Secret holds now (the fingerprint
+    `ops.cert_sync` records on it), or None before the first sync."""
+    try:
+        secret = core.read_namespaced_secret(
+            name=config.temporal_cert_secret, namespace=config.namespace
+        )
+    except Exception as exc:  # pylint: disable=broad-except
+        if _is_not_found(exc):
+            return None
+        raise
+    annotations = getattr(getattr(secret, "metadata", None), "annotations", None)
+    return (annotations or {}).get(LEAF_SHA256)
+
+
 def set_deployment_replicas(
-    apps, config: ScalingConfig, name: str, replicas: int
+    apps,
+    config: ScalingConfig,
+    name: str,
+    replicas: int,
+    *,
+    leaf_sha256: str | None = None,
 ) -> None:
     """Bring Deployment ``name`` to an absolute replica target.
 
@@ -498,6 +526,10 @@ def set_deployment_replicas(
     image) or, for a target of zero, tears it down. Idempotent either way --
     the target is absolute, never an increment, and it always issues the call
     rather than reading first to skip it.
+
+    ``leaf_sha256`` (`current_leaf`) records which Temporal leaf the pods
+    mount, so `ops.cert_sync` rolls this Deployment only once that leaf is
+    replaced.
     """
     if replicas > 0:
         apply_deployment(
@@ -507,6 +539,7 @@ def set_deployment_replicas(
                 image_tag=config.image_tag,
                 replicas=replicas,
                 woken_at=datetime.now(timezone.utc),
+                leaf_sha256=leaf_sha256,
             ),
         )
     else:

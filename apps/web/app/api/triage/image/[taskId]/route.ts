@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { isPortalAuthorized } from "@/lib/authz";
 import { fetchTaskImage } from "@/lib/label-studio-tasks";
+import { tenantProjectIds } from "@/lib/tenant-tasks";
 
 /**
  * Streams a task's frame through this server.
@@ -16,7 +17,8 @@ import { fetchTaskImage } from "@/lib/label-studio-tasks";
  * It takes only a task id, never a `fileuri`. Accepting a caller-supplied URI
  * would make this an open proxy that fetches anything the server can reach;
  * resolving the URI from the task itself keeps the reachable set to frames
- * that already belong to a project.
+ * that already belong to a project -- in v2, to one of this tenant's
+ * projects, since every tenant's share one Label Studio workspace.
  */
 export async function GET(
   _request: Request,
@@ -33,7 +35,14 @@ export async function GET(
     return new NextResponse("Bad task id", { status: 400 });
   }
 
-  const resolved = await fetchTaskImage(taskId);
+  const resolved = await fetchTaskImage(taskId, await tenantProjectIds());
+
+  if (resolved.kind === "foreign") {
+    // v2: another tenant's task, in the Label Studio workspace every tenant
+    // shares (lib/tenant-tasks.ts). Answered as for a task that isn't there,
+    // so the route doesn't confirm other tenants' ids.
+    return new NextResponse("No such task", { status: 404 });
+  }
 
   if (resolved.kind === "unresolved") {
     // Label Studio handed the URI back unchanged, so the project has no

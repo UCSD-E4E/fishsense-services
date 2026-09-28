@@ -34,6 +34,7 @@ from fishsense_services_orchestrator.nrp.gpu_fallback import (
 
 from ._nrp import (
     FALLBACK,
+    LEAF,
     FakeCluster,
     GPU,
     STATE,
@@ -219,3 +220,19 @@ async def test_never_writes_the_state_into_a_deployment():
         namespace=cluster.namespace, image_tag="v1.2.3", replicas=1
     )
     assert without_wake(gpu_bodies[0]) == rendered
+
+
+async def test_whichever_deployment_stands_carries_the_current_leaf():
+    """As the per-image and light wakes do (test_ensure_processor_running):
+    the GPU Deployment, and its CPU fallback once the GPU gives up, record
+    which Temporal leaf their pods mount, so the cert sync rolls one only when
+    that leaf has been replaced."""
+    cluster = FakeCluster(broken={GPU})
+    cluster.push_leaf("sha-of-the-current-leaf")
+    activities = _activities(cluster)
+
+    await _run(activities)  # a first start, which won't go Ready
+    assert cluster.template_annotations(GPU)[LEAF] == "sha-of-the-current-leaf"
+    modes = [await _run(activities) for _ in range(4)]
+    assert MODE_CPU_FALLBACK in modes
+    assert cluster.template_annotations(FALLBACK)[LEAF] == "sha-of-the-current-leaf"
