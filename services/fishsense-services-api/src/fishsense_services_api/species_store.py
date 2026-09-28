@@ -20,8 +20,8 @@ v1's rules, kept:
   capture whose live species row is flagged `needs_reprocess`;
 * **the population cohort**: the same without the cluster gate or the flag,
   every matching dive;
-* a sentinel (a species row with no project) is not a label, and a
-  superseded row is not evidence of done work;
+* an incomplete sentinel (a species row with no project) is not a label, and
+  a superseded row is not evidence of done work;
 * raising the flag touches only live, by default incomplete, canonical rows;
   clearing touches every canonical row of the dive (or only the named frames);
 * the unidentified-slate note is written only when the dive has none, and
@@ -30,6 +30,9 @@ v1's rules, kept:
 v2 changes:
 
 * per tenant, ordered by `created_at` (v1: `id`);
+* **a completed sentinel is done work** in both cohorts, as populate has
+  always read it (v1's cohorts ignored it, so its dive was re-staged hourly,
+  forever);
 * **populate's candidates are canonical** (v1 took every laser-valid image of
   the dive): a duplicate frame shares its twin's JPEG and task URL, and would
   have been anchored to the twin's task;
@@ -105,13 +108,19 @@ REFUSAL_OUTLIVED_SQL = (
 )
 
 #: The canonical capture `c` has a live species label in a Label Studio
-#: project: populate has seeded (or a labeler holds) its task. Sentinels and
-#: superseded rows don't count.
+#: project -- populate has seeded (or a labeler holds) its task -- or a live
+#: completed one anywhere. Superseded rows and incomplete sentinels don't
+#: count. v2 change: v1 ignored a completed sentinel here, yet populate never
+#: tasks a frame with a completed row (`species.populate.
+#: select_target_captures`), so its dive was re-staged hourly, forever, ahead
+#: of every younger one. The stage-2 resolver (`species.preprocess`) and
+#: populate read "done" the same way.
 _HAS_LIVE_SPECIES_TASK = """
     EXISTS (
         SELECT 1 FROM species_labels s
         WHERE s.tenant_id = c.tenant_id AND s.capture_id = c.id
-          AND s.ls_project_id IS NOT NULL AND NOT s.superseded
+          AND (s.ls_project_id IS NOT NULL OR s.completed)
+          AND NOT s.superseded
     )
 """
 

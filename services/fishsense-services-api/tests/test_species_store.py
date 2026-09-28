@@ -243,6 +243,41 @@ async def test_species_preprocessing_ignores_null_project_species_sentinels(
     assert await _next(app_engine, lab) == dive
 
 
+async def test_a_completed_sentinel_takes_its_frame_out_of_both_cohorts(
+    owner_engine, app_engine
+):
+    """v2 change (v1 wedged here): populate never tasks a frame with a
+    completed row, a completed sentinel included, so a cohort that still
+    counted that frame as work re-staged its dive every hour, forever, ahead
+    of every younger dive. A completed sentinel is done work."""
+    lab = await _tenant(owner_engine)
+    dive = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, dive, "a")
+    await _cluster(owner_engine, lab, dive, "prediction", [capture])
+    await _laser(owner_engine, lab, capture)
+    await _species(owner_engine, lab, capture, project=None, completed=True)
+
+    assert await _next(app_engine, lab) is None
+    assert await _population(app_engine, lab) == []
+
+
+async def test_a_superseded_completed_sentinel_is_not_done_work(
+    owner_engine, app_engine
+):
+    """Populate reads live rows only, so a superseded one -- completed or
+    not -- leaves its frame in both cohorts."""
+    lab = await _tenant(owner_engine)
+    dive = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, dive, "a")
+    await _cluster(owner_engine, lab, dive, "prediction", [capture])
+    await _laser(owner_engine, lab, capture)
+    await _species(owner_engine, lab, capture, project=None, completed=True,
+                   superseded=True)  # fmt: skip
+
+    assert await _next(app_engine, lab) == dive
+    assert await _population(app_engine, lab) == [dive]
+
+
 async def test_species_preprocessing_excludes_incomplete_or_superseded_or_null_xy_lasers(
     owner_engine, app_engine
 ):

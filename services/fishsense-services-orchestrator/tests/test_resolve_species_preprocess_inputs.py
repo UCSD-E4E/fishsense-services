@@ -429,3 +429,22 @@ async def test_a_migrated_frame_is_redrawn_over_v1s_jpeg():
     assert member.jpeg == LAYOUT.legacy_processed_jpeg(
         "preprocess_groups_jpeg", checksum_of("aaa")
     )
+
+
+# --- v2: a completed sentinel is done work ------------------------------------------
+
+
+async def test_a_completed_sentinel_is_done_work():
+    """v2 change (v1 wedged here): populate never tasks a frame with a
+    completed row, a completed sentinel included, and the cohort no longer
+    selects one. Drawing it anyway redraws a JPEG nothing will task."""
+    result = await _resolve(
+        facts(
+            images=[_image(1, "aaa"), _image(2, "bbb")],
+            clusters=[[1, 2]],
+            valid=[1, 2],
+            labels=[_species(1, project=None, completed=True)],
+        )
+    )
+
+    assert _clusters(result) == [["bbb"]]

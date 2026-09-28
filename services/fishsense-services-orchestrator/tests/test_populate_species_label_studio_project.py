@@ -111,6 +111,18 @@ def test_select_targets_filters_by_valid_laser_and_drops_completed():
     assert [c.capture_id for c in selected] == [capture(3)]
 
 
+def test_select_targets_drops_a_frame_with_a_completed_sentinel():
+    """v1's rule, now shared with both cohorts and the stage-2 resolver: a
+    completed sentinel is done work, so its frame is never tasked (and so the
+    cohorts must not keep selecting its dive)."""
+    candidates = [_image(1, "a"), _image(3, "c")]
+    existing = [_species_label(1, completed=True, project=None)]
+
+    selected = sut.select_target_captures(candidates, existing, 70)
+
+    assert [c.capture_id for c in selected] == [capture(3)]
+
+
 def test_select_targets_skips_images_already_in_this_project():
     """Idempotency filter: an image with a non-superseded species row for
     the *target* project is not re-selected, but one whose only row is in
