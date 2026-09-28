@@ -42,7 +42,7 @@ def deps(monkeypatch) -> Deps:
 
 
 def test_the_stages_ported_so_far_are_discovered():
-    assert {"ingest", "clustering", "labels"} <= {s.name for s in stages()}
+    assert {"ingest", "clustering", "labels", "nrp"} <= {s.name for s in stages()}
     assert all(isinstance(s, Stage) for s in stages())
 
 

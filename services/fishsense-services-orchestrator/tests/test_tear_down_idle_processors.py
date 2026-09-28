@@ -1,0 +1,240 @@
+"""The hourly sweeper: tear each processor Deployment down when its queue is quiet.
+
+Ported from fishsense-lite@77e8f8e5 services/fishsense-api-workflow-worker/
+tests/test_scale_down_data_worker_if_idle_activity.py and
+test_scale_down_idle_data_worker_workflow.py. There are four Deployments over
+three queues -- per-image, light, and the GPU worker with its CPU-only fallback
+-- so the per-queue pairing is itself part of what is pinned here: a busy
+per-image queue must not keep a GPU pod alive.
+
+The Temporal-busy check and Kubernetes are faked; this pins: disabled → no-op;
+busy → leave it; wedged-but-busy → tear down anyway; idle → tear down; that the
+sweeper never writes the GPU-fallback state; and the Temporal list-filter.
+
+v2 change: **tear down means delete**, never scale to zero (NRP deletes
+Deployments older than two weeks). And a Deployment that is already gone is the
+ordinary idle state: nothing to delete, and not reported as a tear-down.
+"""
+
+from __future__ import annotations
+
+import uuid
+
+import pytest
+from temporalio import activity
+from temporalio.contrib.pydantic import pydantic_data_converter
+from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
+from temporalio.worker import Worker
+
+from fishsense_services_contracts import (
+    PROCESSOR_GPU_TASK_QUEUE,
+    PROCESSOR_LIGHT_TASK_QUEUE,
+    PROCESSOR_TASK_QUEUE,
+)
+from fishsense_services_orchestrator.nrp import activities as sut
+from fishsense_services_orchestrator.nrp.activities import NrpActivities
+from fishsense_services_orchestrator.nrp.gpu_fallback import FAILURES_KEY
+from fishsense_services_orchestrator.nrp.workflow import (
+    TearDownIdleProcessorsWorkflow,
+)
+
+from ._nrp import (
+    ALL_DEPLOYMENTS,
+    FALLBACK,
+    GPU,
+    LIGHT,
+    PER_IMAGE,
+    STATE,
+    FakeCluster,
+    config,
+)
+
+ALL_QUEUES = {
+    PROCESSOR_TASK_QUEUE,
+    PROCESSOR_GPU_TASK_QUEUE,
+    PROCESSOR_LIGHT_TASK_QUEUE,
+}
+
+
+def _busy(queues: set[str], asked: list | None = None):
+    async def _check(_cooldown: int, task_queue: str) -> bool:
+        if asked is not None:
+            asked.append(task_queue)
+        return task_queue in queues
+
+    return _check
+
+
+def _everything_up(cluster: FakeCluster, *, ready: bool = True) -> None:
+    for name in ALL_DEPLOYMENTS:
+        cluster.stand_up(name, replicas=1, ready=1 if ready else 0)
+
+
+async def _sweep(cluster: FakeCluster, busy: set[str], asked=None) -> bool:
+    activities = NrpActivities(
+        config=config(),
+        kubernetes=cluster.kubernetes,
+        task_queue_busy=_busy(busy, asked),
+    )
+    return await ActivityEnvironment().run(activities.tear_down_idle_processors)
+
+
+async def test_noop_when_scaling_disabled():
+    async def _must_not(*_a):
+        pytest.fail("must not query Temporal when disabled")
+
+    activities = NrpActivities(config=None, task_queue_busy=_must_not)
+    assert (
+        await ActivityEnvironment().run(activities.tear_down_idle_processors) is False
+    )
+
+
+async def test_does_not_tear_down_when_busy_and_the_worker_is_healthy():
+    """Busy + a Ready pod = real work in flight. Leave it alone."""
+    cluster = FakeCluster()
+    _everything_up(cluster)
+
+    assert await _sweep(cluster, ALL_QUEUES) is False
+    assert not cluster.deletes
+
+
+async def test_tears_down_a_wedged_worker_even_though_the_queue_looks_busy():
+    """The feedback loop this exists to break.
+
+    A processor that cannot produce a Ready pod (expired Temporal cert, bad
+    image, unschedulable) never drains its queue — so every dispatched child
+    sits Running, the queue never looks idle, and the Deployment holds GPUs
+    around the clock. Exactly the state v1's prod was in from 2026-08-14.
+    "Busy" is only a reason to keep the pods when the pods can make progress.
+    """
+    cluster = FakeCluster()
+    _everything_up(cluster, ready=False)
+
+    assert await _sweep(cluster, ALL_QUEUES) is True
+    assert cluster.deletes == ALL_DEPLOYMENTS
+
+
+async def test_tears_every_deployment_down_when_idle():
+    cluster = FakeCluster()
+    _everything_up(cluster)
+
+    assert await _sweep(cluster, set()) is True
+    assert cluster.deletes == ALL_DEPLOYMENTS
+    assert not cluster.deployments
+
+
+async def test_nothing_standing_is_nothing_to_tear_down():
+    """v2: the ordinary idle hour. Every Deployment is already gone (torn
+    down last hour, or deleted by NRP); none of that is an error, and the
+    sweeper doesn't claim a tear-down it didn't do."""
+    cluster = FakeCluster()
+
+    assert await _sweep(cluster, set()) is False
+    assert not cluster.deletes
+
+
+async def test_a_busy_per_image_queue_does_not_keep_the_other_pods_alive():
+    """The reason the split exists. Before it, one queue served everything, so
+    hours of rectify work held a GPU the whole time — and would equally have
+    held a light pod that had nothing to do."""
+    cluster = FakeCluster()
+    _everything_up(cluster)
+
+    await _sweep(cluster, {PROCESSOR_TASK_QUEUE})
+
+    assert cluster.deletes == [GPU, FALLBACK, LIGHT]
+
+
+async def test_a_busy_gpu_queue_does_not_keep_the_per_image_worker_alive():
+    cluster = FakeCluster()
+    _everything_up(cluster)
+
+    await _sweep(cluster, {PROCESSOR_GPU_TASK_QUEUE})
+
+    assert cluster.deletes == [PER_IMAGE, LIGHT]
+
+
+async def test_a_busy_light_queue_does_not_keep_the_per_image_worker_alive():
+    """The converse of the split, and the one that costs real money: the light
+    stages fire hourly and finish in seconds, so if their queue being busy held
+    the per-image pod up, we would be paying for a 16 Gi rawpy worker to watch
+    a line fit."""
+    cluster = FakeCluster()
+    _everything_up(cluster)
+
+    await _sweep(cluster, {PROCESSOR_LIGHT_TASK_QUEUE})
+
+    assert cluster.deletes == [PER_IMAGE, GPU, FALLBACK]
+
+
+async def test_never_touches_the_gpu_fallback_state():
+    """Tripwire. `gpu_fallback` counts "replicas wanted, no Ready pod" as a
+    failed start. If routine idle tear-downs also rewrote (or deleted) that
+    count, a multi-hour GPU outage would reset its own failure counter every
+    hour and could never reach the CPU fallback — silently defeating the whole
+    feature."""
+    cluster = FakeCluster()
+    _everything_up(cluster, ready=False)
+    cluster.config_maps[cluster.namespace, STATE] = {FAILURES_KEY: "2"}
+
+    await _sweep(cluster, set())
+
+    assert not cluster.config_map_writes
+    assert cluster.state() == {FAILURES_KEY: "2"}
+
+
+async def test_queries_each_task_queue_once_not_once_per_deployment():
+    """Two GPU Deployments share one queue; asking Temporal twice for the same
+    answer is pure waste on an hourly job. Three queues, four Deployments."""
+    cluster = FakeCluster()
+    asked: list[str] = []
+
+    await _sweep(cluster, set(), asked)
+
+    assert sorted(asked) == sorted(ALL_QUEUES)
+
+
+def test_busy_query_targets_the_task_queue_with_running_or_recent_close():
+    query = sut.build_busy_query(15, PROCESSOR_TASK_QUEUE)
+    assert f'TaskQueue = "{PROCESSOR_TASK_QUEUE}"' in query
+    assert 'ExecutionStatus = "Running"' in query
+    # A recent-close cutoff timestamp (RFC3339, Z-suffixed) is present.
+    assert 'CloseTime > "20' in query and query.rstrip().endswith('Z")')
+
+
+def test_busy_query_can_target_the_gpu_task_queue():
+    query = sut.build_busy_query(15, PROCESSOR_GPU_TASK_QUEUE)
+    assert f'TaskQueue = "{PROCESSOR_GPU_TASK_QUEUE}"' in query
+
+
+# -- the workflow ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("tore_down", [True, False])
+async def test_workflow_returns_activity_result(tore_down: bool):
+    """A thin wrapper: pin that it delegates to the activity and passes the
+    result through."""
+    calls: list = []
+
+    @activity.defn(name="tear_down_idle_processors")
+    async def stub_tear_down() -> bool:
+        calls.append(True)
+        return tore_down
+
+    async with await WorkflowEnvironment.start_time_skipping(
+        data_converter=pydantic_data_converter
+    ) as env:
+        async with Worker(
+            env.client,
+            task_queue="test-processor-sweeper",
+            workflows=[TearDownIdleProcessorsWorkflow],
+            activities=[stub_tear_down],
+        ):
+            result = await env.client.execute_workflow(
+                TearDownIdleProcessorsWorkflow.run,
+                id=f"test-processor-sweeper-{uuid.uuid4()}",
+                task_queue="test-processor-sweeper",
+            )
+
+    assert result is tore_down
+    assert calls == [True]

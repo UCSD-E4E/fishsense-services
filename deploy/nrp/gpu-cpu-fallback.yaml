@@ -1,0 +1,123 @@
+# fishsense-processor-gpu-cpu-fallback -- the GPU role, on NRP, without a GPU.
+#
+# Ported from fishsense-lite@77e8f8e5
+# deploy/k8s/data-worker/deployment-gpu-cpu-fallback.yaml. Same GPU image, same
+# `gpu` role, same `fishsense_processor_gpu` queue -- and no GPU request at all.
+# It exists so the torch stages degrade rather than stop when NRP has no GPU for
+# us: fishsense-core's models use CUDA when torch sees it and the CPU otherwise,
+# so this pod produces the *same predictions*, just slowly.
+#
+# **Exactly one of this and fishsense-processor-gpu is up at a time**, and the
+# orchestrator decides which: after FISHSENSE_NRP_GPU_MAX_START_FAILURES failed
+# GPU starts it deletes the GPU Deployment and applies this one, for
+# FISHSENSE_NRP_GPU_FALLBACK_MINUTES, then probes the GPU again. On a healthy
+# cluster this Deployment never exists.
+#
+# Applied and deleted by the orchestrator, like the others (see
+# per-image.yaml): no `replicas`, no image tag.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fishsense-processor-gpu-cpu-fallback
+  labels:
+    app.kubernetes.io/name: fishsense-processor-gpu-cpu-fallback
+    app.kubernetes.io/part-of: fishsense
+    app.kubernetes.io/component: gpu-cpu-fallback
+spec:
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fishsense-processor-gpu-cpu-fallback
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fishsense-processor-gpu-cpu-fallback
+        app.kubernetes.io/part-of: fishsense
+        app.kubernetes.io/component: gpu-cpu-fallback
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      # No GPU toleration and no GPU node affinity, deliberately: restricted to
+      # GPU nodes, this pod would fail to schedule for exactly the reasons the
+      # GPU one did, and the fallback would be worthless.
+      terminationGracePeriodSeconds: 45
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        # The image's `app` user, by number: kubelet cannot check a name.
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: processor
+          image: ghcr.io/ucsd-e4e/fishsense-services-processor-gpu
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: FISHSENSE_PROCESSOR_ROLE
+              value: gpu
+            # One image at a time. CPU inference is slow and memory-hungry;
+            # concurrency buys little and risks the decode OOM. A backlog here
+            # drains slowly on purpose -- the alternative was not draining.
+            - name: FISHSENSE_PROCESSOR_MAX_CONCURRENT_ACTIVITIES
+              value: "1"
+            - name: FISHSENSE_TEMPORAL_ADDRESS
+              value: krg-prod.ucsd.edu:7233
+            - name: FISHSENSE_TEMPORAL_NAMESPACE
+              value: fishsense
+            - name: FISHSENSE_TEMPORAL_DOMAIN
+              value: workflows.krg.ucsd.edu
+            - name: FISHSENSE_TEMPORAL_CLIENT_CERT
+              value: /certs/client.pem
+            - name: FISHSENSE_TEMPORAL_CLIENT_PRIVATE_KEY
+              value: /certs/client.key
+            - name: FISHSENSE_TEMPORAL_SERVER_ROOT_CA_CERT
+              value: /certs/root-ca.pem
+            - name: TMPDIR
+              value: /scratch
+            - name: XDG_CACHE_HOME
+              value: /cache
+          envFrom:
+            - secretRef:
+                name: fishsense-processor-secrets
+                optional: true
+          resources:
+            # Inference is CPU-bound here, so more cores than the GPU pod, one
+            # image at a time. Do not raise the cap to claw back throughput:
+            # peak memory is dominated by the full-res decode.
+            requests:
+              cpu: "4"
+              memory: 6Gi
+              ephemeral-storage: 2Gi
+            limits:
+              cpu: "8"
+              memory: 16Gi
+              ephemeral-storage: 17Gi
+              # No `nvidia.com/gpu` -- the entire point of this Deployment.
+          volumeMounts:
+            - name: temporal-certs
+              mountPath: /certs
+              readOnly: true
+            - name: cache
+              mountPath: /cache
+            - name: scratch
+              mountPath: /scratch
+      volumes:
+        - name: temporal-certs
+          secret:
+            secretName: fishsense-data-worker-temporal-certs
+        - name: cache
+          emptyDir:
+            # The same checkpoints as the GPU pod.
+            sizeLimit: 12Gi
+        - name: scratch
+          emptyDir:
+            sizeLimit: 4Gi

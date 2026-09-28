@@ -3,12 +3,13 @@
 Ported from fishsense-lite@a8b2c3bc services/fishsense-api-workflow-worker/src/
 fishsense_api_workflow_worker/workflows/cluster_dive_frames_parent_workflow.py.
 
-Picks the oldest high-priority dive needing dive-frame clustering and
-dispatches `DiveFrameClusteringWorkflow` to the processor's light queue. After
+Picks the oldest high-priority dive needing dive-frame clustering, wakes the
+processor's light role on NRP, and dispatches `DiveFrameClusteringWorkflow` to
+the light queue. After
 the child returns, persists its clusters as prediction clusters, so stage-2
 species preprocessing has the cluster gate it depends on. Stage 1 has no NAS
 or object-store staging -- clustering is pure maths on capture timestamps --
-so the sequence is selector -> resolver -> child -> persist.
+so the sequence is selector -> resolver -> wake -> child -> persist.
 
 Cluster-correctness invariants (v1's):
 
@@ -27,8 +28,10 @@ v2 changes:
   re-selected hourly, hit "already started", and never got clusters. v2 allows
   a duplicate of a *closed* child -- clustering is deterministic and cheap --
   and the persist is idempotent, so a re-run is harmless;
-* no NRP scale-up step yet: the processor's scaling ports with the other
-  worker duties (PLAN.md §6.2).
+* the wake (v1's `ensure_light_worker_running_activity`, ported with v1's
+  NRP scaling at fishsense-lite@77e8f8e5) stands the light processor up rather
+  than scaling it (`nrp`, PLAN.md §3). As in v1, it runs only once the parent
+  knows there is work, so a quiet hour never wakes a pod.
 """
 
 from datetime import timedelta
@@ -50,6 +53,7 @@ with workflow.unsafe.imports_passed_through():
     from fishsense_services_orchestrator.clustering.activities import (
         ClusteringTarget,
     )
+    from fishsense_services_orchestrator.nrp.workflow import wake_light_processor
 
 __all__ = ["ClusterDiveFramesParentWorkflow"]
 
@@ -96,6 +100,12 @@ class ClusterDiveFramesParentWorkflow:
         )
         if not inputs.images:
             return target
+
+        # On NRP nothing polls the light queue until the processor is stood up
+        # (it is torn down when idle). Idempotent, and a no-op when NRP
+        # scaling isn't configured; returns at once, and the child waits out
+        # the pod's cold start on the queue.
+        await wake_light_processor()
 
         try:
             clusters: List[List[UUID]] = await workflow.execute_child_workflow(
