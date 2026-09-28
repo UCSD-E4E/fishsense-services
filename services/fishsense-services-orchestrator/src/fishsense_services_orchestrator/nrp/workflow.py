@@ -44,8 +44,10 @@ SCALING_RETRY_POLICY = RetryPolicy(
 #: once, here, rather than repeated as a literal.
 WAKE_TIMEOUT = timedelta(minutes=5)
 
-#: The GPU wake's: longer because it waits for a pod (10 minutes by default)
-#: and may then wait for a second one after flipping to the CPU fallback.
+#: The most `wake_gpu_processor` can take, retries included. Longer than the
+#: other wakes' 5 minutes because this one waits for a pod (10 minutes by
+#: default) and may then wait for a second one after flipping to the CPU
+#: fallback. A parent's run timeout must cover it and its child.
 GPU_WAKE_TIMEOUT = timedelta(minutes=30)
 
 

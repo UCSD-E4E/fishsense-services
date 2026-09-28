@@ -15,7 +15,8 @@ the v2 changes:
   in fishsense-core 4.1.0, so the stage builds one from required settings
   (`FISHSENSE_SAM3_SHA256`, `FISHSENSE_SAM3_SIZE`) and fetches through
   `weights.GarageWeightStore`; bytes that aren't the pinned file never load
-  (v1's checkpoint cache trusted whatever the key held);
+  (v1's checkpoint cache trusted whatever the key held); **a weights failure
+  is final**, one non-retryable type per cause, not a retry per image;
 * the JPEG is read from the ref the orchestrator hands over;
 * **`core_version` is recorded** (v1 never set it), and `checkpoint` names the
   verified model (`sam3/3.1@<sha256>`), not v1's pod-local cache path;
@@ -37,7 +38,7 @@ import boto3
 import cv2
 import numpy as np
 import pytest
-from fishsense_core.models import ModelIntegrityError
+from fishsense_core.models import ModelIntegrityError, ModelUnavailable
 from moto import mock_aws
 from pydantic import ValidationError
 from temporalio import activity
@@ -242,6 +243,70 @@ def test_an_unfittable_mask_is_a_headtail_failure_not_an_error(monkeypatch):
 
     assert result.status == "headtail_failed"
     assert result.mask_area_px > 0 and result.head_x is None
+
+
+# -- v2: an abstention names the dot it was made from -------------------------------
+
+
+class TestAnAbstentionNamesItsDot:
+    """v2: v1 left `laser_label_id` NULL on every abstention, so a laser
+    correction never made one stale: the frame kept its "no fish" forever
+    (the cohort and the GPU-less skip both judge staleness by that dot). A
+    kept mask names the dot on it, as a prediction does; with no mask kept,
+    the dot the crop was centred on -- the first -- is the one the answer
+    came from."""
+
+    LASER = (2000.0, 1500.0)
+
+    def _ids(self):
+        return [uuid.uuid4(), uuid.uuid4()]
+
+    def test_no_detections_names_the_crop_centre(self):
+        ids = self._ids()
+        result = _predict(
+            _jpeg(), [self.LASER, (2100.0, 1500.0)], _Stub([]), laser_label_ids=ids
+        )
+        assert (result.status, result.laser_label_id) == ("no_detections", ids[0])
+
+    def test_laser_off_all_fish_names_the_crop_centre(self):
+        ids = self._ids()
+        result = _predict(
+            _jpeg(),
+            [self.LASER, (2100.0, 1500.0)],
+            _Stub([_fish_mask(100, 100, 40, 20)]),
+            laser_label_ids=ids,
+        )
+        assert (result.status, result.laser_label_id) == ("laser_off_all_fish", ids[0])
+
+    def test_headtail_failed_names_the_dot_on_the_mask(self, monkeypatch):
+        class _Exploding:
+            def find_head_tail_img(self, _mask):
+                raise RuntimeError("native detector failed")
+
+        monkeypatch.setitem(
+            sys.modules,
+            "fishsense_core.fish",
+            types.SimpleNamespace(FishHeadTailDetector=_Exploding),
+        )
+        miss, hit = (1800.0, 1500.0), (2300.0, 1500.0)
+        ox, oy = crop_origin(*miss, FRAME_W, FRAME_H, CROP_W, CROP_H)
+        mask = _fish_mask(int(hit[0] - ox), int(hit[1] - oy), 120, 50)
+        ids = self._ids()
+
+        result = _predict(_jpeg(), [miss, hit], _Stub([mask]), laser_label_ids=ids)
+
+        assert (result.status, result.laser_label_id) == ("headtail_failed", ids[1])
+
+    def test_with_no_dot_or_no_frame_there_is_none_to_name(self):
+        assert (
+            _predict(_jpeg(), [], _Stub([]), laser_label_ids=[]).laser_label_id is None
+        )
+        assert (
+            _predict(
+                b"not a jpeg", [self.LASER], _Stub([]), laser_label_ids=self._ids()[:1]
+            ).laser_label_id
+            is None
+        ), "an undecodable JPEG is the file's fault, not the dot's"
 
 
 # -- mask conversion ---------------------------------------------------------------
@@ -622,6 +687,51 @@ async def test_on_a_gpu_sam3_runs_with_the_verified_checkpoint(monkeypatch):
     assert loaded == ["/cache/sam3/3.1/sam3.1_multiplex.pt"]
     assert result.predictor_version == HEADTAIL_PREDICTOR_VERSION, "an upgrade"
     assert result.checkpoint == "sam3/3.1@0123456789ab", "the model, not a path"
+
+
+def _unset_sam3_settings():
+    # Raises the ValidationError a pod without FISHSENSE_SAM3_* raises.
+    return sam3_weights.Sam3Settings()
+
+
+class TestAWeightsFailureIsFinal:
+    """v2: a SAM 3.1 weights failure is not the image's and does not pass on
+    a retry. Left a plain exception, every image of the dive retries without
+    limit (the workflow sets no retry policy) until the child's 6 h timeout,
+    each attempt re-downloading and re-hashing a multi-GB checkpoint (core
+    caches only a verified file). Each is its own type, so the failure says
+    which of the four it was."""
+
+    @pytest.mark.parametrize(
+        ("failure", "error_type"),
+        [
+            (_unset_sam3_settings, "Sam3SettingsInvalid"),
+            (ModelIntegrityError("sam3/3.1: expected sha256 ..."), "Sam3WeightsCorrupt"),
+            (ModelUnavailable("sam3/3.1: not in s3://model-weights"), "Sam3WeightsUnavailable"),
+            (KeyError("sam3"), "Sam3NotInManifest"),
+        ],
+        ids=["settings", "integrity", "unavailable", "manifest"],
+    )  # fmt: skip
+    async def test_is_non_retryable_and_named(self, monkeypatch, failure, error_type):
+        monkeypatch.setattr(act, "cuda_available", lambda: True)
+        for name in SAM3_ENV:
+            monkeypatch.delenv(name, raising=False)
+
+        async def fetch():
+            if callable(failure):
+                failure()
+            raise failure
+
+        activities = act.HeadtailPredictActivities(
+            store_factory=lambda: _FakeStore(_jpeg()), sam3_checkpoint=fetch
+        )
+
+        with pytest.raises(ApplicationError) as excinfo:
+            await ActivityEnvironment().run(
+                activities.predict_headtail_image, _payload()
+            )
+
+        assert (excinfo.value.type, excinfo.value.non_retryable) == (error_type, True)
 
 
 async def test_the_core_version_is_recorded(no_gpu, fallback_stub):

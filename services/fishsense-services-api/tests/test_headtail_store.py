@@ -30,7 +30,9 @@ v2 changes, each pinned here:
   (`current_head_tail_predictions`);
 * intrinsics are the dive's device's current camera calibration (v1: the
   dive's camera's intrinsics), and a non-pinhole calibration is refused rather
-  than rectified with pinhole maths (PLAN.md §8);
+  than rectified with pinhole maths (PLAN.md §8); **the stage-5.1 and predict
+  cohorts leave out a dive the resolver refuses**, which v1 selected (and
+  stalled on) every hour;
 * **the processor's output is checked** (PLAN.md §9.11): a prediction for a
   capture outside the dive, or naming another capture's laser label, is refused
   and nothing is written;
@@ -120,7 +122,16 @@ async def _device(owner_engine, tenant, *, calibrations=((K, D, "pinhole"),)):
     return device
 
 
-async def _dive(owner_engine, tenant, *, priority="high", at=T0, device=None):
+#: `_dive`'s default: a device with a current pinhole calibration, the only
+#: dive stage 5.1 can render (and so the only one either cohort selects).
+_PINHOLE_DEVICE = object()
+
+
+async def _dive(
+    owner_engine, tenant, *, priority="high", at=T0, device=_PINHOLE_DEVICE
+):
+    if device is _PINHOLE_DEVICE:
+        device = await _device(owner_engine, tenant)
     return await _exec(
         owner_engine,
         "INSERT INTO dives (tenant_id, source_path, name, dived_at, priority, "
@@ -400,6 +411,52 @@ async def test_the_cohort_is_per_tenant(owner_engine, app_engine):
     assert await _next_preprocess(app_engine, lab) is None
 
 
+async def _unrenderable_dive(owner_engine, tenant, setup, *, at=T0):
+    """A dive stage 5.1's resolver refuses: no device, a device with no
+    calibration, or one whose current calibration is not a pinhole."""
+    if setup == "no-device":
+        return await _dive(owner_engine, tenant, at=at, device=None)
+    calibrations = () if setup == "no-calibration" else ((K, D, "axial_refractive"),)
+    device = await _device(owner_engine, tenant, calibrations=calibrations)
+    return await _dive(owner_engine, tenant, at=at, device=device)
+
+
+_UNRENDERABLE = ["no-device", "no-calibration", "axial"]
+
+
+@pytest.mark.parametrize("setup", _UNRENDERABLE)
+async def test_a_dive_stage_5_1_cannot_render_is_not_selected_nor_blocks_a_younger_one(
+    owner_engine, app_engine, setup
+):
+    """v2: the cohort carries the resolver's refusals. v1 selected a dive
+    whose resolver then raised, every hour, and -- oldest first -- nothing
+    behind it ever ran; across tenants it blocks every tenant."""
+    lab = await _tenant(owner_engine)
+    stuck = await _unrenderable_dive(owner_engine, lab, setup)
+    stuck_capture = await _capture(owner_engine, lab, stuck)
+    await _laser(owner_engine, lab, stuck_capture)
+    await _headtail(owner_engine, lab, stuck_capture, needs_reprocess=True)
+    younger = await _dive(owner_engine, lab, at=T0 + timedelta(hours=1))
+    await _laser(owner_engine, lab, await _capture(owner_engine, lab, younger))
+
+    assert await _next_preprocess(app_engine, lab) == younger
+
+
+async def test_only_the_current_calibration_decides_renderability(
+    owner_engine, app_engine
+):
+    """A pinhole calibration superseded by an axial one is axial now: the
+    resolver reads the current one, and so must the cohort."""
+    lab = await _tenant(owner_engine)
+    device = await _device(
+        owner_engine, lab, calibrations=((K, D, "pinhole"), (K, D, "axial_refractive"))
+    )
+    dive = await _dive(owner_engine, lab, device=device)
+    await _laser(owner_engine, lab, await _capture(owner_engine, lab, dive))
+
+    assert await _next_preprocess(app_engine, lab) is None
+
+
 # -- the flag branch (v1's test_cohort_needs_reprocess_all_kinds) ------------------
 
 
@@ -659,7 +716,7 @@ async def test_raises_when_dive_or_device_or_calibration_missing(
     if setup == "no-dive":
         dive = uuid.uuid4()
     elif setup == "no-device":
-        dive = await _dive(owner_engine, lab)
+        dive = await _dive(owner_engine, lab, device=None)
     else:
         dive = await _resolver_dive(owner_engine, lab, calibrations=())
 
@@ -936,13 +993,19 @@ async def test_stale_or_null_predictor_version_re_enters_the_cohort(
     assert await _next_predict(app_engine, lab) == dive
 
 
-async def test_prediction_from_a_superseded_laser_is_stale(owner_engine, app_engine):
+@pytest.mark.parametrize(
+    "status", ["predicted", "no_detections", "laser_off_all_fish", "headtail_failed"]
+)
+async def test_prediction_from_a_superseded_laser_is_stale(
+    owner_engine, app_engine, status
+):
     """The dot that chose the fish was later dead-lettered, so the mask may be
-    of the wrong thing entirely."""
+    of the wrong thing entirely. v2: an abstention names its dot too (the
+    processor's), so a corrected dot re-opens a "no fish" as well."""
     lab = await _tenant(owner_engine)
     dive, capture, _ = await _predict_seed(owner_engine, lab)
     dead = await _laser(owner_engine, lab, capture, superseded=True)
-    await _prediction(owner_engine, lab, capture, laser=dead)
+    await _prediction(owner_engine, lab, capture, laser=dead, status=status)
     assert await _next_predict(app_engine, lab) == dive
 
 
@@ -993,6 +1056,21 @@ async def test_first_prediction_is_preferred_over_an_upgrade(owner_engine, app_e
     )
 
     assert (candidate.dive_id, candidate.never_predicted) == (fresh, True)
+
+
+@pytest.mark.parametrize("setup", _UNRENDERABLE)
+async def test_predict_skips_a_dive_stage_5_1_cannot_render(
+    owner_engine, app_engine, setup
+):
+    """Predict reads stage 5.1's JPEG; a dive 5.1 refuses never gets one, so
+    its resolver would defer every image every hour -- and, never predicted,
+    it would outrank every dive behind it forever."""
+    lab = await _tenant(owner_engine)
+    stuck = await _unrenderable_dive(owner_engine, lab, setup)
+    await _laser(owner_engine, lab, await _capture(owner_engine, lab, stuck))
+    younger, _, _ = await _predict_seed(owner_engine, lab, at=T0 + timedelta(hours=1))
+
+    assert await _next_predict(app_engine, lab) == younger
 
 
 async def test_an_upgrade_only_dive_is_still_selected_when_nothing_else_needs_one(

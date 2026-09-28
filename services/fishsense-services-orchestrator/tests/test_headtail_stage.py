@@ -5,7 +5,8 @@ test_schedule_registration.py (the head/tail rows) and worker.py's
 `schedule_workflows`. v1's intervals, minutes, overlap and run timeouts:
 
 * stage 5.1 at +30, SKIP, 1 h;
-* predict at +32 (after the render it reads), SKIP, 2 h;
+* predict at +32 (after the render it reads), SKIP; v1's 2 h run timeout
+  is v2's every step at its longest (pinned below);
 * populate at +34 (after predict, since it is prediction-gated), SKIP, 1 h;
 * the label sync on the hour, overlap allowed (the cursor only moves
   forward), 3 h.
@@ -24,6 +25,7 @@ from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.testing import WorkflowEnvironment
 
 from fishsense_services_orchestrator.headtail import workflow as wf
+from fishsense_services_orchestrator.nrp.workflow import GPU_WAKE_TIMEOUT
 from fishsense_services_orchestrator.registry import stages
 from fishsense_services_orchestrator.schedules import ensure_schedules
 
@@ -36,7 +38,7 @@ EXPECTED = {
     ),
     "predict-headtail-images": (
         "PredictHeadtailImagesParentWorkflow", timedelta(minutes=32),
-        ScheduleOverlapPolicy.SKIP, timedelta(hours=2),
+        ScheduleOverlapPolicy.SKIP, wf.PREDICT_RUN_TIMEOUT,
     ),
     "populate-headtail-labels": (
         "PopulateHeadTailLabelStudioProjectParentWorkflow", timedelta(minutes=34),
@@ -78,6 +80,28 @@ def test_the_schedules_are_v1s_by_value():
             overlap,
             run_timeout,
         ), schedule_id
+
+
+def test_the_predict_run_outlives_every_step_it_waits_on():
+    """v2: v1's 2 h run timeout was shorter than its own 6 h child. When the
+    run times out, Temporal terminates the child with it (the parent-close
+    policy), so a long CPU-fallback dive ran for 2 h and persisted nothing,
+    every firing. The run must cover each step at its longest: the select,
+    the resolve, the GPU wake, the child, the persist and the backfill."""
+    (predict,) = [
+        s for s in _stage().schedules if s.schedule_id == "predict-headtail-images"
+    ]
+    longest = (
+        wf.PREDICT_SELECT_TIMEOUT
+        + wf.PREDICT_RESOLVE_TIMEOUT
+        + GPU_WAKE_TIMEOUT
+        + wf.PREDICT_CHILD_TIMEOUT
+        + wf.PREDICT_PERSIST_TIMEOUT
+        + wf.PREDICT_BACKFILL_TIMEOUT
+    )
+
+    assert predict.run_timeout >= longest
+    assert predict.overlap == ScheduleOverlapPolicy.SKIP, "one dive at a time"
 
 
 @pytest.mark.parametrize("schedule_id", sorted(EXPECTED))

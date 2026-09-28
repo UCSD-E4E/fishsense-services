@@ -4,7 +4,8 @@ The settings resolve when the worker starts (Label Studio, its S3 storage, the
 object store), so a stage missing configuration fails the start, not its
 first run. v1's schedules, minutes and run timeouts (fishsense-lite@77e8f8e5
 fishsense_api_workflow_worker/worker.py); the ids are v2's own, since
-Temporal is shared until cutover.
+Temporal is shared until cutover, and predict's run timeout covers its child
+(v1's did not).
 """
 
 from datetime import timedelta
@@ -21,6 +22,7 @@ from fishsense_services_orchestrator.headtail.populate import (
 )
 from fishsense_services_orchestrator.headtail.sync import HeadTailSyncActivities
 from fishsense_services_orchestrator.headtail.workflow import (
+    PREDICT_RUN_TIMEOUT,
     BackfillHeadtailPredictionsWorkflow,
     CreateHeadTailLabelStudioProjectWorkflow,
     PopulateHeadTailLabelStudioProjectParentWorkflow,
@@ -111,13 +113,15 @@ STAGE = Stage(
             run_timeout=timedelta(hours=1),
             overlap=ScheduleOverlapPolicy.SKIP,
         ),
-        # +32: predict on what +30 rendered; drains one dive per firing.
+        # +32: predict on what +30 rendered; drains one dive per firing. v2:
+        # the run outlives its wake and its 6 h child (v1's 2 h killed the
+        # child on the CPU fallback); SKIP holds the next firings meanwhile.
         ScheduledWorkflow(
             schedule_id="predict-headtail-images",
             workflow=PredictHeadtailImagesParentWorkflow,
             every=_HOURLY,
             offset=timedelta(minutes=32),
-            run_timeout=timedelta(hours=2),
+            run_timeout=PREDICT_RUN_TIMEOUT,
             overlap=ScheduleOverlapPolicy.SKIP,
         ),
         # +34: populate, prediction-gated, after +32 has written its rows.
