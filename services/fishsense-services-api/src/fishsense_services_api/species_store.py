@@ -38,8 +38,10 @@ v2 changes:
   v1's cluster read had no ORDER BY, yet "image i of N" and stage 6.1's
   "Part of previous group" both read it;
 * **stage 6.1 writes all or nothing**, serialised per dive, and refuses a
-  capture that is not a canonical capture of the dive (v1 posted cluster by
-  cluster, so a failure left a partial set that blocked every re-run);
+  capture of another dive (v1 posted cluster by cluster, so a failure left a
+  partial set that blocked every re-run). A duplicate frame of the dive is
+  left out rather than refused: migrated clusters hold some, and v1 grouped
+  them;
 * **writing a link expires a refusal instead of clearing it**: v2's refusal
   is an append-only `laser_calibrations` row, so the write stamps
   `dives.calibration_links_changed_at` (migration 0022) and a refused
@@ -545,7 +547,17 @@ async def persist_label_studio_clusters(
 ) -> int | None:
     """Write stage 6.1's label-studio clusters, all or nothing, in the
     caller's transaction. The number written; None if the dive already has
-    label-studio clusters (v1 refused to re-run: it had no delete)."""
+    label-studio clusters (v1 refused to re-run: it had no delete).
+
+    A duplicate frame of the dive (not canonical) is dropped from its group,
+    and a group left empty is not written. A migrated dive's prediction
+    clusters can hold one with a live species row, and v1 grouped it; it is
+    measured under its canonical copy's dive, so it has no place in these
+    clusters, and refusing it would fail stage 6.1 for the dive forever. The
+    groups are formed before the drop, so a duplicate's "Not part of current
+    group" still splits them where v1 did. A capture of another dive is
+    still refused (`ForeignCapture`).
+    """
     await conn.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": f"label-studio-clusters:{dive_id}"},
@@ -553,24 +565,22 @@ async def persist_label_studio_clusters(
     if (await species_grouping_facts(conn, tenant_id, dive_id)).already_grouped:
         return None
 
-    groups = [group for group in groups if group]
     members = {capture for group in groups for capture in group}
-    canonical = set(
-        (
-            await conn.execute(
-                text("""
-                    SELECT id FROM captures
-                    WHERE tenant_id = :tenant AND dive_id = :dive
-                      AND is_canonical AND id = ANY(:ids)
-                    """),
-                {"tenant": tenant_id, "dive": dive_id, "ids": list(members)},
-            )
-        ).scalars()
-    )
-    if foreign := members - canonical:
-        raise ForeignCapture(
-            f"not canonical captures of dive {dive_id}: {sorted(map(str, foreign))}"
+    of_dive = {
+        r.id: r.is_canonical
+        for r in await conn.execute(
+            text("""
+                SELECT id, is_canonical FROM captures
+                WHERE tenant_id = :tenant AND dive_id = :dive AND id = ANY(:ids)
+                """),
+            {"tenant": tenant_id, "dive": dive_id, "ids": list(members)},
         )
+    }
+    if foreign := members - of_dive.keys():
+        raise ForeignCapture(
+            f"not captures of dive {dive_id}: {sorted(map(str, foreign))}"
+        )
+    groups = [kept for group in groups if (kept := [c for c in group if of_dive[c]])]
     for group in groups:
         if len(set(group)) != len(group):
             raise InvalidClusters(f"a capture repeats within a group of {dive_id}")

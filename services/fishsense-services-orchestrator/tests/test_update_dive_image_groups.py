@@ -16,8 +16,11 @@ between the read and the write reports the skip.
 
 from __future__ import annotations
 
+import pytest
+from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
 
+from fishsense_services_api.clustering_store import ForeignCapture, InvalidClusters
 from fishsense_services_api.species_store import SpeciesGroupingFacts
 from fishsense_services_orchestrator.species import grouping as sut
 from fishsense_services_orchestrator.species.activities import SpeciesActivities
@@ -303,3 +306,34 @@ async def test_a_dive_grouped_since_the_read_is_reported_as_a_skip():
 
     assert result.skipped_already_grouped is True
     assert result.new_clusters_created == 0
+
+
+@pytest.mark.parametrize(
+    "refusal",
+    [ForeignCapture("not this dive's"), InvalidClusters("a capture repeats")],
+)
+async def test_a_refused_group_set_fails_without_retrying(refusal):
+    """The catalog's refusal is final: a retry re-reads the same labels and
+    regroups them into the same refused set, so retrying only burns attempts."""
+
+    class Refusing(FakeSpeciesCatalog):
+        async def persist_label_studio_clusters(self, tenant_id, dive_id, groups):
+            raise refusal
+
+    catalog = Refusing(
+        grouping=SpeciesGroupingFacts(
+            already_grouped=False,
+            prediction_clusters=_clusters([101]),
+            species_labels=[_label(101)],
+        )
+    )
+    with pytest.raises(ApplicationError) as excinfo:
+        await ActivityEnvironment().run(
+            SpeciesActivities(
+                catalog=catalog, store=FakeStore()
+            ).update_dive_image_groups,
+            SpeciesTarget(TENANT, DIVE),
+        )
+
+    assert excinfo.value.non_retryable
+    assert excinfo.value.type == "InvalidClusters"

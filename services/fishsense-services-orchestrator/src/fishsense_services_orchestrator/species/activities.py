@@ -28,7 +28,8 @@ v2 changes:
   store's `locate_processed_jpeg`, whose answer is also the task's URL;
 * the sync applies each task through a column-scoped update, and a dive-link
   write expires a standing calibration refusal (see species_store);
-* stage 6.1 persists all or nothing.
+* stage 6.1 persists all or nothing, and the catalog's refusal of a group
+  set is final (non-retryable).
 """
 
 from __future__ import annotations
@@ -39,7 +40,9 @@ from datetime import datetime
 from typing import Any, List, Optional, Protocol
 
 from temporalio import activity
+from temporalio.exceptions import ApplicationError
 
+from fishsense_services_api.clustering_store import InvalidClusters
 from fishsense_services_api.label_sync_store import SpeciesSync, SyncedLabel
 from fishsense_services_api.species_store import (
     SpeciesCandidate,
@@ -608,9 +611,18 @@ class SpeciesActivities:
             )
             return UpdateDiveImageGroupsResult(False, 0, seen)
 
-        created = await self._catalog.persist_label_studio_clusters(
-            target.tenant_id, target.dive_id, groups
-        )
+        try:
+            created = await self._catalog.persist_label_studio_clusters(
+                target.tenant_id, target.dive_id, groups
+            )
+        except InvalidClusters as exc:
+            # Final (ForeignCapture included): a retry re-reads the same labels
+            # and regroups them into the same refused set.
+            raise ApplicationError(
+                f"refusing the label-studio groups for dive {target.dive_id}: {exc}",
+                type="InvalidClusters",
+                non_retryable=True,
+            ) from exc
         if created is None:
             return skipped
         activity.logger.info(

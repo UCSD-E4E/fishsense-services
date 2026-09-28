@@ -24,7 +24,8 @@ v2 changes, each pinned here:
   `GET clusters` had no ORDER BY, and both "image i of N" and stage 6.1's
   "Part of previous group" read the order;
 * **stage 6.1 persists all or nothing**, serialised per dive (v1 posted one
-  cluster at a time, so a failure left a partial set that blocked every re-run);
+  cluster at a time, so a failure left a partial set that blocked every re-run),
+  leaving out the dive's duplicate frames and refusing another dive's;
 * **a refusal expires by comparison, not by clearing**: the sync stamps
   `dives.calibration_links_changed_at` when it writes a link, and a refused
   calibration row older than that stamp no longer stands (migration
@@ -37,7 +38,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import text
 
-from fishsense_services_api.clustering_store import InvalidClusters
+from fishsense_services_api.clustering_store import ForeignCapture, InvalidClusters
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.ingest_store import (
     create_dive,
@@ -856,6 +857,66 @@ async def test_a_foreign_capture_writes_nothing(owner_engine, app_engine):
 
     async with tenant_transaction(app_engine, lab) as conn:
         assert (await species_grouping_facts(conn, lab, dive)).already_grouped is False
+
+
+async def _label_studio_members(owner_engine, dive) -> list[set[uuid.UUID]]:
+    async with owner_engine.connect() as conn:
+        rows = await conn.execute(
+            text(
+                "SELECT array_agg(m.capture_id) AS m FROM dive_frame_clusters k "
+                "JOIN dive_frame_cluster_captures m ON m.cluster_id = k.id "
+                "WHERE k.dive_id = :d AND k.formed_by = 'label_studio' "
+                "GROUP BY k.id"
+            ),
+            {"d": dive},
+        )
+        return sorted((set(r.m) for r in rows), key=len)
+
+
+async def test_a_migrated_duplicate_in_the_dive_is_dropped_not_refused(
+    owner_engine, app_engine
+):
+    """A migrated dive's prediction clusters can hold a duplicate frame (its
+    canonical copy is under another dive) with a live species row, and v1
+    grouped it. Refusing it fails stage 6.1 for that dive forever; the
+    duplicate is left out of the label-studio clusters instead (it is measured
+    under its canonical copy's dive), and a group left empty is not written."""
+    lab = await _tenant(owner_engine)
+    original = await _dive(app_engine, lab, "orig", priority="low")
+    await _capture(app_engine, lab, original, "a", checksum="f" * 32)
+    await _capture(app_engine, lab, original, "b", checksum="9" * 32)
+    dive = await _dive(app_engine, lab, "d1")
+    mine = await _capture(app_engine, lab, dive, "m")
+    duplicate = await _capture(app_engine, lab, dive, "a", checksum="f" * 32)
+    lonely = await _capture(app_engine, lab, dive, "b", checksum="9" * 32)
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        written = await persist_label_studio_clusters(
+            conn, lab, dive, [[mine, duplicate], [lonely]]
+        )
+
+    assert written == 1
+    assert await _label_studio_members(owner_engine, dive) == [{mine}]
+
+
+async def test_a_duplicate_under_another_dive_is_still_foreign(
+    owner_engine, app_engine
+):
+    """Only the dive's own duplicates are dropped: a capture of another dive,
+    canonical or not, is still refused and nothing is written."""
+    lab = await _tenant(owner_engine)
+    original = await _dive(app_engine, lab, "orig", priority="low")
+    await _capture(app_engine, lab, original, "a", checksum="8" * 32)
+    other = await _dive(app_engine, lab, "d2")
+    theirs = await _capture(app_engine, lab, other, "a", checksum="8" * 32)
+    dive = await _dive(app_engine, lab, "d1")
+    mine = await _capture(app_engine, lab, dive, "m")
+
+    with pytest.raises(ForeignCapture):
+        async with tenant_transaction(app_engine, lab) as conn:
+            await persist_label_studio_clusters(conn, lab, dive, [[mine], [theirs]])
+
+    assert await _label_studio_members(owner_engine, dive) == []
 
 
 # -- the dive links the species sync writes -------------------------------------------
