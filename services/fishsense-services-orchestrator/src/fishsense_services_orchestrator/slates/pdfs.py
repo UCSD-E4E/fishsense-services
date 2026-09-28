@@ -19,9 +19,12 @@ v1's rules, kept:
 v2 changes:
 
 * per tenant: the PDF is keyed `tenants/{tenant}/slate_pdf/{template}.pdf`
-  (v1: `slate_pdf/{slate_id}.pdf`);
-* a template that is missing, or has no NAS path, is a final refusal (v1: a
-  plain ValueError, retried until its timeout);
+  (v1: `slate_pdf/{slate_id}.pdf`). **A migrated template is staged from
+  v1's key** when its PDF is still there -- copied to the tenant's, v1's only
+  read -- so neither the NAS nor a NAS path is needed for it (as the JPEG
+  lookup reads v1's key for a migrated frame);
+* a template that is missing, or has no NAS path (and no PDF v1 staged), is
+  a final refusal (v1: a plain ValueError, retried until its timeout);
 * **the sync stages a PDF it needs rather than failing on its absence.** v1
   read the PDF only from scratch and raised when it was missing, keeping the
   project's cursor put until a stage-9 run staged it. Every carried-over
@@ -125,10 +128,6 @@ class SlatePdfs:
             raise SlatePdfUnavailable(
                 f"slate_template_id={slate_template_id} not found"
             )
-        if not template.source_path:
-            raise SlatePdfUnavailable(
-                f"slate_template_id={slate_template_id} has no NAS path"
-            )
 
         if await self._store.has_slate_pdf(tenant_id, slate_template_id):
             activity.logger.info(
@@ -137,6 +136,22 @@ class SlatePdfs:
                 tenant_id,
             )
             return True
+        if template.v1_id is not None:
+            data = await self._store.download_legacy_slate_pdf(template.v1_id)
+            if data is not None:
+                await self._store.upload_slate_pdf(tenant_id, slate_template_id, data)
+                activity.logger.info(
+                    "staged slate template %s for tenant %s from v1's slate_pdf/%d",
+                    slate_template_id,
+                    tenant_id,
+                    template.v1_id,
+                )
+                return True
+
+        if not template.source_path:
+            raise SlatePdfUnavailable(
+                f"slate_template_id={slate_template_id} has no NAS path"
+            )
 
         nas = self._nas_client_factory()
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -38,6 +38,13 @@ v2 changes:
 
 * per tenant; candidates oldest first (`created_at`), re-entry last, so the
   orchestrator can take the oldest across the tenants it serves;
+* **a cohort offers only a dive its resolver can resolve**: the dive's
+  device has a camera calibration, and (stage 13) its template has a dpi and
+  reference points. v1 offered them and its resolver raised, every hour,
+  ahead of every younger dive; across tenants that wedges every tenant. None
+  of these is fixed by a refit, so no refusal is recorded: the dive leaves
+  the cohort until the reference data is fixed, then comes back by itself.
+  The stage-13/board partition is v1's and ignores them;
 * **a refusal is a row**: the dive's current `laser_calibrations` row is
   `refused`, so it stands only while nothing newer was appended. v1's
   `_clear_refusal` ran on a successful fit (here an accepted row simply
@@ -52,7 +59,9 @@ v2 changes:
   the fit saw, and now expires the refusal (v1 snapshotted at refusal time
   and missed it);
 * **no upsert**: a refit is appended, so it is visible to every
-  provenance-mismatch cohort (v1's PUT kept the row id);
+  provenance-mismatch cohort (v1's PUT kept the row id). A *retried* record
+  of one attempt is not a refit: the caller names the attempt, and a repeat
+  of the name appends nothing (v1's PUT was idempotent by the dive);
 * stage 13's observations take each frame's lowest live laser label (v1:
   `get_laser_label(image_id).first()`, no ordering), and the board's geometry
   is read through `current_calibration_targets` by name -- per axis -- so a
@@ -178,6 +187,10 @@ class CalibrationRecord:
     slate_template_id: uuid.UUID | None
     calibration_target_id: uuid.UUID | None
     inputs_as_of: datetime | None
+    #: The attempt's id, named by the caller so that recording it again (a
+    #: retry after a lost reply) is the row already written, not a second
+    #: one. None: a fresh id.
+    id: uuid.UUID | None = None
 
 
 # --- the SQL both cohorts share (each over a dive aliased `d`) -----------------
@@ -232,6 +245,26 @@ _EFFECTIVE_TARGET = """
     (SELECT cur.id FROM calibration_targets t
      JOIN current_calibration_targets cur ON cur.name = t.name
      WHERE t.id = d.calibration_target_id)
+"""
+
+#: The dive's device has a current camera calibration: without one both
+#: resolvers refuse (`_require_camera`).
+_HAS_CAMERA = """
+    EXISTS (
+        SELECT 1 FROM current_camera_calibrations cc
+        WHERE cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
+    )
+"""
+
+#: The dive's slate template can scale a fit: a dpi and reference points,
+#: which `slate_calibration_inputs` refuses without.
+_TEMPLATE_CAN_SCALE = """
+    EXISTS (
+        SELECT 1 FROM slate_templates st
+        WHERE st.id = d.slate_template_id AND st.dpi IS NOT NULL
+          AND jsonb_typeof(st.reference_points) = 'array'
+          AND st.reference_points <> '[]'::jsonb
+    )
 """
 
 #: A label on the dive (any state) newer than refusal `r`'s inputs.
@@ -301,7 +334,11 @@ async def next_dive_for_laser_calibration(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> CalibrationCandidate | None:
     """The tenant's next dive in the stage-13 (slate) cohort."""
-    return await _next(conn, tenant_id, _STAGE_13_CAN_CALIBRATE)
+    return await _next(
+        conn,
+        tenant_id,
+        f"{_STAGE_13_CAN_CALIBRATE} AND {_HAS_CAMERA} AND {_TEMPLATE_CAN_SCALE}",
+    )
 
 
 async def next_dive_for_checkerboard_calibration(
@@ -313,6 +350,7 @@ async def next_dive_for_checkerboard_calibration(
         tenant_id,
         f"""
         d.calibration_target_id IS NOT NULL
+        AND {_HAS_CAMERA}
         AND NOT {_STAGE_13_CAN_CALIBRATE}
         AND (SELECT count(*) FROM captures c
              WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
@@ -533,22 +571,29 @@ async def record_laser_calibration(
     dive_id: uuid.UUID,
     record: CalibrationRecord,
 ) -> uuid.UUID:
-    """Append one attempt to the dive's calibrations. Returns its id."""
-    return (
+    """Append one attempt to the dive's calibrations. Returns its id.
+
+    Idempotent in `record.id`: an attempt already recorded under that id is
+    left as it is (append-only) and its id returned, so a retried record
+    cannot append the attempt twice."""
+    attempt = record.id or uuid.uuid4()
+    written = (
         await conn.execute(
             text("""
                 INSERT INTO laser_calibrations
-                    (tenant_id, dive_id, camera_calibration_id, producer, outcome,
-                     laser_position, laser_axis, refusal_reason, inputs_as_of,
-                     gate_verdicts, lever_arm_m, observation_count, core_version,
-                     slate_template_id, calibration_target_id)
-                VALUES (:tenant, :dive, :camera, :producer, :outcome,
+                    (id, tenant_id, dive_id, camera_calibration_id, producer,
+                     outcome, laser_position, laser_axis, refusal_reason,
+                     inputs_as_of, gate_verdicts, lever_arm_m, observation_count,
+                     core_version, slate_template_id, calibration_target_id)
+                VALUES (:id, :tenant, :dive, :camera, :producer, :outcome,
                         CAST(:position AS jsonb), CAST(:axis AS jsonb), :reason,
                         :inputs_as_of, CAST(:verdicts AS jsonb), :lever, :count,
                         :core, :slate, :target)
+                ON CONFLICT (id) DO NOTHING
                 RETURNING id
                 """),
             {
+                "id": attempt,
                 "tenant": tenant_id,
                 "dive": dive_id,
                 "camera": record.camera_calibration_id,
@@ -566,7 +611,8 @@ async def record_laser_calibration(
                 "target": record.calibration_target_id,
             },
         )
-    ).scalar_one()
+    ).scalar_one_or_none()
+    return attempt if written is None else written
 
 
 def _json(value) -> str | None:

@@ -85,6 +85,17 @@
             ],
             "title": "Calibration Source Number"
           },
+          "calibration_target_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calibration Target Number"
+          },
           "dived_at": {
             "format": "date-time",
             "title": "Dived At",
@@ -132,6 +143,7 @@
           "dived_at",
           "priority",
           "slate_template_number",
+          "calibration_target_number",
           "calibration_source_number"
         ],
         "title": "Dive",
@@ -383,6 +395,72 @@
         "summary": "Get Dives"
       }
     },
+    "/tenants/{slug}/dives/{number}/calibration-refusal": {
+      "delete": {
+        "description": "Clear dive ``number``'s standing calibration refusal, so it is\nfitted again (idempotent): for a change its labels don't show.",
+        "operationId": "clear_dive_calibration_refusal",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "description": "why, kept with the clear",
+            "in": "query",
+            "name": "reason",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "why, kept with the clear",
+              "title": "Reason"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Clear Dive Calibration Refusal"
+      }
+    },
     "/tenants/{slug}/dives/{number}/calibration-source": {
       "delete": {
         "description": "Unlink dive ``number`` from any borrowed calibration (idempotent).",
@@ -494,6 +572,119 @@
           }
         ],
         "summary": "Set Dive Calibration Source"
+      }
+    },
+    "/tenants/{slug}/dives/{number}/calibration-target": {
+      "delete": {
+        "description": "Unlink dive ``number`` from any calibration target (idempotent): it\nleaves the checkerboard cohort. A standing refusal is left as it is.",
+        "operationId": "clear_dive_calibration_target",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Clear Dive Calibration Target"
+      }
+    },
+    "/tenants/{slug}/dives/{number}/calibration-target/{target_number}": {
+      "put": {
+        "description": "Dive ``number`` was shot against calibration target\n``target_number``: it enters the checkerboard cohort, and a standing\ncalibration refusal expires.\n\n404 if the dive is missing from the tenant or no target has that\nnumber.",
+        "operationId": "set_dive_calibration_target",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "target_number",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Target Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dive"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Dive Calibration Target"
       }
     },
     "/tenants/{slug}/dives/{number}/labels/{kind}/needs-reprocess": {

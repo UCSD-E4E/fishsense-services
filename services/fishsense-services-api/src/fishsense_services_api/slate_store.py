@@ -45,6 +45,11 @@ v2 changes:
   did: v1's cohort read every species row while its resolver's getter dropped
   superseded ones, so a dead-lettered marker picked a dive that resolved
   nothing -- hourly, ahead of every newer dive;
+* **the cohort offers only a dive stage 9 can run**: a camera calibration
+  for its device, and a template with a dpi, reference points and a NAS
+  path. v1 offered the rest and its resolver (or `stage_slate_pdf`) raised
+  every hour, ahead of every newer dive -- across tenants, every tenant's.
+  Each is fixed in reference data, so the dive simply comes back then;
 * **populate targets canonical frames only.** v1 took every marked image; a
   duplicate shares its canonical twin's checksum, hence its JPEG and task URL,
   and v2 holds one label per Label Studio task;
@@ -115,6 +120,8 @@ class SlateTemplate:
     reference_points: list[tuple[float, float]]
     #: Share-relative NAS path of the template PDF (v1's `DiveSlate.path`).
     source_path: str | None
+    #: v1's id for a migrated template: v1 staged its PDF under it.
+    v1_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -190,6 +197,23 @@ _MARKED_AND_UNLABELED = """
     )
 """
 
+#: Dive `d` is one stage 9 can run at all: its device has a current camera
+#: calibration, and its template can be scaled (a dpi, reference points) and
+#: staged (a NAS path). The resolver and `stage_slate_pdf` refuse the rest.
+_RESOLVABLE = """
+    EXISTS (
+        SELECT 1 FROM current_camera_calibrations cc
+        WHERE cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
+    )
+    AND EXISTS (
+        SELECT 1 FROM slate_templates st
+        WHERE st.id = d.slate_template_id AND st.dpi IS NOT NULL
+          AND jsonb_typeof(st.reference_points) = 'array'
+          AND st.reference_points <> '[]'::jsonb
+          AND coalesce(st.source_path, '') <> ''
+    )
+"""
+
 #: A frame flagged for a redraw on a live slate label. `c` is the capture.
 _FLAGGED = """
     EXISTS (
@@ -213,6 +237,7 @@ async def next_dive_for_slate_preprocessing(
                 SELECT d.id, d.created_at FROM dives d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
                   AND d.slate_template_id IS NOT NULL
+                  AND {_RESOLVABLE}
                   AND EXISTS (
                       SELECT 1 FROM captures c
                       WHERE {_CANONICAL_OF_DIVE}
@@ -234,6 +259,7 @@ def _template(row) -> SlateTemplate:
         dpi=row.dpi,
         reference_points=[tuple(p) for p in (row.reference_points or [])],
         source_path=row.source_path,
+        v1_id=row.v1_id,
     )
 
 
@@ -244,7 +270,7 @@ async def slate_template(
     row = (
         await conn.execute(
             text("""
-                SELECT id, name, dpi, reference_points, source_path
+                SELECT id, name, dpi, reference_points, source_path, v1_id
                 FROM slate_templates WHERE id = :id
                 """),
             {"id": slate_template_id},
