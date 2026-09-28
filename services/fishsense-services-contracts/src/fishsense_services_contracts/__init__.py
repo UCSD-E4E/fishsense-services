@@ -13,7 +13,13 @@ without a new version. To change the contract: bump the version, then
 ``python -m fishsense_services_contracts > schemas/v{N}.json``.
 """
 
+import importlib
+import inspect
+import pkgutil
 from typing import Any
+
+from pydantic import BaseModel
+from pydantic_settings import BaseSettings
 
 from fishsense_services_contracts.clustering import (
     ClusterDiveFrameImage,
@@ -26,10 +32,33 @@ from fishsense_services_contracts.task_queues import (
     PROCESSOR_TASK_QUEUE,
 )
 
-CONTRACT_VERSION = 2
+CONTRACT_VERSION = 3
+
+
+def _discover_models() -> tuple[type[BaseModel], ...]:
+    """Every payload model the package defines, by module then definition
+    order. A model defined here *is* contract; settings (how each side
+    connects) are not. Discovered rather than listed, so no slice can add one
+    and forget it."""
+    found: list[type[BaseModel]] = []
+    for module in sorted(pkgutil.iter_modules(__path__), key=lambda m: m.name):
+        if module.name.startswith("_"):
+            continue
+        loaded = importlib.import_module(f"{__name__}.{module.name}")
+        for obj in vars(loaded).values():
+            if (
+                inspect.isclass(obj)
+                and issubclass(obj, BaseModel)
+                and not issubclass(obj, BaseSettings)
+                and obj.__module__ == loaded.__name__
+                and obj not in found
+            ):
+                found.append(obj)
+    return tuple(found)
+
 
 #: Every model that crosses the orchestrator/processor boundary.
-MODELS = (ClusterDiveFrameImage, ClusterDiveFramesInput, ObjectRef)
+MODELS = _discover_models()
 
 __all__ = [
     "CONTRACT_VERSION",

@@ -1,4 +1,4 @@
-"""Migration slate_calibration_01: what a calibration was fitted against, and
+"""Migration 0024: what a calibration was fitted against, and
 an operator's clear of a refusal -- both append-only.
 
 v1 recorded neither. Its extrinsics row named no target, so a calibration's

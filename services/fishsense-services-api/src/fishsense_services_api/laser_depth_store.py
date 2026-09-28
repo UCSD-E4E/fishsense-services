@@ -15,7 +15,7 @@ and depths; the write is its `put_laser_depth`. v1's rules, kept:
 * a capture's labels are tried in ascending order (v1's id; v2's number,
   which is v1's id for a migrated label), the first that triangulates wins.
 
-The rules live in migration depth_measure_02's views (`dive_laser_geometry`,
+The rules live in migration 0026's views (`dive_laser_geometry`,
 `laser_depth_work`); the cohort, the resolver and the persist check all read
 them, so they cannot disagree.
 

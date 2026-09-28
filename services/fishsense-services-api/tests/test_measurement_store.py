@@ -32,7 +32,7 @@ v2 changes, each pinned here:
   inputs; the capture drops out until one of them changes. v1 dropped them
   and re-selected the dive forever;
 * **species and fish models are found or created through `ensure_species` and
-  `ensure_fish_model`** (migration depth_measure_03): global reference tables
+  `ensure_fish_model`** (migration 0027): global reference tables
   the app role may not write, with an identity-only path in;
 * the processor's lengths are checked against the work they answer (PLAN.md
   §9.11), so a retry writes nothing twice.

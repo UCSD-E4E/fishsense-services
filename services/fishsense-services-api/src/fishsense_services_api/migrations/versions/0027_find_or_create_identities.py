@@ -32,14 +32,14 @@ Why not the alternatives:
 (the migration role), so no caller can redirect `species` to a table of its
 own. EXECUTE is revoked from PUBLIC and granted to the app role only.
 
-Revision ID: depth_measure_03
-Revises: depth_measure_02
+Revision ID: 0027
+Revises: 0026
 """
 
 from alembic import context, op
 
-revision = "depth_measure_03"
-down_revision = "depth_measure_02"
+revision = "0027"
+down_revision = "0026"
 
 
 def _app_role() -> str:

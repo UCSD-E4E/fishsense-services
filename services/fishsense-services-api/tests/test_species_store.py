@@ -28,7 +28,7 @@ v2 changes, each pinned here:
 * **a refusal expires by comparison, not by clearing**: the sync stamps
   `dives.calibration_links_changed_at` when it writes a link, and a refused
   calibration row older than that stamp no longer stands (migration
-  species_01). v1 nulled three refusal columns on `dive`.
+  0022). v1 nulled three refusal columns on `dive`.
 """
 
 import uuid

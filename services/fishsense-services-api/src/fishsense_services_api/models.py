@@ -228,7 +228,7 @@ class Dive(Base):
     )
     calibration_source_dive_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     #: When the species sync last wrote the slate template or calibration
-    #: target: a calibration refusal older than this has expired (species_01).
+    #: target: a calibration refusal older than this has expired (0022).
     calibration_links_changed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
@@ -382,7 +382,7 @@ class LaserCalibration(Base):
     residual_m: Mapped[float | None] = mapped_column(Double)
     core_version: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
-    #: The target the fit (or refusal) used; at most one (slate_calibration_01).
+    #: The target the fit (or refusal) used; at most one (0024).
     slate_template_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("slate_templates.id")
     )
@@ -392,7 +392,7 @@ class LaserCalibration(Base):
 
 
 class LaserCalibrationRefusalClear(Base):
-    """An operator's clear of a refusal, appended (slate_calibration_01): v1
+    """An operator's clear of a refusal, appended (0024): v1
     nulled the dive's refusal columns; v2's refusals are append-only rows."""
 
     __tablename__ = "laser_calibration_refusal_clears"
@@ -604,7 +604,7 @@ class LaserPrediction(_PredictionCore, Base):
 
 class LaserPredictionVerdict(Base):
     """The auto-accept gate's verdict on one laser prediction; append-only
-    (migration laser_01). The latest per prediction is its verdict; a new
+    (migration 0021). The latest per prediction is its verdict; a new
     prediction has none, so it reads as unjudged."""
 
     __tablename__ = "laser_prediction_verdicts"
@@ -843,7 +843,7 @@ class Measurement(Base):
 
 class LaserDepthRefusal(Base):
     """A laser label tried under a calibration that gave no depth in front of
-    the camera (migration depth_measure_01): "tried, made no progress"."""
+    the camera (migration 0025): "tried, made no progress"."""
 
     __tablename__ = "laser_depth_refusals"
     __table_args__ = (
@@ -886,7 +886,7 @@ class LaserDepthRefusal(Base):
 
 class MeasurementRefusal(Base):
     """A capture's measurement inputs that gave no usable length, or a real
-    fish no name could be read from (migration depth_measure_01)."""
+    fish no name could be read from (migration 0025)."""
 
     __tablename__ = "measurement_refusals"
     __table_args__ = (

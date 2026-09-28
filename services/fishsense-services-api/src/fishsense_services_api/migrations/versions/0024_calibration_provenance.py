@@ -22,14 +22,14 @@ additive and both append-only:
   deleted (SELECT, INSERT only). Tenant-scoped under the canonical policy, and
   it can only name a refusal of its own tenant (composite key).
 
-Revision ID: slate_calibration_01
-Revises: 0020
+Revision ID: 0024
+Revises: 0023
 """
 
 from alembic import context, op
 
-revision = "slate_calibration_01"
-down_revision = "0020"
+revision = "0024"
+down_revision = "0023"
 
 ACTIVE_TENANT = "NULLIF(current_setting('app.tenant_id', true), '')::uuid"
 

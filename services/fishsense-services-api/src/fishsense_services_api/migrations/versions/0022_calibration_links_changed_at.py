@@ -29,14 +29,14 @@ migration", and v1's refusals arrive already reflecting v1's clears.
 Additive; ``dives`` is already tenant-scoped (0005), so no policy or grant
 changes.
 
-Revision ID: species_01
-Revises: 0020
+Revision ID: 0022
+Revises: 0021
 """
 
 from alembic import op
 
-revision = "species_01"
-down_revision = "0020"
+revision = "0022"
+down_revision = "0021"
 
 
 def upgrade() -> None:

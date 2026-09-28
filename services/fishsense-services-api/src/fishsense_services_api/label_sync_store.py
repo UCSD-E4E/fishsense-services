@@ -223,6 +223,8 @@ async def apply_species_sync(
         )
     ).one_or_none()
     return None if row is None else SyncedLabel(row.capture_id, row.dive_id)
+
+
 async def apply_head_tail_sync(
     conn: AsyncConnection, tenant_id: uuid.UUID, ls_task_id: int, sync: HeadTailSync
 ) -> bool:
@@ -316,6 +318,7 @@ class LabelSyncCatalog(ServicePrincipal):
     ) -> SyncedLabel | None:
         async with self._tenant(tenant_id) as conn:
             return await apply_species_sync(conn, tenant_id, ls_task_id, sync)
+
     async def apply_head_tail_sync(
         self, tenant_id: uuid.UUID, ls_task_id: int, sync: HeadTailSync
     ) -> bool:

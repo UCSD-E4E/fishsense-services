@@ -1,4 +1,4 @@
-"""The schema the laser-depth and stage-14 stages add (depth_measure_01..03).
+"""The schema the laser-depth and stage-14 stages add (0025..03).
 
 * the refusal tables are append-only and tenant-scoped, like the results they
   stand in for;

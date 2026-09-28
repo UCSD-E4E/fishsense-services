@@ -42,7 +42,7 @@ v2 changes:
   cluster, so a failure left a partial set that blocked every re-run);
 * **writing a link expires a refusal instead of clearing it**: v2's refusal
   is an append-only `laser_calibrations` row, so the write stamps
-  `dives.calibration_links_changed_at` (migration species_01) and a refused
+  `dives.calibration_links_changed_at` (migration 0022) and a refused
   row older than the stamp no longer stands (`REFUSAL_OUTLIVED_SQL`);
 * calibration targets are versioned by `valid_from`, so a name resolves to its
   current row.

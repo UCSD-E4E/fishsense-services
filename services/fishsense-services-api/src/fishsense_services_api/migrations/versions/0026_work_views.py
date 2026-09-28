@@ -46,14 +46,14 @@ label naming another model. The row stays as history, and the frame is counted
 once (prod dives 341/383). As in v1, a species relabel of a real fish changes
 nothing: its identity is the cluster's.
 
-Revision ID: depth_measure_02
-Revises: depth_measure_01
+Revision ID: 0026
+Revises: 0025
 """
 
 from alembic import context, op
 
-revision = "depth_measure_02"
-down_revision = "depth_measure_01"
+revision = "0026"
+down_revision = "0025"
 
 VALID_LASER = (
     "{t}.completed AND NOT {t}.superseded AND {t}.x IS NOT NULL AND {t}.y IS NOT NULL"

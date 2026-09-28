@@ -10,7 +10,7 @@ the current calibration" skip, `_ensure_species`, `_ensure_fish` (reuse the
 cluster's fish, else create one and bind the cluster) and `_ensure_model_fish`
 (one fish per model name). The geometry is the processor's.
 
-What is work is migration depth_measure_02's `measurement_work` view; the
+What is work is migration 0026's `measurement_work` view; the
 cohort, the resolver and the persist check all read it, so they cannot
 disagree (v1's dives 32, 279 and 466, and the `Fish Model,` empty leaf, were
 each a disagreement between its cohort SQL and its activity).
@@ -23,13 +23,13 @@ v2 changes:
   And one laser label and one head/tail label: the lowest-numbered valid ones
   (v1's activity read "the first non-superseded", with no order);
 * **measurements are appended**; v1's stale-binding DELETE is
-  `current_measurements`' rule (depth_measure_02), so a re-bound capture is
+  `current_measurements`' rule (0026), so a re-bound capture is
   simply work again;
 * **tried, made no progress** (PLAN.md §9.16): a zero or non-finite length, or
   a real-fish leaf no name can be read from, is recorded as a refusal of those
   inputs, which closes the work until one of them changes;
 * species and fish models are found or created with `ensure_species` and
-  `ensure_fish_model` (depth_measure_03) -- global tables the app role cannot
+  `ensure_fish_model` (0027) -- global tables the app role cannot
   write -- and only for a length that is actually written (v1 created the
   species, fish and cluster binding before computing the length, so a NaN
   frame still created them);

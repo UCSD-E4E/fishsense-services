@@ -907,7 +907,7 @@ def test_label_studio_projects_are_recorded_from_v1s_labels(v1, v2):
 #   and applied no plausibility test;
 # * a measurement bound to a fish the frame's subject no longer names (#527,
 #   #905) is one v1 deletes on its next measure run and v2 no longer counts
-#   (depth_measure_02). It is reported beside the refused ones, not as a gap.
+#   (0026). It is reported beside the refused ones, not as a gap.
 
 
 def _parity(v1: Engine, v2: Engine):

@@ -22,7 +22,7 @@ v2 changes:
   rows share one created_at -- keeps v1's lowest-id order;
 * predictions are appended (0011), and "the dive's prediction for a capture" is
   its latest (`current_*`). **The gate's verdict is appended to
-  laser_prediction_verdicts** (migration laser_01) rather than written over the
+  laser_prediction_verdicts** (migration 0021) rather than written over the
   prediction, and only when it changed, as v1 wrote only changed rows;
 * **the dive line is appended only when the fit changed** (dive_laser_lines is
   append-only; v1 rewrote it every hourly run for every complete dive);

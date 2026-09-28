@@ -20,13 +20,13 @@ the prediction it judged.
 The gate appends only verdicts that changed (v1 wrote only changed rows), so
 an hourly re-judgement of an unchanged dive writes nothing.
 
-Revision ID: laser_01
+Revision ID: 0021
 Revises: 0020
 """
 
 from alembic import context, op
 
-revision = "laser_01"
+revision = "0021"
 down_revision = "0020"
 
 ACTIVE_TENANT = "NULLIF(current_setting('app.tenant_id', true), '')::uuid"

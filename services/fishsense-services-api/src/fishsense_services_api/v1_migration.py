@@ -802,7 +802,7 @@ def preflight(target_url: str, head: str) -> list[str]:
 # longer names -- a model label naming another model, or a real fish whose
 # Label Studio cluster points at another fish -- which v1's measure run
 # deletes (#527, #905) and v2's current_measurements no longer counts
-# (depth_measure_02); read the way v2 reads its copy: the frame's live,
+# (0026); read the way v2 reads its copy: the frame's live,
 # non-sentinel, highest-id species label, its highest-id Label Studio cluster.
 _V1_FRESH = """
     WITH plausible AS (

@@ -6,14 +6,14 @@ Migration 0011's status CHECK left it out, so the insert would fail, and an
 abstention that cannot be recorded is re-predicted every hour: the cohort
 selects on the row's absence. Additive: the CHECK only widens.
 
-Revision ID: headtail_01
-Revises: 0020
+Revision ID: 0023
+Revises: 0022
 """
 
 from alembic import op
 
-revision = "headtail_01"
-down_revision = "0020"
+revision = "0023"
+down_revision = "0022"
 
 _OLD = ("predicted", "no_detections", "laser_off_all_fish", "headtail_failed")
 _NEW = (*_OLD, "decode_failed")

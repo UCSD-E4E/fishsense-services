@@ -1087,7 +1087,7 @@ async def test_the_current_views_show_the_columns_added_since_they_were_made(
     lab, app_engine
 ):
     """0009's and 0011's `SELECT *` views froze their column lists before
-    0017 (`noise_estimator`) and 0019 (`number`); laser_01 appends them, so a
+    0017 (`noise_estimator`) and 0019 (`number`); 0021 appends them, so a
     reader of the current line can tell which noise scale it was fitted on."""
     dive = await lab.dive()
     await lab.prediction(await lab.capture(dive))

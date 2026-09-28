@@ -19,16 +19,16 @@ edited or deleted (SELECT, INSERT only, like the results it stands in for):
 A refusal holds only while every input it names is still the one in use: the
 cohorts compare the ids *and* the coordinates, so a new calibration, a moved
 dot or a new label is tried again. The cohorts skip what is refused
-(depth_measure_02).
+(0026).
 
-Revision ID: depth_measure_01
-Revises: 0020
+Revision ID: 0025
+Revises: 0024
 """
 
 from alembic import context, op
 
-revision = "depth_measure_01"
-down_revision = "0020"
+revision = "0025"
+down_revision = "0024"
 
 ACTIVE_TENANT = "NULLIF(current_setting('app.tenant_id', true), '')::uuid"
 
