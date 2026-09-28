@@ -1,0 +1,151 @@
+# fishsense-processor-gpu -- the GPU role, on NRP, with a GPU.
+#
+# Ported from fishsense-lite@77e8f8e5 deploy/k8s/data-worker/deployment-gpu.yaml.
+# Serves `fishsense_processor_gpu`: the torch inference stages (the laser
+# detector, SAM 3.1 head/tail) as they are ported. Runs the GPU image (the
+# processor built with its `torch` extra).
+#
+# The queue means *prefer* a GPU, not require one. **This Deployment is allowed
+# to be unschedulable** -- NRP is shared, and a Turing-or-newer card with free
+# capacity is not guaranteed. When it repeatedly fails to start, the
+# orchestrator deletes it and stands up gpu-cpu-fallback.yaml instead: the same
+# checkpoints on the CPU, slowly. The bookkeeping (failed starts, the fallback
+# window) lives in the `fishsense-processor-gpu-fallback` ConfigMap, not on
+# this Deployment, because the orchestrator deletes this Deployment when idle
+# (see the orchestrator's nrp/gpu_fallback.py).
+#
+# Applied and deleted by the orchestrator, like the others (see
+# per-image.yaml): no `replicas`, no image tag.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fishsense-processor-gpu
+  labels:
+    app.kubernetes.io/name: fishsense-processor-gpu
+    app.kubernetes.io/part-of: fishsense
+    app.kubernetes.io/component: gpu
+spec:
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fishsense-processor-gpu
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fishsense-processor-gpu
+        app.kubernetes.io/part-of: fishsense
+        app.kubernetes.io/component: gpu
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      # NRP's GPU nodes are commonly tainted `nvidia.com/gpu:NoSchedule`.
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      # GPU compute-capability floor. The torch build (cu13x / cuDNN 9.2)
+      # dropped GPUs with SM < 7.5: a conv2d on an older card dies with "cuDNN
+      # version 92000 is not compatible with devices with SM < 7.5", observed
+      # live when NRP scheduled v1 onto a GTX 1080 Ti (SM 6.1). Require
+      # Turing (7.5) or Ampere and newer (major >= 8). Labels come from NVIDIA
+      # GPU Feature Discovery; the two terms are OR'd. Also the single biggest
+      # reason this Deployment can be unschedulable, which is what the CPU
+      # fallback is for.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: nvidia.com/gpu.compute.major
+                    operator: In
+                    values: ["8", "9", "10", "11", "12"]
+              - matchExpressions:
+                  - key: nvidia.com/gpu.compute.major
+                    operator: In
+                    values: ["7"]
+                  - key: nvidia.com/gpu.compute.minor
+                    operator: In
+                    values: ["5"]
+      # Preemptible guest; predict is read-only against the object store and
+      # its write-back idempotent.
+      terminationGracePeriodSeconds: 45
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: processor
+          image: ghcr.io/ucsd-e4e/fishsense-services-processor-gpu
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: FISHSENSE_PROCESSOR_ROLE
+              value: gpu
+            - name: FISHSENSE_TEMPORAL_ADDRESS
+              value: krg-prod.ucsd.edu:7233
+            - name: FISHSENSE_TEMPORAL_NAMESPACE
+              value: fishsense
+            - name: FISHSENSE_TEMPORAL_DOMAIN
+              value: workflows.krg.ucsd.edu
+            - name: FISHSENSE_TEMPORAL_CLIENT_CERT
+              value: /certs/client.pem
+            - name: FISHSENSE_TEMPORAL_CLIENT_PRIVATE_KEY
+              value: /certs/client.key
+            - name: FISHSENSE_TEMPORAL_SERVER_ROOT_CA_CERT
+              value: /certs/root-ca.pem
+            - name: TMPDIR
+              value: /scratch
+            # Model weights download here (fishsense-core's weight cache), on
+            # every cold start: an emptyDir, since the Deployment is deleted.
+            - name: XDG_CACHE_HOME
+              value: /cache
+          envFrom:
+            - secretRef:
+                name: fishsense-processor-secrets
+                optional: true
+          resources:
+            # Lighter on CPU than the per-image pod: the heavy work is on the
+            # GPU. Memory still covers a full-res decode per in-flight activity
+            # plus the checkpoint's host-side buffers, so it keeps the same
+            # ceiling (the 2026-07-21 OOM was a decode problem, not a GPU one).
+            requests:
+              cpu: "2"
+              memory: 6Gi
+              ephemeral-storage: 2Gi
+            limits:
+              cpu: "4"
+              memory: 16Gi
+              ephemeral-storage: 17Gi
+              # Extended resources must appear in limits; k8s copies it to
+              # requests.
+              nvidia.com/gpu: "1"
+          volumeMounts:
+            - name: temporal-certs
+              mountPath: /certs
+              readOnly: true
+            - name: cache
+              mountPath: /cache
+            - name: scratch
+              mountPath: /scratch
+      volumes:
+        - name: temporal-certs
+          secret:
+            secretName: fishsense-data-worker-temporal-certs
+        - name: cache
+          emptyDir:
+            # Holds the SAM 3.1 checkpoint, which is multi-gigabyte: at 2Gi
+            # v1's download filled the volume and the stage failed on a pod
+            # that looked healthy.
+            sizeLimit: 12Gi
+        - name: scratch
+          emptyDir:
+            sizeLimit: 4Gi

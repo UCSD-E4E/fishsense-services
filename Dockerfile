@@ -55,6 +55,9 @@ ENV PATH=/app/.venv/bin:$PATH \
 
 FROM runtime AS orchestrator
 COPY --from=build-orchestrator /app/.venv /app/.venv
+# The processor's NRP manifests: the orchestrator applies them itself, with the
+# release's image tag (FISHSENSE_NRP_MANIFEST_DIR defaults here).
+COPY deploy/nrp /app/deploy/nrp
 USER app
 CMD ["fishsense-services-orchestrator"]
 

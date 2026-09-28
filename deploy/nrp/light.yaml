@@ -1,0 +1,116 @@
+# fishsense-processor-light -- the light role, on NRP.
+#
+# Ported from fishsense-lite@77e8f8e5 deploy/k8s/data-worker/deployment-light.yaml.
+# Serves `fishsense_processor_light`: the stages that hold no image bytes --
+# frame clustering first, then laser calibration, measurement, laser depth,
+# laser-label validation and the auto-accept gate as they are ported.
+#
+# **This exists because of a memory cap, not a CPU one.** These stages sat on
+# the per-image queue in v1 until 2026-09-04. That worker's cap of 2 is a
+# memory ceiling for rawpy decodes, so one multi-image preprocess owned both
+# slots, and three of the auto-accept drain's first four firings and two
+# consecutive laser calibrations expired on `ScheduleToStart` for work that
+# runs in under two seconds. Nothing here decodes an image, so this pod is
+# small and its cap (8) has nothing to do with the decoders'.
+#
+# Applied and deleted by the orchestrator, like the others (see
+# per-image.yaml): no `replicas`, no image tag.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fishsense-processor-light
+  labels:
+    app.kubernetes.io/name: fishsense-processor-light
+    app.kubernetes.io/part-of: fishsense
+    app.kubernetes.io/component: light
+spec:
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fishsense-processor-light
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fishsense-processor-light
+        app.kubernetes.io/part-of: fishsense
+        app.kubernetes.io/component: light
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      # Preemptible guest; every stage here is an idempotent cohort drain.
+      terminationGracePeriodSeconds: 45
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: processor
+          image: ghcr.io/ucsd-e4e/fishsense-services-processor
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            # The only thing distinguishing this pod from the per-image one,
+            # besides its size.
+            - name: FISHSENSE_PROCESSOR_ROLE
+              value: light
+            - name: FISHSENSE_TEMPORAL_ADDRESS
+              value: krg-prod.ucsd.edu:7233
+            - name: FISHSENSE_TEMPORAL_NAMESPACE
+              value: fishsense
+            - name: FISHSENSE_TEMPORAL_DOMAIN
+              value: workflows.krg.ucsd.edu
+            - name: FISHSENSE_TEMPORAL_CLIENT_CERT
+              value: /certs/client.pem
+            - name: FISHSENSE_TEMPORAL_CLIENT_PRIVATE_KEY
+              value: /certs/client.key
+            - name: FISHSENSE_TEMPORAL_SERVER_ROOT_CA_CERT
+              value: /certs/root-ca.pem
+            - name: TMPDIR
+              value: /scratch
+            - name: XDG_CACHE_HOME
+              value: /cache
+          envFrom:
+            - secretRef:
+                name: fishsense-processor-secrets
+                optional: true
+          resources:
+            # An order of magnitude smaller than the per-image pod, and that is
+            # the point: peak memory is a few numpy arrays over one dive's rows.
+            # Sized so NRP can nearly always schedule it -- a stage that cannot
+            # get a pod does not run. The request covers importing opencv and
+            # fishsense-core (calibration and measurement do), not image bytes.
+            requests:
+              cpu: "1"
+              memory: 2Gi
+              ephemeral-storage: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+              ephemeral-storage: 2Gi
+          volumeMounts:
+            - name: temporal-certs
+              mountPath: /certs
+              readOnly: true
+            - name: cache
+              mountPath: /cache
+            - name: scratch
+              mountPath: /scratch
+      volumes:
+        - name: temporal-certs
+          secret:
+            secretName: fishsense-data-worker-temporal-certs
+        - name: cache
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: scratch
+          emptyDir:
+            sizeLimit: 1Gi

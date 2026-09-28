@@ -1,0 +1,82 @@
+# The orchestrator's identity in the NRP namespace -- OPERATOR BOOTSTRAP.
+#
+# Ported from fishsense-lite@77e8f8e5 deploy/k8s/data-worker/deployer-rbac.yaml.
+# Not one of the manifests the orchestrator applies (it reads only the four
+# Deployment files here): a human with namespace-admin applies this once, with
+# an interactive kubeconfig, because the identity it defines cannot create
+# roles:
+#
+#   kubectl apply -f deploy/nrp/deployer-rbac.yaml
+#
+# Re-apply it when the Role changes; nothing else picks it up.
+#
+# v2 change: the orchestrator stands the processor up and tears it down
+# (PLAN.md §3), so it needs `create` and `delete` on Deployments, not only
+# `patch` on their scale subresource, and its GPU-fallback state lives in a
+# ConfigMap. v2's Deployments and ConfigMap have their own names
+# (fishsense-processor*), so they sit beside v1's in the same namespace until
+# cutover without touching them.
+#
+# NOTHING here contains a credential. The token Secret at the bottom has no
+# `data:`: the token controller fills in `.data.token` and `.data["ca.crt"]`
+# in the cluster. Build the orchestrator's static-token kubeconfig from those
+# (FISHSENSE_NRP_KUBECONFIG_PATH); THAT file must stay out of the repo.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fishsense-orchestrator
+  namespace: e4e-fishsense
+---
+# Exactly what the orchestrator does:
+#  - the wakes: server-side apply of a Deployment (`patch`, which creates it
+#    when missing, so also `create`), and `get` for the readiness reads;
+#  - the sweeper: `delete`;
+#  - the GPU fallback: get/create/patch on its one ConfigMap.
+# No pods, no secrets, no watch, nothing cluster-scoped.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: fishsense-orchestrator
+  namespace: e4e-fishsense
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "create", "patch", "delete"]
+  # RBAC cannot scope `create` by name (there is no object yet), so the
+  # ConfigMap's create is unrestricted; reading and changing it are pinned.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["fishsense-processor-gpu-fallback"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: fishsense-orchestrator
+  namespace: e4e-fishsense
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: fishsense-orchestrator
+subjects:
+  - kind: ServiceAccount
+    name: fishsense-orchestrator
+    namespace: e4e-fishsense
+---
+# A long-lived token for the ServiceAccount (since Kubernetes 1.24 one is not
+# minted automatically). If NRP strips `service-account-token` Secrets (it
+# comes back with an empty `.data.token`), use a bound token instead
+# (`kubectl -n e4e-fishsense create token fishsense-orchestrator
+# --duration=168h`) and plan its re-mint.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: fishsense-orchestrator-token
+  namespace: e4e-fishsense
+  annotations:
+    kubernetes.io/service-account.name: fishsense-orchestrator
+type: kubernetes.io/service-account-token

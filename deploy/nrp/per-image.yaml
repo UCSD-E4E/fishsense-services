@@ -1,0 +1,137 @@
+# fishsense-processor -- the per-image role, on NRP.
+#
+# Ported from fishsense-lite@77e8f8e5 deploy/k8s/data-worker/deployment.yaml.
+# Serves `fishsense_processor`: the per-image fan-out stages, each of which
+# decodes a full-res `.ORF` and peaks at 1-3 GB.
+#
+# **Applied by the orchestrator, not by hand.** Each wake server-side applies
+# this file with the release's image tag and the replica target
+# (FISHSENSE_NRP_ACTIVE_REPLICAS), and the hourly sweeper deletes the
+# Deployment once `fishsense_processor` is quiet. It is never kept at zero
+# replicas: NRP deletes Deployments older than two weeks, which is how v1 lost
+# five days of stages (PLAN.md §3). So this file sets neither `replicas` nor an
+# image tag -- the orchestrator refuses one that does.
+#
+# **It requests no GPU, and that is the point**: this pod must be schedulable
+# on any ordinary amd64 node. Adding a GPU request or GPU affinity here would
+# couple every per-image stage to NRP's GPU capacity again.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fishsense-processor
+  labels:
+    app.kubernetes.io/name: fishsense-processor
+    app.kubernetes.io/part-of: fishsense
+    app.kubernetes.io/component: per-image
+spec:
+  revisionHistoryLimit: 3
+  # A release that changes the image replaces the pod(s) one at a time rather
+  # than transiently doubling the count on NRP.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fishsense-processor
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fishsense-processor
+        app.kubernetes.io/part-of: fishsense
+        app.kubernetes.io/component: per-image
+    spec:
+      # fishsense-core ships only a cp313 x86_64 manylinux wheel; NRP also has
+      # arm64 nodes.
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      # We're a guest on a shared cluster -- let NRP preempt our pods whenever
+      # it needs the capacity. No PodDisruptionBudget on purpose; an evicted
+      # activity times out and re-runs (processor activities are idempotent).
+      # Longer than the processor's 30 s drain (worker.py
+      # GRACEFUL_SHUTDOWN_TIMEOUT): a tear-down SIGTERMs a pod mid-activity.
+      terminationGracePeriodSeconds: 45
+      # The processor never talks to the k8s API (only the orchestrator does,
+      # from outside the cluster) -- don't mount a token.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: processor
+          image: ghcr.io/ucsd-e4e/fishsense-services-processor
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: FISHSENSE_PROCESSOR_ROLE
+              value: per_image
+            # The shared krg-prod Temporal, over mTLS, in the one `fishsense`
+            # namespace the orchestrator dispatches into.
+            - name: FISHSENSE_TEMPORAL_ADDRESS
+              value: krg-prod.ucsd.edu:7233
+            - name: FISHSENSE_TEMPORAL_NAMESPACE
+              value: fishsense
+            - name: FISHSENSE_TEMPORAL_DOMAIN
+              value: workflows.krg.ucsd.edu
+            - name: FISHSENSE_TEMPORAL_CLIENT_CERT
+              value: /certs/client.pem
+            - name: FISHSENSE_TEMPORAL_CLIENT_PRIVATE_KEY
+              value: /certs/client.key
+            - name: FISHSENSE_TEMPORAL_SERVER_ROOT_CA_CERT
+              value: /certs/root-ca.pem
+            # Scratch and caches on the emptyDirs below (the image's user has
+            # no home directory).
+            - name: TMPDIR
+              value: /scratch
+            - name: XDG_CACHE_HOME
+              value: /cache
+          # The object store's credentials (FISHSENSE_*), created out of band.
+          envFrom:
+            - secretRef:
+                name: fishsense-processor-secrets
+                optional: true
+          resources:
+            # Memory is sized against the role's activity cap (2, see the
+            # processor's registry), NOT against CPU: each in-flight per-image
+            # activity peaks at ~1-3 GB for a full-res rawpy decode + opencv
+            # rectify. At a cap of 4 v1's pod OOMKilled ~22 s after start and
+            # CrashLoopBackOff'd 17 times (2026-07-21). 2 x ~3 GB leaves real
+            # headroom under 16Gi; throughput comes from replicas instead.
+            requests:
+              cpu: "4"
+              memory: 6Gi
+              ephemeral-storage: 2Gi
+            limits:
+              cpu: "8"
+              memory: 16Gi
+              # >= the sum of the emptyDir sizeLimits below, so a volume can
+              # fill to its own cap without tripping the container's overall
+              # limit and getting evicted first.
+              ephemeral-storage: 6Gi
+          volumeMounts:
+            - name: temporal-certs
+              mountPath: /certs
+              readOnly: true
+            - name: cache
+              mountPath: /cache
+            - name: scratch
+              mountPath: /scratch
+      volumes:
+        - name: temporal-certs
+          # v1's Secret, same `CN=fishsense-worker` identity, which the slot's
+          # nrp_cert_sync already rotates. A pod created after a rotation mounts
+          # the current leaf, so tear-down needs no rollout-restart.
+          secret:
+            secretName: fishsense-data-worker-temporal-certs
+        # Ephemeral only; no PVC by design.
+        - name: cache
+          emptyDir:
+            sizeLimit: 2Gi
+        - name: scratch
+          emptyDir:
+            sizeLimit: 4Gi
