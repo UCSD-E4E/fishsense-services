@@ -265,7 +265,9 @@ async def test_a_jpeg_v1_wrote_is_found_for_a_frame_migrated_from_v1(s3):
     assert located == ObjectRef(bucket=LABELS, key=V1_JPEG)
 
 
-async def test_a_jpeg_v2_rendered_wins_over_v1s(s3):
+async def test_a_migrated_frame_is_located_at_v1s_jpeg_first(s3):
+    """v1 overwrote in place and v2 does too (`processed_jpeg_target`), so a
+    migrated frame's tasks never see its URL move."""
     s3.put_object(Bucket=LABELS, Key=V1_JPEG, Body=b"v1")
     s3.put_object(Bucket=LABELS, Key=NEW_JPEG, Body=b"v2")
 
@@ -273,7 +275,7 @@ async def test_a_jpeg_v2_rendered_wins_over_v1s(s3):
         TENANT, "preprocess_groups_jpeg", "caf", from_v1=True
     )
 
-    assert located == ObjectRef(bucket=LABELS, key=NEW_JPEG)
+    assert located == ObjectRef(bucket=LABELS, key=V1_JPEG)
 
 
 async def test_a_v1_jpeg_never_answers_for_a_frame_v2_ingested(s3):
@@ -302,5 +304,7 @@ def test_the_orchestrator_never_writes_a_processed_jpeg():
     assert not [
         name
         for name in dir(sut.OrchestratorObjectStore)
-        if "jpeg" in name and not name.startswith(("has_", "locate_"))
+        # `processed_jpeg_target` only names the key the processor writes.
+        if "jpeg" in name
+        and not name.startswith(("has_", "locate_", "processed_jpeg_target"))
     ]

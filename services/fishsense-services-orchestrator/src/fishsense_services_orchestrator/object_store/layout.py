@@ -35,9 +35,15 @@ from __future__ import annotations
 import uuid
 
 from fishsense_services_contracts.object_store import (
-    TENANTS_PREFIX,
+    CHECKERBOARD_LATTICE_JPEG_FOLDER,
+    HEADTAIL_JPEG_FOLDER,
+    JPEG_FOLDERS,
+    LASER_JPEG_FOLDER,
     ObjectRef,
     ObjectStoreConnection,
+    SLATE_JPEG_FOLDER,
+    SPECIES_JPEG_FOLDER,
+    TENANTS_PREFIX,
 )
 
 __all__ = [
@@ -54,25 +60,6 @@ __all__ = [
 
 RAW_PREFIX = "raw"
 SLATE_PDF_PREFIX = "slate_pdf"
-
-# The per-stage JPEG folders: populate embeds them in the `s3://` URI a labeler
-# follows, and the processor writes to them, so they are spelled once.
-LASER_JPEG_FOLDER = "preprocess_jpeg"
-SPECIES_JPEG_FOLDER = "preprocess_groups_jpeg"
-HEADTAIL_JPEG_FOLDER = "preprocess_headtail_jpeg"
-SLATE_JPEG_FOLDER = "preprocess_slate_images_jpeg"
-# Lattice-verification renders, in their own folder: keyed by checksum like
-# every other stage, they would otherwise OVERWRITE the stage-0.1 JPEG a laser
-# project is already serving (v1).
-CHECKERBOARD_LATTICE_JPEG_FOLDER = "checkerboard_lattice_jpeg"
-
-JPEG_FOLDERS = (
-    LASER_JPEG_FOLDER,
-    SPECIES_JPEG_FOLDER,
-    HEADTAIL_JPEG_FOLDER,
-    SLATE_JPEG_FOLDER,
-    CHECKERBOARD_LATTICE_JPEG_FOLDER,
-)
 
 
 class ObjectLayout:
@@ -127,10 +114,14 @@ class ObjectLayout:
         ``v1_id``). Only then may a v1 key answer: v1's keys carry no tenant,
         and v1's frames are all the lab tenant's.
         """
-        candidates = [self.processed_jpeg(tenant_id, folder, checksum)]
+        # v1's key first: v1 overwrote a frame's JPEG in place, so existing
+        # Label Studio tasks and label image_urls point at it, and populate
+        # dedupes by URL. A migrated frame keeps that key for good; a redraw
+        # overwrites it where it is (`OrchestratorObjectStore.processed_jpeg_target`).
+        new = self.processed_jpeg(tenant_id, folder, checksum)
         if from_v1:
-            candidates.append(self.legacy_processed_jpeg(folder, checksum))
-        return candidates
+            return [self.legacy_processed_jpeg(folder, checksum), new]
+        return [new]
 
     def _place(self, tenant_id: uuid.UUID, bucket: str, relative: str) -> ObjectRef:
         # The one place a tenant becomes a location. Bucket-per-tenant (§9.11)

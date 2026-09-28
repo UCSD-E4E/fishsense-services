@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from fishsense_services_contracts.object_store import ObjectRef
 from fishsense_services_orchestrator.labels.populate import (
     LabelStudioStorageSettings,
     TaskImage,
@@ -42,11 +43,27 @@ STORAGE = LabelStudioStorageSettings(
 
 @pytest.fixture(name="build")
 def _build():
-    return lambda folder, image: build_task_data(folder, image, STORAGE)
+    # v2: a task shows the JPEG where the object store located it, so the
+    # folder picks the ref's key here rather than being rebuilt from settings.
+    return lambda folder, image: build_task_data(
+        TaskImage(
+            number=image.number,
+            image=ObjectRef(
+                bucket=STORAGE.bucket,
+                key=f"{STORAGE.prefix}/{folder}/{image.image.key}.JPG",
+            ),
+            captured_at=image.captured_at,
+        )
+    )
 
 
 def _image(number=7, taken=datetime(2023, 8, 31, 19, 42, 29, tzinfo=timezone.utc)):
-    return TaskImage(number=number, checksum=f"{number:032d}", captured_at=taken)
+    # The key stem is the checksum; `build` places it in the folder.
+    return TaskImage(
+        number=number,
+        image=ObjectRef(bucket=STORAGE.bucket, key=f"{number:032d}"),
+        captured_at=taken,
+    )
 
 
 def test_keeps_both_image_keys(build):
@@ -101,7 +118,10 @@ def test_the_url_is_v1s_for_a_migrated_capture(build):
     """A migrated project's tasks are deduplicated by this URL: if v2 built a
     different one for the same JPEG, its next populate would import every
     task again."""
-    data = build("preprocess_jpeg", TaskImage(12, "ab" * 16, None))
+    data = build(
+        "preprocess_jpeg",
+        TaskImage(12, ObjectRef(bucket=STORAGE.bucket, key="ab" * 16), None),
+    )
 
     assert data["image"] == (
         "s3://labels-fishsense-lite/fishsense-lite/preprocess_jpeg/"

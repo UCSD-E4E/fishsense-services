@@ -20,6 +20,7 @@ Each is shared by every tenant, with the tenant as the first key segment
 (§9.11); a later move to bucket-per-tenant swaps that segment for a bucket.
 """
 
+import uuid
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, SecretStr, field_validator, model_validator
@@ -29,6 +30,49 @@ __all__ = ["TENANTS_PREFIX", "ObjectRef", "ObjectStoreConnection"]
 
 #: The first segment of every key v2 writes: ``tenants/{tenant_id}/...``.
 TENANTS_PREFIX = "tenants"
+
+# The per-stage JPEG folders: populate embeds them in the `s3://` URI a labeler
+# follows, and the processor writes to them, so they are spelled once, here.
+LASER_JPEG_FOLDER = "preprocess_jpeg"
+SPECIES_JPEG_FOLDER = "preprocess_groups_jpeg"
+HEADTAIL_JPEG_FOLDER = "preprocess_headtail_jpeg"
+SLATE_JPEG_FOLDER = "preprocess_slate_images_jpeg"
+# Lattice-verification renders, in their own folder: keyed by checksum like
+# every other stage, they would otherwise OVERWRITE the stage-0.1 JPEG a laser
+# project is already serving (v1).
+CHECKERBOARD_LATTICE_JPEG_FOLDER = "checkerboard_lattice_jpeg"
+
+JPEG_FOLDERS = (
+    LASER_JPEG_FOLDER,
+    SPECIES_JPEG_FOLDER,
+    HEADTAIL_JPEG_FOLDER,
+    SLATE_JPEG_FOLDER,
+    CHECKERBOARD_LATTICE_JPEG_FOLDER,
+)
+
+
+def is_processed_jpeg_key(key: str, *, legacy_prefix: str) -> bool:
+    """Whether `key` is a processed JPEG's: ``{folder}/{checksum}.JPG`` under a
+    tenant (``tenants/{uuid}/``) or where v1 wrote them (``{legacy_prefix}/``).
+
+    The processor writes nothing else. A migrated frame's redraw overwrites
+    v1's JPEG in place, as v1 did, so its URL -- which Label Studio tasks and
+    label image_urls hold -- never moves.
+    """
+    segments = key.split("/")
+    if len(segments) < 2 or segments[-2] not in JPEG_FOLDERS:
+        return False
+    stem, dot, extension = segments[-1].rpartition(".")
+    if not (dot and extension == "JPG" and stem.isalnum()):
+        return False
+    owner = segments[:-2]
+    if len(owner) == 2 and owner[0] == TENANTS_PREFIX:
+        try:
+            uuid.UUID(owner[1])
+        except ValueError:
+            return False
+        return True
+    return owner == (legacy_prefix.split("/") if legacy_prefix else [])
 
 
 class ObjectStoreConnection(BaseSettings):

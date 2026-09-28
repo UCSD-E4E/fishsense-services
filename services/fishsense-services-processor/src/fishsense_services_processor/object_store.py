@@ -41,6 +41,7 @@ import boto3
 from botocore.config import Config
 
 from fishsense_services_contracts.object_store import (
+    is_processed_jpeg_key,
     TENANTS_PREFIX,
     ObjectRef,
     ObjectStoreConnection,
@@ -80,6 +81,7 @@ class ProcessorObjectStore:
     def __init__(self, s3, settings: ObjectStoreConnection) -> None:
         self._s3 = s3
         self._labels_bucket = settings.labels_bucket
+        self._legacy_prefix = settings.legacy_labels_prefix
 
     @classmethod
     def from_settings(cls, settings: ObjectStoreConnection) -> "ProcessorObjectStore":
@@ -109,17 +111,13 @@ class ProcessorObjectStore:
         )
 
     def _check_jpeg_target(self, ref: ObjectRef) -> None:
-        segments = ref.key.split("/")
-        if (
-            ref.bucket != self._labels_bucket
-            or segments[0] != TENANTS_PREFIX
-            or len(segments) < 3
-            or not ref.key.endswith(".JPG")
+        if ref.bucket != self._labels_bucket or not is_processed_jpeg_key(
+            ref.key, legacy_prefix=self._legacy_prefix
         ):
             raise RefusedWrite(
-                f"the processor writes only a tenant's processed JPEG "
-                f"(s3://{self._labels_bucket}/{TENANTS_PREFIX}/.../*.JPG), "
-                f"not {ref.uri}"
+                f"the processor writes only a processed JPEG, "
+                f"{{folder}}/{{checksum}}.JPG in s3://{self._labels_bucket}/ under "
+                f"{TENANTS_PREFIX}/{{tenant uuid}}/ or v1's prefix, not {ref.uri}"
             )
 
     # -- primitives ----------------------------------------------------------

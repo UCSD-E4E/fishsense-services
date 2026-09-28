@@ -53,6 +53,7 @@ from fishsense_services_api.label_project_store import (
     DiveForTitle,
     RecordedProject,
 )
+from fishsense_services_contracts.object_store import ObjectRef
 from fishsense_services_orchestrator.labels.label_studio import (
     Beat,
     LabelStudioClient,
@@ -112,22 +113,13 @@ class LabelStudioStorageSettings(BaseSettings):
         return (self.prefix or "").strip("/")
 
 
-def build_image_url(
-    folder: str, checksum: str, storage: LabelStudioStorageSettings
-) -> str:
-    """Build the `s3://` URI for a processed JPEG in Garage.
-
-    Label Studio resolves this to a presigned GET URL at serve time via the
-    per-project S3 source storage (see `ensure_label_studio_s3_storage`).
-    `folder` is the **physical** prefix the processor wrote to
-    (preprocess_jpeg / preprocess_groups_jpeg / preprocess_headtail_jpeg /
-    preprocess_slate_images_jpeg / checkerboard_lattice_jpeg) -- the exact key
-    the JPEG lives at, so there is no virtual-to-physical rewrite to get wrong
-    (v1's nginx alias mismatch, issue #113, is gone by construction).
-    """
-    prefix = storage.key_prefix
-    key = f"{prefix}/{folder}/{checksum}.JPG" if prefix else f"{folder}/{checksum}.JPG"
-    return f"s3://{storage.bucket}/{key}"
+def build_image_url(image: ObjectRef) -> str:
+    """The `s3://` URI of a processed JPEG, exactly where the object store
+    located (or wrote) it: v1's key for a migrated frame, whose tasks already
+    hold that URL, and the tenant's for a new one. Label Studio resolves it to
+    a presigned GET at serve time through the project's S3 source storage.
+    Never rebuilt from settings, so it can't name a key nothing wrote."""
+    return image.uri
 
 
 @dataclass(frozen=True)
@@ -136,13 +128,12 @@ class TaskImage:
 
     #: The capture's `number`: v1's image id for a migrated capture.
     number: int
-    checksum: str
+    #: Its processed JPEG, as the object store located it.
+    image: ObjectRef
     captured_at: datetime | None
 
 
-def build_task_data(
-    folder: str, image: TaskImage, storage: LabelStudioStorageSettings
-) -> dict:
+def build_task_data(image: TaskImage) -> dict:
     """The `data` payload for one imported Label Studio task.
 
     `image` and `img` are both emitted because prod labeling configs across
@@ -161,7 +152,7 @@ def build_task_data(
     second; it keeps v1's key, and is the capture's number (v1's image id for
     a migrated capture).
     """
-    url = build_image_url(folder, image.checksum, storage)
+    url = build_image_url(image.image)
     taken = image.captured_at
     return {
         "image": url,

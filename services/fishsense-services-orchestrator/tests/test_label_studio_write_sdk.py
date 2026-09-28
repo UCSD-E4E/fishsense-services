@@ -18,6 +18,7 @@ import httpx
 from label_studio_sdk.client import LabelStudio
 from temporalio.testing import ActivityEnvironment
 
+from fishsense_services_contracts.object_store import ObjectRef
 from fishsense_services_orchestrator.labels import populate as pu
 from fishsense_services_orchestrator.labels.label_studio import (
     LabelStudioClient,
@@ -178,10 +179,14 @@ async def test_tasks_are_imported_once_and_anchored_through_the_resolve_wrapper(
     Read through the SDK's model, it must still match the built s3:// URL, or
     every run re-imports everything."""
     ls = FakeLabelStudio(projects=[{"id": 42, "title": "t"}])
-    images = [pu.TaskImage(1, "a" * 32, None), pu.TaskImage(2, "b" * 32, None)]
-    tasks = [
-        {"data": pu.build_task_data("preprocess_jpeg", i, STORAGE)} for i in images
+    images = [
+        pu.TaskImage(
+            n, ObjectRef(bucket=STORAGE.bucket,
+                         key=f"{STORAGE.prefix}/preprocess_jpeg/{c * 32}.JPG"), None
+        )  # fmt: skip
+        for n, c in ((1, "a"), (2, "b"))
     ]
+    tasks = [{"data": pu.build_task_data(i)} for i in images]
     recorded = []
 
     async def record_label(item, task_id):

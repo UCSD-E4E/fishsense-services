@@ -243,10 +243,6 @@ async def test_split_buckets_read_scratch_write_labels(s3, tmp_path):
     "ref",
     [
         pytest.param(
-            ObjectRef(bucket=LABELS, key="fishsense-lite/preprocess_jpeg/c.JPG"),
-            id="v1-jpeg-label-studio-serves",
-        ),
-        pytest.param(
             ObjectRef(bucket=BUCKET, key=f"tenants/{TENANT}/preprocess_jpeg/c.JPG"),
             id="scratch-bucket",
         ),
@@ -261,10 +257,11 @@ async def test_split_buckets_read_scratch_write_labels(s3, tmp_path):
         pytest.param(ObjectRef(bucket=LABELS, key="tenants/c.JPG"), id="no-tenant"),
     ],
 )
-async def test_the_processor_writes_nothing_but_a_tenants_processed_jpeg(s3, ref):
-    """The processor runs on infrastructure we don't own (PLAN.md §9.11), and a
-    JPEG v1 wrote is what a Label Studio task shows a labeler: overwriting one
-    silently changes the picture under an existing label."""
+async def test_the_processor_writes_nothing_but_a_processed_jpeg(s3, ref):
+    """The processor runs on infrastructure we don't own (PLAN.md §9.11). It
+    writes a processed JPEG where the orchestrator says -- under a tenant, or
+    over v1's in place for a migrated frame's redraw, as v1 did (see the
+    tests below) -- and nothing else."""
     with pytest.raises(sut.RefusedWrite):
         await _store(s3).upload_processed_jpeg(ref, b"JPG")
 
@@ -276,3 +273,45 @@ def test_the_processor_cannot_delete():
     """v1's asymmetry, kept: the orchestrator stages scratch in and deletes it
     after; the processor reads it and writes JPEGs, and has no delete at all."""
     assert not [name for name in dir(sut.ProcessorObjectStore) if "delete" in name]
+
+
+# -- where the processor may write: a processed JPEG, where the orchestrator says -
+
+
+LEGACY = "fishsense-lite"
+SUM = "0123456789abcdef0123456789abcdef"
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        f"tenants/{TENANT}/preprocess_jpeg/{SUM}.JPG",
+        # A migrated frame's redraw overwrites v1's JPEG in place, as v1 did.
+        f"{LEGACY}/preprocess_headtail_jpeg/{SUM}.JPG",
+    ],
+    ids=["tenant", "v1-in-place"],
+)
+async def test_a_processed_jpeg_is_written_where_the_orchestrator_says(s3, key):
+    await _store(s3).upload_processed_jpeg(ObjectRef(bucket=LABELS, key=key), b"J")
+
+    assert s3.get_object(Bucket=LABELS, Key=key)["Body"].read() == b"J"
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        f"tenants/not-a-uuid/preprocess_jpeg/{SUM}.JPG",
+        f"tenants/{TENANT}/raw/{SUM}.JPG",
+        f"tenants/{TENANT}/preprocess_jpeg/not-a-checksum.JPG",
+        f"tenants/{TENANT}/x/preprocess_jpeg/{SUM}.JPG",
+        f"{LEGACY}/raw/{SUM}.JPG",
+        f"elsewhere/preprocess_jpeg/{SUM}.JPG",
+        f"preprocess_jpeg/{SUM}.JPG",
+    ],
+    ids=["tenant-not-a-uuid", "not-a-jpeg-folder", "not-a-checksum",
+         "nested", "v1-not-a-jpeg-folder", "not-v1s-prefix", "no-prefix"],
+)  # fmt: skip
+async def test_anything_else_is_refused(s3, key):
+    """The review of foundation/object-store: any tenants/<x>/.../*.JPG passed."""
+    with pytest.raises(sut.RefusedWrite):
+        await _store(s3).upload_processed_jpeg(ObjectRef(bucket=LABELS, key=key), b"J")

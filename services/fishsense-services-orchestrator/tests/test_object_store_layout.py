@@ -185,13 +185,16 @@ def test_the_legacy_key_handles_v1s_prefixes(prefix, expected):
     assert layout.legacy_processed_jpeg("preprocess_jpeg", CHECKSUM).key == expected
 
 
-def test_a_frame_from_v1_resolves_to_its_new_key_then_v1s(layout):
-    """New first: once v2 re-renders a migrated frame, the new JPEG wins."""
+def test_a_frame_from_v1_resolves_to_v1s_key_then_its_new_one(layout):
+    """v1's key first. v1 overwrote a frame's JPEG in place, so its URL never
+    changed -- existing Label Studio tasks and label image_urls point at it,
+    and populate dedupes tasks by URL. A migrated frame keeps that key for
+    good: a redraw overwrites it where it is (`processed_jpeg_target`)."""
     assert layout.processed_jpeg_candidates(
         TENANT, "preprocess_jpeg", CHECKSUM, from_v1=True
     ) == [
-        layout.processed_jpeg(TENANT, "preprocess_jpeg", CHECKSUM),
         layout.legacy_processed_jpeg("preprocess_jpeg", CHECKSUM),
+        layout.processed_jpeg(TENANT, "preprocess_jpeg", CHECKSUM),
     ]
 
 

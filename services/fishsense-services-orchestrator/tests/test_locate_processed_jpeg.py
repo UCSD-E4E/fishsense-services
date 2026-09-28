@@ -121,3 +121,43 @@ async def test_a_folder_no_stage_writes_is_refused(s3):
 
     assert excinfo.value.non_retryable
     assert excinfo.value.type == "UnknownJpegFolder"
+
+
+# -- where a render writes: in place, as v1 ------------------------------------------
+
+
+def _store(s3):
+    settings = ObjectStoreConnection(
+        endpoint_url="http://garage.example.com", region="garage",
+        access_key_id="k", secret_access_key="s", bucket=BUCKET,
+        labels_bucket=LABELS, legacy_labels_prefix="fishsense-lite",
+    )  # fmt: skip
+    return OrchestratorObjectStore(s3, ObjectLayout(settings))
+
+
+async def _target(s3, *, from_v1):
+    return await _store(s3).processed_jpeg_target(
+        TENANT, "preprocess_headtail_jpeg", SUM, from_v1=from_v1
+    )
+
+
+async def test_a_redraw_of_a_migrated_frame_overwrites_v1s_jpeg_in_place(s3):
+    """v1 overwrote in place, so a reprocess redraw changes the picture under
+    the existing tasks without moving their URL (and without populate
+    importing the frame a second time under a new URL)."""
+    s3.put_object(Bucket=LABELS, Key=V1_KEY, Body=b"x")
+
+    assert await _target(s3, from_v1=True) == ObjectRef(bucket=LABELS, key=V1_KEY)
+
+
+async def test_a_frame_rendered_for_the_first_time_is_written_under_its_tenant(s3):
+    for from_v1 in (True, False):
+        assert await _target(s3, from_v1=from_v1) == ObjectRef(
+            bucket=LABELS, key=NEW_KEY
+        )
+
+
+async def test_a_redraw_of_a_v2_frame_overwrites_its_tenant_jpeg(s3):
+    s3.put_object(Bucket=LABELS, Key=NEW_KEY, Body=b"x")
+
+    assert await _target(s3, from_v1=False) == ObjectRef(bucket=LABELS, key=NEW_KEY)

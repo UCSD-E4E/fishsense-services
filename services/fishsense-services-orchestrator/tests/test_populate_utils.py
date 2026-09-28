@@ -268,87 +268,6 @@ def test_title_of_a_long_name_is_v1s_exact_title():
 # -- image URLs and the S3 storage ------------------------------------------------------
 
 
-def test_build_image_url_without_a_prefix():
-    # v2 change: v1 fell back from `labels_bucket` to its scratch `bucket`. v2's
-    # Label Studio storage names its one bucket, so there is nothing to fall
-    # back to; an unset prefix still means no prefix.
-    assert (
-        pu.build_image_url("preprocess_jpeg", "abc", _storage())
-        == "s3://fishsense-test/preprocess_jpeg/abc.JPG"
-    )
-
-
-def test_build_image_url_uses_labels_bucket_and_prefix():
-    storage = _storage(bucket="labels-fishsense-lite", prefix="/fishsense-lite/")
-    assert (
-        pu.build_image_url("preprocess_groups_jpeg", "caf", storage)
-        == "s3://labels-fishsense-lite/fishsense-lite/preprocess_groups_jpeg/caf.JPG"
-    )
-
-
-async def test_ensure_s3_storage_registers_labels_bucket_and_prefix():
-    ls = MagicMock()
-    ls.import_storage.s3.list.return_value = []
-    storage = _storage(bucket="labels-fishsense-lite", prefix="fishsense-lite")
-
-    await pu.ensure_label_studio_s3_storage(LabelStudioClient(ls), 999, storage)
-
-    _, kwargs = ls.import_storage.s3.create.call_args
-    assert kwargs["bucket"] == "labels-fishsense-lite"
-    assert kwargs["prefix"] == "fishsense-lite"
-    assert kwargs["presign"] is True
-
-
-async def test_ensure_s3_storage_registers_presigned_source_when_absent():
-    """A freshly-created per-dive project gets a Garage S3 source storage
-    registered with presign=True so LS can resolve the `s3://` task URIs to
-    presigned GET URLs."""
-    ls = MagicMock()
-    ls.import_storage.s3.list.return_value = []
-
-    await ActivityEnvironment().run(
-        pu.ensure_label_studio_s3_storage, LabelStudioClient(ls), 73, _storage()
-    )
-
-    ls.import_storage.s3.create.assert_called_once()
-    kwargs = ls.import_storage.s3.create.call_args.kwargs
-    assert kwargs["project"] == 73
-    assert kwargs["bucket"] == "fishsense-test"
-    assert kwargs["s3endpoint"] == "http://garage.example.com"
-    assert kwargs["region_name"] == "garage"
-    assert kwargs["presign"] is True
-    assert kwargs["use_blob_urls"] is False
-    assert kwargs["aws_access_key_id"] == "ak"
-    assert kwargs["aws_secret_access_key"] == "sk"
-    assert "prefix" not in kwargs
-
-
-async def test_ensure_s3_storage_is_idempotent_when_already_registered():
-    """Re-running create on an existing project must not register a
-    duplicate storage -- match is on (bucket, title)."""
-    ls = MagicMock()
-    ls.import_storage.s3.list.return_value = [
-        SimpleNamespace(bucket="fishsense-test", title=pu.LS_S3_STORAGE_TITLE)
-    ]
-
-    await ActivityEnvironment().run(
-        pu.ensure_label_studio_s3_storage, LabelStudioClient(ls), 73, _storage()
-    )
-
-    ls.import_storage.s3.create.assert_not_called()
-
-
-async def test_ensure_s3_storage_ignores_another_buckets_storage():
-    ls = MagicMock()
-    ls.import_storage.s3.list.return_value = [
-        SimpleNamespace(bucket="elsewhere", title=pu.LS_S3_STORAGE_TITLE)
-    ]
-
-    await pu.ensure_label_studio_s3_storage(LabelStudioClient(ls), 73, _storage())
-
-    ls.import_storage.s3.create.assert_called_once()
-
-
 def test_normalize_image_url_decodes_hosted_ls_resolve_wrapper():
     s3 = "s3://labels-fishsense-lite/fishsense-lite/preprocess_groups_jpeg/abc.JPG"
     wrapper = "/tasks/999/resolve/?fileuri=" + base64.b64encode(s3.encode()).decode()
@@ -461,3 +380,21 @@ async def test_create_or_get_heals_existing_project_config(monkeypatch):
     assert pid == 55
     ls.projects.create.assert_not_called()
     ls.projects.update.assert_called_once_with(id=55, label_config=_CFG_B)
+
+
+def test_a_task_shows_the_jpeg_where_the_object_store_located_it():
+    """The URL is the located JPEG's, not one rebuilt from settings: v1's key
+    for a migrated frame (so the URL dedupe still matches its tasks), the
+    tenant's for a new one -- never a key nothing wrote."""
+    from fishsense_services_contracts.object_store import ObjectRef
+    from fishsense_services_orchestrator.labels.populate import (
+        TaskImage,
+        build_task_data,
+    )
+
+    ref = ObjectRef(bucket="labels-fishsense-lite",
+                    key="tenants/0/preprocess_jpeg/abc.JPG")  # fmt: skip
+
+    data = build_task_data(TaskImage(number=7, image=ref, captured_at=None))
+
+    assert data["image"] == data["img"] == ref.uri

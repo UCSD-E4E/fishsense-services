@@ -125,6 +125,17 @@ class OrchestratorObjectStore:
                 return ref
         return None
 
+    async def processed_jpeg_target(
+        self, tenant_id: uuid.UUID, folder: str, checksum: str, *, from_v1: bool
+    ) -> ObjectRef:
+        """Where a render of this frame writes: over its JPEG where it already
+        is (v1 overwrote in place, so a redraw never moves a URL that Label
+        Studio tasks hold), else under the tenant."""
+        located = await self.locate_processed_jpeg(
+            tenant_id, folder, checksum, from_v1=from_v1
+        )
+        return located or self.layout.processed_jpeg(tenant_id, folder, checksum)
+
     async def has_processed_jpeg(
         self, tenant_id: uuid.UUID, folder: str, checksum: str, *, from_v1: bool
     ) -> bool:
