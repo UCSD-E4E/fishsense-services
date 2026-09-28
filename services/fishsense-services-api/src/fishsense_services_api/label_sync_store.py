@@ -16,6 +16,17 @@ v2 changes:
   `needs_reprocess` and `superseded` are not among them;
 * **a cursor never moves backwards**, so overlapping runs finishing out of
   order can't rewind each other.
+
+The species half is ported from fishsense-lite@77e8f8e5
+services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/
+activities/sync_species_labels_for_label_studio_project_activity.py
+(`_update_species_label`, `_apply_parsed`) and the API's
+`get_species_label_by_label_studio_id` / `put_species_label`. v1's semantics:
+a task's row is its *live* row (a superseded one is never found, so never
+revived); a parsed field of None keeps the stored value. v2 change, as for
+laser: the update names the sync's columns, so `needs_reprocess`,
+`superseded`, `image_url` and the operator's `fish_angle_degrees` are never
+written by it.
 """
 
 import json
@@ -32,14 +43,17 @@ from fishsense_services_api.service_principal import ServicePrincipal
 __all__ = [
     "LabelSyncCatalog",
     "LaserSync",
+    "SpeciesSync",
+    "SyncedLabel",
     "advance_sync_cursor",
     "apply_laser_sync",
+    "apply_species_sync",
     "label_studio_projects",
     "sync_cursor",
 ]
 
 #: The label table for each kind the sync knows.
-_TABLES = {"laser": "laser_labels"}
+_TABLES = {"laser": "laser_labels", "species": "species_labels"}
 
 
 @dataclass(frozen=True)
@@ -107,6 +121,79 @@ async def apply_laser_sync(
     return updated.rowcount > 0
 
 
+@dataclass(frozen=True)
+class SpeciesSync:
+    """What one Label Studio task says about its species label. A parsed field
+    of None means the annotation didn't give it: the stored value is kept."""
+
+    completed: bool
+    grouping: str | None
+    top_three_photos_of_group: bool | None
+    content_of_image: str | None
+    fish_measurable_category: str | None
+    fish_angle_category: str | None
+    fish_curved_category: str | None
+    #: The most recent annotator's Label Studio user id; None keeps the last.
+    ls_labeler_id: int | None
+    ls_updated_at: datetime | None
+    ls_payload: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class SyncedLabel:
+    """The label a task's sync updated: what the dive-link pass needs."""
+
+    capture_id: uuid.UUID
+    #: None for a capture filed under no dive.
+    dive_id: uuid.UUID | None
+
+
+async def apply_species_sync(
+    conn: AsyncConnection, tenant_id: uuid.UUID, ls_task_id: int, sync: SpeciesSync
+) -> SyncedLabel | None:
+    """Update the tenant's live species label for this task; None when there
+    is none (the sync skips the task, as v1's 404 did)."""
+    row = (
+        await conn.execute(
+            text("""
+                UPDATE species_labels s SET
+                    completed = :completed,
+                    grouping = COALESCE(:grouping, s.grouping),
+                    top_three_photos_of_group =
+                        COALESCE(:top_three, s.top_three_photos_of_group),
+                    content_of_image = COALESCE(:content, s.content_of_image),
+                    fish_measurable_category =
+                        COALESCE(:measurable, s.fish_measurable_category),
+                    fish_angle_category = COALESCE(:angle, s.fish_angle_category),
+                    fish_curved_category = COALESCE(:curved, s.fish_curved_category),
+                    ls_labeler_id = COALESCE(:labeler, s.ls_labeler_id),
+                    ls_updated_at = :updated_at,
+                    ls_payload = CAST(:payload AS jsonb)
+                FROM captures c
+                WHERE s.tenant_id = :tenant AND s.ls_task_id = :task
+                  AND NOT s.superseded
+                  AND c.tenant_id = s.tenant_id AND c.id = s.capture_id
+                RETURNING s.capture_id, c.dive_id
+                """),
+            {
+                "completed": sync.completed,
+                "grouping": sync.grouping,
+                "top_three": sync.top_three_photos_of_group,
+                "content": sync.content_of_image,
+                "measurable": sync.fish_measurable_category,
+                "angle": sync.fish_angle_category,
+                "curved": sync.fish_curved_category,
+                "labeler": sync.ls_labeler_id,
+                "updated_at": sync.ls_updated_at,
+                "payload": json.dumps(sync.ls_payload),
+                "tenant": tenant_id,
+                "task": ls_task_id,
+            },
+        )
+    ).one_or_none()
+    return None if row is None else SyncedLabel(row.capture_id, row.dive_id)
+
+
 async def sync_cursor(
     conn: AsyncConnection, tenant_id: uuid.UUID, kind: str, ls_project_id: int
 ) -> datetime | None:
@@ -158,6 +245,12 @@ class LabelSyncCatalog(ServicePrincipal):
     ) -> bool:
         async with self._tenant(tenant_id) as conn:
             return await apply_laser_sync(conn, tenant_id, ls_task_id, sync)
+
+    async def apply_species_sync(
+        self, tenant_id: uuid.UUID, ls_task_id: int, sync: SpeciesSync
+    ) -> SyncedLabel | None:
+        async with self._tenant(tenant_id) as conn:
+            return await apply_species_sync(conn, tenant_id, ls_task_id, sync)
 
     async def sync_cursor(
         self, tenant_id: uuid.UUID, kind: str, ls_project_id: int
