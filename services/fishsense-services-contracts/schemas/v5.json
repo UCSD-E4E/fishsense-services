@@ -1,0 +1,5188 @@
+{
+  "CheckerboardCalibrationImage": {
+    "$defs": {
+      "ObjectRef": {
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "title": "ObjectRef",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "capture_id": {
+        "format": "uuid",
+        "title": "Capture Id",
+        "type": "string"
+      },
+      "laser_x": {
+        "title": "Laser X",
+        "type": "number"
+      },
+      "laser_y": {
+        "title": "Laser Y",
+        "type": "number"
+      },
+      "raw": {
+        "$ref": "#/$defs/ObjectRef"
+      }
+    },
+    "required": [
+      "capture_id",
+      "raw",
+      "laser_x",
+      "laser_y"
+    ],
+    "title": "CheckerboardCalibrationImage",
+    "type": "object"
+  },
+  "CheckerboardLatticeRender": {
+    "$defs": {
+      "ObjectRef": {
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "title": "ObjectRef",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "capture_id": {
+        "format": "uuid",
+        "title": "Capture Id",
+        "type": "string"
+      },
+      "corners": {
+        "anyOf": [
+          {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Corners"
+      },
+      "detected_cols": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Detected Cols"
+      },
+      "detected_rows": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Detected Rows"
+      },
+      "height": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Height"
+      },
+      "image": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "median_spacing_px": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Median Spacing Px"
+      },
+      "skip_reason": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Skip Reason"
+      },
+      "width": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Width"
+      }
+    },
+    "required": [
+      "capture_id"
+    ],
+    "title": "CheckerboardLatticeRender",
+    "type": "object"
+  },
+  "CheckerboardObservation": {
+    "properties": {
+      "capture_id": {
+        "format": "uuid",
+        "title": "Capture Id",
+        "type": "string"
+      },
+      "detected_cols": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Detected Cols"
+      },
+      "detected_rows": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Detected Rows"
+      },
+      "laser_x": {
+        "title": "Laser X",
+        "type": "number"
+      },
+      "laser_y": {
+        "title": "Laser Y",
+        "type": "number"
+      },
+      "point": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Point"
+      },
+      "skip_reason": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Skip Reason"
+      }
+    },
+    "required": [
+      "capture_id",
+      "point",
+      "laser_x",
+      "laser_y"
+    ],
+    "title": "CheckerboardObservation",
+    "type": "object"
+  },
+  "CheckerboardTarget": {
+    "properties": {
+      "cols": {
+        "exclusiveMinimum": 0,
+        "title": "Cols",
+        "type": "integer"
+      },
+      "pitch_x_m": {
+        "exclusiveMinimum": 0,
+        "title": "Pitch X M",
+        "type": "number"
+      },
+      "pitch_y_m": {
+        "exclusiveMinimum": 0,
+        "title": "Pitch Y M",
+        "type": "number"
+      },
+      "rows": {
+        "exclusiveMinimum": 0,
+        "title": "Rows",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "rows",
+      "cols",
+      "pitch_x_m",
+      "pitch_y_m"
+    ],
+    "title": "CheckerboardTarget",
+    "type": "object"
+  },
+  "ClusterDiveFrameImage": {
+    "properties": {
+      "capture_id": {
+        "format": "uuid",
+        "title": "Capture Id",
+        "type": "string"
+      },
+      "taken_datetime": {
+        "format": "date-time",
+        "title": "Taken Datetime",
+        "type": "string"
+      }
+    },
+    "required": [
+      "capture_id",
+      "taken_datetime"
+    ],
+    "title": "ClusterDiveFrameImage",
+    "type": "object"
+  },
+  "ClusterDiveFramesInput": {
+    "$defs": {
+      "ClusterDiveFrameImage": {
+        "properties": {
+          "capture_id": {
+            "format": "uuid",
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "taken_datetime": {
+            "format": "date-time",
+            "title": "Taken Datetime",
+            "type": "string"
+          }
+        },
+        "required": [
+          "capture_id",
+          "taken_datetime"
+        ],
+        "title": "ClusterDiveFrameImage",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "dive_id": {
+        "format": "uuid",
+        "title": "Dive Id",
+        "type": "string"
+      },
+      "images": {
+        "items": {
+          "$ref": "#/$defs/ClusterDiveFrameImage"
+        },
+        "title": "Images",
+        "type": "array"
+      }
+    },
+    "required": [
+      "dive_id",
+      "images"
+    ],
+    "title": "ClusterDiveFramesInput",
+    "type": "object"
+  },
+  "ComputeLaserDepthsInput": {
+    "$defs": {
+      "LaserCalibrationGeometry": {
+        "properties": {
+          "laser_axis": {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Laser Axis",
+            "type": "array"
+          },
+          "laser_calibration_id": {
+            "format": "uuid",
+            "title": "Laser Calibration Id",
+            "type": "string"
+          },
+          "laser_position": {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Laser Position",
+            "type": "array"
+          }
+        },
+        "required": [
+          "laser_calibration_id",
+          "laser_position",
+          "laser_axis"
+        ],
+        "title": "LaserCalibrationGeometry",
+        "type": "object"
+      },
+      "LaserDepthCapture": {
+        "properties": {
+          "capture_id": {
+            "format": "uuid",
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "laser_labels": {
+            "items": {
+              "$ref": "#/$defs/LaserDot"
+            },
+            "minItems": 1,
+            "title": "Laser Labels",
+            "type": "array"
+          }
+        },
+        "required": [
+          "capture_id",
+          "laser_labels"
+        ],
+        "title": "LaserDepthCapture",
+        "type": "object"
+      },
+      "LaserDot": {
+        "properties": {
+          "laser_label_id": {
+            "format": "uuid",
+            "title": "Laser Label Id",
+            "type": "string"
+          },
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "laser_label_id",
+          "x",
+          "y"
+        ],
+        "title": "LaserDot",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "calibration": {
+        "$ref": "#/$defs/LaserCalibrationGeometry"
+      },
+      "camera_matrix": {
+        "maxItems": 3,
+        "minItems": 3,
+        "prefixItems": [
+          {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          }
+        ],
+        "title": "Camera Matrix",
+        "type": "array"
+      },
+      "captures": {
+        "items": {
+          "$ref": "#/$defs/LaserDepthCapture"
+        },
+        "title": "Captures",
+        "type": "array"
+      },
+      "dive_id": {
+        "format": "uuid",
+        "title": "Dive Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "dive_id",
+      "camera_matrix",
+      "calibration",
+      "captures"
+    ],
+    "title": "ComputeLaserDepthsInput",
+    "type": "object"
+  },
+  "ComputeLaserDepthsResult": {
+    "$defs": {
+      "LaserDepth": {
+        "properties": {
+          "depth_m": {
+            "exclusiveMinimum": 0,
+            "title": "Depth M",
+            "type": "number"
+          },
+          "laser_label_id": {
+            "format": "uuid",
+            "title": "Laser Label Id",
+            "type": "string"
+          },
+          "range_m": {
+            "minimum": 0,
+            "title": "Range M",
+            "type": "number"
+          },
+          "residual_m": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual M"
+          },
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "laser_label_id",
+          "x",
+          "y",
+          "depth_m",
+          "range_m",
+          "residual_m"
+        ],
+        "title": "LaserDepth",
+        "type": "object"
+      },
+      "LaserDepthOutcome": {
+        "properties": {
+          "capture_id": {
+            "format": "uuid",
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "depth": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/LaserDepth"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "refusals": {
+            "items": {
+              "$ref": "#/$defs/LaserDepthRefusal"
+            },
+            "title": "Refusals",
+            "type": "array"
+          }
+        },
+        "required": [
+          "capture_id",
+          "depth",
+          "refusals"
+        ],
+        "title": "LaserDepthOutcome",
+        "type": "object"
+      },
+      "LaserDepthRefusal": {
+        "properties": {
+          "depth_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depth M"
+          },
+          "laser_label_id": {
+            "format": "uuid",
+            "title": "Laser Label Id",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "non_finite_depth",
+              "non_positive_depth"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "laser_label_id",
+          "x",
+          "y",
+          "reason",
+          "depth_m"
+        ],
+        "title": "LaserDepthRefusal",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "captures": {
+        "items": {
+          "$ref": "#/$defs/LaserDepthOutcome"
+        },
+        "title": "Captures",
+        "type": "array"
+      },
+      "core_version": {
+        "minLength": 1,
+        "title": "Core Version",
+        "type": "string"
+      },
+      "dive_id": {
+        "format": "uuid",
+        "title": "Dive Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "dive_id",
+      "core_version",
+      "captures"
+    ],
+    "title": "ComputeLaserDepthsResult",
+    "type": "object"
+  },
+  "DivePlan": {
+    "properties": {
+      "dive_id": {
+        "title": "Dive Id",
+        "type": "integer"
+      },
+      "excluded_kept": {
+        "items": {
+          "type": "integer"
+        },
+        "title": "Excluded Kept",
+        "type": "array"
+      },
+      "positives": {
+        "title": "Positives",
+        "type": "integer"
+      },
+      "reflection_suspect": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Reflection Suspect"
+      },
+      "revive_ids": {
+        "items": {
+          "type": "integer"
+        },
+        "title": "Revive Ids",
+        "type": "array"
+      },
+      "revive_on_calibration_frames": {
+        "items": {
+          "type": "integer"
+        },
+        "title": "Revive On Calibration Frames",
+        "type": "array"
+      },
+      "revive_on_images_with_another_live_label": {
+        "items": {
+          "type": "integer"
+        },
+        "title": "Revive On Images With Another Live Label",
+        "type": "array"
+      },
+      "status": {
+        "title": "Status",
+        "type": "string"
+      },
+      "superseded_after": {
+        "title": "Superseded After",
+        "type": "integer"
+      },
+      "superseded_now": {
+        "title": "Superseded Now",
+        "type": "integer"
+      },
+      "unjudged_superseded": {
+        "default": 0,
+        "title": "Unjudged Superseded",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "dive_id",
+      "status",
+      "positives",
+      "superseded_now",
+      "superseded_after"
+    ],
+    "title": "DivePlan",
+    "type": "object"
+  },
+  "EvaluateLaserAutoAcceptInput": {
+    "$defs": {
+      "GatePrediction": {
+        "properties": {
+          "capture_number": {
+            "title": "Capture Number",
+            "type": "integer"
+          },
+          "prediction_id": {
+            "format": "uuid",
+            "title": "Prediction Id",
+            "type": "string"
+          },
+          "predictor_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Predictor Version"
+          },
+          "x": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "X"
+          },
+          "y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Y"
+          }
+        },
+        "required": [
+          "prediction_id",
+          "capture_number"
+        ],
+        "title": "GatePrediction",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "dive_id": {
+        "format": "uuid",
+        "title": "Dive Id",
+        "type": "string"
+      },
+      "dive_number": {
+        "title": "Dive Number",
+        "type": "integer"
+      },
+      "predictions": {
+        "items": {
+          "$ref": "#/$defs/GatePrediction"
+        },
+        "title": "Predictions",
+        "type": "array"
+      }
+    },
+    "required": [
+      "dive_id",
+      "dive_number",
+      "predictions"
+    ],
+    "title": "EvaluateLaserAutoAcceptInput",
+    "type": "object"
+  },
+  "FishLength": {
+    "$defs": {
+      "HeadTail": {
+        "properties": {
+          "head_tail_label_id": {
+            "format": "uuid",
+            "title": "Head Tail Label Id",
+            "type": "string"
+          },
+          "head_x": {
+            "title": "Head X",
+            "type": "number"
+          },
+          "head_y": {
+            "title": "Head Y",
+            "type": "number"
+          },
+          "tail_x": {
+            "title": "Tail X",
+            "type": "number"
+          },
+          "tail_y": {
+            "title": "Tail Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "head_tail_label_id",
+          "head_x",
+          "head_y",
+          "tail_x",
+          "tail_y"
+        ],
+        "title": "HeadTail",
+        "type": "object"
+      },
+      "LaserDot": {
+        "properties": {
+          "laser_label_id": {
+            "format": "uuid",
+            "title": "Laser Label Id",
+            "type": "string"
+          },
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "laser_label_id",
+          "x",
+          "y"
+        ],
+        "title": "LaserDot",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "capture_id": {
+        "format": "uuid",
+        "title": "Capture Id",
+        "type": "string"
+      },
+      "depth_m": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Depth M"
+      },
+      "head_tail": {
+        "$ref": "#/$defs/HeadTail"
+      },
+      "laser": {
+        "$ref": "#/$defs/LaserDot"
+      },
+      "length_m": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Length M"
+      },
+      "refusal": {
+        "anyOf": [
+          {
+            "enum": [
+              "non_finite_length",
+              "zero_length"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Refusal"
+      },
+      "species_label_id": {
+        "format": "uuid",
+        "title": "Species Label Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "capture_id",
+      "species_label_id",
+      "laser",
+      "head_tail",
+      "length_m",
+      "depth_m",
+      "refusal"
+    ],
+    "title": "FishLength",
+    "type": "object"
+  },
+  "GatePrediction": {
+    "properties": {
+      "capture_number": {
+        "title": "Capture Number",
+        "type": "integer"
+      },
+      "prediction_id": {
+        "format": "uuid",
+        "title": "Prediction Id",
+        "type": "string"
+      },
+      "predictor_version": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Predictor Version"
+      },
+      "x": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "X"
+      },
+      "y": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Y"
+      }
+    },
+    "required": [
+      "prediction_id",
+      "capture_number"
+    ],
+    "title": "GatePrediction",
+    "type": "object"
+  },
+  "HeadTail": {
+    "properties": {
+      "head_tail_label_id": {
+        "format": "uuid",
+        "title": "Head Tail Label Id",
+        "type": "string"
+      },
+      "head_x": {
+        "title": "Head X",
+        "type": "number"
+      },
+      "head_y": {
+        "title": "Head Y",
+        "type": "number"
+      },
+      "tail_x": {
+        "title": "Tail X",
+        "type": "number"
+      },
+      "tail_y": {
+        "title": "Tail Y",
+        "type": "number"
+      }
+    },
+    "required": [
+      "head_tail_label_id",
+      "head_x",
+      "head_y",
+      "tail_x",
+      "tail_y"
+    ],
+    "title": "HeadTail",
+    "type": "object"
+  },
+  "HeadtailPredictionResult": {
+    "properties": {
+      "capture_id": {
+        "format": "uuid",
+        "title": "Capture Id",
+        "type": "string"
+      },
+      "checkpoint": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Checkpoint"
+      },
+      "core_version": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Core Version"
+      },
+      "crop_x": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Crop X"
+      },
+      "crop_y": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Crop Y"
+      },
+      "head_x": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Head X"
+      },
+      "head_y": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Head Y"
+      },
+      "height": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Height"
+      },
+      "laser_label_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Laser Label Id"
+      },
+      "mask_area_px": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Mask Area Px"
+      },
+      "mask_bbox": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Mask Bbox"
+      },
+      "predictor_version": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Predictor Version"
+      },
+      "silhouette_ratio": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Silhouette Ratio"
+      },
+      "status": {
+        "title": "Status",
+        "type": "string"
+      },
+      "tail_x": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Tail X"
+      },
+      "tail_y": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Tail Y"
+      },
+      "width": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Width"
+      }
+    },
+    "required": [
+      "capture_id",
+      "status"
+    ],
+    "title": "HeadtailPredictionResult",
+    "type": "object"
+  },
+  "LaserAutoAcceptResult": {
+    "$defs": {
+      "LaserAutoAcceptSummary": {
+        "properties": {
+          "auto_accepted": {
+            "default": 0,
+            "title": "Auto Accepted",
+            "type": "integer"
+          },
+          "dive_id": {
+            "format": "uuid",
+            "title": "Dive Id",
+            "type": "string"
+          },
+          "eligible": {
+            "default": false,
+            "title": "Eligible",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "inlier_count": {
+            "default": 0,
+            "title": "Inlier Count",
+            "type": "integer"
+          },
+          "inlier_fraction": {
+            "default": 0.0,
+            "title": "Inlier Fraction",
+            "type": "number"
+          },
+          "line_confidence": {
+            "default": 0.0,
+            "title": "Line Confidence",
+            "type": "number"
+          },
+          "n_points": {
+            "default": 0,
+            "title": "N Points",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reason"
+          },
+          "verdicts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Verdicts",
+            "type": "object"
+          },
+          "written": {
+            "default": 0,
+            "title": "Written",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dive_id"
+        ],
+        "title": "LaserAutoAcceptSummary",
+        "type": "object"
+      },
+      "LaserFrameVerdict": {
+        "properties": {
+          "auto_accept": {
+            "title": "Auto Accept",
+            "type": "boolean"
+          },
+          "gate_verdict": {
+            "enum": [
+              "auto_accepted",
+              "off_line",
+              "along_line_outlier",
+              "no_prediction",
+              "audit_sample",
+              "dive_ineligible"
+            ],
+            "title": "Gate Verdict",
+            "type": "string"
+          },
+          "line_offset_px": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Line Offset Px"
+          },
+          "line_position_z": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Line Position Z"
+          },
+          "prediction_id": {
+            "format": "uuid",
+            "title": "Prediction Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "prediction_id",
+          "auto_accept",
+          "gate_verdict"
+        ],
+        "title": "LaserFrameVerdict",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "frames": {
+        "items": {
+          "$ref": "#/$defs/LaserFrameVerdict"
+        },
+        "title": "Frames",
+        "type": "array"
+      },
+      "summary": {
+        "$ref": "#/$defs/LaserAutoAcceptSummary"
+      }
+    },
+    "required": [
+      "summary",
+      "frames"
+    ],
+    "title": "LaserAutoAcceptResult",
+    "type": "object"
+  },
+  "LaserAutoAcceptSummary": {
+    "properties": {
+      "auto_accepted": {
+        "default": 0,
+        "title": "Auto Accepted",
+        "type": "integer"
+      },
+      "dive_id": {
+        "format": "uuid",
+        "title": "Dive Id",
+        "type": "string"
+      },
+      "eligible": {
+        "default": false,
+        "title": "Eligible",
+        "type": "boolean"
+      },
+      "enabled": {
+        "default": true,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "inlier_count": {
+        "default": 0,
+        "title": "Inlier Count",
+        "type": "integer"
+      },
+      "inlier_fraction": {
+        "default": 0.0,
+        "title": "Inlier Fraction",
+        "type": "number"
+      },
+      "line_confidence": {
+        "default": 0.0,
+        "title": "Line Confidence",
+        "type": "number"
+      },
+      "n_points": {
+        "default": 0,
+        "title": "N Points",
+        "type": "integer"
+      },
+      "reason": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Reason"
+      },
+      "verdicts": {
+        "additionalProperties": {
+          "type": "integer"
+        },
+        "title": "Verdicts",
+        "type": "object"
+      },
+      "written": {
+        "default": 0,
+        "title": "Written",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "dive_id"
+    ],
+    "title": "LaserAutoAcceptSummary",
+    "type": "object"
+  },
+  "LaserCalibrationGeometry": {
+    "properties": {
+      "laser_axis": {
+        "maxItems": 3,
+        "minItems": 3,
+        "prefixItems": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "number"
+          }
+        ],
+        "title": "Laser Axis",
+        "type": "array"
+      },
+      "laser_calibration_id": {
+        "format": "uuid",
+        "title": "Laser Calibration Id",
+        "type": "string"
+      },
+      "laser_position": {
+        "maxItems": 3,
+        "minItems": 3,
+        "prefixItems": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "number"
+          }
+        ],
+        "title": "Laser Position",
+        "type": "array"
+      }
+    },
+    "required": [
+      "laser_calibration_id",
+      "laser_position",
+      "laser_axis"
+    ],
+    "title": "LaserCalibrationGeometry",
+    "type": "object"
+  },
+  "LaserCalibrationResult": {
+    "properties": {
+      "core_version": {
+        "title": "Core Version",
+        "type": "string"
+      },
+      "gate_verdicts": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "title": "Gate Verdicts",
+        "type": "object"
+      },
+      "laser_axis": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Laser Axis"
+      },
+      "laser_position": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Laser Position"
+      },
+      "lever_arm_m": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Lever Arm M"
+      },
+      "observation_count": {
+        "minimum": 0,
+        "title": "Observation Count",
+        "type": "integer"
+      },
+      "observations_trimmed": {
+        "minimum": 0,
+        "title": "Observations Trimmed",
+        "type": "integer"
+      },
+      "outcome": {
+        "enum": [
+          "accepted",
+          "refused"
+        ],
+        "title": "Outcome",
+        "type": "string"
+      },
+      "refusal_reason": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Refusal Reason"
+      },
+      "refusal_type": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Refusal Type"
+      }
+    },
+    "required": [
+      "outcome",
+      "observation_count",
+      "observations_trimmed",
+      "gate_verdicts",
+      "core_version"
+    ],
+    "title": "LaserCalibrationResult",
+    "type": "object"
+  },
+  "LaserDepth": {
+    "properties": {
+      "depth_m": {
+        "exclusiveMinimum": 0,
+        "title": "Depth M",
+        "type": "number"
+      },
+      "laser_label_id": {
+        "format": "uuid",
+        "title": "Laser Label Id",
+        "type": "string"
+      },
+      "range_m": {
+        "minimum": 0,
+        "title": "Range M",
+        "type": "number"
+      },
+      "residual_m": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Residual M"
+      },
+      "x": {
+        "title": "X",
+        "type": "number"
+      },
+      "y": {
+        "title": "Y",
+        "type": "number"
+      }
+    },
+    "required": [
+      "laser_label_id",
+      "x",
+      "y",
+      "depth_m",
+      "range_m",
+      "residual_m"
+    ],
+    "title": "LaserDepth",
+    "type": "object"
+  },
+  "LaserDepthCapture": {
+    "$defs": {
+      "LaserDot": {
+        "properties": {
+          "laser_label_id": {
+            "format": "uuid",
+            "title": "Laser Label Id",
+            "type": "string"
+          },
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "laser_label_id",
+          "x",
+          "y"
+        ],
+        "title": "LaserDot",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "capture_id": {
+        "format": "uuid",
+        "title": "Capture Id",
+        "type": "string"
+      },
+      "laser_labels": {
+        "items": {
+          "$ref": "#/$defs/LaserDot"
+        },
+        "minItems": 1,
+        "title": "Laser Labels",
+        "type": "array"
+      }
+    },
+    "required": [
+      "capture_id",
+      "laser_labels"
+    ],
+    "title": "LaserDepthCapture",
+    "type": "object"
+  },
+  "LaserDepthOutcome": {
+    "$defs": {
+      "LaserDepth": {
+        "properties": {
+          "depth_m": {
+            "exclusiveMinimum": 0,
+            "title": "Depth M",
+            "type": "number"
+          },
+          "laser_label_id": {
+            "format": "uuid",
+            "title": "Laser Label Id",
+            "type": "string"
+          },
+          "range_m": {
+            "minimum": 0,
+            "title": "Range M",
+            "type": "number"
+          },
+          "residual_m": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual M"
+          },
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "laser_label_id",
+          "x",
+          "y",
+          "depth_m",
+          "range_m",
+          "residual_m"
+        ],
+        "title": "LaserDepth",
+        "type": "object"
+      },
+      "LaserDepthRefusal": {
+        "properties": {
+          "depth_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depth M"
+          },
+          "laser_label_id": {
+            "format": "uuid",
+            "title": "Laser Label Id",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "non_finite_depth",
+              "non_positive_depth"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "laser_label_id",
+          "x",
+          "y",
+          "reason",
+          "depth_m"
+        ],
+        "title": "LaserDepthRefusal",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "capture_id": {
+        "format": "uuid",
+        "title": "Capture Id",
+        "type": "string"
+      },
+      "depth": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/LaserDepth"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "refusals": {
+        "items": {
+          "$ref": "#/$defs/LaserDepthRefusal"
+        },
+        "title": "Refusals",
+        "type": "array"
+      }
+    },
+    "required": [
+      "capture_id",
+      "depth",
+      "refusals"
+    ],
+    "title": "LaserDepthOutcome",
+    "type": "object"
+  },
+  "LaserDepthRefusal": {
+    "properties": {
+      "depth_m": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Depth M"
+      },
+      "laser_label_id": {
+        "format": "uuid",
+        "title": "Laser Label Id",
+        "type": "string"
+      },
+      "reason": {
+        "enum": [
+          "non_finite_depth",
+          "non_positive_depth"
+        ],
+        "title": "Reason",
+        "type": "string"
+      },
+      "x": {
+        "title": "X",
+        "type": "number"
+      },
+      "y": {
+        "title": "Y",
+        "type": "number"
+      }
+    },
+    "required": [
+      "laser_label_id",
+      "x",
+      "y",
+      "reason",
+      "depth_m"
+    ],
+    "title": "LaserDepthRefusal",
+    "type": "object"
+  },
+  "LaserDot": {
+    "properties": {
+      "laser_label_id": {
+        "format": "uuid",
+        "title": "Laser Label Id",
+        "type": "string"
+      },
+      "x": {
+        "title": "X",
+        "type": "number"
+      },
+      "y": {
+        "title": "Y",
+        "type": "number"
+      }
+    },
+    "required": [
+      "laser_label_id",
+      "x",
+      "y"
+    ],
+    "title": "LaserDot",
+    "type": "object"
+  },
+  "LaserFrameVerdict": {
+    "properties": {
+      "auto_accept": {
+        "title": "Auto Accept",
+        "type": "boolean"
+      },
+      "gate_verdict": {
+        "enum": [
+          "auto_accepted",
+          "off_line",
+          "along_line_outlier",
+          "no_prediction",
+          "audit_sample",
+          "dive_ineligible"
+        ],
+        "title": "Gate Verdict",
+        "type": "string"
+      },
+      "line_offset_px": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Line Offset Px"
+      },
+      "line_position_z": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Line Position Z"
+      },
+      "prediction_id": {
+        "format": "uuid",
+        "title": "Prediction Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "prediction_id",
+      "auto_accept",
+      "gate_verdict"
+    ],
+    "title": "LaserFrameVerdict",
+    "type": "object"
+  },
+  "LaserLabelRow": {
+    "properties": {
+      "capture_number": {
+        "title": "Capture Number",
+        "type": "integer"
+      },
+      "completed": {
+        "title": "Completed",
+        "type": "boolean"
+      },
+      "label_id": {
+        "format": "uuid",
+        "title": "Label Id",
+        "type": "string"
+      },
+      "number": {
+        "title": "Number",
+        "type": "integer"
+      },
+      "superseded": {
+        "title": "Superseded",
+        "type": "boolean"
+      },
+      "x": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "X"
+      },
+      "y": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Y"
+      }
+    },
+    "required": [
+      "label_id",
+      "number",
+      "capture_number",
+      "superseded",
+      "completed"
+    ],
+    "title": "LaserLabelRow",
+    "type": "object"
+  },
+  "LaserLineFit": {
+    "properties": {
+      "a": {
+        "title": "A",
+        "type": "number"
+      },
+      "b": {
+        "title": "B",
+        "type": "number"
+      },
+      "c": {
+        "title": "C",
+        "type": "number"
+      },
+      "inlier_count": {
+        "title": "Inlier Count",
+        "type": "integer"
+      },
+      "inlier_fraction": {
+        "title": "Inlier Fraction",
+        "type": "number"
+      },
+      "label_noise_mad": {
+        "title": "Label Noise Mad",
+        "type": "number"
+      },
+      "line_confidence": {
+        "title": "Line Confidence",
+        "type": "number"
+      },
+      "n_points": {
+        "title": "N Points",
+        "type": "integer"
+      },
+      "noise_estimator": {
+        "const": "signed_residual_mad",
+        "default": "signed_residual_mad",
+        "title": "Noise Estimator",
+        "type": "string"
+      },
+      "residual_std": {
+        "title": "Residual Std",
+        "type": "number"
+      }
+    },
+    "required": [
+      "a",
+      "b",
+      "c",
+      "n_points",
+      "inlier_count",
+      "inlier_fraction",
+      "residual_std",
+      "label_noise_mad",
+      "line_confidence"
+    ],
+    "title": "LaserLineFit",
+    "type": "object"
+  },
+  "LaserPredictImage": {
+    "$defs": {
+      "ObjectRef": {
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "title": "ObjectRef",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "capture_id": {
+        "format": "uuid",
+        "title": "Capture Id",
+        "type": "string"
+      },
+      "raw": {
+        "$ref": "#/$defs/ObjectRef"
+      }
+    },
+    "required": [
+      "capture_id",
+      "raw"
+    ],
+    "title": "LaserPredictImage",
+    "type": "object"
+  },
+  "LaserPredictionResult": {
+    "properties": {
+      "capture_id": {
+        "format": "uuid",
+        "title": "Capture Id",
+        "type": "string"
+      },
+      "checkpoint": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Checkpoint"
+      },
+      "color": {
+        "anyOf": [
+          {
+            "enum": [
+              "red",
+              "green"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Color"
+      },
+      "color_margin": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Color Margin"
+      },
+      "confidence": {
+        "title": "Confidence",
+        "type": "number"
+      },
+      "core_version": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Core Version"
+      },
+      "height": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Height"
+      },
+      "predictor_version": {
+        "title": "Predictor Version",
+        "type": "integer"
+      },
+      "rejected_out_of_region": {
+        "default": false,
+        "title": "Rejected Out Of Region",
+        "type": "boolean"
+      },
+      "width": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Width"
+      },
+      "x": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "X"
+      },
+      "y": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Y"
+      }
+    },
+    "required": [
+      "capture_id",
+      "confidence",
+      "predictor_version"
+    ],
+    "title": "LaserPredictionResult",
+    "type": "object"
+  },
+  "LaserPreprocessImage": {
+    "$defs": {
+      "ObjectRef": {
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "title": "ObjectRef",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "capture_id": {
+        "format": "uuid",
+        "title": "Capture Id",
+        "type": "string"
+      },
+      "jpeg": {
+        "$ref": "#/$defs/ObjectRef"
+      },
+      "raw": {
+        "$ref": "#/$defs/ObjectRef"
+      }
+    },
+    "required": [
+      "capture_id",
+      "raw",
+      "jpeg"
+    ],
+    "title": "LaserPreprocessImage",
+    "type": "object"
+  },
+  "LaserSupersede": {
+    "$defs": {
+      "SupersedeReason": {
+        "enum": [
+          "validator_3sigma",
+          "validator_coarse_calibration"
+        ],
+        "title": "SupersedeReason",
+        "type": "string"
+      }
+    },
+    "properties": {
+      "label_id": {
+        "format": "uuid",
+        "title": "Label Id",
+        "type": "string"
+      },
+      "reason": {
+        "$ref": "#/$defs/SupersedeReason"
+      }
+    },
+    "required": [
+      "label_id",
+      "reason"
+    ],
+    "title": "LaserSupersede",
+    "type": "object"
+  },
+  "LaserValidationResult": {
+    "$defs": {
+      "LaserLineFit": {
+        "properties": {
+          "a": {
+            "title": "A",
+            "type": "number"
+          },
+          "b": {
+            "title": "B",
+            "type": "number"
+          },
+          "c": {
+            "title": "C",
+            "type": "number"
+          },
+          "inlier_count": {
+            "title": "Inlier Count",
+            "type": "integer"
+          },
+          "inlier_fraction": {
+            "title": "Inlier Fraction",
+            "type": "number"
+          },
+          "label_noise_mad": {
+            "title": "Label Noise Mad",
+            "type": "number"
+          },
+          "line_confidence": {
+            "title": "Line Confidence",
+            "type": "number"
+          },
+          "n_points": {
+            "title": "N Points",
+            "type": "integer"
+          },
+          "noise_estimator": {
+            "const": "signed_residual_mad",
+            "default": "signed_residual_mad",
+            "title": "Noise Estimator",
+            "type": "string"
+          },
+          "residual_std": {
+            "title": "Residual Std",
+            "type": "number"
+          }
+        },
+        "required": [
+          "a",
+          "b",
+          "c",
+          "n_points",
+          "inlier_count",
+          "inlier_fraction",
+          "residual_std",
+          "label_noise_mad",
+          "line_confidence"
+        ],
+        "title": "LaserLineFit",
+        "type": "object"
+      },
+      "LaserSupersede": {
+        "properties": {
+          "label_id": {
+            "format": "uuid",
+            "title": "Label Id",
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/$defs/SupersedeReason"
+          }
+        },
+        "required": [
+          "label_id",
+          "reason"
+        ],
+        "title": "LaserSupersede",
+        "type": "object"
+      },
+      "ReflectionReport": {
+        "properties": {
+          "angle_deg": {
+            "title": "Angle Deg",
+            "type": "number"
+          },
+          "n_primary": {
+            "title": "N Primary",
+            "type": "integer"
+          },
+          "n_secondary": {
+            "title": "N Secondary",
+            "type": "integer"
+          },
+          "separation_px": {
+            "title": "Separation Px",
+            "type": "number"
+          }
+        },
+        "required": [
+          "n_primary",
+          "n_secondary",
+          "separation_px",
+          "angle_deg"
+        ],
+        "title": "ReflectionReport",
+        "type": "object"
+      },
+      "SupersedeReason": {
+        "enum": [
+          "validator_3sigma",
+          "validator_coarse_calibration"
+        ],
+        "title": "SupersedeReason",
+        "type": "string"
+      }
+    },
+    "properties": {
+      "dive_id": {
+        "format": "uuid",
+        "title": "Dive Id",
+        "type": "string"
+      },
+      "flagged": {
+        "default": 0,
+        "title": "Flagged",
+        "type": "integer"
+      },
+      "line": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/LaserLineFit"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "positives": {
+        "title": "Positives",
+        "type": "integer"
+      },
+      "reflection": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ReflectionReport"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "status": {
+        "title": "Status",
+        "type": "string"
+      },
+      "supersede": {
+        "items": {
+          "$ref": "#/$defs/LaserSupersede"
+        },
+        "title": "Supersede",
+        "type": "array"
+      }
+    },
+    "required": [
+      "dive_id",
+      "status",
+      "positives"
+    ],
+    "title": "LaserValidationResult",
+    "type": "object"
+  },
+  "LatticeImage": {
+    "$defs": {
+      "ObjectRef": {
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "title": "ObjectRef",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "capture_id": {
+        "format": "uuid",
+        "title": "Capture Id",
+        "type": "string"
+      },
+      "laser_x": {
+        "title": "Laser X",
+        "type": "number"
+      },
+      "laser_y": {
+        "title": "Laser Y",
+        "type": "number"
+      },
+      "raw": {
+        "$ref": "#/$defs/ObjectRef"
+      },
+      "render": {
+        "$ref": "#/$defs/ObjectRef"
+      }
+    },
+    "required": [
+      "capture_id",
+      "raw",
+      "render",
+      "laser_x",
+      "laser_y"
+    ],
+    "title": "LatticeImage",
+    "type": "object"
+  },
+  "MeasureFishCapture": {
+    "$defs": {
+      "HeadTail": {
+        "properties": {
+          "head_tail_label_id": {
+            "format": "uuid",
+            "title": "Head Tail Label Id",
+            "type": "string"
+          },
+          "head_x": {
+            "title": "Head X",
+            "type": "number"
+          },
+          "head_y": {
+            "title": "Head Y",
+            "type": "number"
+          },
+          "tail_x": {
+            "title": "Tail X",
+            "type": "number"
+          },
+          "tail_y": {
+            "title": "Tail Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "head_tail_label_id",
+          "head_x",
+          "head_y",
+          "tail_x",
+          "tail_y"
+        ],
+        "title": "HeadTail",
+        "type": "object"
+      },
+      "LaserDot": {
+        "properties": {
+          "laser_label_id": {
+            "format": "uuid",
+            "title": "Laser Label Id",
+            "type": "string"
+          },
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "laser_label_id",
+          "x",
+          "y"
+        ],
+        "title": "LaserDot",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "capture_id": {
+        "format": "uuid",
+        "title": "Capture Id",
+        "type": "string"
+      },
+      "head_tail": {
+        "$ref": "#/$defs/HeadTail"
+      },
+      "laser": {
+        "$ref": "#/$defs/LaserDot"
+      },
+      "species_label_id": {
+        "format": "uuid",
+        "title": "Species Label Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "capture_id",
+      "species_label_id",
+      "laser",
+      "head_tail"
+    ],
+    "title": "MeasureFishCapture",
+    "type": "object"
+  },
+  "MeasureFishInput": {
+    "$defs": {
+      "HeadTail": {
+        "properties": {
+          "head_tail_label_id": {
+            "format": "uuid",
+            "title": "Head Tail Label Id",
+            "type": "string"
+          },
+          "head_x": {
+            "title": "Head X",
+            "type": "number"
+          },
+          "head_y": {
+            "title": "Head Y",
+            "type": "number"
+          },
+          "tail_x": {
+            "title": "Tail X",
+            "type": "number"
+          },
+          "tail_y": {
+            "title": "Tail Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "head_tail_label_id",
+          "head_x",
+          "head_y",
+          "tail_x",
+          "tail_y"
+        ],
+        "title": "HeadTail",
+        "type": "object"
+      },
+      "LaserCalibrationGeometry": {
+        "properties": {
+          "laser_axis": {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Laser Axis",
+            "type": "array"
+          },
+          "laser_calibration_id": {
+            "format": "uuid",
+            "title": "Laser Calibration Id",
+            "type": "string"
+          },
+          "laser_position": {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Laser Position",
+            "type": "array"
+          }
+        },
+        "required": [
+          "laser_calibration_id",
+          "laser_position",
+          "laser_axis"
+        ],
+        "title": "LaserCalibrationGeometry",
+        "type": "object"
+      },
+      "LaserDot": {
+        "properties": {
+          "laser_label_id": {
+            "format": "uuid",
+            "title": "Laser Label Id",
+            "type": "string"
+          },
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "laser_label_id",
+          "x",
+          "y"
+        ],
+        "title": "LaserDot",
+        "type": "object"
+      },
+      "MeasureFishCapture": {
+        "properties": {
+          "capture_id": {
+            "format": "uuid",
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "head_tail": {
+            "$ref": "#/$defs/HeadTail"
+          },
+          "laser": {
+            "$ref": "#/$defs/LaserDot"
+          },
+          "species_label_id": {
+            "format": "uuid",
+            "title": "Species Label Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "capture_id",
+          "species_label_id",
+          "laser",
+          "head_tail"
+        ],
+        "title": "MeasureFishCapture",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "calibration": {
+        "$ref": "#/$defs/LaserCalibrationGeometry"
+      },
+      "camera_matrix": {
+        "maxItems": 3,
+        "minItems": 3,
+        "prefixItems": [
+          {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          }
+        ],
+        "title": "Camera Matrix",
+        "type": "array"
+      },
+      "captures": {
+        "items": {
+          "$ref": "#/$defs/MeasureFishCapture"
+        },
+        "title": "Captures",
+        "type": "array"
+      },
+      "dive_id": {
+        "format": "uuid",
+        "title": "Dive Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "dive_id",
+      "camera_matrix",
+      "calibration",
+      "captures"
+    ],
+    "title": "MeasureFishInput",
+    "type": "object"
+  },
+  "MeasureFishResult": {
+    "$defs": {
+      "FishLength": {
+        "properties": {
+          "capture_id": {
+            "format": "uuid",
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "depth_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depth M"
+          },
+          "head_tail": {
+            "$ref": "#/$defs/HeadTail"
+          },
+          "laser": {
+            "$ref": "#/$defs/LaserDot"
+          },
+          "length_m": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Length M"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "enum": [
+                  "non_finite_length",
+                  "zero_length"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal"
+          },
+          "species_label_id": {
+            "format": "uuid",
+            "title": "Species Label Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "capture_id",
+          "species_label_id",
+          "laser",
+          "head_tail",
+          "length_m",
+          "depth_m",
+          "refusal"
+        ],
+        "title": "FishLength",
+        "type": "object"
+      },
+      "HeadTail": {
+        "properties": {
+          "head_tail_label_id": {
+            "format": "uuid",
+            "title": "Head Tail Label Id",
+            "type": "string"
+          },
+          "head_x": {
+            "title": "Head X",
+            "type": "number"
+          },
+          "head_y": {
+            "title": "Head Y",
+            "type": "number"
+          },
+          "tail_x": {
+            "title": "Tail X",
+            "type": "number"
+          },
+          "tail_y": {
+            "title": "Tail Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "head_tail_label_id",
+          "head_x",
+          "head_y",
+          "tail_x",
+          "tail_y"
+        ],
+        "title": "HeadTail",
+        "type": "object"
+      },
+      "LaserDot": {
+        "properties": {
+          "laser_label_id": {
+            "format": "uuid",
+            "title": "Laser Label Id",
+            "type": "string"
+          },
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "laser_label_id",
+          "x",
+          "y"
+        ],
+        "title": "LaserDot",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "algorithm": {
+        "minLength": 1,
+        "title": "Algorithm",
+        "type": "string"
+      },
+      "algorithm_version": {
+        "minLength": 1,
+        "title": "Algorithm Version",
+        "type": "string"
+      },
+      "captures": {
+        "items": {
+          "$ref": "#/$defs/FishLength"
+        },
+        "title": "Captures",
+        "type": "array"
+      },
+      "core_version": {
+        "minLength": 1,
+        "title": "Core Version",
+        "type": "string"
+      },
+      "dive_id": {
+        "format": "uuid",
+        "title": "Dive Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "dive_id",
+      "algorithm",
+      "algorithm_version",
+      "core_version",
+      "captures"
+    ],
+    "title": "MeasureFishResult",
+    "type": "object"
+  },
+  "ObjectRef": {
+    "properties": {
+      "bucket": {
+        "title": "Bucket",
+        "type": "string"
+      },
+      "key": {
+        "title": "Key",
+        "type": "string"
+      }
+    },
+    "required": [
+      "bucket",
+      "key"
+    ],
+    "title": "ObjectRef",
+    "type": "object"
+  },
+  "PerformCheckerboardCalibrationInput": {
+    "$defs": {
+      "CheckerboardCalibrationImage": {
+        "properties": {
+          "capture_id": {
+            "format": "uuid",
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "laser_x": {
+            "title": "Laser X",
+            "type": "number"
+          },
+          "laser_y": {
+            "title": "Laser Y",
+            "type": "number"
+          },
+          "raw": {
+            "$ref": "#/$defs/ObjectRef"
+          }
+        },
+        "required": [
+          "capture_id",
+          "raw",
+          "laser_x",
+          "laser_y"
+        ],
+        "title": "CheckerboardCalibrationImage",
+        "type": "object"
+      },
+      "CheckerboardTarget": {
+        "properties": {
+          "cols": {
+            "exclusiveMinimum": 0,
+            "title": "Cols",
+            "type": "integer"
+          },
+          "pitch_x_m": {
+            "exclusiveMinimum": 0,
+            "title": "Pitch X M",
+            "type": "number"
+          },
+          "pitch_y_m": {
+            "exclusiveMinimum": 0,
+            "title": "Pitch Y M",
+            "type": "number"
+          },
+          "rows": {
+            "exclusiveMinimum": 0,
+            "title": "Rows",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rows",
+          "cols",
+          "pitch_x_m",
+          "pitch_y_m"
+        ],
+        "title": "CheckerboardTarget",
+        "type": "object"
+      },
+      "ObjectRef": {
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "title": "ObjectRef",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "camera_matrix": {
+        "items": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "title": "Camera Matrix",
+        "type": "array"
+      },
+      "distortion_coefficients": {
+        "items": {
+          "type": "number"
+        },
+        "title": "Distortion Coefficients",
+        "type": "array"
+      },
+      "dive_dots": {
+        "items": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "type": "array"
+        },
+        "title": "Dive Dots",
+        "type": "array"
+      },
+      "dive_id": {
+        "format": "uuid",
+        "title": "Dive Id",
+        "type": "string"
+      },
+      "images": {
+        "items": {
+          "$ref": "#/$defs/CheckerboardCalibrationImage"
+        },
+        "title": "Images",
+        "type": "array"
+      },
+      "target": {
+        "$ref": "#/$defs/CheckerboardTarget"
+      }
+    },
+    "required": [
+      "dive_id",
+      "camera_matrix",
+      "distortion_coefficients",
+      "target",
+      "images",
+      "dive_dots"
+    ],
+    "title": "PerformCheckerboardCalibrationInput",
+    "type": "object"
+  },
+  "PlanLaserRemediationInput": {
+    "$defs": {
+      "LaserLabelRow": {
+        "properties": {
+          "capture_number": {
+            "title": "Capture Number",
+            "type": "integer"
+          },
+          "completed": {
+            "title": "Completed",
+            "type": "boolean"
+          },
+          "label_id": {
+            "format": "uuid",
+            "title": "Label Id",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "superseded": {
+            "title": "Superseded",
+            "type": "boolean"
+          },
+          "x": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "X"
+          },
+          "y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Y"
+          }
+        },
+        "required": [
+          "label_id",
+          "number",
+          "capture_number",
+          "superseded",
+          "completed"
+        ],
+        "title": "LaserLabelRow",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "calibration_capture_numbers": {
+        "items": {
+          "type": "integer"
+        },
+        "title": "Calibration Capture Numbers",
+        "type": "array"
+      },
+      "dive_excluded": {
+        "default": false,
+        "title": "Dive Excluded",
+        "type": "boolean"
+      },
+      "dive_id": {
+        "title": "Dive Id",
+        "type": "integer"
+      },
+      "excluded_label_ids": {
+        "items": {
+          "type": "integer"
+        },
+        "title": "Excluded Label Ids",
+        "type": "array"
+      },
+      "labels": {
+        "items": {
+          "$ref": "#/$defs/LaserLabelRow"
+        },
+        "title": "Labels",
+        "type": "array"
+      }
+    },
+    "required": [
+      "dive_id",
+      "labels"
+    ],
+    "title": "PlanLaserRemediationInput",
+    "type": "object"
+  },
+  "PredictHeadtailImage": {
+    "$defs": {
+      "ObjectRef": {
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "title": "ObjectRef",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "capture_id": {
+        "format": "uuid",
+        "title": "Capture Id",
+        "type": "string"
+      },
+      "existing_laser_superseded": {
+        "default": false,
+        "title": "Existing Laser Superseded",
+        "type": "boolean"
+      },
+      "has_existing_prediction": {
+        "default": false,
+        "title": "Has Existing Prediction",
+        "type": "boolean"
+      },
+      "jpeg": {
+        "$ref": "#/$defs/ObjectRef"
+      },
+      "laser_label_ids": {
+        "items": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "title": "Laser Label Ids",
+        "type": "array"
+      },
+      "laser_points": {
+        "items": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "title": "Laser Points",
+        "type": "array"
+      }
+    },
+    "required": [
+      "capture_id",
+      "jpeg",
+      "laser_points",
+      "laser_label_ids"
+    ],
+    "title": "PredictHeadtailImage",
+    "type": "object"
+  },
+  "PredictHeadtailImagesInput": {
+    "$defs": {
+      "ObjectRef": {
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "title": "ObjectRef",
+        "type": "object"
+      },
+      "PredictHeadtailImage": {
+        "properties": {
+          "capture_id": {
+            "format": "uuid",
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "existing_laser_superseded": {
+            "default": false,
+            "title": "Existing Laser Superseded",
+            "type": "boolean"
+          },
+          "has_existing_prediction": {
+            "default": false,
+            "title": "Has Existing Prediction",
+            "type": "boolean"
+          },
+          "jpeg": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "laser_label_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Laser Label Ids",
+            "type": "array"
+          },
+          "laser_points": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "title": "Laser Points",
+            "type": "array"
+          }
+        },
+        "required": [
+          "capture_id",
+          "jpeg",
+          "laser_points",
+          "laser_label_ids"
+        ],
+        "title": "PredictHeadtailImage",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "dive_id": {
+        "format": "uuid",
+        "title": "Dive Id",
+        "type": "string"
+      },
+      "images": {
+        "items": {
+          "$ref": "#/$defs/PredictHeadtailImage"
+        },
+        "title": "Images",
+        "type": "array"
+      },
+      "tenant_id": {
+        "format": "uuid",
+        "title": "Tenant Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "tenant_id",
+      "dive_id",
+      "images"
+    ],
+    "title": "PredictHeadtailImagesInput",
+    "type": "object"
+  },
+  "PredictLaserImagesInput": {
+    "$defs": {
+      "LaserPredictImage": {
+        "properties": {
+          "capture_id": {
+            "format": "uuid",
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "raw": {
+            "$ref": "#/$defs/ObjectRef"
+          }
+        },
+        "required": [
+          "capture_id",
+          "raw"
+        ],
+        "title": "LaserPredictImage",
+        "type": "object"
+      },
+      "ObjectRef": {
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "title": "ObjectRef",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "camera_matrix": {
+        "items": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "title": "Camera Matrix",
+        "type": "array"
+      },
+      "distortion_coefficients": {
+        "items": {
+          "type": "number"
+        },
+        "title": "Distortion Coefficients",
+        "type": "array"
+      },
+      "dive_id": {
+        "format": "uuid",
+        "title": "Dive Id",
+        "type": "string"
+      },
+      "images": {
+        "items": {
+          "$ref": "#/$defs/LaserPredictImage"
+        },
+        "title": "Images",
+        "type": "array"
+      },
+      "laser_region": {
+        "anyOf": [
+          {
+            "items": {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Laser Region"
+      },
+      "wavelength": {
+        "anyOf": [
+          {
+            "enum": [
+              "red",
+              "green"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Wavelength"
+      }
+    },
+    "required": [
+      "dive_id",
+      "images",
+      "camera_matrix",
+      "distortion_coefficients"
+    ],
+    "title": "PredictLaserImagesInput",
+    "type": "object"
+  },
+  "PredictSpeciesImage": {
+    "$defs": {
+      "ObjectRef": {
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "title": "ObjectRef",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "capture_id": {
+        "format": "uuid",
+        "title": "Capture Id",
+        "type": "string"
+      },
+      "has_existing_prediction": {
+        "default": false,
+        "title": "Has Existing Prediction",
+        "type": "boolean"
+      },
+      "headtail_prediction_id": {
+        "format": "uuid",
+        "title": "Headtail Prediction Id",
+        "type": "string"
+      },
+      "jpeg": {
+        "$ref": "#/$defs/ObjectRef"
+      },
+      "mask_bbox": {
+        "items": {
+          "type": "integer"
+        },
+        "title": "Mask Bbox",
+        "type": "array"
+      }
+    },
+    "required": [
+      "capture_id",
+      "headtail_prediction_id",
+      "jpeg",
+      "mask_bbox"
+    ],
+    "title": "PredictSpeciesImage",
+    "type": "object"
+  },
+  "PredictSpeciesImageInput": {
+    "$defs": {
+      "ObjectRef": {
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "title": "ObjectRef",
+        "type": "object"
+      },
+      "PredictSpeciesImage": {
+        "properties": {
+          "capture_id": {
+            "format": "uuid",
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "has_existing_prediction": {
+            "default": false,
+            "title": "Has Existing Prediction",
+            "type": "boolean"
+          },
+          "headtail_prediction_id": {
+            "format": "uuid",
+            "title": "Headtail Prediction Id",
+            "type": "string"
+          },
+          "jpeg": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "mask_bbox": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Mask Bbox",
+            "type": "array"
+          }
+        },
+        "required": [
+          "capture_id",
+          "headtail_prediction_id",
+          "jpeg",
+          "mask_bbox"
+        ],
+        "title": "PredictSpeciesImage",
+        "type": "object"
+      },
+      "SpeciesCandidate": {
+        "properties": {
+          "choice": {
+            "title": "Choice",
+            "type": "string"
+          },
+          "scientific_name": {
+            "title": "Scientific Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "choice",
+          "scientific_name"
+        ],
+        "title": "SpeciesCandidate",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "candidates": {
+        "items": {
+          "$ref": "#/$defs/SpeciesCandidate"
+        },
+        "title": "Candidates",
+        "type": "array"
+      },
+      "image": {
+        "$ref": "#/$defs/PredictSpeciesImage"
+      }
+    },
+    "required": [
+      "image",
+      "candidates"
+    ],
+    "title": "PredictSpeciesImageInput",
+    "type": "object"
+  },
+  "PredictSpeciesImagesInput": {
+    "$defs": {
+      "ObjectRef": {
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "title": "ObjectRef",
+        "type": "object"
+      },
+      "PredictSpeciesImage": {
+        "properties": {
+          "capture_id": {
+            "format": "uuid",
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "has_existing_prediction": {
+            "default": false,
+            "title": "Has Existing Prediction",
+            "type": "boolean"
+          },
+          "headtail_prediction_id": {
+            "format": "uuid",
+            "title": "Headtail Prediction Id",
+            "type": "string"
+          },
+          "jpeg": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "mask_bbox": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Mask Bbox",
+            "type": "array"
+          }
+        },
+        "required": [
+          "capture_id",
+          "headtail_prediction_id",
+          "jpeg",
+          "mask_bbox"
+        ],
+        "title": "PredictSpeciesImage",
+        "type": "object"
+      },
+      "SpeciesCandidate": {
+        "properties": {
+          "choice": {
+            "title": "Choice",
+            "type": "string"
+          },
+          "scientific_name": {
+            "title": "Scientific Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "choice",
+          "scientific_name"
+        ],
+        "title": "SpeciesCandidate",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "candidates": {
+        "items": {
+          "$ref": "#/$defs/SpeciesCandidate"
+        },
+        "title": "Candidates",
+        "type": "array"
+      },
+      "dive_id": {
+        "format": "uuid",
+        "title": "Dive Id",
+        "type": "string"
+      },
+      "images": {
+        "items": {
+          "$ref": "#/$defs/PredictSpeciesImage"
+        },
+        "title": "Images",
+        "type": "array"
+      },
+      "tenant_id": {
+        "format": "uuid",
+        "title": "Tenant Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "tenant_id",
+      "dive_id",
+      "candidates",
+      "images"
+    ],
+    "title": "PredictSpeciesImagesInput",
+    "type": "object"
+  },
+  "PreprocessHeadtailImage": {
+    "$defs": {
+      "ObjectRef": {
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "title": "ObjectRef",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "capture_id": {
+        "format": "uuid",
+        "title": "Capture Id",
+        "type": "string"
+      },
+      "checksum": {
+        "title": "Checksum",
+        "type": "string"
+      },
+      "jpeg": {
+        "$ref": "#/$defs/ObjectRef"
+      },
+      "raw": {
+        "$ref": "#/$defs/ObjectRef"
+      }
+    },
+    "required": [
+      "capture_id",
+      "checksum",
+      "raw",
+      "jpeg"
+    ],
+    "title": "PreprocessHeadtailImage",
+    "type": "object"
+  },
+  "PreprocessHeadtailImageInput": {
+    "$defs": {
+      "ObjectRef": {
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "title": "ObjectRef",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "camera_matrix": {
+        "items": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "title": "Camera Matrix",
+        "type": "array"
+      },
+      "distortion_coefficients": {
+        "items": {
+          "type": "number"
+        },
+        "title": "Distortion Coefficients",
+        "type": "array"
+      },
+      "jpeg": {
+        "$ref": "#/$defs/ObjectRef"
+      },
+      "raw": {
+        "$ref": "#/$defs/ObjectRef"
+      }
+    },
+    "required": [
+      "raw",
+      "jpeg",
+      "camera_matrix",
+      "distortion_coefficients"
+    ],
+    "title": "PreprocessHeadtailImageInput",
+    "type": "object"
+  },
+  "PreprocessHeadtailImagesInput": {
+    "$defs": {
+      "ObjectRef": {
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "title": "ObjectRef",
+        "type": "object"
+      },
+      "PreprocessHeadtailImage": {
+        "properties": {
+          "capture_id": {
+            "format": "uuid",
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "checksum": {
+            "title": "Checksum",
+            "type": "string"
+          },
+          "jpeg": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "raw": {
+            "$ref": "#/$defs/ObjectRef"
+          }
+        },
+        "required": [
+          "capture_id",
+          "checksum",
+          "raw",
+          "jpeg"
+        ],
+        "title": "PreprocessHeadtailImage",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "camera_matrix": {
+        "items": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "title": "Camera Matrix",
+        "type": "array"
+      },
+      "distortion_coefficients": {
+        "items": {
+          "type": "number"
+        },
+        "title": "Distortion Coefficients",
+        "type": "array"
+      },
+      "dive_id": {
+        "format": "uuid",
+        "title": "Dive Id",
+        "type": "string"
+      },
+      "images": {
+        "items": {
+          "$ref": "#/$defs/PreprocessHeadtailImage"
+        },
+        "title": "Images",
+        "type": "array"
+      },
+      "tenant_id": {
+        "format": "uuid",
+        "title": "Tenant Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "tenant_id",
+      "dive_id",
+      "images",
+      "camera_matrix",
+      "distortion_coefficients"
+    ],
+    "title": "PreprocessHeadtailImagesInput",
+    "type": "object"
+  },
+  "PreprocessLaserImagesInput": {
+    "$defs": {
+      "LaserPreprocessImage": {
+        "properties": {
+          "capture_id": {
+            "format": "uuid",
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "jpeg": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "raw": {
+            "$ref": "#/$defs/ObjectRef"
+          }
+        },
+        "required": [
+          "capture_id",
+          "raw",
+          "jpeg"
+        ],
+        "title": "LaserPreprocessImage",
+        "type": "object"
+      },
+      "ObjectRef": {
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "title": "ObjectRef",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "bbox": {
+        "items": {
+          "type": "integer"
+        },
+        "maxItems": 4,
+        "minItems": 4,
+        "title": "Bbox",
+        "type": "array"
+      },
+      "camera_matrix": {
+        "items": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "title": "Camera Matrix",
+        "type": "array"
+      },
+      "distortion_coefficients": {
+        "items": {
+          "type": "number"
+        },
+        "title": "Distortion Coefficients",
+        "type": "array"
+      },
+      "dive_id": {
+        "format": "uuid",
+        "title": "Dive Id",
+        "type": "string"
+      },
+      "images": {
+        "items": {
+          "$ref": "#/$defs/LaserPreprocessImage"
+        },
+        "title": "Images",
+        "type": "array"
+      },
+      "laser_region": {
+        "anyOf": [
+          {
+            "items": {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Laser Region"
+      }
+    },
+    "required": [
+      "dive_id",
+      "images",
+      "camera_matrix",
+      "distortion_coefficients",
+      "bbox"
+    ],
+    "title": "PreprocessLaserImagesInput",
+    "type": "object"
+  },
+  "PreprocessSlateImage": {
+    "$defs": {
+      "ObjectRef": {
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "title": "ObjectRef",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "capture_id": {
+        "format": "uuid",
+        "title": "Capture Id",
+        "type": "string"
+      },
+      "jpeg": {
+        "$ref": "#/$defs/ObjectRef"
+      },
+      "raw": {
+        "$ref": "#/$defs/ObjectRef"
+      }
+    },
+    "required": [
+      "capture_id",
+      "raw",
+      "jpeg"
+    ],
+    "title": "PreprocessSlateImage",
+    "type": "object"
+  },
+  "PreprocessSlateImagesInput": {
+    "$defs": {
+      "ObjectRef": {
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "title": "ObjectRef",
+        "type": "object"
+      },
+      "PreprocessSlateImage": {
+        "properties": {
+          "capture_id": {
+            "format": "uuid",
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "jpeg": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "raw": {
+            "$ref": "#/$defs/ObjectRef"
+          }
+        },
+        "required": [
+          "capture_id",
+          "raw",
+          "jpeg"
+        ],
+        "title": "PreprocessSlateImage",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "camera_matrix": {
+        "items": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "title": "Camera Matrix",
+        "type": "array"
+      },
+      "distortion_coefficients": {
+        "items": {
+          "type": "number"
+        },
+        "title": "Distortion Coefficients",
+        "type": "array"
+      },
+      "dive_id": {
+        "format": "uuid",
+        "title": "Dive Id",
+        "type": "string"
+      },
+      "images": {
+        "items": {
+          "$ref": "#/$defs/PreprocessSlateImage"
+        },
+        "title": "Images",
+        "type": "array"
+      },
+      "reference_points": {
+        "items": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "type": "array"
+        },
+        "title": "Reference Points",
+        "type": "array"
+      },
+      "slate_dpi": {
+        "exclusiveMinimum": 0,
+        "title": "Slate Dpi",
+        "type": "integer"
+      },
+      "slate_pdf": {
+        "$ref": "#/$defs/ObjectRef"
+      },
+      "slate_template_id": {
+        "format": "uuid",
+        "title": "Slate Template Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "dive_id",
+      "slate_template_id",
+      "slate_pdf",
+      "slate_dpi",
+      "reference_points",
+      "camera_matrix",
+      "distortion_coefficients",
+      "images"
+    ],
+    "title": "PreprocessSlateImagesInput",
+    "type": "object"
+  },
+  "PreprocessSpeciesImagesInput": {
+    "$defs": {
+      "ObjectRef": {
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "title": "ObjectRef",
+        "type": "object"
+      },
+      "SpeciesClusterMember": {
+        "properties": {
+          "capture_id": {
+            "format": "uuid",
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "cluster_index": {
+            "minimum": 1,
+            "title": "Cluster Index",
+            "type": "integer"
+          },
+          "cluster_size": {
+            "minimum": 1,
+            "title": "Cluster Size",
+            "type": "integer"
+          },
+          "jpeg": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "raw": {
+            "$ref": "#/$defs/ObjectRef"
+          }
+        },
+        "required": [
+          "capture_id",
+          "raw",
+          "jpeg",
+          "cluster_index",
+          "cluster_size"
+        ],
+        "title": "SpeciesClusterMember",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "camera_matrix": {
+        "items": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "maxItems": 3,
+        "minItems": 3,
+        "title": "Camera Matrix",
+        "type": "array"
+      },
+      "cluster_members": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/SpeciesClusterMember"
+          },
+          "type": "array"
+        },
+        "title": "Cluster Members",
+        "type": "array"
+      },
+      "distortion_coefficients": {
+        "items": {
+          "type": "number"
+        },
+        "title": "Distortion Coefficients",
+        "type": "array"
+      },
+      "dive_id": {
+        "format": "uuid",
+        "title": "Dive Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "dive_id",
+      "camera_matrix",
+      "distortion_coefficients",
+      "cluster_members"
+    ],
+    "title": "PreprocessSpeciesImagesInput",
+    "type": "object"
+  },
+  "ReflectionReport": {
+    "properties": {
+      "angle_deg": {
+        "title": "Angle Deg",
+        "type": "number"
+      },
+      "n_primary": {
+        "title": "N Primary",
+        "type": "integer"
+      },
+      "n_secondary": {
+        "title": "N Secondary",
+        "type": "integer"
+      },
+      "separation_px": {
+        "title": "Separation Px",
+        "type": "number"
+      }
+    },
+    "required": [
+      "n_primary",
+      "n_secondary",
+      "separation_px",
+      "angle_deg"
+    ],
+    "title": "ReflectionReport",
+    "type": "object"
+  },
+  "RemediateLaserSupersedesInput": {
+    "properties": {
+      "all_dives": {
+        "default": false,
+        "title": "All Dives",
+        "type": "boolean"
+      },
+      "apply": {
+        "default": false,
+        "title": "Apply",
+        "type": "boolean"
+      },
+      "dive_ids": {
+        "items": {
+          "type": "integer"
+        },
+        "title": "Dive Ids",
+        "type": "array"
+      },
+      "excluded_dive_ids": {
+        "items": {
+          "type": "integer"
+        },
+        "title": "Excluded Dive Ids",
+        "type": "array"
+      },
+      "excluded_label_ids": {
+        "items": {
+          "type": "integer"
+        },
+        "title": "Excluded Label Ids",
+        "type": "array"
+      },
+      "expected_plan_sha256": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Plan Sha256"
+      }
+    },
+    "required": [
+      "dive_ids"
+    ],
+    "title": "RemediateLaserSupersedesInput",
+    "type": "object"
+  },
+  "RemediationDiveRequest": {
+    "properties": {
+      "dive_excluded": {
+        "default": false,
+        "title": "Dive Excluded",
+        "type": "boolean"
+      },
+      "dive_id": {
+        "title": "Dive Id",
+        "type": "integer"
+      },
+      "excluded_label_ids": {
+        "items": {
+          "type": "integer"
+        },
+        "title": "Excluded Label Ids",
+        "type": "array"
+      },
+      "revive_ids": {
+        "items": {
+          "type": "integer"
+        },
+        "title": "Revive Ids",
+        "type": "array"
+      }
+    },
+    "required": [
+      "dive_id"
+    ],
+    "title": "RemediationDiveRequest",
+    "type": "object"
+  },
+  "SlateCalibrationInput": {
+    "$defs": {
+      "SlateObservation": {
+        "properties": {
+          "capture_id": {
+            "format": "uuid",
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "laser_x": {
+            "title": "Laser X",
+            "type": "number"
+          },
+          "laser_y": {
+            "title": "Laser Y",
+            "type": "number"
+          },
+          "reference_points": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Points"
+          },
+          "skipped_points": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skipped Points"
+          }
+        },
+        "required": [
+          "capture_id",
+          "reference_points",
+          "skipped_points",
+          "laser_x",
+          "laser_y"
+        ],
+        "title": "SlateObservation",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "camera_matrix": {
+        "items": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "title": "Camera Matrix",
+        "type": "array"
+      },
+      "dive_dots": {
+        "items": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "type": "array"
+        },
+        "title": "Dive Dots",
+        "type": "array"
+      },
+      "dive_id": {
+        "format": "uuid",
+        "title": "Dive Id",
+        "type": "string"
+      },
+      "dpi": {
+        "exclusiveMinimum": 0,
+        "title": "Dpi",
+        "type": "integer"
+      },
+      "observations": {
+        "items": {
+          "$ref": "#/$defs/SlateObservation"
+        },
+        "title": "Observations",
+        "type": "array"
+      },
+      "template_points": {
+        "items": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "type": "array"
+        },
+        "title": "Template Points",
+        "type": "array"
+      }
+    },
+    "required": [
+      "dive_id",
+      "camera_matrix",
+      "template_points",
+      "dpi",
+      "observations",
+      "dive_dots"
+    ],
+    "title": "SlateCalibrationInput",
+    "type": "object"
+  },
+  "SlateObservation": {
+    "properties": {
+      "capture_id": {
+        "format": "uuid",
+        "title": "Capture Id",
+        "type": "string"
+      },
+      "laser_x": {
+        "title": "Laser X",
+        "type": "number"
+      },
+      "laser_y": {
+        "title": "Laser Y",
+        "type": "number"
+      },
+      "reference_points": {
+        "anyOf": [
+          {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Reference Points"
+      },
+      "skipped_points": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Skipped Points"
+      }
+    },
+    "required": [
+      "capture_id",
+      "reference_points",
+      "skipped_points",
+      "laser_x",
+      "laser_y"
+    ],
+    "title": "SlateObservation",
+    "type": "object"
+  },
+  "SpeciesCandidate": {
+    "properties": {
+      "choice": {
+        "title": "Choice",
+        "type": "string"
+      },
+      "scientific_name": {
+        "title": "Scientific Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "choice",
+      "scientific_name"
+    ],
+    "title": "SpeciesCandidate",
+    "type": "object"
+  },
+  "SpeciesClusterMember": {
+    "$defs": {
+      "ObjectRef": {
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "title": "ObjectRef",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "capture_id": {
+        "format": "uuid",
+        "title": "Capture Id",
+        "type": "string"
+      },
+      "cluster_index": {
+        "minimum": 1,
+        "title": "Cluster Index",
+        "type": "integer"
+      },
+      "cluster_size": {
+        "minimum": 1,
+        "title": "Cluster Size",
+        "type": "integer"
+      },
+      "jpeg": {
+        "$ref": "#/$defs/ObjectRef"
+      },
+      "raw": {
+        "$ref": "#/$defs/ObjectRef"
+      }
+    },
+    "required": [
+      "capture_id",
+      "raw",
+      "jpeg",
+      "cluster_index",
+      "cluster_size"
+    ],
+    "title": "SpeciesClusterMember",
+    "type": "object"
+  },
+  "SpeciesPredictionResult": {
+    "$defs": {
+      "SpeciesScore": {
+        "properties": {
+          "choice": {
+            "title": "Choice",
+            "type": "string"
+          },
+          "probability": {
+            "title": "Probability",
+            "type": "number"
+          }
+        },
+        "required": [
+          "choice",
+          "probability"
+        ],
+        "title": "SpeciesScore",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "capture_id": {
+        "format": "uuid",
+        "title": "Capture Id",
+        "type": "string"
+      },
+      "headtail_prediction_id": {
+        "format": "uuid",
+        "title": "Headtail Prediction Id",
+        "type": "string"
+      },
+      "margin": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Margin"
+      },
+      "model_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Model Id"
+      },
+      "predicted_choice": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Predicted Choice"
+      },
+      "predictor_version": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Predictor Version"
+      },
+      "status": {
+        "title": "Status",
+        "type": "string"
+      },
+      "top1_probability": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Top1 Probability"
+      },
+      "top5": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/SpeciesScore"
+        },
+        "title": "Top5",
+        "type": "array"
+      }
+    },
+    "required": [
+      "capture_id",
+      "headtail_prediction_id",
+      "status"
+    ],
+    "title": "SpeciesPredictionResult",
+    "type": "object"
+  },
+  "SpeciesScore": {
+    "properties": {
+      "choice": {
+        "title": "Choice",
+        "type": "string"
+      },
+      "probability": {
+        "title": "Probability",
+        "type": "number"
+      }
+    },
+    "required": [
+      "choice",
+      "probability"
+    ],
+    "title": "SpeciesScore",
+    "type": "object"
+  },
+  "ValidateLaserLabelsInput": {
+    "$defs": {
+      "LaserLabelRow": {
+        "properties": {
+          "capture_number": {
+            "title": "Capture Number",
+            "type": "integer"
+          },
+          "completed": {
+            "title": "Completed",
+            "type": "boolean"
+          },
+          "label_id": {
+            "format": "uuid",
+            "title": "Label Id",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "superseded": {
+            "title": "Superseded",
+            "type": "boolean"
+          },
+          "x": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "X"
+          },
+          "y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Y"
+          }
+        },
+        "required": [
+          "label_id",
+          "number",
+          "capture_number",
+          "superseded",
+          "completed"
+        ],
+        "title": "LaserLabelRow",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "calibration_capture_numbers": {
+        "items": {
+          "type": "integer"
+        },
+        "title": "Calibration Capture Numbers",
+        "type": "array"
+      },
+      "dive_id": {
+        "format": "uuid",
+        "title": "Dive Id",
+        "type": "string"
+      },
+      "labels": {
+        "items": {
+          "$ref": "#/$defs/LaserLabelRow"
+        },
+        "title": "Labels",
+        "type": "array"
+      }
+    },
+    "required": [
+      "dive_id",
+      "labels"
+    ],
+    "title": "ValidateLaserLabelsInput",
+    "type": "object"
+  },
+  "VerifyCheckerboardLatticeInput": {
+    "$defs": {
+      "CheckerboardTarget": {
+        "properties": {
+          "cols": {
+            "exclusiveMinimum": 0,
+            "title": "Cols",
+            "type": "integer"
+          },
+          "pitch_x_m": {
+            "exclusiveMinimum": 0,
+            "title": "Pitch X M",
+            "type": "number"
+          },
+          "pitch_y_m": {
+            "exclusiveMinimum": 0,
+            "title": "Pitch Y M",
+            "type": "number"
+          },
+          "rows": {
+            "exclusiveMinimum": 0,
+            "title": "Rows",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rows",
+          "cols",
+          "pitch_x_m",
+          "pitch_y_m"
+        ],
+        "title": "CheckerboardTarget",
+        "type": "object"
+      },
+      "LatticeImage": {
+        "properties": {
+          "capture_id": {
+            "format": "uuid",
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "laser_x": {
+            "title": "Laser X",
+            "type": "number"
+          },
+          "laser_y": {
+            "title": "Laser Y",
+            "type": "number"
+          },
+          "raw": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "render": {
+            "$ref": "#/$defs/ObjectRef"
+          }
+        },
+        "required": [
+          "capture_id",
+          "raw",
+          "render",
+          "laser_x",
+          "laser_y"
+        ],
+        "title": "LatticeImage",
+        "type": "object"
+      },
+      "ObjectRef": {
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "title": "ObjectRef",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "camera_matrix": {
+        "items": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "title": "Camera Matrix",
+        "type": "array"
+      },
+      "distortion_coefficients": {
+        "items": {
+          "type": "number"
+        },
+        "title": "Distortion Coefficients",
+        "type": "array"
+      },
+      "dive_id": {
+        "format": "uuid",
+        "title": "Dive Id",
+        "type": "string"
+      },
+      "images": {
+        "items": {
+          "$ref": "#/$defs/LatticeImage"
+        },
+        "title": "Images",
+        "type": "array"
+      },
+      "sample_limit": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Sample Limit"
+      },
+      "target": {
+        "$ref": "#/$defs/CheckerboardTarget"
+      }
+    },
+    "required": [
+      "dive_id",
+      "camera_matrix",
+      "distortion_coefficients",
+      "target",
+      "images"
+    ],
+    "title": "VerifyCheckerboardLatticeInput",
+    "type": "object"
+  }
+}
