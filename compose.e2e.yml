@@ -30,3 +30,7 @@ services:
     depends_on:
       fake-idp:
         condition: service_started
+
+  web:
+    ports: !override
+      - "127.0.0.1::3000"

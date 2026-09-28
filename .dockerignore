@@ -11,3 +11,6 @@ deploy
 # them); nothing else under deploy/ goes into an image.
 !deploy/nrp
 !deploy/nrp/**
+# The web app installs and builds its own dependencies in its image.
+apps/web/node_modules
+apps/web/.next

@@ -227,4 +227,12 @@ async def test_every_operation_has_an_explicit_operation_id(offline_client):
     spec = (await offline_client.get("/openapi.json")).json()
     ids = [op["operationId"] for path in spec["paths"].values() for op in path.values()]
 
-    assert sorted(ids) == ["create_device", "list_devices"]
+    assert sorted(ids) == [
+        "clear_dive_calibration_source",
+        "create_device",
+        "get_my_membership",
+        "list_devices",
+        "list_dives",
+        "list_label_studio_project_ids",
+        "set_dive_calibration_source",
+    ]

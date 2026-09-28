@@ -62,6 +62,42 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # The web portal (apps/web): the public landing page and the admin portal
+  # (triage, calibration-source links), on the API above. Sign-in needs a real
+  # Authentik client: set AUTH_AUTHENTIK_ID / _SECRET / _ISSUER (the web's
+  # confidential client, whose id is one of FISHSENSE_OIDC_AUDIENCES). The
+  # landing page lists Label Studio projects only with LABEL_STUDIO_ENABLED=true,
+  # as the web's service account (FISHSENSE_API_SERVICE_USERNAME / _PASSWORD,
+  # an Authentik app password), which needs a membership in the tenant.
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      FISHSENSE_API_URL: http://api:8000
+      FISHSENSE_TENANT: ${FISHSENSE_TENANT:-lab}
+      FISHSENSE_API_SERVICE_USERNAME: ${FISHSENSE_API_SERVICE_USERNAME:-}
+      FISHSENSE_API_SERVICE_PASSWORD: ${FISHSENSE_API_SERVICE_PASSWORD:-}
+      AUTH_URL: ${AUTH_URL:-http://localhost:3000}
+      AUTH_SECRET: ${AUTH_SECRET:-fishsense-web-dev-only-auth-secret}
+      AUTH_AUTHENTIK_ID: ${AUTH_AUTHENTIK_ID:-fishsense-web}
+      AUTH_AUTHENTIK_SECRET: ${AUTH_AUTHENTIK_SECRET:-unset}
+      AUTH_AUTHENTIK_ISSUER: ${AUTH_AUTHENTIK_ISSUER:-https://auth.example.invalid/application/o/fishsense-web}
+      # Label Studio links and the frames triage may fetch come from settings:
+      # LABELER_BASE (defaults to LABEL_STUDIO_URL) for the project links, and
+      # the object store's host plus TRIAGE_IMAGE_HOSTS for presigned frames.
+      LABEL_STUDIO_ENABLED: ${LABEL_STUDIO_ENABLED:-false}
+      LABEL_STUDIO_URL: ${FISHSENSE_LABEL_STUDIO_URL:-https://label-studio.example.invalid}
+      LABEL_STUDIO_API_KEY: ${FISHSENSE_LABEL_STUDIO_API_KEY:-}
+      LABELER_BASE: ${LABELER_BASE:-}
+      FISHSENSE_OBJECT_STORE_ENDPOINT_URL: ${FISHSENSE_OBJECT_STORE_ENDPOINT_URL:-http://garage.example.invalid:3900}
+      TRIAGE_IMAGE_HOSTS: ${TRIAGE_IMAGE_HOSTS:-}
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      api:
+        condition: service_started
+
   temporal:
     image: temporalio/temporal:1.9.1
     command: ["server", "start-dev", "--ip", "0.0.0.0", "--namespace", "fishsense"]
