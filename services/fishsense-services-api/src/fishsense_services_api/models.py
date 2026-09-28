@@ -227,6 +227,11 @@ class Dive(Base):
         Uuid, ForeignKey("calibration_targets.id")
     )
     calibration_source_dive_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    #: When the species sync last wrote the slate template or calibration
+    #: target: a calibration refusal older than this has expired (species_01).
+    calibration_links_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     created_at: Mapped[datetime] = _created_at()
 
 
