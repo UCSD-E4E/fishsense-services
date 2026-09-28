@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# Two images from one workspace:
+# The images built from one workspace:
 #
 #   api (default, the last stage):
 #     API:         uvicorn, runs as the unprivileged app role
@@ -8,7 +8,11 @@
 #   orchestrator (`--target orchestrator`):
 #     the Temporal worker, also as the app role
 #   processor (`--target processor`):
-#     the compute worker; no database or NAS access, only Temporal
+#     the compute worker; no database or NAS access, only Temporal. Serves the
+#     role FISHSENSE_PROCESSOR_ROLE names (per_image, light)
+#   processor-gpu (`--target processor-gpu`):
+#     the same with the processor's `torch` extra (torch, SAM 3.1, the laser
+#     detector), for the gpu role and its CPU fallback on NRP
 #
 # amd64 only for now: the orchestrator's synology-filestation wheel is built for
 # manylinux x86_64. The processor is the part that goes ARM64 later (PLAN §3).
@@ -48,6 +52,21 @@ COPY services/fishsense-services-contracts services/fishsense-services-contracts
 COPY services/fishsense-services-processor services/fishsense-services-processor
 RUN uv sync --frozen --no-dev --package fishsense-services-processor --no-editable
 
+# The GPU image: the processor with its `torch` extra. A separate image so the
+# per-image and light pods (and CI) never pull torch and its CUDA runtime.
+# SAM3 is a pinned git dependency (Meta publishes no wheel), so this build
+# needs git.
+FROM build-base AS build-processor-gpu
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+RUN uv sync --frozen --no-dev --package fishsense-services-processor --extra torch \
+    --no-install-workspace
+COPY services/fishsense-services-contracts services/fishsense-services-contracts
+COPY services/fishsense-services-processor services/fishsense-services-processor
+RUN uv sync --frozen --no-dev --package fishsense-services-processor --extra torch \
+    --no-editable
+
 FROM python:3.13-slim AS runtime
 RUN useradd --system --uid 10001 --no-create-home app
 ENV PATH=/app/.venv/bin:$PATH \
@@ -63,6 +82,11 @@ CMD ["fishsense-services-orchestrator"]
 
 FROM runtime AS processor
 COPY --from=build-processor /app/.venv /app/.venv
+USER app
+CMD ["fishsense-services-processor"]
+
+FROM runtime AS processor-gpu
+COPY --from=build-processor-gpu /app/.venv /app/.venv
 USER app
 CMD ["fishsense-services-processor"]
 
