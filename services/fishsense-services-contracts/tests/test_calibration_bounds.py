@@ -124,3 +124,11 @@ def test_bounds_bracket_the_measured_cluster():
     assert MIN_BASELINE_M > 0.0951
     assert MAX_BASELINE_M > 0.1295
     assert MAX_BASELINE_M < 0.1601
+
+
+def test_the_observation_floor_is_v1s():
+    """v1's `MIN_LASER_POINTS`: both producers refuse below it, and both API
+    cohorts select at or above it (pinned against their SQL there)."""
+    from fishsense_services_contracts.calibration_bounds import MIN_LASER_POINTS
+
+    assert MIN_LASER_POINTS == 2

@@ -40,9 +40,23 @@ import math
 __all__ = [
     "MAX_BASELINE_M",
     "MIN_BASELINE_M",
+    "MIN_LASER_POINTS",
     "baseline_m",
     "is_plausible_baseline",
 ]
+
+#: Minimum usable laser observations before a fit is attempted.
+#:
+#: From fishsense-lite@77e8f8e5 perform_laser_calibration_activity.py, where
+#: v1 noted that the api's `MIN_SLATE_LASER_POINTS` must equal it: they are one
+#: threshold spelled twice, on opposite sides of the worker boundary, and a
+#: dive that clears the cohort's copy but not this one is re-selected hourly
+#: forever with nothing written. Not hypothetical: the cohort used to count
+#: completed slate labels rather than observations, and prod dive 347 (18
+#: labels, 1 live dot) wedged stage 13 for as long as it was scheduled. v2
+#: keeps it here, beside the baseline, for the same reason; the API's cohorts
+#: spell it in SQL and a test pins the two.
+MIN_LASER_POINTS = 2
 
 #: Bounds on the baseline, in metres.
 #:
