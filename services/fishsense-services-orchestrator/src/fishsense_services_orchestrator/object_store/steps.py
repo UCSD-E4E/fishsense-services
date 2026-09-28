@@ -30,7 +30,12 @@ from fishsense_services_orchestrator.object_store.contracts import (
     StagingTarget,
 )
 
-__all__ = ["STAGE_RAW_RETRY_POLICY", "cleanup_raw", "stage_raw"]
+__all__ = [
+    "CLEANUP_RAW_RETRY_POLICY",
+    "STAGE_RAW_RETRY_POLICY",
+    "cleanup_raw",
+    "stage_raw",
+]
 
 # Raw staging pulls `.ORF`s from FileStation, whose shared download backend 502s
 # under concurrent large-file load. A 502 should self-heal on a *bounded,
@@ -47,6 +52,11 @@ STAGE_RAW_RETRY_POLICY = RetryPolicy(
     maximum_attempts=5,
     non_retryable_error_types=["NasFileNotFound", "NotAMember"],
 )
+
+
+#: v1 gave cleanup no retry policy: retry within its window. A revoked
+#: membership (`NotAMember`) is the exception -- no retry can fix it.
+CLEANUP_RAW_RETRY_POLICY = RetryPolicy(non_retryable_error_types=["NotAMember"])
 
 
 async def stage_raw(target: StagingTarget) -> StageRawBytesResult:
@@ -70,5 +80,6 @@ async def cleanup_raw(target: StagingTarget) -> CleanupRawBytesResult:
         target,
         schedule_to_close_timeout=timedelta(minutes=15),
         heartbeat_timeout=timedelta(minutes=5),
+        retry_policy=CLEANUP_RAW_RETRY_POLICY,
         result_type=CleanupRawBytesResult,
     )

@@ -259,3 +259,16 @@ class TestQuery:
 
         assert str(DIVE) not in q
         assert " in (" in q.lower() and "startswith" not in q.lower()
+
+
+def test_a_lost_membership_stops_cleanup_rather_than_retrying_for_its_window():
+    """v1 gave cleanup no retry policy. The catalog now raises NotAMember when
+    the orchestrator's membership is revoked, which no retry can fix; without
+    a policy saying so, cleanup retried it for its whole 15 minutes (review of
+    foundation/object-store). Transient failures still retry within the window."""
+    from fishsense_services_orchestrator.object_store.steps import (
+        CLEANUP_RAW_RETRY_POLICY,
+    )
+
+    assert "NotAMember" in (CLEANUP_RAW_RETRY_POLICY.non_retryable_error_types or [])
+    assert not CLEANUP_RAW_RETRY_POLICY.maximum_attempts  # unbounded, as v1

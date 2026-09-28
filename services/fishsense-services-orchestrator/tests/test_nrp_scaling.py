@@ -323,3 +323,27 @@ def test_light_scaling_defaults_to_one_replica():
     no throughput and NRP asks us to hold as little as possible."""
     cfg = scaling.resolve_scaling_config(settings())
     assert cfg.light.active_replicas == 1
+
+
+def test_two_first_writes_of_the_gpu_state_both_land():
+    """Two GPU wakes writing first-time state at once: both patches find no
+    ConfigMap, one create wins, the other gets 409 AlreadyExists -- which now
+    patches instead of failing the activity (review of
+    foundation/nrp-processor-roles)."""
+    from fishsense_services_orchestrator.nrp.gpu_fallback import GpuState
+
+    calls = []
+
+    class RacingCore:
+        def patch_namespaced_config_map(self, name, namespace, body):
+            calls.append("patch")
+            if calls.count("patch") == 1:
+                raise ApiException(status=404, reason="Not Found")
+
+        def create_namespaced_config_map(self, namespace, body):
+            calls.append("create")
+            raise ApiException(status=409, reason="AlreadyExists")
+
+    scaling.write_gpu_state(RacingCore(), "fishsense", "state", GpuState())
+
+    assert calls == ["patch", "create", "patch"]

@@ -541,15 +541,23 @@ def write_gpu_state(core, namespace: str, name: str, state: GpuState) -> None:
     except Exception as exc:  # pylint: disable=broad-except
         if not _is_not_found(exc):
             raise
-        core.create_namespaced_config_map(
-            namespace=namespace,
-            body={
-                "apiVersion": "v1",
-                "kind": "ConfigMap",
-                "metadata": {
-                    "name": name,
-                    "labels": {"app.kubernetes.io/part-of": "fishsense"},
+        try:
+            core.create_namespaced_config_map(
+                namespace=namespace,
+                body={
+                    "apiVersion": "v1",
+                    "kind": "ConfigMap",
+                    "metadata": {
+                        "name": name,
+                        "labels": {"app.kubernetes.io/part-of": "fishsense"},
+                    },
+                    "data": {k: v for k, v in data.items() if v is not None},
                 },
-                "data": {k: v for k, v in data.items() if v is not None},
-            },
-        )
+            )
+        except Exception as race:  # pylint: disable=broad-except
+            # Another wake created it between our patch and our create.
+            if getattr(race, "status", None) != 409:
+                raise
+            core.patch_namespaced_config_map(
+                name=name, namespace=namespace, body={"data": data}
+            )
