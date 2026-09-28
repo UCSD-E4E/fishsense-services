@@ -309,6 +309,67 @@ class TestAnAbstentionNamesItsDot:
         ), "an undecodable JPEG is the file's fault, not the dot's"
 
 
+class TestTheKeptMasksBox:
+    """New in v2 (contract 5): the kept mask's box rides on the result, in
+    frame pixels, so the species pre-annotation stage crops exactly the fish
+    SAM 3.1 segmented at the dot -- no second SAM pass -- and nothing else."""
+
+    LASER = (3500.0, 2500.0)
+
+    def _mask(self):
+        ox, oy = crop_origin(*self.LASER, FRAME_W, FRAME_H, CROP_W, CROP_H)
+        assert ox > 0 and oy > 0, "an off-origin crop, or a missing lift passes"
+        mask = np.zeros((CROP_H, CROP_W), dtype=np.uint8)
+        local_x, local_y = int(self.LASER[0] - ox), int(self.LASER[1] - oy)
+        mask[local_y - 40 : local_y + 30, local_x - 200 : local_x + 150] = 1
+        box = [local_x - 200 + ox, local_y - 40 + oy, local_x + 150 + ox,
+               local_y + 30 + oy]  # fmt: skip
+        return mask, box
+
+    def test_a_prediction_carries_its_masks_box_in_frame_pixels(self):
+        mask, box = self._mask()
+
+        result = _predict(_jpeg(), [self.LASER], _Stub([mask]))
+
+        assert result.status == "predicted"
+        assert result.mask_bbox == box
+
+    def test_the_box_is_the_kept_masks_not_another(self):
+        mask, box = self._mask()
+        elsewhere = np.zeros_like(mask)
+        elsewhere[10:20, 10:20] = 1
+
+        result = _predict(_jpeg(), [self.LASER], _Stub([elsewhere, mask]))
+
+        assert result.mask_bbox == box
+
+    def test_an_unfittable_mask_still_names_its_box(self, monkeypatch):
+        """The mask was kept, so the fish is known even when its keypoints
+        are not: the species stage can still classify it."""
+
+        class _Exploding:
+            def find_head_tail_img(self, _mask):
+                raise RuntimeError("native detector failed")
+
+        monkeypatch.setitem(
+            sys.modules,
+            "fishsense_core.fish",
+            types.SimpleNamespace(FishHeadTailDetector=_Exploding),
+        )
+        mask, box = self._mask()
+
+        result = _predict(_jpeg(), [self.LASER], _Stub([mask]))
+
+        assert (result.status, result.mask_bbox) == ("headtail_failed", box)
+
+    @pytest.mark.parametrize("masks", [[], "off"], ids=["no-masks", "laser-off"])
+    def test_no_kept_mask_means_no_box(self, masks):
+        if masks == "off":
+            masks = [_fish_mask(100, 100, 40, 20)]
+        result = _predict(_jpeg(), [self.LASER], _Stub(masks))
+        assert result.mask_bbox is None
+
+
 # -- mask conversion ---------------------------------------------------------------
 
 

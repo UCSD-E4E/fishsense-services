@@ -37,6 +37,12 @@ torch = [
     "einops>=0.8.0",
     "psutil>=6.0.0",
     "pycocotools>=2.0.8",
+    # BioCLIP 2.5 / 2 (the species pre-annotation stage, new in v2): open_clip
+    # builds the model from the verified weights. Pinned to the release
+    # coral-gardeners-fish-detector@67c8627 ran, so the stage can't change
+    # under SPECIES_PREDICTOR_VERSION without a visible diff; 3.x reads a
+    # `local-dir:` model, which is how the verified weights load offline.
+    "open-clip-torch==3.3.0",
 ]
 
 [project.scripts]

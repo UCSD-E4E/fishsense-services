@@ -23,7 +23,9 @@ v2 changes: ids are UUIDs; SAM 3.1 is built through fishsense-core's
 non-retryable error); the version constants come from the contract package;
 **an abstention names the dot it came from** (the dot on the kept mask for
 `headtail_failed`, else the crop's centre, the first), where v1 left it NULL
-and a corrected dot never made the row stale.
+and a corrected dot never made the row stale; **a kept mask's box rides on the
+result** (`mask_bbox`, frame pixels), which the species pre-annotation stage
+crops by.
 """
 
 from __future__ import annotations
@@ -47,6 +49,7 @@ from fishsense_services_processor.headtail_predict.geometry import (
     crop_origin,
     lift_point,
     mask_at_point,
+    mask_box,
     silhouette_ratio,
 )
 
@@ -282,6 +285,9 @@ def _keypoint(
         "core_version": options.core_version,
         # The dot that chose the mask, on a failure too (v2; v1: NULL).
         "laser_label_id": _laser_label_for_mask(local_points, laser_label_ids, binary),
+        # v2: the kept mask's box, on a failure too -- the fish is known even
+        # when its keypoints are not (the species stage crops by it).
+        "mask_bbox": mask_box(binary, origin_x, origin_y),
     }
 
     try:
