@@ -852,6 +852,28 @@ def test_a_legacy_null_superseded_laser_label_arrives_not_live(v1, v2):
     ) == [(1, False, None), (2, True, None)]
 
 
+def test_a_legacy_null_superseded_head_tail_label_arrives_not_live(v1, v2):
+    """`headtaillabel.superseded` was added the same way (nullable, no
+    backfill), and v1 read it the same way: every head/tail getter filters
+    `HeadTailLabel.superseded == False` (fishsense-lite@77e8f8e5
+    label_controller.py:310-383)."""
+    _seed_v1(v1)
+    _seed_labels(v1)
+    with v1.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO headtaillabel (id, label_studio_task_id,
+                label_studio_project_id, head_x, head_y, tail_x, tail_y, image_id,
+                user_id, completed, superseded, needs_reprocess)
+            VALUES (2, 81, 8, 1, 2, 3, 4, 101, 1, true, NULL, false)
+            """))
+
+    _run(v1, v2)
+
+    assert _rows(
+        v2, "SELECT v1_id, superseded FROM head_tail_labels ORDER BY v1_id"
+    ) == [(1, True), (2, True)]
+
+
 def test_a_v1_without_superseded_reasons_leaves_them_unknown(v1, v2):
     _seed_v1(v1)
     _seed_labels(v1)

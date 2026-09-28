@@ -484,16 +484,21 @@ LABEL_TABLES = {
 }  # fmt: skip
 
 
+#: v1 tables whose `superseded` was added nullable with no backfill (unlike
+#: specieslabel/diveslatelabel, 7934e62a12c0), and read with `== False`.
+_NULL_SUPERSEDED_IS_DEAD = frozenset({"laserlabel", "headtaillabel"})
+
+
 def _superseded(v1_table: str, superseded: bool | None) -> bool:
-    """A v1 laser label whose `superseded` is NULL arrives superseded (its
-    reason stays unknown). v1 added the column nullable with no backfill and
-    read NULL as not live everywhere: every getter filters `superseded ==
-    False` and the validator writes only `superseded is False` rows
-    (fishsense-lite@77e8f8e5 fishsense-api controllers/label_controller.py,
+    """A v1 laser or head/tail label whose `superseded` is NULL arrives
+    superseded (its reason stays unknown). v1 read NULL as not live
+    everywhere: every getter filters `superseded == False` and the validator
+    writes only `superseded is False` rows (fishsense-lite@77e8f8e5
+    fishsense-api controllers/label_controller.py,
     data-processing-workflow-worker activities/validate_laser_labels_for_dive_
     activity.py). Counting it live would hand the resolvers, gate and
     validator a label v1 never did."""
-    if v1_table == "laserlabel" and superseded is None:
+    if v1_table in _NULL_SUPERSEDED_IS_DEAD and superseded is None:
         return True
     return bool(superseded)
 
