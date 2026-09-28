@@ -35,6 +35,7 @@ from temporalio import activity
 
 __all__ = [
     "LabelStudioClient",
+    "LabelStudioPrediction",
     "LabelStudioProject",
     "LabelStudioSettings",
     "LabelStudioTask",
@@ -228,6 +229,14 @@ def heartbeat_again() -> None:
     activity.heartbeat(*_STICKY.get(activity.info().task_token, ()))
 
 
+@dataclass(frozen=True)
+class LabelStudioPrediction:
+    """A prediction attached to a task: what the backfills dedupe on."""
+
+    task_id: int | None
+    model_version: str | None
+
+
 class LabelStudioClient:
     def __init__(self, sdk: LabelStudio) -> None:
         self._sdk = sdk
@@ -416,6 +425,36 @@ class LabelStudioClient:
         await self._sdk_call(
             f"projects.update({project_id})",
             lambda: self._sdk.projects.update(id=project_id, **fields),
+        )
+
+    # -- predictions (the laser and head/tail backfills) ---------------------------
+
+    async def predictions(self, project_id: int) -> list[LabelStudioPrediction]:
+        """What is already attached across a project: the backfills' idempotency
+        key is `(task, model_version)` (fishsense-lite@77e8f8e5
+        backfill_{laser,headtail}_predictions_activity)."""
+        listed = await self._sdk_call(
+            f"predictions.list({project_id})",
+            lambda: list(self._sdk.predictions.list(project=project_id)),
+        )
+        return [
+            LabelStudioPrediction(
+                task_id=getattr(p, "task", None),
+                model_version=getattr(p, "model_version", None),
+            )
+            for p in listed
+        ]
+
+    async def create_prediction(
+        self, task_id: int, model_version: str, result: Sequence[dict]
+    ) -> None:
+        """Attach a prediction to an existing task -- not a re-import, which
+        would duplicate the task."""
+        await self._sdk_call(
+            f"predictions.create(task={task_id})",
+            lambda: self._sdk.predictions.create(
+                task=task_id, model_version=model_version, result=list(result)
+            ),
         )
 
     async def s3_import_storages(self, project_id: int) -> list[tuple[Any, Any]]:
