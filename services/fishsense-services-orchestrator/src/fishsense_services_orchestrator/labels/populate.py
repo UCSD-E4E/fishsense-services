@@ -58,6 +58,8 @@ from fishsense_services_orchestrator.labels.label_studio import (
     Beat,
     LabelStudioClient,
     LabelStudioProject,
+    heartbeat_again,
+    sticky_heartbeat,
 )
 
 __all__ = [
@@ -703,7 +705,7 @@ async def import_tasks_and_record_labels(
             "import task missing an image URL in `data` -- cannot anchor label"
         )
 
-    beat: Beat = activity.heartbeat
+    beat: Beat = heartbeat_again
 
     async def _list_known() -> dict:
         """`url -> task_id` for the whole project."""
@@ -737,7 +739,7 @@ async def import_tasks_and_record_labels(
         await ls.import_tasks(project_id, to_import, beat=beat)
 
         def beat_imported() -> None:
-            activity.heartbeat(IMPORT_ISSUED, project_id)
+            sticky_heartbeat(IMPORT_ISSUED, project_id)
 
         beat = beat_imported
         beat()

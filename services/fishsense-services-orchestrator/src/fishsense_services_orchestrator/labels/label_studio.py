@@ -19,6 +19,7 @@ import, so a throttle on create, heal, storage or publish failed the activity.
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
@@ -202,6 +203,30 @@ class LabelStudioProject:
 #: clear it, so every call a heartbeat can come from takes the caller's.
 Beat = Callable[[], None]
 
+#: The details each activity attempt last heartbeated through
+#: `sticky_heartbeat`, by task token, so `heartbeat_again` can re-send them.
+#: Bounded: attempts end, and a token is never reused.
+_STICKY: "OrderedDict[bytes, tuple]" = OrderedDict()
+_STICKY_MAX = 4096
+
+
+def sticky_heartbeat(*details: Any) -> None:
+    """Heartbeat `details`, and have every later heartbeat in this attempt
+    re-send them (`heartbeat_again`). The import's IMPORT_ISSUED marker is
+    what makes its retry safe; a bare heartbeat after it -- a throttled
+    publish in the same activity, say -- would clear it."""
+    token = activity.info().task_token
+    _STICKY[token] = details
+    _STICKY.move_to_end(token)
+    while len(_STICKY) > _STICKY_MAX:
+        _STICKY.popitem(last=False)
+    activity.heartbeat(*details)
+
+
+def heartbeat_again() -> None:
+    """Heartbeat, re-sending whatever this attempt last sent sticky."""
+    activity.heartbeat(*_STICKY.get(activity.info().task_token, ()))
+
 
 class LabelStudioClient:
     def __init__(self, sdk: LabelStudio) -> None:
@@ -250,7 +275,7 @@ class LabelStudioClient:
                     THROTTLE_MAX_ATTEMPTS,
                     wait,
                 )
-                activity.heartbeat()
+                heartbeat_again()
                 await asyncio.sleep(wait)
 
         raise RuntimeError(
@@ -263,7 +288,7 @@ class LabelStudioClient:
         """Every task in the project, paged in a worker thread while the main
         thread heartbeats: on a backlog project the pager's synchronous HTTP
         calls can run for the activity's whole timeout."""
-        raw = await self._listing(project_id, beat=activity.heartbeat)
+        raw = await self._listing(project_id, beat=heartbeat_again)
         return [LabelStudioTask.from_sdk(task) for task in raw]
 
     async def _listing(self, project_id: int, *, beat: Beat) -> list[Any]:
@@ -314,7 +339,7 @@ class LabelStudioClient:
                     THROTTLE_MAX_ATTEMPTS,
                     wait,
                 )
-                (beat or activity.heartbeat)()
+                (beat or heartbeat_again)()
                 await _throttle_sleep(wait)
         raise RuntimeError(
             f"Label Studio still throttling {what} after {THROTTLE_MAX_ATTEMPTS} "

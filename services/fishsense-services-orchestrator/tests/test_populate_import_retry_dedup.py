@@ -398,3 +398,43 @@ async def test_tasks_and_items_must_be_parallel():
 async def test_a_task_without_an_image_cannot_be_anchored():
     with pytest.raises(RuntimeError, match="missing an image URL"):
         await _run(SlowImportLabelStudio([]), [{"data": {}}], ["x"], [])
+
+
+async def test_a_throttle_after_the_import_keeps_the_marker():
+    """Review of foundation/label-studio-write: v1's populate publishes after
+    importing, in the same activity. A throttled publish heartbeated bare,
+    which cleared IMPORT_ISSUED -- and a retry after that would import every
+    task again. Every heartbeat in the adapter re-sends what was last beaten."""
+    from label_studio_sdk.core import ApiError
+
+    from fishsense_services_orchestrator.labels import label_studio as ls_mod
+    from fishsense_services_orchestrator.labels.populate import IMPORT_ISSUED
+
+    heartbeats: list[tuple] = []
+    env = ActivityEnvironment()
+    env.on_heartbeat = lambda *details: heartbeats.append(details)
+    calls = iter([ApiError(status_code=429, body={"detail": "1 second"}), "ok"])
+
+    async def publish():
+        outcome = next(calls)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    async def run():
+        ls_mod.sticky_heartbeat(IMPORT_ISSUED, 42)
+        client = ls_mod.LabelStudioClient(sdk=None)
+        return await client._throttled(publish, what="publish")
+
+    original = ls_mod._throttle_sleep
+
+    async def no_sleep(_seconds):
+        return None
+
+    ls_mod._throttle_sleep = no_sleep
+    try:
+        assert await env.run(run) == "ok"
+    finally:
+        ls_mod._throttle_sleep = original
+
+    assert heartbeats == [(IMPORT_ISSUED, 42), (IMPORT_ISSUED, 42)]
