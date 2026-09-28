@@ -12,9 +12,10 @@ Ported from fishsense-lite@77e8f8e5, services/fishsense-api:
 v2 changes:
 
 * one query serves the four label kinds (v1 had four endpoints), per tenant;
-* the auto-accept gate reads each capture's **current** prediction: v2's
-  predictions are append-only, so v1's "a re-prediction clears the verdict"
-  is a newer row with no verdict;
+* the auto-accept gate reads each capture's **current** prediction and its
+  effective verdict (`current_laser_predictions_gated`): v2's gate appends
+  verdicts to their own table, and v1's "a re-prediction clears the verdict"
+  is a newer prediction with none;
 * `gated` for a kind with no gate is refused (:class:`GateNotApplicable`),
   where v1 simply had no such parameter;
 * dives are addressed by `number` (v1's id for a migrated dive) and the
@@ -103,7 +104,9 @@ def _gate_scan(*, judged: bool) -> str:
     return f"""
         EXISTS (
             SELECT 1 FROM laser_labels g
-            JOIN current_laser_predictions p
+            -- The effective verdict: v2's gate appends to laser_prediction_verdicts
+            -- (migration 0021); only a migrated v1 row carries its own.
+            JOIN current_laser_predictions_gated p
               ON p.tenant_id = g.tenant_id AND p.capture_id = g.capture_id
             WHERE g.tenant_id = l.tenant_id
               AND g.ls_project_id = l.ls_project_id

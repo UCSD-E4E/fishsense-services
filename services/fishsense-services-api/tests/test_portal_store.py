@@ -532,3 +532,26 @@ async def test_the_store_scopes_to_the_tenant_itself_not_only_through_rls(
         (1, None),
         (2, 1),
     ]
+
+
+async def test_a_verdict_the_v2_gate_recorded_counts(seed, owner_engine, app_engine, lab):
+    """The seam with the laser slice: v2's gate appends its verdict to
+    laser_prediction_verdicts (migration 0021) and never writes over the
+    append-only prediction. Reading the prediction row's own gate_verdict --
+    which only a migrated v1 row carries -- would call every project the v2
+    gate has finished "never touched". Readers use current_laser_predictions_gated."""
+    image = await seed.image(1)
+    await seed.label("laser_labels", image, project_id=FULLY_GATED)
+    await seed.prediction(image, gate_verdict=None)
+    async with owner_engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO laser_prediction_verdicts "
+                "(tenant_id, prediction_id, auto_accept, gate_verdict) "
+                "SELECT tenant_id, id, true, 'auto_accepted' FROM laser_predictions "
+                "WHERE capture_id = :c"
+            ),
+            {"c": image},
+        )
+
+    assert await _ids(app_engine, lab, gated=True) == [FULLY_GATED]
