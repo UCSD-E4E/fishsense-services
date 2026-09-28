@@ -103,6 +103,14 @@ services:
       FISHSENSE_OBJECT_STORE_SECRET_ACCESS_KEY: ${FISHSENSE_OBJECT_STORE_SECRET_ACCESS_KEY:-unset}
       FISHSENSE_OBJECT_STORE_BUCKET: ${FISHSENSE_OBJECT_STORE_BUCKET:-fishsense-lite}
       FISHSENSE_OBJECT_STORE_LEGACY_LABELS_PREFIX: ${FISHSENSE_OBJECT_STORE_LEGACY_LABELS_PREFIX:-fishsense-lite}
+      # The S3 storage Label Studio presigns processed JPEGs with (the populate
+      # stages). Placeholders until set: the worker starts, and only a populate
+      # that registers a project's storage fails.
+      FISHSENSE_LABEL_STUDIO_S3_BUCKET: ${FISHSENSE_LABEL_STUDIO_S3_BUCKET:-labels-fishsense-lite}
+      FISHSENSE_LABEL_STUDIO_S3_ENDPOINT_URL: ${FISHSENSE_LABEL_STUDIO_S3_ENDPOINT_URL:-http://garage.example.invalid:3900}
+      FISHSENSE_LABEL_STUDIO_S3_REGION: ${FISHSENSE_LABEL_STUDIO_S3_REGION:-garage}
+      FISHSENSE_LABEL_STUDIO_S3_ACCESS_KEY: ${FISHSENSE_LABEL_STUDIO_S3_ACCESS_KEY:-unset}
+      FISHSENSE_LABEL_STUDIO_S3_SECRET_KEY: ${FISHSENSE_LABEL_STUDIO_S3_SECRET_KEY:-unset}
       # No FISHSENSE_NRP_KUBECONFIG_PATH: standing the processor up on NRP is
       # off, and its wakes are no-ops -- the processor below is always up.
     depends_on:

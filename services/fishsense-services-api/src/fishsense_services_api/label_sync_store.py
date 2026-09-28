@@ -27,6 +27,14 @@ revived); a parsed field of None keeps the stored value. v2 change, as for
 laser: the update names the sync's columns, so `needs_reprocess`,
 `superseded`, `image_url` and the operator's `fish_angle_degrees` are never
 written by it.
+The head/tail sync (`apply_head_tail_sync`) is ported from
+fishsense-lite@77e8f8e5 services/fishsense-api-workflow-worker/src/
+fishsense_api_workflow_worker/activities/
+sync_headtail_labels_for_label_studio_project_activity.py
+(`__update_headtail_label`) and the API's head/tail label-studio-project-ids,
+with the same v2 changes. Two v1 rules are its own: a label is found among
+*live* rows only (v1 read it with `superseded == False`), and the points move
+only when both keypoints are present.
 """
 
 import json
@@ -41,11 +49,13 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
+    "HeadTailSync",
     "LabelSyncCatalog",
     "LaserSync",
     "SpeciesSync",
     "SyncedLabel",
     "advance_sync_cursor",
+    "apply_head_tail_sync",
     "apply_laser_sync",
     "apply_species_sync",
     "label_studio_projects",
@@ -53,7 +63,11 @@ __all__ = [
 ]
 
 #: The label table for each kind the sync knows.
-_TABLES = {"laser": "laser_labels", "species": "species_labels"}
+_TABLES = {
+    "laser": "laser_labels",
+    "species": "species_labels",
+    "head_tail": "head_tail_labels",
+}
 
 
 @dataclass(frozen=True)
@@ -66,6 +80,23 @@ class LaserSync:
     x: float | None
     y: float | None
     label: str | None
+    #: The most recent annotator's Label Studio user id; None keeps the last.
+    ls_labeler_id: int | None
+    ls_updated_at: datetime | None
+    ls_payload: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class HeadTailSync:
+    """What one annotated Label Studio task says about its head/tail label."""
+
+    completed: bool
+    #: Snout and Fork, in pixels -- all four, or all None when the annotation
+    #: lacks either keypoint (then the last ones are kept, as in v1).
+    head_x: float | None
+    head_y: float | None
+    tail_x: float | None
+    tail_y: float | None
     #: The most recent annotator's Label Studio user id; None keeps the last.
     ls_labeler_id: int | None
     ls_updated_at: datetime | None
@@ -192,6 +223,40 @@ async def apply_species_sync(
         )
     ).one_or_none()
     return None if row is None else SyncedLabel(row.capture_id, row.dive_id)
+async def apply_head_tail_sync(
+    conn: AsyncConnection, tenant_id: uuid.UUID, ls_task_id: int, sync: HeadTailSync
+) -> bool:
+    """Update the tenant's live head/tail label for this task, writing only
+    the sync's columns. False when the task has no live label."""
+    points = None not in (sync.head_x, sync.head_y, sync.tail_x, sync.tail_y)
+    updated = await conn.execute(
+        text("""
+            UPDATE head_tail_labels SET
+                completed = :completed,
+                head_x = CASE WHEN :points THEN :head_x ELSE head_x END,
+                head_y = CASE WHEN :points THEN :head_y ELSE head_y END,
+                tail_x = CASE WHEN :points THEN :tail_x ELSE tail_x END,
+                tail_y = CASE WHEN :points THEN :tail_y ELSE tail_y END,
+                ls_labeler_id = COALESCE(:labeler, ls_labeler_id),
+                ls_updated_at = :updated_at,
+                ls_payload = CAST(:payload AS jsonb)
+            WHERE tenant_id = :tenant AND ls_task_id = :task AND NOT superseded
+            """),
+        {
+            "completed": sync.completed,
+            "points": points,
+            "head_x": sync.head_x,
+            "head_y": sync.head_y,
+            "tail_x": sync.tail_x,
+            "tail_y": sync.tail_y,
+            "labeler": sync.ls_labeler_id,
+            "updated_at": sync.ls_updated_at,
+            "payload": json.dumps(sync.ls_payload),
+            "tenant": tenant_id,
+            "task": ls_task_id,
+        },
+    )
+    return updated.rowcount > 0
 
 
 async def sync_cursor(
@@ -251,6 +316,11 @@ class LabelSyncCatalog(ServicePrincipal):
     ) -> SyncedLabel | None:
         async with self._tenant(tenant_id) as conn:
             return await apply_species_sync(conn, tenant_id, ls_task_id, sync)
+    async def apply_head_tail_sync(
+        self, tenant_id: uuid.UUID, ls_task_id: int, sync: HeadTailSync
+    ) -> bool:
+        async with self._tenant(tenant_id) as conn:
+            return await apply_head_tail_sync(conn, tenant_id, ls_task_id, sync)
 
     async def sync_cursor(
         self, tenant_id: uuid.UUID, kind: str, ls_project_id: int
