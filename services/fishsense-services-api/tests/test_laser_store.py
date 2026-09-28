@@ -386,16 +386,16 @@ async def test_raise_can_include_completed_labels(lab, app_engine):
     )  # fmt: skip
 
 
-async def test_clear_is_scoped_to_the_checksums_redrawn(lab, app_engine):
-    """A flag raised while the child ran must survive (v1's clear scope)."""
+async def test_clear_is_scoped_to_the_captures_redrawn(lab, app_engine):
+    """A flag raised while the child ran must survive (v1's clear scope; v1
+    named the frames by checksum, one canonical capture per tenant)."""
     dive = await lab.dive()
-    redrawn = await lab.label(await lab.capture(dive, checksum="a" * 32),
-                              needs_reprocess=True)  # fmt: skip
-    raised_since = await lab.label(await lab.capture(dive, checksum="b" * 32),
-                                   needs_reprocess=True)  # fmt: skip
+    first = await lab.capture(dive)
+    redrawn = await lab.label(first, needs_reprocess=True)
+    raised_since = await lab.label(await lab.capture(dive), needs_reprocess=True)
 
     cleared = await _as_tenant(
-        app_engine, lab.tenant, clear_laser_reprocess_flags, dive, ["a" * 32]
+        app_engine, lab.tenant, clear_laser_reprocess_flags, dive, [first]
     )
 
     still = {r["id"] for r in await lab.rows(

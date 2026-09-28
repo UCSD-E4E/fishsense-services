@@ -376,6 +376,9 @@ class RemediateLaserSupersedesInput(BaseModel):
     AND a matching digest."""
 
     dive_ids: list[int]
+    #: Plan every dive of every served tenant (v1's CLI listed them itself;
+    #: the v2 CLI has no database connection).
+    all_dives: bool = False
     excluded_dive_ids: list[int] = Field(default_factory=list)
     excluded_label_ids: list[int] = Field(default_factory=list)
     apply: bool = False

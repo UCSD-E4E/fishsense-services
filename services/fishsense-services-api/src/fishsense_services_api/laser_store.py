@@ -403,15 +403,16 @@ async def clear_laser_reprocess_flags(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
     dive_id: uuid.UUID,
-    checksums: list[str] | None,
+    capture_ids: list[uuid.UUID] | None,
 ) -> int:
     """Lower the flag once the JPEGs are redrawn (v1's DELETE): canonical
     captures, whatever the row's state (a flag nothing lowers wedges its
-    dive). `checksums` scopes it to the frames redrawn; None clears the whole
-    dive; [] clears nothing."""
-    if checksums is not None and not checksums:
+    dive). `capture_ids` scopes it to the frames redrawn (v1 named them by
+    checksum, which is one canonical capture per tenant); None clears the
+    whole dive; [] clears nothing."""
+    if capture_ids is not None and not capture_ids:
         return 0
-    scope = "" if checksums is None else "AND c.checksum = ANY(:checksums)"
+    scope = "" if capture_ids is None else "AND c.id = ANY(:captures)"
     updated = await conn.execute(
         text(f"""
             UPDATE laser_labels l SET needs_reprocess = false
@@ -420,7 +421,7 @@ async def clear_laser_reprocess_flags(
               AND c.id = l.capture_id AND c.dive_id = :dive AND c.is_canonical
               AND l.needs_reprocess {scope}
             """),
-        {"tenant": tenant_id, "dive": dive_id, "checksums": checksums},
+        {"tenant": tenant_id, "dive": dive_id, "captures": capture_ids},
     )
     return updated.rowcount
 
@@ -1149,9 +1150,9 @@ class LaserCatalog(ServicePrincipal):
             raise_laser_reprocess_flags, tenant_id, dive_id, **kwargs
         )
 
-    async def clear_laser_reprocess_flags(self, tenant_id, dive_id, checksums):
+    async def clear_laser_reprocess_flags(self, tenant_id, dive_id, capture_ids):
         return await self._call(
-            clear_laser_reprocess_flags, tenant_id, dive_id, checksums
+            clear_laser_reprocess_flags, tenant_id, dive_id, capture_ids
         )
 
     async def next_dive_for_laser_prediction(self, tenant_id):
