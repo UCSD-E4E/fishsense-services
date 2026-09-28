@@ -26,9 +26,14 @@ BATCH = 5_000
 
 @dataclass
 class Report(Mapping):
-    """Per v1 table: (rows in v1, rows migrated into v2)."""
+    """Per v1 table: (rows in v1, rows migrated into v2).
+
+    ``skipped`` names the v1 rows deliberately not migrated, per table and
+    reason: a v1 value v2's constraints refuse outright (not merely one v1
+    never recorded). They are accounted for, so they are no discrepancy."""
 
     counts: dict[str, tuple[int, int]] = field(default_factory=dict)
+    skipped: dict[str, dict[str, int]] = field(default_factory=dict)
 
     def __getitem__(self, table: str) -> tuple[int, int]:
         return self.counts[table]
@@ -40,7 +45,11 @@ class Report(Mapping):
         return len(self.counts)
 
     def discrepancies(self) -> dict[str, tuple[int, int]]:
-        return {t: c for t, c in self.counts.items() if c[0] != c[1]}
+        return {
+            t: c
+            for t, c in self.counts.items()
+            if c[0] - sum(self.skipped.get(t, {}).values()) != c[1]
+        }
 
 
 def migrate_v1(
@@ -734,10 +743,27 @@ def _results(v1, v2, tenant, report) -> None:
                 "fish": fish.get(r["fish_id"]),
                 "calibration": calibrations.get(r["laser_extrinsics_id"]),
             }
-            for r in _rows(v1, "SELECT * FROM measurement ORDER BY id")
+            for r in _rows(
+                v1, f"SELECT * FROM measurement WHERE {_V1_POSITIVE} ORDER BY id"
+            )
         ),
     )
     _account(v1, v2, report, "measurement", "measurements")
+    # v1 stored whatever length its activity computed, 0 m included (a
+    # degenerate head/tail); 0013's measurements_length_check refuses a
+    # non-positive length, and one such row would abort the whole
+    # transaction. v2's stage 14 records that outcome as a refusal, which
+    # needs the input labels v1 never kept, so the row is skipped, by name.
+    # The capture is simply unmeasured in v2, and stage 14 may try it again.
+    non_positive = v1.execute(
+        text(f"SELECT count(*) FROM measurement WHERE NOT ({_V1_POSITIVE})")
+    ).scalar_one()
+    if non_positive:
+        report.skipped["measurement"] = {"non-positive length": non_positive}
+
+
+#: A v1 measurement v2 can hold: a positive length, or none recorded.
+_V1_POSITIVE = "coalesce(length_m > 0, true)"
 
 
 STEPS: list[Callable] = [
@@ -866,6 +892,9 @@ _V1_FRESH = """
         LEFT JOIN subject s ON s.image_id = m.image_id
         LEFT JOIN cluster k ON k.image_id = m.image_id
         LEFT JOIN fish f ON f.id = m.fish_id
+        -- A non-positive length is skipped by the migration (the report
+        -- names it), so v2 has nothing to compare it with.
+        WHERE coalesce(m.length_m > 0, true)
     )
     SELECT count(*) FILTER (WHERE NOT refused AND NOT stale),
            count(*) FILTER (WHERE refused),
