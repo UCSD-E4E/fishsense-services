@@ -170,6 +170,8 @@ async def test_no_token_is_401(client):
         ("GET", "/tenants/lab/dives"),
         ("PUT", "/tenants/lab/dives/2/calibration-source/1"),
         ("DELETE", "/tenants/lab/dives/2/calibration-source"),
+        ("PUT", "/tenants/lab/dives/2/labels/laser/needs-reprocess"),
+        ("DELETE", "/tenants/lab/dives/2/labels/laser/needs-reprocess"),
     ]:
         response = await client.request(method, path)
         assert response.status_code == 401, (method, path)
@@ -412,6 +414,170 @@ async def test_a_dive_number_is_a_non_negative_integer(client, tenants, bad):
     went into a URL; the API refuses anything else itself."""
     response = await client.put(
         f"/tenants/lab/dives/{bad}/calibration-source/1", headers=_bearer(ADMIN)
+    )
+
+    assert response.status_code == 422
+
+
+# -- asking for a redraw: needs_reprocess -----------------------------------------
+#
+# fishsense-lite@77e8f8e5 fishsense-api controllers/label_reprocess_controller.py:
+# `PUT`/`DELETE /api/v1/dives/{id}/labels/{laser,headtail,species,dive-slate}/
+# needs-reprocess`. Raising puts the dive back in its kind's preprocessing
+# cohort (the JPEGs are redrawn at the same keys; Label Studio's tasks are
+# untouched). v1 served it to anyone holding the service account; here it
+# needs the tenant's admin role. The per-kind rules (canonical frames, live
+# rows, incomplete by default) are the stores', pinned in each store's tests.
+
+LABEL_TABLES = {
+    "laser": "laser_labels",
+    "head_tail": "head_tail_labels",
+    "species": "species_labels",
+    "slate": "slate_labels",
+}
+
+
+async def _labelled_dive(owner_engine, tenant, number, table):
+    """Dive `number` with two canonical frames labelled in `table`: one
+    answered, one not."""
+    dive = await _dive(owner_engine, tenant, number)
+    async with owner_engine.begin() as conn:
+        for done in (False, True):
+            capture = (
+                await conn.execute(
+                    text(
+                        "INSERT INTO captures (tenant_id, dive_id, source_path, "
+                        "captured_at, checksum, is_canonical) VALUES (:t, :d, "
+                        "gen_random_uuid()::text, :at, md5(random()::text), true) "
+                        "RETURNING id"
+                    ),
+                    {"t": tenant, "d": dive, "at": T0},
+                )
+            ).scalar_one()
+            await conn.execute(
+                text(
+                    f"INSERT INTO {table} (tenant_id, capture_id, source, completed) "
+                    "VALUES (:t, :c, 'human', :done)"
+                ),
+                {"t": tenant, "c": capture, "done": done},
+            )
+    return dive
+
+
+async def _flagged(owner_engine, table, dive):
+    async with owner_engine.connect() as conn:
+        return (
+            await conn.execute(
+                text(
+                    f"SELECT count(*) FROM {table} l JOIN captures c "
+                    "ON c.id = l.capture_id WHERE c.dive_id = :d AND l.needs_reprocess"
+                ),
+                {"d": dive},
+            )
+        ).scalar_one()
+
+
+@pytest.mark.parametrize("kind", sorted(LABEL_TABLES))
+async def test_an_admin_asks_for_a_dives_unanswered_frames_to_be_redrawn(
+    client, tenants, owner_engine, kind
+):
+    table = LABEL_TABLES[kind]
+    dive = await _labelled_dive(owner_engine, tenants["lab"], 7, table)
+
+    response = await client.put(
+        f"/tenants/lab/dives/7/labels/{kind}/needs-reprocess", headers=_bearer(ADMIN)
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"flagged": 1}
+    assert await _flagged(owner_engine, table, dive) == 1
+
+
+@pytest.mark.parametrize("kind", sorted(LABEL_TABLES))
+async def test_only_incomplete_false_redraws_answered_frames_too(
+    client, tenants, owner_engine, kind
+):
+    table = LABEL_TABLES[kind]
+    dive = await _labelled_dive(owner_engine, tenants["lab"], 7, table)
+
+    response = await client.put(
+        f"/tenants/lab/dives/7/labels/{kind}/needs-reprocess",
+        params={"only_incomplete": "false"},
+        headers=_bearer(ADMIN),
+    )
+
+    assert response.json() == {"flagged": 2}
+    assert await _flagged(owner_engine, table, dive) == 2
+
+
+@pytest.mark.parametrize("kind", sorted(LABEL_TABLES))
+async def test_an_admin_withdraws_a_redraw(client, tenants, owner_engine, kind):
+    table = LABEL_TABLES[kind]
+    dive = await _labelled_dive(owner_engine, tenants["lab"], 7, table)
+    await client.put(
+        f"/tenants/lab/dives/7/labels/{kind}/needs-reprocess",
+        params={"only_incomplete": "false"},
+        headers=_bearer(ADMIN),
+    )
+
+    first = await client.delete(
+        f"/tenants/lab/dives/7/labels/{kind}/needs-reprocess", headers=_bearer(ADMIN)
+    )
+    again = await client.delete(
+        f"/tenants/lab/dives/7/labels/{kind}/needs-reprocess", headers=_bearer(ADMIN)
+    )
+
+    assert first.json() == {"cleared": 2}
+    # Idempotent, never a 404 (v1's). v1 counted the rows the clear touched,
+    # not the flags it lowered, so the count of a repeat is not pinned.
+    assert again.status_code == 200
+    assert await _flagged(owner_engine, table, dive) == 0
+
+
+async def test_a_member_who_is_not_an_admin_cannot_ask_for_a_redraw(
+    client, tenants, owner_engine
+):
+    dive = await _labelled_dive(owner_engine, tenants["lab"], 7, "laser_labels")
+
+    raised = await client.put(
+        "/tenants/lab/dives/7/labels/laser/needs-reprocess", headers=_bearer(MEMBER)
+    )
+    cleared = await client.delete(
+        "/tenants/lab/dives/7/labels/laser/needs-reprocess", headers=_bearer(MEMBER)
+    )
+
+    assert (raised.status_code, cleared.status_code) == (403, 403)
+    assert await _flagged(owner_engine, "laser_labels", dive) == 0
+
+
+async def test_another_tenants_admin_cannot_ask_for_a_redraw(
+    client, tenants, owner_engine
+):
+    dive = await _labelled_dive(owner_engine, tenants["lab"], 7, "laser_labels")
+
+    response = await client.put(
+        "/tenants/lab/dives/7/labels/laser/needs-reprocess", headers=_bearer(OUTSIDER)
+    )
+
+    assert response.status_code == 404
+    assert await _flagged(owner_engine, "laser_labels", dive) == 0
+
+
+async def test_a_redraw_of_a_missing_dive_is_a_404(client, tenants):
+    for method in ("PUT", "DELETE"):
+        response = await client.request(
+            method,
+            "/tenants/lab/dives/999/labels/laser/needs-reprocess",
+            headers=_bearer(ADMIN),
+        )
+        assert response.status_code == 404, method
+        assert response.json()["detail"] == "dive 999 not found"
+
+
+@pytest.mark.parametrize("kind", ["headtail", "dive-slate", "checkerboard_lattice"])
+async def test_a_redraw_of_an_unknown_kind_is_a_422(client, tenants, kind):
+    response = await client.put(
+        f"/tenants/lab/dives/7/labels/{kind}/needs-reprocess", headers=_bearer(ADMIN)
     )
 
     assert response.status_code == 422

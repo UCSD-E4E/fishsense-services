@@ -81,6 +81,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{slug}/dives/{number}/labels/{kind}/needs-reprocess": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Raise Needs Reprocess
+         * @description Redraw dive ``number``'s ``kind`` frames: the dive re-enters that
+         *     kind's preprocessing, and the JPEGs are redrawn where they are.
+         *     Incomplete labels only unless ``only_incomplete=false``.
+         */
+        put: operations["raise_needs_reprocess"];
+        post?: never;
+        /**
+         * Clear Needs Reprocess
+         * @description Withdraw a redraw of dive ``number``'s ``kind`` frames (idempotent:
+         *     0 when none was asked for).
+         */
+        delete: operations["clear_needs_reprocess"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{slug}/label-studio-projects": {
         parameters: {
             query?: never;
@@ -122,6 +149,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** Cleared */
+        Cleared: {
+            /** Cleared */
+            cleared: number;
+        };
         /** Device */
         Device: {
             /**
@@ -167,6 +199,11 @@ export interface components {
             priority: "low" | "high" | "none";
             /** Slate Template Number */
             slate_template_number: number | null;
+        };
+        /** Flagged */
+        Flagged: {
+            /** Flagged */
+            flagged: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -349,6 +386,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Dive"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    raise_needs_reprocess: {
+        parameters: {
+            query?: {
+                only_incomplete?: boolean;
+            };
+            header?: never;
+            path: {
+                number: number;
+                kind: "laser" | "head_tail" | "species" | "slate";
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Flagged"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_needs_reprocess: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                number: number;
+                kind: "laser" | "head_tail" | "species" | "slate";
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Cleared"];
                 };
             };
             /** @description Validation Error */

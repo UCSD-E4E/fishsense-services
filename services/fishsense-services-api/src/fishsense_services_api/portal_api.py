@@ -35,12 +35,21 @@ from fishsense_services_api.portal_store import (
     label_studio_project_ids,
     list_dives,
     set_calibration_source,
+    set_needs_reprocess,
 )
 
 
 class MyMembership(BaseModel):
     role: str
     is_admin: bool
+
+
+class Flagged(BaseModel):
+    flagged: int
+
+
+class Cleared(BaseModel):
+    cleared: int
 
 
 class Dive(BaseModel):
@@ -151,6 +160,49 @@ def add_portal_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
                 await clear_calibration_source(conn, member.tenant_id, number)
         except DiveNotFound as error:
             raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from None
+
+    @app.put(
+        "/tenants/{slug}/dives/{number}/labels/{kind}/needs-reprocess",
+        operation_id="raise_needs_reprocess",
+        response_model=Flagged,
+    )
+    async def raise_needs_reprocess(
+        member: Admin,
+        number: DiveNumber,
+        kind: LabelKind,
+        only_incomplete: bool = True,
+    ) -> Flagged:
+        """Redraw dive ``number``'s ``kind`` frames: the dive re-enters that
+        kind's preprocessing, and the JPEGs are redrawn where they are.
+        Incomplete labels only unless ``only_incomplete=false``."""
+        try:
+            async with tenant_transaction(engine, member.tenant_id) as conn:
+                flagged = await set_needs_reprocess(
+                    conn, member.tenant_id, number, kind,
+                    raised=True, only_incomplete=only_incomplete,
+                )  # fmt: skip
+        except DiveNotFound as error:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from None
+        return Flagged(flagged=flagged)
+
+    @app.delete(
+        "/tenants/{slug}/dives/{number}/labels/{kind}/needs-reprocess",
+        operation_id="clear_needs_reprocess",
+        response_model=Cleared,
+    )
+    async def clear_needs_reprocess(
+        member: Admin, number: DiveNumber, kind: LabelKind
+    ) -> Cleared:
+        """Withdraw a redraw of dive ``number``'s ``kind`` frames (idempotent:
+        0 when none was asked for)."""
+        try:
+            async with tenant_transaction(engine, member.tenant_id) as conn:
+                cleared = await set_needs_reprocess(
+                    conn, member.tenant_id, number, kind, raised=False
+                )
+        except DiveNotFound as error:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from None
+        return Cleared(cleared=cleared)
 
 
 def _dive(summary: DiveSummary) -> Dive:

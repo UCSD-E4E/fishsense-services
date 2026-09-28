@@ -1,6 +1,19 @@
 {
   "components": {
     "schemas": {
+      "Cleared": {
+        "properties": {
+          "cleared": {
+            "title": "Cleared",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cleared"
+        ],
+        "title": "Cleared",
+        "type": "object"
+      },
       "Device": {
         "properties": {
           "id": {
@@ -122,6 +135,19 @@
           "calibration_source_number"
         ],
         "title": "Dive",
+        "type": "object"
+      },
+      "Flagged": {
+        "properties": {
+          "flagged": {
+            "title": "Flagged",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "flagged"
+        ],
+        "title": "Flagged",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -468,6 +494,154 @@
           }
         ],
         "summary": "Set Dive Calibration Source"
+      }
+    },
+    "/tenants/{slug}/dives/{number}/labels/{kind}/needs-reprocess": {
+      "delete": {
+        "description": "Withdraw a redraw of dive ``number``'s ``kind`` frames (idempotent:\n0 when none was asked for).",
+        "operationId": "clear_needs_reprocess",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "laser",
+                "head_tail",
+                "species",
+                "slate"
+              ],
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Cleared"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Clear Needs Reprocess"
+      },
+      "put": {
+        "description": "Redraw dive ``number``'s ``kind`` frames: the dive re-enters that\nkind's preprocessing, and the JPEGs are redrawn where they are.\nIncomplete labels only unless ``only_incomplete=false``.",
+        "operationId": "raise_needs_reprocess",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "laser",
+                "head_tail",
+                "species",
+                "slate"
+              ],
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "only_incomplete",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Only Incomplete",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Flagged"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Raise Needs Reprocess"
       }
     },
     "/tenants/{slug}/label-studio-projects": {

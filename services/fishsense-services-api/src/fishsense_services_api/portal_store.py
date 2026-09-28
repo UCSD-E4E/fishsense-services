@@ -31,6 +31,13 @@ from typing import Literal, get_args
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api import (
+    headtail_store,
+    laser_store,
+    slate_store,
+    species_store,
+)
+
 __all__ = [
     "DiveNotFound",
     "DiveSummary",
@@ -41,6 +48,7 @@ __all__ = [
     "label_studio_project_ids",
     "list_dives",
     "set_calibration_source",
+    "set_needs_reprocess",
 ]
 
 #: The label kinds, spelled as `label_studio_projects.kind` spells them.
@@ -244,4 +252,46 @@ async def clear_calibration_source(
             "WHERE tenant_id = :tenant_id AND id = :dive"
         ),
         {"tenant_id": tenant_id, "dive": dive},
+    )
+
+
+async def set_needs_reprocess(
+    conn: AsyncConnection,
+    tenant_id: uuid.UUID,
+    number: int,
+    kind: LabelKind,
+    *,
+    raised: bool,
+    only_incomplete: bool = True,
+) -> int:
+    """Ask for dive `number`'s `kind` frames to be redrawn, or withdraw that;
+    the rows touched (v1's `PUT`/`DELETE .../labels/{kind}/needs-reprocess`).
+
+    Each kind's store owns its rule -- which rows a raise may touch, and that
+    a withdrawal touches every row -- so this only resolves the dive and
+    dispatches. A withdrawal is the whole dive: an operator has no redraw run
+    to scope it to.
+    """
+    dive = await _dive_id(conn, tenant_id, number, "dive")
+    if kind == "species":
+        return await species_store.set_species_needs_reprocess(
+            conn, tenant_id, dive, raised, only_incomplete=only_incomplete
+        )
+    if raised:
+        raise_flags = {
+            "laser": laser_store.raise_laser_reprocess_flags,
+            "head_tail": headtail_store.set_headtail_needs_reprocess,
+            "slate": slate_store.flag_slate_labels_for_reprocess,
+        }[kind]
+        return await raise_flags(conn, tenant_id, dive, only_incomplete=only_incomplete)
+    if kind == "laser":
+        return await laser_store.clear_laser_reprocess_flags(
+            conn, tenant_id, dive, None
+        )
+    if kind == "head_tail":
+        return await headtail_store.clear_headtail_needs_reprocess(
+            conn, tenant_id, dive, None
+        )
+    return await slate_store.clear_slate_reprocess_flags(
+        conn, tenant_id, dive, checksums=None
     )
