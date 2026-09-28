@@ -34,6 +34,7 @@ from fishsense_core.image.raw_image import RawImage
 from fishsense_core.image.rectified_image import RectifiedImage
 from temporalio import activity
 
+from fishsense_services_processor.jpeg import encode_jpeg
 from fishsense_services_processor.species.workflow import PreprocessSpeciesImageInput
 
 __all__ = ["SpeciesImageActivities", "overlay_and_encode_jpeg"]
@@ -58,10 +59,7 @@ def overlay_and_encode_jpeg(
         10,
         cv2.LINE_AA,
     )
-    success, encoded = cv2.imencode(".jpg", img)
-    if not success:
-        raise RuntimeError("cv2.imencode failed")
-    return encoded.tobytes()
+    return encode_jpeg(img)
 
 
 def _rectify_overlay_encode(

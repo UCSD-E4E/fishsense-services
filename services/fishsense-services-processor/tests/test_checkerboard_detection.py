@@ -32,7 +32,7 @@ import cv2
 import numpy as np
 import pytest
 
-from fishsense_services_processor.calibration.region import point_in_laser_region
+from fishsense_services_contracts.laser_region import point_in_laser_region
 
 from fishsense_services_processor.checkerboard import detection as sut
 from fishsense_services_processor.calibration.geometry import (

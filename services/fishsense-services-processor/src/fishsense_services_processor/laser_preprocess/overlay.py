@@ -25,6 +25,8 @@ from typing import Optional, Sequence, Tuple
 import cv2
 import numpy as np
 
+from fishsense_services_processor.jpeg import encode_jpeg as _encode_jpeg
+
 __all__ = [
     "overlay_laser_bbox_and_encode_jpeg",
     "overlay_laser_region_and_encode_jpeg",
@@ -33,13 +35,6 @@ __all__ = [
 
 Bbox = Tuple[int, int, int, int]  # (x1, y1, x2, y2)
 Region = Sequence[Sequence[int]]  # [[x, y], ...] convex, in draw order
-
-
-def _encode_jpeg(img: np.ndarray) -> bytes:
-    success, encoded = cv2.imencode(".jpg", img)
-    if not success:
-        raise RuntimeError("cv2.imencode failed")
-    return encoded.tobytes()
 
 
 def overlay_laser_region_and_encode_jpeg(

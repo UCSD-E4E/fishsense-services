@@ -37,8 +37,8 @@ v2 changes:
   try, so a transport error stayed retryable -- with no fetch there is
   nothing to keep retryable);
 * the board carries its pitch per axis (`CheckerboardTarget`);
-* the JPEG encoder is a local copy of v1's `encode_rectified_jpeg` (the
-  head/tail slice owns its port).
+* the JPEG encoder is the shared `jpeg.encode_jpeg` (v1's
+  `encode_rectified_jpeg`), and the region test is the contracts' one.
 """
 
 from __future__ import annotations
@@ -50,7 +50,6 @@ from pathlib import Path
 from typing import List
 from uuid import UUID
 
-import cv2
 import numpy as np
 from fishsense_core.camera_intrinsics import CameraIntrinsics
 from fishsense_core.image.raw_image import RawImage
@@ -58,6 +57,7 @@ from fishsense_core.image.rectified_image import RectifiedImage
 from pydantic import BaseModel
 from temporalio import activity
 
+from fishsense_services_contracts.laser_region import point_in_laser_region
 from fishsense_services_contracts.object_store import ObjectRef, ObjectStoreConnection
 from fishsense_services_contracts.slate_calibration import (
     CheckerboardLatticeRender,
@@ -71,7 +71,6 @@ from fishsense_services_processor.calibration.geometry import (
     laser_point_on_plane,
     plane_from_correspondences,
 )
-from fishsense_services_processor.calibration.region import point_in_laser_region
 from fishsense_services_processor.checkerboard.detection import (
     board_hull,
     detect_checkerboard,
@@ -80,6 +79,7 @@ from fishsense_services_processor.checkerboard.detection import (
 from fishsense_services_processor.checkerboard.lattice_overlay import (
     draw_lattice_overlay,
 )
+from fishsense_services_processor.jpeg import encode_jpeg
 from fishsense_services_processor.object_store import ProcessorObjectStore
 
 __all__ = [
@@ -133,15 +133,6 @@ class RenderCheckerboardLatticeInput(BaseModel):
 def open_store() -> ProcessorObjectStore:
     """The object store, from ``FISHSENSE_OBJECT_STORE_*`` (tests replace it)."""
     return ProcessorObjectStore.from_settings(ObjectStoreConnection())
-
-
-def encode_jpeg(image_bgr: np.ndarray) -> bytes:
-    """Encode a BGR ndarray to JPEG bytes. Does not mutate. (v1's
-    `encode_rectified_jpeg`.)"""
-    success, encoded = cv2.imencode(".jpg", image_bgr)
-    if not success:
-        raise RuntimeError("cv2.imencode failed")
-    return encoded.tobytes()
 
 
 def _rectified(raw, camera_matrix, distortion_coefficients) -> np.ndarray:
