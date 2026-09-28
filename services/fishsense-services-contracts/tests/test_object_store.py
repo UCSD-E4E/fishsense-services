@@ -8,8 +8,8 @@ section and normalised it when a client was built; v2 reads
 ``FISHSENSE_OBJECT_STORE_*`` and normalises it once, at startup. v1's rules,
 kept:
 
-* ``labels_bucket`` and ``models_bucket`` fall back to ``bucket``, so a
-  single-bucket deployment works unchanged;
+* ``labels_bucket`` falls back to ``bucket``, so a single-bucket deployment
+  works unchanged;
 * a prefix left empty (or None) is ``""``, never the string ``"None"`` in a key,
   and its surrounding slashes are stripped -- S3 reads ``a//b`` as a different
   object from ``a/b``.
@@ -47,6 +47,8 @@ REQUIRED = {
     "FISHSENSE_OBJECT_STORE_ACCESS_KEY_ID": "GKexample",
     "FISHSENSE_OBJECT_STORE_SECRET_ACCESS_KEY": SECRET,
     "FISHSENSE_OBJECT_STORE_BUCKET": "fishsense-lite",
+    # Required: unset, every migrated frame's JPEG would read as "not written".
+    "FISHSENSE_OBJECT_STORE_LEGACY_LABELS_PREFIX": "fishsense-lite",
 }
 
 
@@ -54,9 +56,6 @@ REQUIRED = {
 def env(monkeypatch):
     for name in list(REQUIRED) + [
         "FISHSENSE_OBJECT_STORE_LABELS_BUCKET",
-        "FISHSENSE_OBJECT_STORE_MODELS_BUCKET",
-        "FISHSENSE_OBJECT_STORE_MODELS_PREFIX",
-        "FISHSENSE_OBJECT_STORE_LEGACY_LABELS_PREFIX",
     ]:
         monkeypatch.delenv(name, raising=False)
     for name, value in REQUIRED.items():
@@ -109,28 +108,26 @@ def test_a_docker_hostname_without_a_tld_is_a_valid_endpoint(env):
     assert ObjectStoreConnection().endpoint_url == "http://garage:3900"
 
 
-def test_labels_and_models_buckets_default_to_the_scratch_bucket(env):
-    """A single-bucket deployment sets neither (v1's `open_client`)."""
-    settings = ObjectStoreConnection()
+def test_the_labels_bucket_defaults_to_the_scratch_bucket(env):
+    """A single-bucket deployment doesn't set it (v1's `open_client`)."""
+    assert ObjectStoreConnection().labels_bucket == "fishsense-lite"
 
-    assert settings.labels_bucket == "fishsense-lite"
-    assert settings.models_bucket == "fishsense-lite"
-    assert settings.models_prefix == ""
-    assert settings.legacy_labels_prefix == ""
+
+def test_a_single_bucket_setup_says_so_with_an_empty_legacy_prefix(env):
+    env.setenv("FISHSENSE_OBJECT_STORE_LEGACY_LABELS_PREFIX", "")
+
+    assert ObjectStoreConnection().legacy_labels_prefix == ""
 
 
 def test_v1s_production_buckets_are_honoured(env):
     env.setenv("FISHSENSE_OBJECT_STORE_LABELS_BUCKET", "labels-fishsense-lite")
-    env.setenv("FISHSENSE_OBJECT_STORE_LEGACY_LABELS_PREFIX", "fishsense-lite")
-    env.setenv("FISHSENSE_OBJECT_STORE_MODELS_BUCKET", "model-weights")
     settings = ObjectStoreConnection()
 
     assert settings.labels_bucket == "labels-fishsense-lite"
     assert settings.legacy_labels_prefix == "fishsense-lite"
-    assert settings.models_bucket == "model-weights"
 
 
-@pytest.mark.parametrize("field", ["legacy_labels_prefix", "models_prefix"])
+@pytest.mark.parametrize("field", ["legacy_labels_prefix"])
 @pytest.mark.parametrize(
     ("value", "expected"),
     [("", ""), ("/fishsense-lite/", "fishsense-lite"), ("a/b/", "a/b")],
@@ -152,11 +149,9 @@ def test_a_none_prefix_is_empty_not_the_string_none():
         secret_access_key=SECRET,
         bucket="b",
         legacy_labels_prefix=None,
-        models_prefix=None,
     )
 
     assert settings.legacy_labels_prefix == ""
-    assert settings.models_prefix == ""
 
 
 def test_the_legacy_prefix_cannot_be_the_tenant_namespace(env):

@@ -59,6 +59,7 @@ OBJECT_STORE = {
     "FISHSENSE_OBJECT_STORE_ACCESS_KEY_ID": "GKexample",
     "FISHSENSE_OBJECT_STORE_SECRET_ACCESS_KEY": secrets.token_hex(16),
     "FISHSENSE_OBJECT_STORE_BUCKET": "fishsense-lite",
+    "FISHSENSE_OBJECT_STORE_LEGACY_LABELS_PREFIX": "fishsense-lite",
 }
 NAS = {
     "FISHSENSE_NAS_URL": "https://nas.example.test:6021",
@@ -157,6 +158,7 @@ async def test_a_parent_stages_and_cleanup_waits_for_a_running_reader():
         settings = ObjectStoreConnection(
             endpoint_url="http://garage.example.com", region="garage",
             access_key_id="k", secret_access_key="s", bucket=BUCKET,
+            legacy_labels_prefix="fishsense-lite",
         )  # fmt: skip
         store = OrchestratorObjectStore(s3, ObjectLayout(settings))
         staging = RawStagingActivities(

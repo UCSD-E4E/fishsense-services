@@ -113,6 +113,7 @@ def _store(s3) -> OrchestratorObjectStore:
         access_key_id="k",
         secret_access_key="s",
         bucket=BUCKET,
+        legacy_labels_prefix="fishsense-lite",
     )
     return OrchestratorObjectStore(s3, ObjectLayout(settings))
 

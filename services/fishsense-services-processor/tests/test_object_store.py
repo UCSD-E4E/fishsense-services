@@ -4,12 +4,12 @@
 Ported from fishsense-lite@77e8f8e5
 services/fishsense-data-processing-workflow-worker/tests/test_object_store.py,
 and the halves of libs/fishsense-shared/tests/test_object_store.py this side
-depends on (path-style addressing, `_get` closing the StreamingBody, the model
-key). v1's rules, kept:
+depends on (path-style addressing, `_get` closing the StreamingBody). v1's rules, kept:
 
 * raw and slate scratch are read, processed JPEGs written; nothing is deleted
   -- the processor has no way to;
-* weights come from the models bucket under ``models_prefix``, never scratch;
+* weights are not here: ``weights.GarageWeightStore`` reads them, verified
+  against fishsense-core's manifest (tests/test_weights.py);
 * a missing object raises ``NoSuchKey`` rather than reading as empty;
 * every read closes the StreamingBody, or the connection pool drains.
 
@@ -52,7 +52,7 @@ def _settings(**overrides) -> ObjectStoreConnection:
         "secret_access_key": "s",
         "bucket": BUCKET,
         "labels_bucket": LABELS,
-        "models_bucket": MODELS,
+        "legacy_labels_prefix": "fishsense-lite",
     }
     values.update(overrides)
     return ObjectStoreConnection(**values)
@@ -276,57 +276,3 @@ def test_the_processor_cannot_delete():
     """v1's asymmetry, kept: the orchestrator stages scratch in and deletes it
     after; the processor reads it and writes JPEGs, and has no delete at all."""
     assert not [name for name in dir(sut.ProcessorObjectStore) if "delete" in name]
-
-
-# -- model weights ---------------------------------------------------------------
-
-
-def test_model_key_carries_no_content_type_prefix():
-    """Weights get their own bucket, so the key must not restate it."""
-    assert (
-        sut.model_key("sam3", "3.1", "sam3.1_multiplex.pt")
-        == "sam3/3.1/sam3.1_multiplex.pt"
-    )
-    assert not hasattr(sut, "MODEL_PREFIX")
-
-
-@pytest.mark.parametrize(
-    ("prefix", "expected"),
-    [
-        ("", "sam3/3.1/sam3.1_multiplex.pt"),
-        (None, "sam3/3.1/sam3.1_multiplex.pt"),
-        ("fishsense-lite", "fishsense-lite/sam3/3.1/sam3.1_multiplex.pt"),
-        ("/fishsense-lite/", "fishsense-lite/sam3/3.1/sam3.1_multiplex.pt"),
-    ],
-)
-def test_model_key_prefix_handling(prefix, expected):
-    assert sut.model_key("sam3", "3.1", "sam3.1_multiplex.pt", prefix) == expected
-
-
-async def test_download_model_reads_from_the_models_bucket(s3, tmp_path):
-    """Weights live in their own bucket, not the scratch one (v1: a checkpoint
-    in a dedicated models bucket was a 404 at cold start)."""
-    s3.put_object(Bucket=MODELS, Key="sam3/3.1/sam3.1_multiplex.pt", Body=b"WEIGHTS")
-    s3.put_object(Bucket=BUCKET, Key="sam3/3.1/sam3.1_multiplex.pt", Body=b"WRONG")
-    store = _store(s3)
-
-    async def _run():
-        return await store.download_model(
-            "sam3", "3.1", "sam3.1_multiplex.pt", tmp_path
-        )
-
-    path = await ActivityEnvironment().run(_run)
-    assert path.read_bytes() == b"WEIGHTS"
-
-
-async def test_download_model_applies_the_models_prefix(s3, tmp_path):
-    s3.put_object(
-        Bucket=MODELS,
-        Key="fishsense-lite/sam3/3.1/sam3.1_multiplex.pt",
-        Body=b"WEIGHTS",
-    )
-    store = _store(s3, models_prefix="fishsense-lite")
-
-    path = await store.download_model("sam3", "3.1", "sam3.1_multiplex.pt", tmp_path)
-
-    assert path.read_bytes() == b"WEIGHTS"

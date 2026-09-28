@@ -46,14 +46,13 @@ class ObjectStoreConnection(BaseSettings):
     bucket: str
     #: The processed JPEGs Label Studio serves. Defaults to ``bucket``.
     labels_bucket: str | None = None
-    #: Model weights (PLAN.md §9.12). Defaults to ``bucket``.
-    models_bucket: str | None = None
-    #: Partitions ``models_bucket`` if it is shared with another project (v1's).
-    models_prefix: str | None = ""
     #: Where v1 wrote its JPEGs inside ``labels_bucket`` (v1's ``labels_prefix``;
     #: production ``fishsense-lite``). Read-only: v2 writes under
     #: ``tenants/``, and this only says where v1's JPEGs already are.
-    legacy_labels_prefix: str | None = ""
+    #: **Required** (an explicit empty value for a single-bucket development
+    #: setup): left unset, every migrated frame's JPEG would silently read as
+    #: "not written yet", and be deferred or re-rendered.
+    legacy_labels_prefix: str
 
     @field_validator("endpoint_url")
     @classmethod
@@ -72,7 +71,7 @@ class ObjectStoreConnection(BaseSettings):
             raise ValueError("must not be blank")
         return value
 
-    @field_validator("models_prefix", "legacy_labels_prefix")
+    @field_validator("legacy_labels_prefix", mode="before")
     @classmethod
     def _prefix(cls, value: str | None) -> str:
         # None is "", never "None" in a key; stray slashes would name a
@@ -82,7 +81,6 @@ class ObjectStoreConnection(BaseSettings):
     @model_validator(mode="after")
     def _defaults_and_namespaces(self) -> "ObjectStoreConnection":
         self.labels_bucket = self.labels_bucket or self.bucket
-        self.models_bucket = self.models_bucket or self.bucket
         first = (self.legacy_labels_prefix or "").split("/", 1)[0]
         if first == TENANTS_PREFIX:
             raise ValueError(

@@ -4,11 +4,12 @@ Ported from fishsense-lite@77e8f8e5
 services/fishsense-data-processing-workflow-worker/src/
 fishsense_data_processing_workflow_worker/object_store.py, and the primitives
 it inherited from libs/fishsense-shared/src/fishsense_shared/object_store.py
-(`build_s3_client`, `model_key`, `BaseObjectStoreClient._get/_put`).
+(`build_s3_client`, `BaseObjectStoreClient._get/_put`). Model weights are
+not here: `weights.GarageWeightStore` reads them, verified against
+fishsense-core's manifest (PLAN.md §9.12).
 
 v1's shape, kept: the processor reads staged raw frames and slate PDFs from
-scratch, writes processed JPEGs to the labels bucket, and reads weights from
-the models bucket. It has **no NAS access and no way to delete anything** --
+scratch and writes processed JPEGs to the labels bucket. It has **no NAS access and no way to delete anything** --
 the orchestrator stages scratch in and cleans it up.
 
 v2 changes:
@@ -49,7 +50,6 @@ __all__ = [
     "ProcessorObjectStore",
     "RefusedWrite",
     "build_s3_client",
-    "model_key",
 ]
 
 # Big enough to keep syscalls few, small enough that a frame is never held.
@@ -74,27 +74,12 @@ def build_s3_client(settings: ObjectStoreConnection):
     )
 
 
-def model_key(name: str, version: str, filename: str, prefix: str | None = "") -> str:
-    """A model checkpoint's key: ``{prefix}/{name}/{version}/{filename}`` (v1's).
-
-    ``version`` is in the key so new weights are a new object and a cached copy
-    can never silently be the wrong one. There is no ``models/`` segment:
-    weights have their own bucket, so it would only restate the bucket's name.
-    ``prefix`` partitions a models bucket shared with another project.
-    """
-    base = f"{name}/{version}/{filename}"
-    prefix = (prefix or "").strip("/")
-    return f"{prefix}/{base}" if prefix else base
-
-
 class ProcessorObjectStore:
-    """Read scratch, write a tenant's JPEGs, read weights. Never delete."""
+    """Read scratch, write a tenant's JPEGs. Never delete."""
 
     def __init__(self, s3, settings: ObjectStoreConnection) -> None:
         self._s3 = s3
         self._labels_bucket = settings.labels_bucket
-        self._models_bucket = settings.models_bucket
-        self._models_prefix = settings.models_prefix
 
     @classmethod
     def from_settings(cls, settings: ObjectStoreConnection) -> "ProcessorObjectStore":
@@ -114,17 +99,6 @@ class ProcessorObjectStore:
         resolved it. Head/tail predict reads the stage-5.1 JPEG because it is
         the exact frame the labeler is shown (v1)."""
         return await self._get(ref)
-
-    async def download_model(
-        self, name: str, version: str, filename: str, directory: Path
-    ) -> Path:
-        """A checkpoint from the models bucket, never scratch (v1: a checkpoint
-        in its own bucket was a 404 at cold start when this read scratch)."""
-        ref = ObjectRef(
-            bucket=self._models_bucket,
-            key=model_key(name, version, filename, self._models_prefix),
-        )
-        return await self._get_to_file(ref, Path(directory) / filename)
 
     # -- writes --------------------------------------------------------------
 
