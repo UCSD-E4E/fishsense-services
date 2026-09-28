@@ -25,4 +25,6 @@ dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
     "testcontainers[postgres]>=4.10.0",
+    # An in-process S3 for the object-store tests (Garage speaks S3).
+    "moto[s3]>=5.0.0",
 ]
