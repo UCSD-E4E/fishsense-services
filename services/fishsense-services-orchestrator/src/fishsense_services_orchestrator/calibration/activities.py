@@ -19,7 +19,8 @@ v2 changes:
   the camera calibration and the dive's dots;
 * every resolver returns the provenance the result is recorded with, and
   the result is appended by `record_laser_calibration` (v1 upserted the
-  extrinsics, or set the dive's refusal columns, from the data-worker);
+  extrinsics, or set the dive's refusal columns, from the data-worker),
+  under an id named by the parent's run, so a retried record is one row;
 * a dive that cannot be resolved is a final refusal. The cohorts no longer
   offer the ones knowable from the database (no camera calibration, a
   template with no dpi or reference points), so an old one cannot be the
@@ -101,6 +102,21 @@ class LaserCalibrationCatalog(Protocol):
     async def record_laser_calibration(
         self, tenant_id: uuid.UUID, dive_id: uuid.UUID, record: CalibrationRecord
     ) -> uuid.UUID: ...
+
+
+#: Names each recorded attempt (`_attempt_id`).
+_ATTEMPT_NAMESPACE = uuid.UUID("5f0b8d0e-3c1a-4f57-9a57-1b0f3c6d2e41")
+
+
+def _attempt_id(producer: str) -> uuid.UUID:
+    """The id the parent run's result is recorded under. A parent records one
+    result, so its run and the producer name the attempt; every retry of the
+    record carries the same name, and a retry after a lost reply appends
+    nothing (`record_laser_calibration` is idempotent in it)."""
+    info = activity.info()
+    return uuid.uuid5(
+        _ATTEMPT_NAMESPACE, f"{info.workflow_id}/{info.workflow_run_id}/{producer}"
+    )
 
 
 def _unavailable(target_dive, exc: CalibrationInputsUnavailable) -> ApplicationError:
@@ -290,6 +306,7 @@ class LaserCalibrationActivities:
                 slate_template_id=provenance.slate_template_id,
                 calibration_target_id=provenance.calibration_target_id,
                 inputs_as_of=provenance.inputs_as_of,
+                id=_attempt_id(provenance.producer),
             ),
         )
         activity.logger.info(

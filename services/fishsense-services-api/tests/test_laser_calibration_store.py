@@ -912,6 +912,46 @@ async def test_a_record_cannot_land_on_another_tenants_dive(owner_engine, app_en
             await record_laser_calibration(conn, lab, theirs, _accepted())
 
 
+async def test_recording_the_same_attempt_twice_appends_it_once(
+    owner_engine, app_engine
+):
+    """v2: the parent retries the record, and a retry after a lost reply
+    would append the attempt a second time -- a second row that moves the
+    dive's current calibration and restarts the refusal's clock. The caller
+    names the attempt; a repeat of that name is the row already written."""
+    lab = await tenant(owner_engine)
+    only = await _slate_dive(owner_engine, lab)
+    attempt = uuid.uuid4()
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        first = await record_laser_calibration(conn, lab, only, _accepted(id=attempt))
+    async with tenant_transaction(app_engine, lab) as conn:
+        again = await record_laser_calibration(conn, lab, only, _refused(id=attempt))
+
+    assert first == again == attempt
+    async with owner_engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                text("SELECT id, outcome FROM laser_calibrations WHERE dive_id = :d"),
+                {"d": only},
+            )
+        ).all()
+    assert [(r.id, r.outcome) for r in rows] == [(attempt, "accepted")]
+
+
+async def test_an_unnamed_attempt_is_appended_under_a_fresh_id(
+    owner_engine, app_engine
+):
+    lab = await tenant(owner_engine)
+    only = await _slate_dive(owner_engine, lab)
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        first = await record_laser_calibration(conn, lab, only, _accepted())
+        second = await record_laser_calibration(conn, lab, only, _accepted())
+
+    assert first != second
+
+
 # ---------- inputs: stage 13 ----------
 
 

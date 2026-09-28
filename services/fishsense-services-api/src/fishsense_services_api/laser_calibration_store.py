@@ -59,7 +59,9 @@ v2 changes:
   the fit saw, and now expires the refusal (v1 snapshotted at refusal time
   and missed it);
 * **no upsert**: a refit is appended, so it is visible to every
-  provenance-mismatch cohort (v1's PUT kept the row id);
+  provenance-mismatch cohort (v1's PUT kept the row id). A *retried* record
+  of one attempt is not a refit: the caller names the attempt, and a repeat
+  of the name appends nothing (v1's PUT was idempotent by the dive);
 * stage 13's observations take each frame's lowest live laser label (v1:
   `get_laser_label(image_id).first()`, no ordering), and the board's geometry
   is read through `current_calibration_targets` by name -- per axis -- so a
@@ -185,6 +187,10 @@ class CalibrationRecord:
     slate_template_id: uuid.UUID | None
     calibration_target_id: uuid.UUID | None
     inputs_as_of: datetime | None
+    #: The attempt's id, named by the caller so that recording it again (a
+    #: retry after a lost reply) is the row already written, not a second
+    #: one. None: a fresh id.
+    id: uuid.UUID | None = None
 
 
 # --- the SQL both cohorts share (each over a dive aliased `d`) -----------------
@@ -565,22 +571,29 @@ async def record_laser_calibration(
     dive_id: uuid.UUID,
     record: CalibrationRecord,
 ) -> uuid.UUID:
-    """Append one attempt to the dive's calibrations. Returns its id."""
-    return (
+    """Append one attempt to the dive's calibrations. Returns its id.
+
+    Idempotent in `record.id`: an attempt already recorded under that id is
+    left as it is (append-only) and its id returned, so a retried record
+    cannot append the attempt twice."""
+    attempt = record.id or uuid.uuid4()
+    written = (
         await conn.execute(
             text("""
                 INSERT INTO laser_calibrations
-                    (tenant_id, dive_id, camera_calibration_id, producer, outcome,
-                     laser_position, laser_axis, refusal_reason, inputs_as_of,
-                     gate_verdicts, lever_arm_m, observation_count, core_version,
-                     slate_template_id, calibration_target_id)
-                VALUES (:tenant, :dive, :camera, :producer, :outcome,
+                    (id, tenant_id, dive_id, camera_calibration_id, producer,
+                     outcome, laser_position, laser_axis, refusal_reason,
+                     inputs_as_of, gate_verdicts, lever_arm_m, observation_count,
+                     core_version, slate_template_id, calibration_target_id)
+                VALUES (:id, :tenant, :dive, :camera, :producer, :outcome,
                         CAST(:position AS jsonb), CAST(:axis AS jsonb), :reason,
                         :inputs_as_of, CAST(:verdicts AS jsonb), :lever, :count,
                         :core, :slate, :target)
+                ON CONFLICT (id) DO NOTHING
                 RETURNING id
                 """),
             {
+                "id": attempt,
                 "tenant": tenant_id,
                 "dive": dive_id,
                 "camera": record.camera_calibration_id,
@@ -598,7 +611,8 @@ async def record_laser_calibration(
                 "target": record.calibration_target_id,
             },
         )
-    ).scalar_one()
+    ).scalar_one_or_none()
+    return attempt if written is None else written
 
 
 def _json(value) -> str | None:
