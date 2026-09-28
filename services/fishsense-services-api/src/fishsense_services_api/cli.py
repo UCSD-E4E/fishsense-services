@@ -105,13 +105,14 @@ async def _migrate_v1() -> int:
         for table, (in_v1, in_v2) in report.discrepancies().items()
     ]
     no_go += await _audit(target, settings.app_role)
-    current, fresh, refused = await asyncio.to_thread(
+    current, fresh, refused, stale = await asyncio.to_thread(
         measurement_parity, source, target
     )
     print(
         f"measurement parity: {current} current in v2 {'=' if current == fresh else '≠'}"
         f" {fresh} fresh in v1"
-        f" ({refused} on refused dives: shown by v1, intentionally not current)"
+        f" ({refused} on refused dives: shown by v1, intentionally not current;"
+        f" {stale} stale bindings: deleted by v1's next measure run, not current)"
     )
     if current != fresh:
         no_go.append(f"measurement parity: {current} current in v2, {fresh} in v1")
