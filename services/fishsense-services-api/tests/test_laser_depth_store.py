@@ -47,6 +47,7 @@ from sqlalchemy import text
 
 from depth_measure_seed import (  # noqa: F401  (forget_identities: a fixture)
     IMPLAUSIBLE_POSITION,
+    T0,
     forget_identities,
     K,
     calibrate,
@@ -602,7 +603,7 @@ async def test_persist_records_depth_range_residual_and_provenance(
         lab,
         dive_id,
         calibration,
-        depths=[DepthRecord(capture_id, label, 1.2, 1.25, 3e-6)],
+        depths=[DepthRecord(capture_id, label, 100.0, 200.0, 1.2, 1.25, 3e-6)],
     )
 
     assert persisted.written == 1
@@ -626,7 +627,7 @@ async def test_a_recompute_is_appended_not_overwritten(owner_engine, app_engine)
         lab,
         dive_id,
         new,
-        depths=[DepthRecord(capture_id, label, 1.2, 1.2, 0.0)],
+        depths=[DepthRecord(capture_id, label, 100.0, 200.0, 1.2, 1.2, 0.0)],
     )
 
     assert [row[1:3] for row in await _depths(owner_engine, capture_id)] == [
@@ -649,7 +650,7 @@ async def test_persist_records_a_fallback_labels_refusal_and_its_siblings_depth(
         lab,
         dive_id,
         calibration,
-        depths=[DepthRecord(capture_id, good, 1.2, 1.25, 0.0)],
+        depths=[DepthRecord(capture_id, good, 1900.0, 1400.0, 1.2, 1.25, 0.0)],
         refusals=[
             DepthRefusal(capture_id, bad, 30.0, 3000.0, "non_positive_depth", -0.4)
         ],
@@ -667,7 +668,7 @@ async def test_persisting_twice_writes_once(owner_engine, app_engine):
     capture_id, label = await _labelled(owner_engine, lab, dive_id)
     refused_capture, refused = await _labelled(owner_engine, lab, dive_id, x=3.0, y=4.0)
     result = dict(
-        depths=[DepthRecord(capture_id, label, 1.2, 1.25, 0.0)],
+        depths=[DepthRecord(capture_id, label, 100.0, 200.0, 1.2, 1.25, 0.0)],
         refusals=[
             DepthRefusal(refused_capture, refused, 3.0, 4.0, "non_finite_depth", None)
         ],
@@ -702,11 +703,35 @@ async def test_a_label_superseded_since_it_was_resolved_is_not_written(
         lab,
         dive_id,
         calibration,
-        depths=[DepthRecord(capture_id, label, 1.2, 1.25, 0.0)],
+        depths=[DepthRecord(capture_id, label, 100.0, 200.0, 1.2, 1.25, 0.0)],
     )
 
     assert (persisted.written, persisted.skipped_stale) == (0, 1)
     assert await _depths(owner_engine, capture_id) == []
+
+
+async def test_a_dot_moved_since_it_was_resolved_is_not_written(
+    owner_engine, app_engine
+):
+    """Label Studio sync moves a dot in place (same label id): a depth
+    computed at the old pixel answers no current work. Written, it would name
+    a still-valid label and so be current forever, at the wrong pixel."""
+    lab = await tenant(owner_engine)
+    dive_id, calibration = await calibrated_dive(owner_engine, lab)
+    capture_id, label = await _labelled(owner_engine, lab, dive_id, x=100.0, y=200.0)
+    await exec_(owner_engine, "UPDATE laser_labels SET x = 1900 WHERE id = :l", l=label)
+
+    persisted = await _persist(
+        app_engine,
+        lab,
+        dive_id,
+        calibration,
+        depths=[DepthRecord(capture_id, label, 100.0, 200.0, 1.2, 1.25, 0.0)],
+    )
+
+    assert (persisted.written, persisted.skipped_stale) == (0, 1)
+    assert await _depths(owner_engine, capture_id) == []
+    assert await _next(app_engine, lab) == dive_id
 
 
 async def test_a_calibration_replaced_since_it_was_resolved_writes_nothing(
@@ -749,8 +774,8 @@ async def test_a_capture_that_is_not_work_of_this_dive_is_not_written(
         dive_id,
         calibration,
         depths=[
-            DepthRecord(foreign, foreign_label, 1.2, 1.2, 0.0),
-            DepthRecord(mine, foreign_label, 1.2, 1.2, 0.0),
+            DepthRecord(foreign, foreign_label, 100.0, 200.0, 1.2, 1.2, 0.0),
+            DepthRecord(mine, foreign_label, 100.0, 200.0, 1.2, 1.2, 0.0),
         ],
     )
 
@@ -778,6 +803,37 @@ async def test_the_cohort_is_per_tenant_and_oldest_first(owner_engine, app_engin
 
     assert await _next(app_engine, lab) == older
     assert await _next(app_engine, reef) == reef_dive
+
+
+async def _tied_dives(owner_engine, tenant_id):
+    """Two dives created in the same instant -- every migrated dive is, since
+    v1 recorded no creation time -- numbered against their UUID order.
+    Returns (lower-numbered, higher-numbered)."""
+    first, _ = await calibrated_dive(owner_engine, tenant_id, created_at=T0)
+    second, _ = await calibrated_dive(owner_engine, tenant_id, created_at=T0)
+    low_uuid, high_uuid = sorted((first, second))
+    for dive_id, number in ((high_uuid, 900_001), (low_uuid, 900_002)):
+        await exec_(
+            owner_engine,
+            "UPDATE dives SET number = :n WHERE id = :d",
+            n=number,
+            d=dive_id,
+        )
+    return high_uuid, low_uuid
+
+
+async def test_dives_created_together_drain_in_v1s_id_order(owner_engine, app_engine):
+    """v1 took `ORDER BY id`; v2 takes the oldest, then the lowest number --
+    v1's id for a migrated dive -- never the UUID, which is random."""
+    lab = await tenant(owner_engine)
+    first, second = await _tied_dives(owner_engine, lab)
+    for dive_id in (first, second):
+        await _labelled(owner_engine, lab, dive_id)
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        candidate = await next_dive_for_laser_depth(conn, lab)
+
+    assert (candidate.dive_id, candidate.number) == (first, 900_001)
 
 
 async def test_the_catalog_acts_only_in_tenants_it_is_a_member_of(

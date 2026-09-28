@@ -21,7 +21,8 @@ them, so they cannot disagree.
 
 v2 changes:
 
-* per tenant, ordered by `created_at` (v1: `id`), so the orchestrator takes
+* per tenant, ordered by `created_at` then `number` (v1: `id`, which
+  `number` is for a migrated dive), so the orchestrator takes
   the oldest candidate across the tenants it serves;
 * the calibration is 0018's effective one (own and plausible, else the
   link's), and the camera matrix is the current calibration of the dive's
@@ -71,6 +72,10 @@ Vector3 = tuple[float, float, float]
 class LaserDepthCandidate:
     dive_id: uuid.UUID
     created_at: datetime
+    #: The tiebreak: v1's id for a migrated dive, and every migrated dive
+    #: shares one created_at (v1 recorded none), so the UUID would drain
+    #: them in random order.
+    number: int
 
 
 @dataclass(frozen=True)
@@ -117,6 +122,11 @@ class LaserDepthWork:
 class DepthRecord:
     capture_id: uuid.UUID
     laser_label_id: uuid.UUID
+    #: The dot the depth was computed at, echoed back: Label Studio sync moves
+    #: a dot in place (same label id), so the id alone cannot tell a depth at
+    #: the old pixel from one at the new.
+    x: float
+    y: float
     depth_m: float
     range_m: float
     residual_m: float | None
@@ -152,19 +162,21 @@ async def next_dive_for_laser_depth(
     row = (
         await conn.execute(
             text("""
-                SELECT d.id, d.created_at FROM dives d
+                SELECT d.id, d.created_at, d.number FROM dives d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
                   AND EXISTS (
                       SELECT 1 FROM laser_depth_work w
                       WHERE w.tenant_id = d.tenant_id AND w.dive_id = d.id
                   )
-                ORDER BY d.created_at, d.id
+                ORDER BY d.created_at, d.number
                 LIMIT 1
                 """),
             {"tenant": tenant_id},
         )
     ).one_or_none()
-    return None if row is None else LaserDepthCandidate(row.id, row.created_at)
+    return (
+        None if row is None else LaserDepthCandidate(row.id, row.created_at, row.number)
+    )
 
 
 async def dive_geometry(
@@ -381,6 +393,7 @@ async def persist_laser_depths(
             laser_calibration_id,
             record.capture_id,
             record.laser_label_id,
+            dot=(record.x, record.y),
         ):
             stale += 1
             continue

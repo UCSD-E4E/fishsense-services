@@ -45,6 +45,7 @@ from sqlalchemy import text
 
 from depth_measure_seed import (  # noqa: F401  (forget_identities: a fixture)
     REAL_FISH,
+    T0,
     forget_identities,
     calibrate,
     calibrated_dive,
@@ -1101,6 +1102,37 @@ async def test_a_capture_of_another_dive_is_not_written(owner_engine, app_engine
 
 
 # -- tenancy -----------------------------------------------------------------------
+
+
+async def _tied_dives(owner_engine, tenant_id):
+    """Two dives created in the same instant -- every migrated dive is, since
+    v1 recorded no creation time -- numbered against their UUID order.
+    Returns (lower-numbered, higher-numbered)."""
+    first, _ = await calibrated_dive(owner_engine, tenant_id, created_at=T0)
+    second, _ = await calibrated_dive(owner_engine, tenant_id, created_at=T0)
+    low_uuid, high_uuid = sorted((first, second))
+    for dive_id, number in ((high_uuid, 900_001), (low_uuid, 900_002)):
+        await exec_(
+            owner_engine,
+            "UPDATE dives SET number = :n WHERE id = :d",
+            n=number,
+            d=dive_id,
+        )
+    return high_uuid, low_uuid
+
+
+async def test_dives_created_together_drain_in_v1s_id_order(owner_engine, app_engine):
+    """v1 took `ORDER BY id`; v2 takes the oldest, then the lowest number --
+    v1's id for a migrated dive -- never the UUID, which is random."""
+    lab = await tenant(owner_engine)
+    first, second = await _tied_dives(owner_engine, lab)
+    for dive_id in (first, second):
+        await measurable_capture(owner_engine, lab, dive_id)
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        candidate = await next_dive_for_measurement(conn, lab)
+
+    assert (candidate.dive_id, candidate.number) == (first, 900_001)
 
 
 async def test_the_catalog_acts_only_in_tenants_it_is_a_member_of(
