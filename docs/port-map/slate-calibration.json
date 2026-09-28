@@ -1,0 +1,713 @@
+{
+  "slice": "slate-calibration: stage 9 slate preprocessing, stage 11/12 dive-slate Label Studio create/populate/sync, stage 13 slate laser calibration (four gates plus refusals), checkerboard laser calibration, checkerboard lattice verification (on-demand study), and the retired slate predictor. v1 = fishsense-lite@a8b2c3bc. Unless marked otherwise, paths are relative to fishsense-lite/services/.",
+  "workflows": [
+    {
+      "name": "PreprocessSlateImagesParentWorkflow (stage 9 parent)",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/preprocess_slate_images_parent_workflow.py",
+      "worker": "api-worker, fishsense_api_queue",
+      "schedule": "id preprocess-slate-images-workflow-schedule, hourly, offset +45 min, overlap SKIP, run_timeout 1h (worker.py:661-671)",
+      "calls": [
+        "select_next_high_priority_dive_for_slate_preprocessing_activity (_dispatch.select_dive: 5 min, SDK_FAIL_FAST)",
+        "resolve_slate_preprocess_inputs_activity -> PreprocessSlateImagesInput",
+        "when there are no image_checksums: clear_slate_reprocess_flags_activity(dive_id, checksums=None, i.e. the whole dive), then return (line 59-74)",
+        "ensure_data_worker_running_activity (wake_data_worker)",
+        "stage_raw_bytes_for_dive_activity (1h, heartbeat 5 min)",
+        "stage_slate_pdf_activity(slate_id) (schedule_to_close 5 min, no retry policy)",
+        "child PreprocessSlateImagesWorkflow id preprocess-slate-{dive_id}, CPU queue fishsense_data_processing_queue, exec 1h, ALLOW_DUPLICATE; on CHILD_ALREADY_RUNNING return with no cleanup and no flag clear",
+        "cleanup_raw_bytes_for_dive_activity",
+        "child PopulateDiveSlateLabelStudioProjectWorkflow id populate-dive-slate-{dive_id} (30 min, ALLOW_DUPLICATE)",
+        "clear_slate_reprocess_flags_activity(dive_id, checksums=inputs.image_checksums): clears only what this run redrew"
+      ]
+    },
+    {
+      "name": "PreprocessSlateImagesWorkflow (stage 9 child)",
+      "file": "fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/workflows/preprocess_slate_images_workflow.py",
+      "worker": "data-worker, CPU/per-image queue fishsense_data_processing_queue",
+      "schedule": "on-demand (child of stage 9 parent)",
+      "calls": [
+        "preprocess_slate_image per checksum, gathered, start_to_close 5 min, output_folder preprocess_slate_images_jpeg"
+      ]
+    },
+    {
+      "name": "CreateDiveSlateLabelStudioProjectWorkflow",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/create_dive_slate_label_studio_project_workflow.py",
+      "worker": "api-worker",
+      "schedule": "on-demand (rarely used; populate calls the same activity)",
+      "calls": [
+        "create_dive_slate_label_studio_project_activity (5 min)"
+      ]
+    },
+    {
+      "name": "PopulateDiveSlateLabelStudioProjectWorkflow (stage 11)",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/populate_dive_slate_label_studio_project_workflow.py (body in workflows/_populate.py create_then_populate('dive_slate'))",
+      "worker": "api-worker",
+      "schedule": "child of the stage 9 parent; also started by hand with a non-colliding id",
+      "calls": [
+        "create_dive_slate_label_studio_project_activity (5 min)",
+        "populate_dive_slate_label_studio_project_activity(dive_id, project_id) (30 min, heartbeat 2 min, _POPULATE_RETRY: 30s initial, x2, max 5 min, 5 attempts)"
+      ]
+    },
+    {
+      "name": "SyncLabelStudioDiveSlateLabelsWorkflow (stage 12)",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/sync_label_studio_dive_slate_labels_workflow.py",
+      "worker": "api-worker",
+      "schedule": "id sync-label-studio-dive-slate-labels-workflow-schedule, hourly, no offset (+0), overlap ALLOW_ALL (the default), run_timeout 3h (the default) (worker.py:466-472)",
+      "calls": [
+        "sync_users_label_studio_activity (10 min); v2's laser sync dropped this step",
+        "get_dive_slate_label_studio_project_ids_activity (10 min)",
+        "sync_dive_slate_labels_for_label_studio_project_activity per project, Semaphore(4), 2h s2c, heartbeat 2 min, in a TaskGroup (the first failure cancels the other projects; v2's laser port fixed this)"
+      ]
+    },
+    {
+      "name": "PerformLaserCalibrationParentWorkflow (stage 13 parent)",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/perform_laser_calibration_parent_workflow.py",
+      "worker": "api-worker",
+      "schedule": "id perform-laser-calibration-workflow-schedule, hourly, offset +50 min, overlap SKIP, run_timeout 30 min (worker.py:678-688)",
+      "calls": [
+        "select_next_high_priority_dive_for_laser_calibration_activity (5 min, SDK_FAIL_FAST)",
+        "ensure_light_worker_running_activity (5 min, SCALING_RETRY_POLICY)",
+        "child PerformLaserCalibrationWorkflow(dive_id) id perform-laser-calibration-{dive_id}, LIGHT queue, exec 15 min, ALLOW_DUPLICATE; WorkflowAlreadyStartedError is swallowed",
+        "no staging and no cleanup; returns dive_id"
+      ]
+    },
+    {
+      "name": "PerformLaserCalibrationWorkflow (stage 13 child)",
+      "file": "fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/workflows/perform_laser_calibration_workflow.py",
+      "worker": "data-worker, LIGHT queue fishsense_data_processing_light_queue",
+      "schedule": "on-demand (child)",
+      "calls": [
+        "perform_laser_calibration_activity(dive_id) (schedule_to_close 10 min, default retry). The activity does its own SDK reads and writes."
+      ]
+    },
+    {
+      "name": "PerformCheckerboardCalibrationParentWorkflow",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/perform_checkerboard_calibration_parent_workflow.py",
+      "worker": "api-worker",
+      "schedule": "id perform-checkerboard-calibration-workflow-schedule, hourly, offset +52 min, overlap SKIP, run_timeout 3h (worker.py:771-808)",
+      "calls": [
+        "select_next_high_priority_dive_for_checkerboard_calibration_activity",
+        "resolve_checkerboard_calibration_inputs_activity -> PerformCheckerboardCalibrationInput",
+        "when there are no images: return with nothing staged",
+        "wake_data_worker",
+        "stage_raw (about 30 min for 133 frames at ~1 MB/s)",
+        "wake_data_worker again (so the +55 idle sweeper cannot scale the worker down mid-staging)",
+        "child PerformCheckerboardCalibrationWorkflow id perform-checkerboard-calibration-{dive_id}, CPU queue, exec 2h, ALLOW_DUPLICATE",
+        "finally: cleanup_raw even when the child FAILED, unless CHILD_ALREADY_RUNNING"
+      ]
+    },
+    {
+      "name": "PerformCheckerboardCalibrationWorkflow (child)",
+      "file": "fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/workflows/perform_checkerboard_calibration_workflow.py",
+      "worker": "data-worker, CPU queue (not light: it decodes .ORF files)",
+      "schedule": "on-demand (child)",
+      "calls": [
+        "detect_checkerboard_laser_point per frame, gathered, start_to_close 10 min, result CheckerboardObservation",
+        "fit_checkerboard_laser_extrinsics(FitCheckerboardExtrinsicsInput) (start_to_close 10 min; makes its own SDK calls)"
+      ]
+    },
+    {
+      "name": "VerifyCheckerboardLatticeParentWorkflow",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/verify_checkerboard_lattice_parent_workflow.py",
+      "worker": "api-worker",
+      "schedule": "on-demand only, never scheduled; input {dive_ids, sample_limit=20}; example id verify-lattice-<tag>",
+      "calls": [
+        "per dive, with per-dive try/except isolation: resolve_checkerboard_calibration_inputs_activity (reused), wake_data_worker, stage_raw, wake_data_worker, child VerifyCheckerboardLatticeWorkflow id verify-checkerboard-lattice-{dive_id} (CPU, 2h), finally cleanup_raw",
+        "workflow.random().shuffle(renders) (replay-safe blinding)",
+        "create_checkerboard_lattice_label_studio_project_activity (10 min)",
+        "populate_checkerboard_lattice_label_studio_project_activity(project_id, chunk) in chunks of 100 (30 min each)"
+      ]
+    },
+    {
+      "name": "VerifyCheckerboardLatticeWorkflow (child)",
+      "file": "fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/workflows/verify_checkerboard_lattice_workflow.py",
+      "worker": "data-worker, CPU queue",
+      "schedule": "on-demand (child)",
+      "calls": [
+        "images[:sample_limit] (the head of the list, not a random sample)",
+        "render_checkerboard_lattice per frame, gathered, 10 min, result CheckerboardLatticeRender"
+      ]
+    },
+    {
+      "name": "PredictSlateImagesParentWorkflow (RETIRED 2026-08-03)",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/predict_slate_images_parent_workflow.py",
+      "worker": "api-worker",
+      "schedule": "NOT scheduled; predict-slate-images-workflow-schedule is actively deleted at startup (worker.py:424 _RETIRED_SCHEDULE_IDS, retire_schedule)",
+      "calls": [
+        "select_next_high_priority_dive_for_slate_prediction_activity",
+        "resolve_slate_predict_inputs_activity",
+        "stage_slate_pdf (15 min)",
+        "child PredictSlateImagesWorkflow id predict-slate-{dive_id}, GPU queue",
+        "persist_slate_predictions_activity",
+        "backfill_slate_predictions_for_dive_activity"
+      ]
+    },
+    {
+      "name": "BackfillSlatePredictionsWorkflow (RETIRED 2026-08-03)",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/backfill_slate_predictions_workflow.py",
+      "worker": "api-worker",
+      "schedule": "on-demand only (registered, never scheduled)",
+      "calls": [
+        "backfill_slate_predictions_for_dive_activity"
+      ]
+    },
+    {
+      "name": "PredictSlateImagesWorkflow (RETIRED 2026-08-03)",
+      "file": "fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/workflows/predict_slate_images_workflow.py",
+      "worker": "data-worker, GPU queue",
+      "schedule": "on-demand only",
+      "calls": [
+        "predict_slate_image per frame (fishsense_core.slate.BoardMasker)"
+      ]
+    }
+  ],
+  "activities": [
+    {
+      "name": "select_next_high_priority_dive_for_slate_preprocessing_activity",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/select_next_high_priority_dive_for_slate_preprocessing_activity.py",
+      "purpose": "stage 9 cohort selector (a thin wrapper over cohort_selection.select_next_dive)",
+      "touches": [
+        "api GET /api/v1/dives/select-next/slate-preprocessing/"
+      ]
+    },
+    {
+      "name": "resolve_slate_preprocess_inputs_activity",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/resolve_slate_preprocess_inputs_activity.py",
+      "purpose": "builds PreprocessSlateImagesInput. Targets: species content_of_image=='Slate, Laser on slate' whose image has no non-sentinel slate label (project_id not null; superseded is NOT checked here, although the cohort checks it), PLUS images whose slate label is needs_reprocess (no marker gate on those). Canonical images only. Raises when camera, intrinsics, slate, dpi or reference_points are missing.",
+      "touches": [
+        "db:dive (GET dives/{id})",
+        "db:cameraintrinsics",
+        "db:diveslate (GET dive-slates, filtered in Python)",
+        "db:specieslabel (GET dives/{id}/labels/species)",
+        "db:diveslatelabel (GET dives/{id}/labels/dive-slate)",
+        "db:image (GET images?dive_id)"
+      ]
+    },
+    {
+      "name": "stage_slate_pdf_activity",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/stage_slate_pdf_activity.py",
+      "purpose": "copies DiveSlate.path (share-relative, prefixed with e4e_nas.raw_root_path) from the NAS to object-store slate_pdf/{slate_id}.pdf. HEAD-checks first, so it is idempotent.",
+      "touches": [
+        "db:diveslate",
+        "nas (FileStation download)",
+        "object-store:slate_pdf/"
+      ]
+    },
+    {
+      "name": "clear_slate_reprocess_flags_activity",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/clear_slate_reprocess_flags_activity.py",
+      "purpose": "lowers needs_reprocess on slate labels, scoped to checksums (None = the whole dive; [] = nothing)",
+      "touches": [
+        "db:diveslatelabel (DELETE /api/v1/dives/{id}/labels/dive-slate/needs-reprocess?checksums=)"
+      ]
+    },
+    {
+      "name": "preprocess_slate_image",
+      "file": "fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/activities/preprocess_slate_image.py",
+      "purpose": "rectifies the raw .ORF, renders the slate PDF page 0 at slate DPI (threshold 125), scales it to the image height, concatenates slate (left) + photo (right), draws numbered red reference points, and writes a JPEG",
+      "touches": [
+        "object-store:raw/{checksum}.ORF (read)",
+        "object-store:slate_pdf/{slate_id}.pdf (read)",
+        "object-store:preprocess_slate_images_jpeg/{checksum}.JPG (write)",
+        "fishsense_core RawImage/RectifiedImage",
+        "pymupdf"
+      ]
+    },
+    {
+      "name": "create_dive_slate_label_studio_project_activity",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/create_dive_slate_label_studio_project_activity.py",
+      "purpose": "create-or-get by title '{dive.name} #{dive_id} - Dive Slate Labeling' with DIVE_SLATE_LABELING_CONFIG_XML (controls: reference_points KeyPointLabels, slate RectangleLabels, skipped_points TextArea) and registers the S3 storage",
+      "touches": [
+        "label-studio (projects list/create, S3 storage)",
+        "db:dive (for the title)"
+      ]
+    },
+    {
+      "name": "populate_dive_slate_label_studio_project_activity",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/populate_dive_slate_label_studio_project_activity.py",
+      "purpose": "targets = slate-marked species images with no COMPLETED slate label. Gates on the JPEG being present in Garage. Imports tasks with dedup-by-URL and records a placeholder DiveSlateLabel(completed=False) per task. Seeds keypoint pre-annotations from SlatePrediction (retired data, now none). Supersede pass over incomplete rows not owned by this project, or no longer targets. Publishes iff the import completed and the project has rows.",
+      "touches": [
+        "db:specieslabel",
+        "db:diveslatelabel (GET + PUT /api/v1/labels/dive-slate/{image_id})",
+        "db:slateprediction (GET dives/{id}/slate-predictions; retired)",
+        "db:image",
+        "object-store:preprocess_slate_images_jpeg (HEAD)",
+        "object-store:slate_pdf (GET, for the panel aspect, only when predictions exist)",
+        "label-studio (import, publish)"
+      ]
+    },
+    {
+      "name": "get_dive_slate_label_studio_project_ids_activity",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/get_dive_slate_label_studio_project_ids_activity.py",
+      "purpose": "distinct LS project ids of live (non-superseded) slate labels",
+      "touches": [
+        "db:diveslatelabel (GET /api/v1/labels/dive-slate/label-studio-project-ids)"
+      ]
+    },
+    {
+      "name": "sync_dive_slate_labels_for_label_studio_project_activity",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/sync_dive_slate_labels_for_label_studio_project_activity.py",
+      "purpose": "cursor sync (kind='dive_slate'). For each task: find the label by task id (skip when there is none); set user_id, label_studio_json, completed=task.is_labeled, updated_at, skipped_points (1-based to 0-based). It shifts reference_points/slate_rectangle x left by panel_width = (pdf_w/pdf_h)*original_height, and raises (the project fails and the cursor stays put) if the geometry is present but the offset cannot be computed or lands out of frame.",
+      "touches": [
+        "db:diveslatelabel (GET by label-studio id, PUT)",
+        "db:image, db:dive (image -> dive_slate_id, memoised)",
+        "db:user",
+        "object-store:slate_pdf/{slate_id}.pdf (GET, per-activity cache)",
+        "label-studio (task list)",
+        "db:sync cursor"
+      ]
+    },
+    {
+      "name": "select_next_high_priority_dive_for_laser_calibration_activity",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/select_next_high_priority_dive_for_laser_calibration_activity.py",
+      "purpose": "stage 13 cohort selector",
+      "touches": [
+        "api GET /api/v1/dives/select-next/laser-calibration/"
+      ]
+    },
+    {
+      "name": "perform_laser_calibration_activity",
+      "file": "fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/activities/perform_laser_calibration_activity.py",
+      "purpose": "slate fit. Returns None when there is no dive_slate_id or no slate labels. For each live slate label: _drop_skipped (resolved against the original indices), count check (skip the LABEL on mismatch), body = template/dpi*0.0254, plane_from_correspondences, then laser_point_on_plane. Refuses below MIN_LASER_POINTS=2. trim_outlying_observations, calibrate_laser (origin z padded 0), then four gates, then PUT extrinsics. Every refusal calls set_calibration_refused (best-effort) and raises non-retryable ApplicationError.",
+      "touches": [
+        "db:dive",
+        "db:diveslate",
+        "db:diveslatelabel",
+        "db:cameraintrinsics",
+        "db:laserlabel (GET labels/laser/{image_id} per slate label; GET dives/{id}/labels/laser for dive dots)",
+        "db:laserextrinsics (PUT /dives/{id}/laser-extrinsics/)",
+        "db:dive refusal (PUT /dives/{id}/calibration-refused/)",
+        "fishsense_core.laser.calibrate_laser",
+        "cv2.solvePnP"
+      ]
+    },
+    {
+      "name": "select_next_high_priority_dive_for_checkerboard_calibration_activity",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/select_next_high_priority_dive_for_checkerboard_calibration_activity.py",
+      "purpose": "checkerboard cohort selector",
+      "touches": [
+        "api GET /api/v1/dives/select-next/checkerboard-laser-calibration/"
+      ]
+    },
+    {
+      "name": "resolve_checkerboard_calibration_inputs_activity",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/resolve_checkerboard_calibration_inputs_activity.py",
+      "purpose": "camera intrinsics + target rows/cols/square_size_m + one frame per canonical image with a live dot (lowest label id wins; superseded and null-xy labels are filtered first). Also reused by lattice verification.",
+      "touches": [
+        "db:dive",
+        "db:cameraintrinsics",
+        "db:calibrationtarget (GET /calibration-targets/)",
+        "db:image",
+        "db:laserlabel"
+      ]
+    },
+    {
+      "name": "detect_checkerboard_laser_point",
+      "file": "fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/activities/detect_checkerboard_laser_point.py",
+      "purpose": "rectify; detect_checkerboard (max_rows/cols = the declared board); the dot must be inside board_hull (point_in_laser_region); plane_from_correspondences; laser_point_on_plane. Returns point=None with skip_reason no_usable_board | dot_off_board | no_pose | no_ray_plane_intersection instead of raising.",
+      "touches": [
+        "object-store:raw/{checksum}.ORF (read)",
+        "fishsense_core RawImage/RectifiedImage",
+        "cv2.findChessboardCornersSBWithMeta"
+      ]
+    },
+    {
+      "name": "fit_checkerboard_laser_extrinsics",
+      "file": "fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/activities/fit_checkerboard_laser_extrinsics.py",
+      "purpose": "same steps as stage 13 after the observations: MIN_LASER_POINTS (imported from stage 13), trim, calibrate_laser, the four gates, PUT extrinsics. Fetches the dive's laser labels BEFORE the try, so a transport error stays retryable. Refusal type InsufficientCheckerboardPoints etc.",
+      "touches": [
+        "db:laserlabel (GET dives/{id}/labels/laser)",
+        "db:laserextrinsics (PUT)",
+        "db:dive refusal (PUT calibration-refused)",
+        "fishsense_core.laser.calibrate_laser"
+      ]
+    },
+    {
+      "name": "render_checkerboard_lattice",
+      "file": "fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/activities/render_checkerboard_lattice.py",
+      "purpose": "the same admission filter as detect (detect_checkerboard, then hull + point_in_laser_region); draws the lattice (lattice_overlay.py); uploads the JPEG; returns corners/median spacing",
+      "touches": [
+        "object-store:raw (read)",
+        "object-store:checkerboard_lattice_jpeg/{checksum}.JPG (write)"
+      ]
+    },
+    {
+      "name": "create_checkerboard_lattice_label_studio_project_activity",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/create_checkerboard_lattice_label_studio_project_activity.py",
+      "purpose": "ONE shared project titled 'Checkerboard Lattice Verification' (not per dive). XML: lattice KeyPointLabels, a required lattice_verdict choice, and a lattice_fault choice.",
+      "touches": [
+        "label-studio"
+      ]
+    },
+    {
+      "name": "populate_checkerboard_lattice_label_studio_project_activity",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/populate_checkerboard_lattice_label_studio_project_activity.py",
+      "purpose": "imports renders with the corners attached inline as predictions (model_version checkerboard-lattice-v1); the record_label hook is a no-op, so no label row is written; publishes",
+      "touches": [
+        "label-studio",
+        "object-store:checkerboard_lattice_jpeg (URL only)"
+      ]
+    },
+    {
+      "name": "RETIRED: select_next_high_priority_dive_for_slate_prediction_activity, resolve_slate_predict_inputs_activity, persist_slate_predictions_activity, backfill_slate_predictions_for_dive_activity",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/{select_next_high_priority_dive_for_slate_prediction,resolve_slate_predict_inputs,persist_slate_predictions,backfill_slate_predictions}_activity.py",
+      "purpose": "the dormant slate-detector path; every module carries a 'RETIRED 2026-08-03' banner. Do not port for parity.",
+      "touches": [
+        "db:slateprediction",
+        "label-studio (predictions)"
+      ]
+    },
+    {
+      "name": "RETIRED: predict_slate_image",
+      "file": "fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/activities/predict_slate_image.py",
+      "purpose": "slate BoardMasker inference (GPU role). Its ECC >= 0.80 gate failed out of distribution (pool dives).",
+      "touches": [
+        "object-store:raw",
+        "object-store:slate_pdf"
+      ]
+    }
+  ],
+  "api_endpoints": [
+    {
+      "route": "GET /api/v1/dives/select-next/slate-preprocessing/",
+      "file": "fishsense-api/src/fishsense_api/controllers/dive_cohort_controller.py:749",
+      "semantics": "priority=HIGH AND dive_slate_id NOT NULL AND (EXISTS a canonical image with species content_of_image='Slate, Laser on slate' and NO slate label having project_id NOT NULL AND superseded=false, OR _has_image_flagged_for_reprocess(DiveSlateLabel), i.e. a canonical image with a flagged slate label) ORDER BY id LIMIT 1"
+    },
+    {
+      "route": "GET /api/v1/dives/select-next/laser-calibration/",
+      "file": "fishsense-api/src/fishsense_api/controllers/dive_cohort_controller.py:854",
+      "semantics": "HIGH AND (no LaserExtrinsics OR dive in implausible_calibration_dive_ids) AND _stage_13_can_calibrate() [dive_slate_id NOT NULL AND _usable_slate_observation_count() >= MIN_SLATE_LASER_POINTS=2, counting completed, non-superseded slate labels on canonical images whose image has a live laser dot: non-superseded, x/y set, completed NOT required] AND NOT _calibration_refusal_still_stands() ORDER BY _reentry_last(implausible), id LIMIT 1"
+    },
+    {
+      "route": "GET /api/v1/dives/select-next/checkerboard-laser-calibration/",
+      "file": "fishsense-api/src/fishsense_api/controllers/dive_cohort_controller.py:927",
+      "semantics": "HIGH AND calibration_target_id NOT NULL AND (no own LaserExtrinsics OR implausible) AND NOT _stage_13_can_calibrate() (stage 13 takes precedence, so the two cohorts partition) AND count(canonical images with a live dot) >= 2 AND NOT refusal-stands. No borrowed-calibration fallback. ORDER BY reentry_last, id"
+    },
+    {
+      "route": "(helper) _calibration_refusal_still_stands",
+      "file": "fishsense-api/src/fishsense_api/controllers/dive_cohort_controller.py:226",
+      "semantics": "calibration_refused_at NOT NULL AND NOT EXISTS any laser label or slate label on the dive (any state, including superseded) with updated_at > calibration_refused_labels_at (NULL labels_at means any label counts as newer). The comparison uses Label Studio's clock, never the API's."
+    },
+    {
+      "route": "(helper) implausible_calibration_dive_ids",
+      "file": "fishsense-api/src/fishsense_api/controllers/dive_cohort_controller.py:299",
+      "semantics": "reads every laserextrinsics row in Python and keeps dives whose not is_plausible_baseline(laser_position): norm(xy) outside [0.097, 0.145] m, or NaN/unreadable"
+    },
+    {
+      "route": "GET /api/v1/dives/{dive_id}/laser-extrinsics/",
+      "file": "fishsense-api/src/fishsense_api/controllers/dive_controller.py:293",
+      "semantics": "own row if plausible; else calibration_dive_id's row if plausible; else 404 (own wins, then the link; implausible counts as none)"
+    },
+    {
+      "route": "PUT /api/v1/dives/{dive_id}/laser-extrinsics/",
+      "file": "fishsense-api/src/fishsense_api/controllers/dive_controller.py:334",
+      "semantics": "upsert on dive_id, KEEPING the row id; stamps created_at=now; clears any standing refusal"
+    },
+    {
+      "route": "PUT /api/v1/dives/{dive_id}/calibration-refused/ (body {reason})",
+      "file": "fishsense-api/src/fishsense_api/controllers/dive_controller.py:623",
+      "semantics": "sets calibration_refused_at=now(), the reason, and calibration_refused_labels_at = max(updated_at) over the dive's laser and slate labels (any state)"
+    },
+    {
+      "route": "DELETE /api/v1/dives/{dive_id}/calibration-refused/",
+      "file": "fishsense-api/src/fishsense_api/controllers/dive_controller.py:672",
+      "semantics": "operator clear of all three refusal columns; idempotent"
+    },
+    {
+      "route": "PUT /api/v1/dives/{dive_id}/dive-slate/{dive_slate_id}",
+      "file": "fishsense-api/src/fishsense_api/controllers/dive_controller.py:484",
+      "semantics": "sets dive_slate_id (404 when the dive or the slate is missing) AND clears the refusal. Written by the species sync."
+    },
+    {
+      "route": "PUT/DELETE /api/v1/dives/{dive_id}/calibration-target/{id}",
+      "file": "fishsense-api/src/fishsense_api/controllers/dive_controller.py:521,564",
+      "semantics": "PUT sets calibration_target_id (404 checks) and clears the refusal; DELETE nulls it (extrinsics are kept, the refusal is NOT cleared)"
+    },
+    {
+      "route": "PUT/DELETE /api/v1/dives/{dive_id}/calibration-source/{source_dive_id}",
+      "file": "fishsense-api/src/fishsense_api/controllers/dive_controller.py:422,464",
+      "semantics": "borrow link (400 on a self-link). Probably the portal/measure slice; listed because the calibration reads depend on it."
+    },
+    {
+      "route": "GET /api/v1/labels/dive-slate/label-studio-project-ids?incomplete=",
+      "file": "fishsense-api/src/fishsense_api/controllers/label_controller.py:166",
+      "semantics": "distinct project_id where project_id NOT NULL AND superseded=false [AND completed false/NULL]"
+    },
+    {
+      "route": "GET /api/v1/labels/dive-slate/{image_id}; GET /api/v1/labels/dive-slate/label-studio/{ls_id}",
+      "file": "fishsense-api/src/fishsense_api/controllers/label_controller.py:202,251",
+      "semantics": "first non-superseded row (no ordering)"
+    },
+    {
+      "route": "GET /api/v1/dives/{dive_id}/labels/dive-slate",
+      "file": "fishsense-api/src/fishsense_api/controllers/label_controller.py:218",
+      "semantics": "every non-superseded slate label of the dive (all images, NOT canonical-filtered), ordered by image_id; 404 when empty"
+    },
+    {
+      "route": "PUT /api/v1/labels/dive-slate/{image_id}",
+      "file": "fishsense-api/src/fishsense_api/controllers/label_controller.py:240",
+      "semantics": "_upsert_label: resolves the natural key (image_id, project_id), with IS NULL handling for sentinels and 409 when there is no project and several rows exist; the whole row is merged except needs_reprocess"
+    },
+    {
+      "route": "GET /api/v1/labels/laser/{image_id}; GET /api/v1/dives/{id}/labels/laser",
+      "file": "fishsense-api/src/fishsense_api/controllers/label_controller.py:549,589",
+      "semantics": "non-superseded only; the single-image form takes .first() with NO ordering (used by stage 13 per slate label)"
+    },
+    {
+      "route": "PUT/DELETE /api/v1/dives/{dive_id}/labels/dive-slate/needs-reprocess",
+      "file": "fishsense-api/src/fishsense_api/controllers/label_reprocess_controller.py:267,289",
+      "semantics": "raise (only_incomplete default true) / lower (checksums scope; None = the whole dive, [] = nothing); canonical images only"
+    },
+    {
+      "route": "GET /api/v1/dive-slates/; PUT /api/v1/dive-slates/{id}",
+      "file": "fishsense-api/src/fishsense_api/controllers/dive_slate_controller.py:18,29",
+      "semantics": "slate template list/upsert (reference data)"
+    },
+    {
+      "route": "GET /api/v1/calibration-targets/; PUT /api/v1/calibration-targets/{id}",
+      "file": "fishsense-api/src/fishsense_api/controllers/calibration_target_controller.py:24,35",
+      "semantics": "target list / in-place correction (v1 edits the row; v2 versions it)"
+    },
+    {
+      "route": "RETIRED: GET /api/v1/dives/select-next/slate-prediction/; PUT /api/v1/images/{id}/slate-prediction/; GET /api/v1/dives/{id}/slate-predictions/",
+      "file": "fishsense-api/src/fishsense_api/controllers/dive_prediction_cohort_controller.py:304; slate_prediction_controller.py:26,42",
+      "semantics": "slate-detector path; the populate activity still calls GET slate-predictions (the rows were removed in prod)"
+    },
+    {
+      "route": "view dive_pipeline_status: slate_applicable, slate_preprocessed, slate_labeling_complete, calibrated, calibration_source",
+      "file": "fishsense-api/src/fishsense_api/views.py:272-350",
+      "semantics": "slate_preprocessed ignores superseded; slate_labeling_complete requires >=1 completed and 0 incomplete non-superseded on canonical images; calibrated = own OR borrowed (NO plausibility filter); calibration_source own > borrowed > none"
+    }
+  ],
+  "tests": [
+    "fishsense-api-workflow-worker/tests/test_preprocess_slate_images_parent_workflow.py (5)",
+    "fishsense-api-workflow-worker/tests/test_resolve_slate_preprocess_inputs_activity.py (5)",
+    "fishsense-api-workflow-worker/tests/test_select_next_high_priority_dive_for_slate_preprocessing_activity.py (2)",
+    "fishsense-api-workflow-worker/tests/test_stage_slate_pdf_activity.py (5)",
+    "fishsense-api-workflow-worker/tests/test_populate_dive_slate_label_studio_project_activity.py (11)",
+    "fishsense-api-workflow-worker/tests/test_sync_dive_slate_labels_activity.py (12)",
+    "fishsense-api-workflow-worker/tests/test_sync_label_studio_dive_slate_labels_workflow.py (3)",
+    "fishsense-api-workflow-worker/tests/test_perform_laser_calibration_parent_workflow.py (2)",
+    "fishsense-api-workflow-worker/tests/test_select_next_high_priority_dive_for_laser_calibration_activity.py (2)",
+    "fishsense-api-workflow-worker/tests/test_checkerboard_calibration_parent.py (6)",
+    "fishsense-api-workflow-worker/tests/test_checkerboard_calibration_resolver.py (7)",
+    "fishsense-api-workflow-worker/tests/test_checkerboard_lattice_predictions.py (15)",
+    "fishsense-api-workflow-worker/tests/test_verify_checkerboard_lattice_parent.py (6)",
+    "fishsense-api-workflow-worker/tests/test_reprocess_flag_drains.py (slate case at :152)",
+    "fishsense-api-workflow-worker/tests/test_resolvers_honour_needs_reprocess.py (slate cases)",
+    "fishsense-api-workflow-worker/tests/test_schedule_registration.py (:105,:114 slate predict retired; :200,:215,:226 checkerboard +52/SKIP/run_timeout)",
+    "fishsense-api-workflow-worker/tests/test_cleanup_raw_respects_other_children.py (child-id list)",
+    "fishsense-api-workflow-worker/tests/test_populate_label_studio_project_workflows.py and test_populate_workflow_retry_policy.py (shared populate; the dive_slate variant)",
+    "fishsense-data-processing-workflow-worker/tests/test_preprocess_slate_images_workflow.py (3)",
+    "fishsense-data-processing-workflow-worker/tests/test_composite_slate_with_image.py (5)",
+    "fishsense-data-processing-workflow-worker/tests/test_render_slate_pdf.py (4)",
+    "fishsense-data-processing-workflow-worker/tests/test_stage9_integration.py (1, -m integration)",
+    "fishsense-data-processing-workflow-worker/tests/test_stage9_notebook_parity.py (1, -m integration)",
+    "fishsense-data-processing-workflow-worker/tests/test_perform_laser_calibration_activity.py (11)",
+    "fishsense-data-processing-workflow-worker/tests/test_perform_laser_calibration_workflow.py (2)",
+    "fishsense-data-processing-workflow-worker/tests/test_calibration_baseline_gate.py (7)",
+    "fishsense-data-processing-workflow-worker/tests/test_calibration_consistency.py (5)",
+    "fishsense-data-processing-workflow-worker/tests/test_calibration_consistency_remedies.py (3)",
+    "fishsense-data-processing-workflow-worker/tests/test_calibration_describes_dive.py (16)",
+    "fishsense-data-processing-workflow-worker/tests/test_calibration_gates_are_wired.py (6)",
+    "fishsense-data-processing-workflow-worker/tests/test_calibration_geometry.py (5)",
+    "fishsense-data-processing-workflow-worker/tests/test_calibration_observation_geometry.py (11)",
+    "fishsense-data-processing-workflow-worker/tests/test_calibration_refusal_is_recorded.py (4)",
+    "fishsense-data-processing-workflow-worker/tests/test_robust_laser_fit.py (10)",
+    "fishsense-data-processing-workflow-worker/tests/_calibration_fixtures.py (fixtures)",
+    "fishsense-data-processing-workflow-worker/tests/test_checkerboard_detection.py (22)",
+    "fishsense-data-processing-workflow-worker/tests/test_perform_checkerboard_calibration_workflow.py (8)",
+    "fishsense-data-processing-workflow-worker/tests/test_lattice_overlay.py (10)",
+    "fishsense-data-processing-workflow-worker/tests/test_render_checkerboard_lattice.py (6)",
+    "fishsense-data-processing-workflow-worker/tests/test_verify_checkerboard_lattice_workflow.py (8)",
+    "fishsense-data-processing-workflow-worker/tests/test_lattice_verification_integration.py (4, integration)",
+    "fishsense-api/tests/test_select_next_dive_endpoints.py (slate-preprocessing :1215-:1431, laser-calibration :1484-:1664)",
+    "fishsense-api/tests/test_checkerboard_calibration_cohort.py (13)",
+    "fishsense-api/tests/test_calibration_refusal_cohort.py (7)",
+    "fishsense-api/tests/test_implausible_calibration_reentry.py (3)",
+    "fishsense-api/tests/test_laser_extrinsics_upsert.py (3)",
+    "fishsense-api/tests/test_set_dive_slate_endpoint.py (4)",
+    "fishsense-api/tests/test_calibration_target_endpoints.py (10)",
+    "fishsense-api/tests/test_calibration_target_seed.py (11)",
+    "fishsense-api/tests/test_calibration_target_migration.py (4)",
+    "fishsense-api/tests/test_calibration_source_endpoints.py (11, shared with the portal slice)",
+    "fishsense-api/tests/test_species_slate_reads_superseded.py (4)",
+    "fishsense-api/tests/test_dive_pipeline_status_view.py (slate_*/calibrated/calibration_source cases, :450, :787-:898, :1306-:1343)",
+    "fishsense-api/tests/test_cohort_needs_reprocess_all_kinds.py and test_label_needs_reprocess_flag.py (dive-slate kind)",
+    "../libs/fishsense-shared/tests/test_calibration_bounds.py (11)",
+    "RETIRED (skip): fishsense-api-workflow-worker/tests/test_backfill_slate_predictions_activity.py (5), test_backfill_slate_predictions_workflow.py (2), test_resolve_slate_predict_inputs_activity.py (2); fishsense-data-processing-workflow-worker/tests/test_predict_slate_image.py (12); fishsense-api/tests/test_slate_prediction_endpoint.py (5); select_next slate-prediction tests :1333-:1398"
+  ],
+  "shared_helpers": [
+    {
+      "name": "_dispatch (select_dive, resolve_inputs, wake_data_worker, wake_light_worker, stage_raw, stage_slate_pdf, dispatch_child/CHILD_ALREADY_RUNNING, run_sdk_activity, cleanup_raw, dispatch_populate)",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/_dispatch.py",
+      "used_by_slices": "every preprocess parent (0.1/2/5.1/9), predict parents, checkerboard calibration, lattice verification. v2 has none of it yet (the clustering port inlined its own)."
+    },
+    {
+      "name": "_populate.create_then_populate + _POPULATE_RETRY",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/_populate.py",
+      "used_by_slices": "laser, species, headtail, dive-slate populate"
+    },
+    {
+      "name": "populate_utils (build_per_dive_title, create_or_get_label_studio_project, ensure_label_studio_s3_storage, import_tasks_and_record_labels/IMPORT_ISSUED heartbeat, publish_label_studio_project, build_image_url, build_task_data, heal_labeling_config)",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/populate_utils.py",
+      "used_by_slices": "all four populate stages, lattice verification, reconcile_labeling_configs"
+    },
+    {
+      "name": "reconcile_labeling_configs_activity (maps the 'Dive Slate Labeling' suffix to DIVE_SLATE_LABELING_CONFIG_XML)",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/reconcile_labeling_configs_activity.py:30-60",
+      "used_by_slices": "LS config healing, all kinds (+25 schedule)"
+    },
+    {
+      "name": "sync_label_studio_project / resolve_annotator_user / SYNC_CONCURRENCY",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/utils.py (v2 port: fishsense-services-orchestrator/.../labels/sync.py)",
+      "used_by_slices": "laser (ported), headtail, dive-slate, species syncs"
+    },
+    {
+      "name": "cohort_selection.select_next_dive",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/cohort_selection.py",
+      "used_by_slices": "all nine selectors"
+    },
+    {
+      "name": "raw_scratch_reader_ids / scratch_in_use (must list preprocess-slate-, perform-checkerboard-calibration-, verify-checkerboard-lattice-)",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/cleanup_raw_bytes_for_dive_activity.py:45-72",
+      "used_by_slices": "every raw-staging stage"
+    },
+    {
+      "name": "ClearReprocessFlagsInput",
+      "file": "fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/reprocess_scope.py",
+      "used_by_slices": "the laser/species/headtail/slate preprocess parents"
+    },
+    {
+      "name": "calibration_geometry (plane_from_correspondences, laser_point_on_plane)",
+      "file": "fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/calibration_geometry.py",
+      "used_by_slices": "stage 13 and checkerboard detect (plus the audit scripts)"
+    },
+    {
+      "name": "calibration_consistency (four gates, REFUSAL_REMEDIES, thresholds)",
+      "file": "fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/calibration_consistency.py",
+      "used_by_slices": "stage 13 and checkerboard fit"
+    },
+    {
+      "name": "robust_laser_fit.trim_outlying_observations (OUTLIER_SIGMA 3, MAD_FLOOR_M 0.003, MIN_POINTS_TO_TRIM 6, MAX_TRIM_FRACTION 0.4)",
+      "file": "fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/robust_laser_fit.py",
+      "used_by_slices": "stage 13 and checkerboard fit"
+    },
+    {
+      "name": "checkerboard_detection (detect_checkerboard, board_hull, grid_residual_px, median_corner_spacing; MIN_GRID_SIDE 3, MAX_GRID_RESIDUAL_FRACTION 0.05)",
+      "file": "fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/checkerboard_detection.py",
+      "used_by_slices": "checkerboard calibration, lattice render, scripts/audit_scale_against_checkerboard.py"
+    },
+    {
+      "name": "lattice_overlay.draw_lattice_overlay",
+      "file": "fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/lattice_overlay.py",
+      "used_by_slices": "lattice verification only"
+    },
+    {
+      "name": "encode_rectified_jpeg",
+      "file": "fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/activities/preprocess_headtail_image.py",
+      "used_by_slices": "headtail preprocess, lattice render"
+    },
+    {
+      "name": "fishsense_shared.calibration_bounds (MIN_BASELINE_M 0.097, MAX_BASELINE_M 0.145, baseline_m, is_plausible_baseline)",
+      "file": "../libs/fishsense-shared/src/fishsense_shared/calibration_bounds.py",
+      "used_by_slices": "the calibration gates, the API cohorts, get_laser_extrinsics (measure and laser-depth consumers)"
+    },
+    {
+      "name": "fishsense_shared.laser_region.point_in_laser_region",
+      "file": "../libs/fishsense-shared/src/fishsense_shared/laser_region.py",
+      "used_by_slices": "laser preprocess/predict, checkerboard detect, lattice render"
+    },
+    {
+      "name": "fishsense_shared.taxonomy.SLATE_CONTENT_MARKER ('Slate, Laser on slate'), calibration_target_leaf (refuses the Ruler by name)",
+      "file": "../libs/fishsense-shared/src/fishsense_shared/taxonomy.py",
+      "used_by_slices": "the stage 9 cohort/resolver/populate, the view, species sync"
+    },
+    {
+      "name": "dive_cohort_controller helpers: _has_live_laser_dot, _usable_slate_observation_count, _stage_13_can_calibrate, _calibration_refusal_still_stands, _reentry_last, implausible_calibration_dive_ids, _has_image_flagged_for_reprocess, MIN_SLATE_LASER_POINTS=2",
+      "file": "fishsense-api/src/fishsense_api/controllers/dive_cohort_controller.py:187-370,795-851",
+      "used_by_slices": "the stage 13 + checkerboard cohorts; implausible ids and resolved extrinsics also feed the measure and laser-depth cohorts"
+    },
+    {
+      "name": "_clear_refusal / _newest_label_timestamp / _plausible_extrinsics",
+      "file": "fishsense-api/src/fishsense_api/controllers/dive_controller.py:~270-290,577-620",
+      "used_by_slices": "calibration writes, set_dive_slate/target, laser-extrinsics read (measure/depth)"
+    },
+    {
+      "name": "v2 ported: sync_label_studio_project, LabelStudioClient, label_sync_store (_TABLES has only 'laser')",
+      "file": "fishsense-services/services/fishsense-services-orchestrator/src/fishsense_services_orchestrator/labels/sync.py; fishsense-services-api/src/fishsense_services_api/label_sync_store.py:42",
+      "used_by_slices": "the laser sync now; the slate sync should extend it (add 'slate': 'slate_labels')"
+    }
+  ],
+  "contracts": [
+    "v1 fishsense_shared.PreprocessSlateImagesInput {dive_id, image_checksums, slate_id, slate_dpi:int, reference_points:[(x,y)], camera_matrix, distortion_coefficients} (libs/fishsense-shared/.../preprocess_contracts.py:404)",
+    "v1 per-image PreprocessSlateImageInput {checksum, output_folder, slate_id, slate_dpi, reference_points, camera_matrix, distortion_coefficients}: local to the data-worker workflow module",
+    "v1 CheckerboardCalibrationImage {image_id, checksum, laser_x, laser_y} (:137)",
+    "v1 PerformCheckerboardCalibrationInput {dive_id, camera_id, camera_matrix, distortion_coefficients, target_rows, target_cols (INTERIOR corners), square_size_m, images} (:152)",
+    "v1 CheckerboardObservation {image_id, point:[x,y,z]|None, laser_x, laser_y, detected_rows?, detected_cols?, skip_reason?} (:178)",
+    "v1 local DTOs: DetectCheckerboardLaserPointInput, FitCheckerboardExtrinsicsInput {dive_id, camera_id, camera_matrix, observations} (perform_checkerboard_calibration_workflow.py:38-60)",
+    "v1 VerifyCheckerboardLatticeInput {dive_id, camera_matrix, distortion_coefficients, target_rows, target_cols, square_size_m, images, sample_limit?} (:208); CheckerboardLatticeRender {image_id, checksum, detected_rows/cols, median_spacing_px, corners, width, height, skip_reason} (:236); local RenderCheckerboardLatticeInput",
+    "v1 stage 13 has NO contract DTO: the child takes a bare dive_id and the data-worker does its own SDK reads and writes. v2 needs a new contract, e.g. SlateCalibrationInput {tenant_id, dive_id, template_points, dpi, observations:[{capture_id, reference_points, skipped_points, laser_x, laser_y}], camera_matrix, dive_dots} and a CalibrationResult {outcome, laser_position, laser_axis, refusal_type, refusal_reason, lever_arm_m, observation_count, gate verdicts}",
+    "RETIRED contracts (do not port): PredictSlateImage, PredictSlateImagesInput, SlatePredictionResult (:354-401)",
+    "object-store keys (libs/fishsense-shared/.../object_store.py): raw/{checksum}.ORF (scratch; the api-worker PUTs, the data-worker GETs); slate_pdf/{slate_id}.pdf (scratch; staged from the NAS DiveSlate.path; also read by the populate and SYNC activities); preprocess_slate_images_jpeg/{checksum}.JPG (durable; LS presigns it); checkerboard_lattice_jpeg/{checksum}.JPG (durable, lattice only; deliberately not preprocess_jpeg); optional labels_prefix/{prefix} for the JPEG bucket",
+    "LS task data: s3://{bucket}/{prefix}/{checksum}.JPG in both data.image and data.img (build_task_data)",
+    "v2 contracts package today holds only ClusterDiveFrameImage/ClusterDiveFramesInput, CONTRACT_VERSION=1, queues fishsense_processor / _light / _gpu (fishsense-services-contracts/.../__init__.py, task_queues.py). This slice needs a contract version bump."
+  ],
+  "v2_schema_gaps": [
+    "effective_laser_calibrations (0008) joins c.dive_id = coalesce(d.calibration_source_dive_id, d.id), so the LINK WINS. v1 is own-wins-then-link (get_laser_extrinsics_for_dive, the view's calibration_source 'own wins over a link', test_calibration_source_own_wins_over_a_link). Fix the view or confirm no dive has both; v1_migration's parity check passed, so this may not show on current data (uncertain).",
+    "No plausible-baseline filter anywhere in v2: v1 treats a stored fit outside 0.097-0.145 m as no calibration (_plausible_extrinsics, implausible_calibration_dive_ids; the cohorts re-admit it, ordered last). Needs an SQL predicate on laser_position jsonb (sqrt(p0^2+p1^2)) in effective_laser_calibrations and/or the cohorts, or a stored baseline column.",
+    "No way to expire a refusal on a link change or by an operator: v1 _clear_refusal runs on set_dive_slate, set_calibration_target, PUT extrinsics and DELETE calibration-refused. laser_calibrations is append-only (SELECT/INSERT) and dives has no link-changed timestamp. An accepted row supersedes a refusal naturally, but there is no 'cleared' outcome and no dives.calibration_inputs_changed_at-style column.",
+    "The refusal-expiry cohort needs a comparison of inputs_as_of against laser_labels.ls_updated_at and slate_labels.ls_updated_at. Those columns exist, but nothing implements it yet. v1 compares ANY label state, superseded included.",
+    "laser_calibrations does not record which target produced a fit (no slate_template_id or calibration_target_id FK; producer only). PLAN 4.3 asks for the target plus its geometry version. Recommend nullable FKs (the current row is a version row).",
+    "dives.calibration_target_id points at ONE versioned calibration_targets row. A pitch correction is a new row (valid_from), so the resolver must re-resolve through current_calibration_targets by name, or dives will keep using the stale pitch. Reference tables are read-only to the app role, so v1's PUT /calibration-targets (in-place correction) has no app-side equivalent.",
+    "calibration_targets has per-axis pitch (pitch_x_m, pitch_y_m) while v1's detector/body_points use one square_size_m. checkerboard_detection needs per-axis support, or must assert pitch_x == pitch_y (the migration copies v1's scalar into both; test_reference_data seeds 0.04223/0.04211).",
+    "slate_templates stores dpi/source_path/reference_points but not the PDF page aspect. The v1 sync and populate fetch the PDF from object-store scratch only to compute width/height in points. A nullable pdf_aspect_ratio (or page_w/page_h) column would remove the sync's dependency on staged scratch (optional).",
+    "No object-store module, raw staging, cleanup, slate-PDF staging or NRP wake exists anywhere in v2 (grep for boto3/object_store finds nothing). These are foundations this slice needs, not tables.",
+    "No table for lattice verdicts. That matches v1 (verdicts live only in LS), so it is not a parity gap.",
+    "slate_predictions (0011) exists for migrated rows only; the retired predictor needs nothing more.",
+    "Present and sufficient: slate_labels (reference_points, slate_rectangle, skipped_points, image_url, upside_down, completed, superseded, needs_reprocess, ls_*); label_studio_sync_cursors kind 'slate' (v1 kind 'dive_slate' mapped in v1_migration CURSOR_KINDS); laser_calibrations columns producer/outcome/refusal_reason/inputs_as_of/gate_verdicts/lever_arm_m/observation_count/residual_m/camera_calibration_id; dives.slate_template_id/calibration_target_id/calibration_source_dive_id; migration 0017 (laser_labels.superseded_reason) also exists beyond 0016."
+  ],
+  "dependencies": [
+    "Depends on: dive ingest (dives, captures, is_canonical, device -> current_camera_calibrations); ported",
+    "Depends on: the species slice. Species sync is the ONLY writer of dive.slate_template_id and calibration_target_id (via set_dive_slate / set_calibration_target, which also clear refusals), and it writes the content_of_image 'Slate, Laser on slate' marker that stage 9 keys on",
+    "Depends on: laser labels. The stage 0.1 populate and the laser sync (ported) provide the laser dots that stage 13, checkerboard and describes-dive consume. Laser-label validation supersedes labels, and its COARSE_CALIBRATION_TOLERANCE_PX=20 rule reads completed, non-superseded slate labels as calibration frames",
+    "Depends on foundations not yet in v2: an object-store client + key layout (tenant prefix, PLAN 9.11), raw staging from the NAS (stage_raw), cleanup_raw with scratch_in_use, slate-PDF staging, NRP stand-up/tear-down for the CPU and light processors (memory rule: create on demand, delete when idle; replaces wake_*), and the LS populate helpers (create-or-get by title, S3 storage, import dedup + IMPORT_ISSUED heartbeat, publish, config reconcile)",
+    "Depends on fishsense-core: calibrate_laser (Rust), RawImage/RectifiedImage (PLAN 6.3 says RectifiedImage still imports the v1 SDK CameraIntrinsics, and v1 preprocess_slate_image/detect/render construct fishsense_api_sdk CameraIntrinsics), WorldPointHandler (inside calibration_geometry)",
+    "Depended on by: stage 14 measure_fish and laser depth. Both read the effective calibration and select on provenance mismatch, so a new accepted row re-triggers them",
+    "Depended on by: dive_pipeline_status / Superset (slate_* columns, calibrated, calibration_source), web portal calibration-source editing and calibration-candidates, and the v1_migration parity report (refused vs fresh dives)",
+    "Mutual with laser-label validation: the 'reject fish labels against the calibration line' follow-up (open in v1) would run after stage 13"
+  ],
+  "gotchas": [
+    "MIN_LASER_POINTS (data-worker, perform_laser_calibration_activity.py:85) must equal the API's MIN_SLATE_LASER_POINTS=2 (dive_cohort_controller.py:333). It counts OBSERVATIONS (a completed, non-superseded slate label on a canonical image whose image has a live dot), not slate labels. Dive 347 wedged the cohort on this.",
+    "The four gates run in this order before any persist: check_observation_geometry (lever >= MIN_OBSERVATION_LEVER_M 0.60 m in z; does NOT abstain on small N), check_fit_self_consistency (DEFAULT_MAX_ANGLE_DEG 3.0, MAX_MEDIAN_OFFSET_PX 8.0, MIN_DOT_SPAN_PX 50), check_baseline_plausible (0.097-0.145 m), check_calibration_describes_dive (median <= 6 px, p90 <= 12 px, needs MIN_DIVE_DOTS 6 to act and MIN_DISAGREEING_DIVE_DOTS 5 beyond p90). The geometry check goes first because the projection gates abstain on degenerate input (CLAUDE.md 'Two more gates').",
+    "Refusals are non-retryable ApplicationErrors (types InsufficientLaserPoints, InsufficientCheckerboardPoints, CalibrationUnderdeterminedError/InconsistentError/ImplausibleError/DoesNotDescribeDiveError), and each is recorded. Recording is best-effort and must never mask the real error (test_a_failure_to_record_does_not_mask_the_refusal). Transient (SDK) errors must stay retryable, which is why the checkerboard fit fetches dive labels BEFORE the try.",
+    "Refusal expiry is in Label Studio's clock: store the max label updated_at at refusal time (calibration_refused_labels_at) and never compare against the wall clock (dive_cohort_controller.py:226 docstring). NULL means any label counts as newer. The v2 equivalent is inputs_as_of vs ls_updated_at; snapshotting at resolve time is arguably more correct than v1's refusal-time snapshot.",
+    "REFUSAL_REMEDIES text must not claim the dive is 're-selected hourly' (calibration_consistency.py:48-70).",
+    "Checkerboard cohort excludes _stage_13_can_calibrate (eligibility, not the bare slate link), so the two producers never race to upsert one dive. It deliberately has no borrowed-calibration fallback.",
+    "Implausible stored fits count as uncalibrated in the cohorts and in get_laser_extrinsics (own and borrowed), and re-entry candidates are ordered LAST to avoid head-of-line blocking (_reentry_last).",
+    "v1 PUT extrinsics keeps the row id, so a refit in place was invisible to the provenance-mismatch cohorts (the operator had to delete rows). v2's append-only rows fix this for free. Do not reintroduce an upsert.",
+    "Checkerboard detection: ask OpenCV for a 3x3 grid with CALIB_CB_LARGER|EXHAUSTIVE|ACCURACY, read the real grid back from the meta, and bound it by the declared board. Never ask for the nominal pattern. Grid orientation is free (a mirror or transpose cancels in the ray-plane intersection); do not 'fix' it (CLAUDE.md 'Five things').",
+    "rows/cols are INTERIOR corners (15x11 squares -> 14x10). An N-corner row has N-1 pitches. Live pitch 0.04217 m (v1 seed/view KNOWN_CALIBRATION_TARGETS still says 0.042, so v2 must take live rows). Never back-solve the pitch from the fish models (the validation set).",
+    "Detect on the RECTIFIED full-resolution frame: solvePnP gets zero distortion, and at half scale the board came back a column short. Never reuse the stage 0.1 JPEG (green outline + quantisation).",
+    "The dot must lie inside board_hull (dot_off_board); otherwise the ray hits the infinite plane and yields a confident, wrong depth.",
+    "Stage 13 _drop_skipped resolves indices against the ORIGINAL list and rejects duplicates and out-of-range indices. A count mismatch skips that LABEL, not the dive (dive 526: two null reference_points).",
+    "Stage 13 walks all non-superseded slate labels, neither completed-filtered nor canonical-filtered, and takes get_laser_label(image_id).first() with no ordering. The cohort counts completed, canonical ones only. Pick a deterministic rule in v2 (lowest id with a live dot, as the checkerboard resolver does) and note the parity delta.",
+    "Describes-dive dots = every non-superseded laser label of the dive with x/y set (incomplete and non-canonical included, per get_laser_labels).",
+    "Stage 9 resolver mirrors the cohort: a flagged image skips the marker and laser gates, and a flag that resolves to no work is lowered for the whole dive (checksums=None); otherwise the dive re-stages from the NAS hourly (dive 60). Clear flags scoped to the checksums actually redrawn, AFTER populate (populate failure keeps the flag).",
+    "dispatch_child returns CHILD_ALREADY_RUNNING on a duplicate id; the caller must then skip cleanup and flag clearing (dive 442 deleted 984 raw objects under a live child).",
+    "The checkerboard parent wakes the CPU worker twice, before and after the ~30 min staging, because the +55 sweeper sees the processor queue as idle during api-side staging. It cleans up raw scratch even when the child fails (a failure is expected there). With v2's stand-up/tear-down model the same hazard applies to the idle teardown.",
+    "Every raw-scratch reader child id must be in raw_scratch_reader_ids (preprocess-slate-, perform-checkerboard-calibration-, verify-checkerboard-lattice-), or another stage's cleanup deletes .ORF files mid-read.",
+    "The slate sync must subtract the composite panel width: panel = (pdf_w_pts/pdf_h_pts) * original_height. If the geometry is present and the offset cannot be computed (no image, no slate, PDF missing), RAISE so the cursor stays put; the old silent 0-px fallback stranded 104 prod rows in composite space.",
+    "Probable latent bug: sync _update_slate_label passes original_width (the COMPOSITE width) as photo_width to _assert_in_frame (sync_dive_slate_labels_for_label_studio_project_activity.py:351-361), so only left overshoot (x<0) is caught, not an unshifted or under-shifted point. The tests only cover x<0 (test file :338-353). The docstring's intent is photo_width = original_width - panel_width.",
+    "Sync reads skipped_points as 1-based text and stores 0-based (int(p)-1). It only overwrites skipped_points/reference_points/slate_rectangle when present, and sets completed=task.is_labeled.",
+    "Populate targets images with no COMPLETED slate label (the stage 9 cohort uses 'no non-sentinel, non-superseded label'). It gates on the JPEG being present (dive 84). The supersede pass exempts rows only when 'same project AND refreshed this run' (dive 341 oscillation). It publishes only when import_result.complete.",
+    "One image can hold several slate rows (unique on image+project). The v2 schema has UNIQUE (tenant, capture, ls_project_id) and UNIQUE (tenant, ls_task_id).",
+    "LS project titles are '{dive.name} #{dive_id} - Dive Slate Labeling', capped at 50 chars (LS_PROJECT_TITLE_MAX), with idempotency by TITLE within the workspace. A v2 UUID (36 chars) does not fit, and carried-over projects are titled with v1 int ids, so v2 must title with v1_id (or a short id) or it will create duplicate projects.",
+    "The v1 sync schedule runs in a TaskGroup (one failure cancels the rest), and the cursor kind is 'dive_slate'. v2's laser port already uses gather-then-fail and kind 'slate'. Keep ALLOW_ALL overlap; the cursor never moves backwards.",
+    "Lattice verification: ONE shared project, shuffled with workflow.random() (replay-safe), tasks carry no dive, predictions go inline at import (LS shows only the project's model_version), there is no label table, imports are chunked at 100 (2 MB payload limit), the child takes a head-of-list sample, and it is never scheduled. v1 has NEVER run it (CLAUDE.md 'Open'), so it is a candidate to defer past cutover (uncertain whether PLAN 6.2 parity requires it).",
+    "Slate predictor RETIRED 2026-08-03: the ECC gate passed false pool fits. Its schedule is actively deleted at startup and the 130 LS predictions were removed. Do not port predict/backfill/persist/resolve/select; the populate's prediction seeding can be dropped (it reads an empty table).",
+    "Stage 13 queue: LIGHT (no image bytes). Checkerboard and lattice: CPU/per-image queue (rawpy decode peaks at 1-3 GB; max_concurrent_activities=2, ~35 min/dive). Stage 9: CPU queue.",
+    "v2 processor boundary: v1's stage 13 and checkerboard fit read and write through the SDK from the data-worker. In v2 the orchestrator must resolve inputs (templates, labels, dots, camera calibration, current target pitch) and persist the result or refusal row, with producer, camera_calibration_id, inputs_as_of, gate_verdicts, lever_arm_m and observation_count. The processor returns a result and does no DB I/O (PLAN 9.11: the API accepts only writes matching an issued run).",
+    "Schedules (v1 minutes): stage 9 at +45 (SKIP, 1h), slate sync at +0 (ALLOW_ALL, 3h), stage 13 at +50 (SKIP, 30 min), checkerboard at +52 (SKIP, 3h). test_schedule_registration pins the stagger."
+  ],
+  "size": "Live (to port), v1 source: api-worker ~2,260 lines across 20 files (stage 9 parent/selector/resolver/pdf/clear ~410; dive-slate create/populate/sync ~810; stage 13 parent/selector ~160; checkerboard parent/resolver/selector ~320; lattice parent/create/populate ~565). Data-worker ~2,600 lines across 13 files (stage 9 ~215, stage 13 ~410, checkerboard wf/detect/fit ~520, lattice wf/render/overlay ~440, calibration_consistency 473, calibration_geometry 124, robust_laser_fit 115, checkerboard_detection 305). API ~1,200 lines (cohort endpoints ~350 of dive_cohort_controller, calibration endpoints in dive_controller ~400, dive-slate label routes ~100, reprocess ~40, calibration_target/dive_slate controllers ~100, views slate/calibrated columns ~80). Shared ~350 (calibration_bounds 99, contract DTOs ~150, keys). Total about 6,400 lines. Tests about 11,500 lines across about 55 files with roughly 400 test functions; the biggest are test_checkerboard_detection (22), test_calibration_describes_dive (16), test_checkerboard_lattice_predictions (15), test_checkerboard_calibration_cohort (13), test_sync_dive_slate_labels_activity (12). Lattice verification alone is ~1,000 source + ~1,200 test lines and could be deferred. Retired (do not port): ~1,180 source lines and ~5 test files (~30 tests)."
+}

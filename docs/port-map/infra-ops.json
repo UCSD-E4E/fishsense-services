@@ -1,0 +1,470 @@
+{
+  "slice": "infra-ops",
+  "workflows": [
+    {
+      "name": "ScaleDownIdleDataWorkerWorkflow",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/scale_down_idle_data_worker_workflow.py",
+      "worker": "api-worker (fishsense_api_queue)",
+      "schedule": "scale-down-idle-data-worker-workflow-schedule; every 1h, offset +55m, overlap SKIP, run_timeout 10m",
+      "calls": [
+        "scale_down_data_worker_if_idle_activity (s2c 5m, SCALING_RETRY_POLICY)"
+      ]
+    },
+    {
+      "name": "VerifyDiveChecksumsWorkflow",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/verify_dive_checksums_workflow.py",
+      "worker": "api-worker (fishsense_api_queue)",
+      "schedule": "on-demand only (operator `temporal workflow start`, args dive_id, limit|null)",
+      "calls": [
+        "verify_dive_checksums_activity (s2c 6h, heartbeat 10m, retry 30s x2 backoff, max 5m interval, 5 attempts)"
+      ]
+    },
+    {
+      "name": "VerifyAllDivesChecksumsWorkflow",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/verify_all_dives_checksums_workflow.py",
+      "worker": "api-worker (fishsense_api_queue)",
+      "schedule": "on-demand only (args limit_per_dive|null, dive_ids|null); query `progress`",
+      "calls": [
+        "select_canonical_dive_ids_activity (only if dive_ids is None; s2c 5m, 3 attempts)",
+        "verify_dive_checksums_activity per dive, serially (s2c 6h, hb 10m, 5 attempts); per-dive failure recorded as `error`, sweep continues"
+      ]
+    },
+    {
+      "name": "ReconcileLabelingConfigsWorkflow",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/reconcile_labeling_configs_workflow.py",
+      "worker": "api-worker (fishsense_api_queue)",
+      "schedule": "reconcile-labeling-configs-workflow-schedule; every 1h, offset +25m, overlap SKIP, run_timeout 30m",
+      "calls": [
+        "reconcile_labeling_configs_activity (s2c 15m, heartbeat 2m, default retry)"
+      ]
+    },
+    {
+      "name": "BackupDatabasesWorkflow",
+      "file": "services/fishsense-backup-worker/src/fishsense_backup_worker/workflows/backup_databases_workflow.py",
+      "worker": "backup-worker (fishsense_backup_queue)",
+      "schedule": "schedule id `fishsense-daily-db-backup` (backup.schedule_id); cron `0 3 * * *` UTC; workflow id `fishsense-daily-db-backup`; no overlap policy set (Temporal default SKIP), no run timeout; input BackupDatabasesInput(databases, nas_root_path, retention_count)",
+      "calls": [
+        "pg_dump_database per DB in parallel (asyncio.gather; s2c 2h, start_to_close 2h, no heartbeat_timeout, default retry)",
+        "prune_database_backups per DB in parallel (s2c 10m)"
+      ]
+    },
+    {
+      "name": "_dispatch helpers (not a workflow; shared parent steps)",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/_dispatch.py",
+      "worker": "api-worker",
+      "schedule": "n/a",
+      "calls": [
+        "select_dive (s2c 5m, SDK_FAIL_FAST)",
+        "resolve_inputs (s2c 5m, SDK_FAIL_FAST)",
+        "wake_data_worker -> ensure_data_worker_running_activity (s2c 5m, SCALING)",
+        "wake_light_worker -> ensure_light_worker_running_activity (s2c 5m, SCALING)",
+        "wake_gpu_worker -> ensure_gpu_worker_running_activity (s2c 30m, hb 5m, SCALING) returns gpu|cpu_fallback|unavailable",
+        "stage_raw -> stage_raw_bytes_for_dive_activity (s2c 1h, hb 5m, STAGE_RAW_RETRY_POLICY)",
+        "stage_slate_pdf -> stage_slate_pdf_activity (caller-supplied timeouts: 5m preprocess, 15m predict)",
+        "dispatch_child (ALLOW_DUPLICATE, returns CHILD_ALREADY_RUNNING sentinel)",
+        "run_sdk_activity (s2c 15m, SDK_FAIL_FAST)",
+        "cleanup_raw -> cleanup_raw_bytes_for_dive_activity (s2c 15m, hb 5m, default retry)",
+        "dispatch_populate (child on api queue, exec 30m, ALLOW_DUPLICATE)"
+      ]
+    },
+    {
+      "name": "_populate.create_then_populate (shared populate child body)",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/_populate.py",
+      "worker": "api-worker",
+      "schedule": "n/a (used by Populate<Stage>LabelStudioProjectWorkflow)",
+      "calls": [
+        "create_{stage}_label_studio_project_activity (s2c 5m)",
+        "populate_{stage}_label_studio_project_activity (s2c 30m, hb 2m, retry 30s x2 max 5m, 5 attempts)"
+      ]
+    }
+  ],
+  "activities": [
+    {
+      "name": "stage_raw_bytes_for_dive_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/stage_raw_bytes_for_dive_activity.py",
+      "purpose": "NAS -> Garage raw/{checksum}.ORF for a dive's canonical images; HEAD-skip already staged; semaphore e4e_nas.stage_concurrency (default 1); 408 -> non-retryable NasFileNotFound; returns StageRawBytesResult(staged, skipped_already_present, no_path)",
+      "touches": [
+        "api: GET images?dive_id (fs.images.get) filtered is_canonical",
+        "nas: read-only FileStation download_to (raw_root_path + image.path)",
+        "object-store: HEAD+PUT bucket raw/{checksum}.ORF"
+      ]
+    },
+    {
+      "name": "stage_slate_pdf_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/stage_slate_pdf_activity.py",
+      "purpose": "NAS -> Garage slate_pdf/{slate_id}.pdf; HEAD-skip; raises if slate row/path missing (no 408 classification here)",
+      "touches": [
+        "api: GET dive_slates (fs.dive_slates.get, then filter by id)",
+        "nas: read-only download",
+        "object-store: HEAD+PUT bucket slate_pdf/{slate_id}.pdf"
+      ]
+    },
+    {
+      "name": "cleanup_raw_bytes_for_dive_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/cleanup_raw_bytes_for_dive_activity.py",
+      "purpose": "Delete raw/{checksum}.ORF for ALL of a dive's images (not canonical-filtered) unless a sibling raw-reading child is Running (Temporal visibility query WorkflowId IN (...)); fails closed if Temporal unreachable; concurrency 8",
+      "touches": [
+        "temporal: list_workflows visibility query",
+        "api: GET images?dive_id",
+        "object-store: DELETE bucket raw/{checksum}.ORF (never NAS)"
+      ]
+    },
+    {
+      "name": "ensure_data_worker_running_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/ensure_data_worker_running_activity.py",
+      "purpose": "Scale per-image (cpu) Deployment to active_replicas (absolute); no-op returning 0 when kubeconfig unset",
+      "touches": [
+        "k8s: patch deployments/scale"
+      ]
+    },
+    {
+      "name": "ensure_light_worker_running_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/ensure_light_worker_running_activity.py",
+      "purpose": "Scale -light Deployment to light_active_replicas; no-op when unconfigured",
+      "touches": [
+        "k8s: patch deployments/scale"
+      ]
+    },
+    {
+      "name": "ensure_gpu_worker_running_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/ensure_gpu_worker_running_activity.py",
+      "purpose": "Read GPU Deployment (annotations+readiness), run gpu_fallback.decide, set both gpu/cpu-fallback replica counts, patch annotations if state changed, poll readiness every 10s up to gpu_start_timeout_seconds (heartbeating); re-observe on timeout; returns gpu|cpu_fallback|unavailable (gpu when unconfigured)",
+      "touches": [
+        "k8s: get deployment, patch deployments/scale x2, patch deployment metadata.annotations"
+      ]
+    },
+    {
+      "name": "scale_down_data_worker_if_idle_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/scale_down_data_worker_if_idle_activity.py",
+      "purpose": "For each (deployment, queue) in sweep_targets: busy = any workflow on TaskQueue Running or CloseTime > now-idle_cooldown; scale to 0 if idle OR busy-but-wedged; never touches annotations",
+      "touches": [
+        "temporal: list_workflows `TaskQueue = \"q\" and (ExecutionStatus = \"Running\" or CloseTime > \"cutoff\")`",
+        "k8s: get deployment, patch deployments/scale"
+      ]
+    },
+    {
+      "name": "verify_dive_checksums_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/verify_dive_checksums_activity.py",
+      "purpose": "Read-only: download whole files (sorted by path, first `limit`), md5 vs stored checksum, EXIF 0x0132 (naive->UTC) vs taken_datetime; 408 = finding (missing_on_nas), other DSM errors propagate; NOT canonical-filtered",
+      "touches": [
+        "api: GET images?dive_id",
+        "nas: read-only download_to"
+      ]
+    },
+    {
+      "name": "select_canonical_dive_ids_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/select_canonical_dive_ids_activity.py",
+      "purpose": "Sorted ids of dives having >=1 canonical image",
+      "touches": [
+        "api: GET /api/v1/canonical/dives/ (dive_controller.py:46, Image.is_canonical == True join)"
+      ]
+    },
+    {
+      "name": "reconcile_labeling_configs_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/reconcile_labeling_configs_activity.py",
+      "purpose": "List LS projects in configured workspace; match title suffix (longest first) to LASER/SPECIES/HEADTAIL/DIVE_SLATE config XML; heal_labeling_config each; returns counts scanned/healed/unchanged/unrecognized. No DB access",
+      "touches": [
+        "label-studio: workspaces.list, projects.list(workspaces=[id]), projects.get, projects.update(label_config)"
+      ]
+    },
+    {
+      "name": "sync_users_label_studio_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/sync_users_label_studio_activity.py",
+      "purpose": "LS users -> fishsense user rows (by email; post or put). Called by laser/headtail/species sync parents; v2 deliberately dropped it (labels/workflow.py docstring)",
+      "touches": [
+        "label-studio: users.list",
+        "api: GET users by email, POST/PUT users"
+      ]
+    },
+    {
+      "name": "pg_dump_database (backup-worker)",
+      "file": "services/fishsense-backup-worker/src/fishsense_backup_worker/activities/pg_dump_database.py",
+      "purpose": "pg_dump -Fc one DB into its own TemporaryDirectory as {ISO-UTC}.dump, upload to NAS {nas_root_path}/{db}/; heartbeat pump every 30s",
+      "touches": [
+        "postgres: pg_dump as `backup` role (PGPASSWORD env)",
+        "nas: create_folder + upload (write)"
+      ]
+    },
+    {
+      "name": "prune_database_backups (backup-worker)",
+      "file": "services/fishsense-backup-worker/src/fishsense_backup_worker/activities/prune_database_backups.py",
+      "purpose": "List NAS {root}/{db}, delete canonical-named dumps beyond newest `keep` (foreign filenames ignored)",
+      "touches": [
+        "nas: list_dir + delete"
+      ]
+    }
+  ],
+  "api_endpoints": [
+    {
+      "route": "GET /api/v1/canonical/dives/",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/dive_controller.py:46",
+      "semantics": "All dives that have at least one Image with is_canonical = true (used by the checksum sweep selector)"
+    },
+    {
+      "route": "GET images for a dive (SDK fs.images.get(dive_id=...))",
+      "file": "libs/fishsense-api-sdk (image client) -> fishsense-api image controller",
+      "semantics": "All image rows of a dive incl. path, checksum, is_canonical, taken_datetime; staging filters is_canonical client-side, cleanup and verify do not"
+    },
+    {
+      "route": "GET dive slates (SDK fs.dive_slates.get())",
+      "file": "libs/fishsense-api-sdk -> fishsense-api dive slate controller",
+      "semantics": "All slates; stage_slate_pdf filters by id client-side and needs `path` (share-relative NAS path)"
+    },
+    {
+      "route": "users get_by_email / POST / PUT (sync_users)",
+      "file": "libs/fishsense-api-sdk user client",
+      "semantics": "Upsert LS identity by email (label_studio_id, names, last_activity, date_joined); not needed in v2 per labels/workflow.py"
+    }
+  ],
+  "tests": [
+    "api-worker: tests/test_stage_raw_bytes_for_dive_activity.py (14 tests)",
+    "api-worker: tests/test_stage_slate_pdf_activity.py (5)",
+    "api-worker: tests/test_cleanup_raw_bytes_for_dive_activity.py (6; incl. tripwire: cleanup imports no NAS client)",
+    "api-worker: tests/test_cleanup_raw_respects_other_children.py (4)",
+    "api-worker: tests/test_object_store.py (6)",
+    "api-worker: tests/test_nas_client.py (7; already ported to v2 ingest)",
+    "api-worker: tests/test_k8s_scaling.py (18)",
+    "api-worker: tests/test_k8s_scaling_tls.py (3; VERIFY_X509_STRICT relaxation)",
+    "api-worker: tests/test_k8s_scaling_integration.py (7; -m k8s, real cluster)",
+    "api-worker: tests/test_gpu_fallback.py (16; pure state machine)",
+    "api-worker: tests/test_ensure_data_worker_running_activity.py (3)",
+    "api-worker: tests/test_ensure_light_worker_running_activity.py (2)",
+    "api-worker: tests/test_ensure_gpu_worker_running_activity.py (8; pins metadata-only annotation patch)",
+    "api-worker: tests/test_scale_down_data_worker_if_idle_activity.py (11; pins sweeper never writes annotations)",
+    "api-worker: tests/test_scale_down_idle_data_worker_workflow.py (1)",
+    "api-worker: tests/test_scale_down_query_integration.py (1; real Temporal visibility query)",
+    "api-worker: tests/test_verify_dive_checksums_activity.py (10; read-only tripwire)",
+    "api-worker: tests/test_verify_dive_checksums_workflow.py (2)",
+    "api-worker: tests/test_verify_all_dives_workflow.py (8)",
+    "api-worker: tests/test_reconcile_labeling_configs_activity.py (5)",
+    "api-worker: tests/test_populate_utils_workspace.py (22; workspace, heal, create_or_get, s3 storage)",
+    "api-worker: tests/test_populate_import_retry_dedup.py (7; IMPORT_ISSUED heartbeat marker)",
+    "api-worker: tests/test_populate_workflow_retry_policy.py (4)",
+    "api-worker: tests/test_populate_task_data_ordering.py (5)",
+    "api-worker: tests/test_ensure_project_shows_predictions.py (10)",
+    "api-worker: tests/test_sync_throttle_handling.py (6)",
+    "api-worker: tests/test_resolve_annotator_id.py (6)",
+    "api-worker: tests/test_schedule_registration.py (24; every schedule id/offset/overlap/timeout + retired schedule)",
+    "api-worker: tests/test_activity_registration.py (3)",
+    "data-worker: tests/test_worker_roles.py (11; exhaustiveness tripwire)",
+    "data-worker: tests/test_worker.py (3)",
+    "data-worker: tests/test_object_store.py (7) + tests/_object_store_itest.py (helper)",
+    "data-worker: tests/test_checkpoint_cache.py (6)",
+    "backup-worker: tests/test_backup_databases_workflow.py (3)",
+    "backup-worker: tests/test_backup_naming_and_pruning.py (10)",
+    "backup-worker: tests/test_nas_backup_client.py (5)",
+    "backup-worker: tests/test_pg_dump_command.py (8; password not in argv)",
+    "backup-worker: tests/test_pg_dump_database_activity.py (2)",
+    "backup-worker: tests/test_pg_dump_integration.py (1; real pg_dump)",
+    "backup-worker: tests/test_prune_database_backups_activity.py (9)",
+    "backup-worker: tests/test_schedule.py (1)",
+    "backup-worker: tests/test_worker_wiring.py (7)",
+    "fishsense-shared: tests/test_object_store.py (30; key helpers, StreamingBody close)",
+    "fishsense-shared: tests/test_ensure_schedule.py (2)",
+    "fishsense-shared: tests/test_build_tls_config.py (7)",
+    "fishsense-shared: tests/test_temporal_namespace.py (3)",
+    "fishsense-shared: tests/test_config.py (5; E4EFS_DOCKER truthiness)",
+    "fishsense-shared: tests/test_url_condition.py (6)",
+    "deploy/incus/nrp_cert_sync/test_sync.sh (asserts every Deployment's restartedAt changes)"
+  ],
+  "shared_helpers": [
+    {
+      "name": "fishsense_shared.object_store: raw_key, slate_pdf_key, jpeg_key, model_key, build_s3_client, open_client, BaseObjectStoreClient (_exists/_get/_put/_delete), *_JPEG_FOLDER constants, NOT_FOUND_CODES",
+      "file": "libs/fishsense-shared/src/fishsense_shared/object_store.py",
+      "used_by_slices": "every preprocess stage (0.1/2/5.1/9), predict laser/headtail/slate, checkerboard calibration + lattice, all populate kinds (folder constants), dive-slate sync (download_slate_pdf), head/tail predict (download_processed_jpeg, download_model)"
+    },
+    {
+      "name": "api-worker ObjectStoreClient (has_raw, upload_raw, has_processed_jpeg, has_slate_pdf, upload_slate_pdf, download_slate_pdf, delete_raw) + open_object_store_client",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/object_store.py",
+      "used_by_slices": "staging/cleanup (infra); populate laser/species/headtail/dive-slate (JPEG gate); resolve_headtail_predict_inputs; dive-slate populate+sync (slate PDF read)"
+    },
+    {
+      "name": "data-worker ObjectStoreClient (download_raw, download_slate_pdf, download_processed_jpeg, download_model, upload_processed_jpeg)",
+      "file": "services/fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/object_store.py",
+      "used_by_slices": "preprocess laser/species/headtail/slate, predict laser/slate/headtail, detect_checkerboard_laser_point, render_checkerboard_lattice, checkpoint_cache"
+    },
+    {
+      "name": "checkpoint_cache (versioned path, atomic rename, per-key asyncio.Lock)",
+      "file": "services/fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/checkpoint_cache.py",
+      "used_by_slices": "head/tail predict (SAM 3.1); PLAN 9.12 GarageWeightStore replaces it"
+    },
+    {
+      "name": "k8s_scaling: resolve_scaling_config, ScalingConfig.sweep_targets, apps_v1_api (+X509 strict relax), readiness/Readiness, deployment_is_wedged, set_deployment_replicas, patch_deployment_annotations",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/k8s_scaling.py",
+      "used_by_slices": "infra only (all ensure_* and sweeper); called indirectly by every parent that dispatches to a processor queue"
+    },
+    {
+      "name": "gpu_fallback: GpuState, FallbackPolicy, decide, annotation keys, MODE_*",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/gpu_fallback.py",
+      "used_by_slices": "predict laser, predict headtail, predict slate (via wake_gpu_worker)"
+    },
+    {
+      "name": "_dispatch (select_dive, resolve_inputs, wake_*_worker, stage_raw, stage_slate_pdf, dispatch_child, CHILD_ALREADY_RUNNING, run_sdk_activity, cleanup_raw, dispatch_populate)",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/_dispatch.py",
+      "used_by_slices": "preprocess laser/species/headtail/slate, predict laser/headtail/slate, checkerboard calibration, lattice verification, auto-accept parent; laser calibration/measure/depth/clustering/laser-sync call ensure_light_worker_running_activity inline"
+    },
+    {
+      "name": "_retry_policies: SDK_FAIL_FAST_RETRY_POLICY, SCALING_RETRY_POLICY, STAGE_RAW_RETRY_POLICY",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/_retry_policies.py",
+      "used_by_slices": "every selector-driven parent"
+    },
+    {
+      "name": "_populate.create_then_populate + POPULATE_MAX_ATTEMPTS",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/_populate.py",
+      "used_by_slices": "populate laser/species/headtail/dive-slate"
+    },
+    {
+      "name": "populate_utils: build_image_url, build_task_data",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/populate_utils.py:38,62",
+      "used_by_slices": "populate laser/species/headtail/dive-slate, checkerboard lattice (build_image_url: species, dive-slate, lattice)"
+    },
+    {
+      "name": "populate_utils: ensure_label_studio_s3_storage, heal_labeling_config, create_or_get_label_studio_project, build_per_dive_title, LS_PROJECT_TITLE_MAX",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/populate_utils.py:109,197,240,311",
+      "used_by_slices": "create-project activities for laser/species/headtail/dive-slate/checkerboard-lattice; reconcile (heal)"
+    },
+    {
+      "name": "populate_utils: import_tasks_and_record_labels, ImportResult, IMPORT_ISSUED, _normalize_image_url, _call_ls",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/populate_utils.py:396-655",
+      "used_by_slices": "populate laser/species/headtail/dive-slate/lattice; backfill laser/headtail predictions"
+    },
+    {
+      "name": "populate_utils: publish_label_studio_project",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/populate_utils.py:657",
+      "used_by_slices": "populate laser/species/headtail/dive-slate/lattice"
+    },
+    {
+      "name": "populate_utils: _get_ls_client, _resolve_workspace_id",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/populate_utils.py:676,684",
+      "used_by_slices": "reconcile, apply_laser_auto_accept, backfill laser/headtail/slate predictions, create-project"
+    },
+    {
+      "name": "populate_utils: ensure_project_shows_predictions",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/populate_utils.py:706",
+      "used_by_slices": "backfill laser/headtail predictions, lattice populate"
+    },
+    {
+      "name": "activities/utils: get_ls_client, get_fs_client, throttle_wait_seconds, THROTTLE_MAX_ATTEMPTS, _ls_project_exists, _list_ls_tasks_with_heartbeat, resolve_annotator_label_studio_id, resolve_annotator_user, sync_label_studio_project (cursor)",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/utils.py",
+      "used_by_slices": "every LS sync kind (laser already ported to v2 labels/label_studio.py + labels/sync.py), populate (throttle), every SDK-using activity (get_fs_client)"
+    },
+    {
+      "name": "nas.NasClient, nas_frames (build_nas_client, resolve_nas_path, file_checksum, read_taken_datetime), nas_errors (dsm_error_code, raise_if_permanent_dsm_error, NAS_FILE_NOT_FOUND_TYPE)",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/{nas.py,activities/nas_frames.py,activities/nas_errors.py}",
+      "used_by_slices": "ingest (already ported to v2 orchestrator/ingest/), raw staging, slate staging, checksum verify"
+    },
+    {
+      "name": "task_queues: DATA_PROCESSING_TASK_QUEUE / _GPU_ / _LIGHT_",
+      "file": "libs/fishsense-shared/src/fishsense_shared/task_queues.py",
+      "used_by_slices": "every parent that dispatches a processor child; v2 equivalent fishsense_services_contracts/task_queues.py (fishsense_processor, _light, _gpu)"
+    },
+    {
+      "name": "temporal: build_tls_config, temporal_namespace, ensure_schedule",
+      "file": "libs/fishsense-shared/src/fishsense_shared/temporal.py",
+      "used_by_slices": "all three workers; cleanup + sweeper open their own Client; v2 has contracts/temporal.py + orchestrator/schedules.py"
+    },
+    {
+      "name": "config: IS_DOCKER, get_config_path, get_log_path, path_validator, url_condition",
+      "file": "libs/fishsense-shared/src/fishsense_shared/config.py",
+      "used_by_slices": "all v1 workers (v2 uses pydantic-settings FISHSENSE_* instead)"
+    },
+    {
+      "name": "backup_naming (backup_filename, filenames_to_prune), pg_dump (build_pg_dump_command, run_pg_dump), NasBackupClient, heartbeat_pump",
+      "file": "services/fishsense-backup-worker/src/fishsense_backup_worker/",
+      "used_by_slices": "backup only"
+    },
+    {
+      "name": "roles/role_names (ROLE_*, ROLE_TASK_QUEUES, CPU/GPU/LIGHT_WORKFLOWS/ACTIVITIES, registrations_for_role)",
+      "file": "services/fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/{roles.py,role_names.py}",
+      "used_by_slices": "every processor stage must be listed in exactly one role"
+    }
+  ],
+  "contracts": [
+    "Object-store keys (libs/fishsense-shared/src/fishsense_shared/object_store.py:8-11): scratch bucket `raw/{checksum}.ORF` (api PUT/DELETE, data GET); scratch `slate_pdf/{slate_id}.pdf` (int v1 slate id); labels bucket `{labels_prefix}/{folder}/{checksum}.JPG`; models bucket `{models_prefix}/{name}/{version}/{filename}`",
+    "JPEG folders: preprocess_jpeg (0.1 laser), preprocess_groups_jpeg (2 species), preprocess_headtail_jpeg (5.1), preprocess_slate_images_jpeg (9), checkerboard_lattice_jpeg (lattice renders, separate so it never overwrites laser JPEGs)",
+    "Prod buckets: bucket=fishsense-lite (scratch), labels_bucket=labels-fishsense-lite, labels_prefix=fishsense-lite, models_bucket=model-weights (no prefix); endpoint https://s3.e4e.ucsd.edu, region garage, path-style SigV4",
+    "SAM 3.1 weights key: model-weights/sam3/3.1/sam3.1_multiplex.pt (deploy/k8s/data-worker/settings.toml [sam3])",
+    "LS task data: {image: s3://{labels_bucket}/{prefix}/{folder}/{checksum}.JPG, img: same, taken: ISO text, image_id} (populate_utils.py:62)",
+    "LS per-project S3 source storage: title `garage`, bucket=labels bucket, prefix=labels_prefix, presign=True, use_blob_urls=False, creds presign_* or main key",
+    "LS project title: `{dive.name truncated} #{dive_id} - {suffix}` <= 50 chars; suffix identifies stage for reconcile; `#{dive_id}` used by ensure_project_shows_predictions",
+    "Task queues: fishsense_api_queue (api-worker), fishsense_data_processing_queue (cpu), fishsense_data_processing_light_queue, fishsense_data_processing_gpu_queue, fishsense_backup_queue; v2: fishsense_orchestrator, fishsense_processor, fishsense_processor_light, fishsense_processor_gpu",
+    "Raw-scratch reader child ids (cleanup gate, cleanup_raw_bytes_for_dive_activity.py:273): preprocess-{laser,species,headtail,slate}-{dive}, predict-{laser,slate}-{dive}, perform-checkerboard-calibration-{dive}, verify-checkerboard-lattice-{dive}",
+    "GPU fallback annotations on the GPU Deployment: fishsense.e4e.ucsd.edu/gpu-start-failures, gpu-wedged-since, gpu-fallback-until (UTC `%Y-%m-%dT%H:%M:%SZ`, absent when healthy)",
+    "ensure_gpu_worker_running_activity return: 'gpu' | 'cpu_fallback' | 'unavailable'",
+    "StageRawBytesResult{staged, skipped_already_present, no_path}; CleanupRawBytesResult{deleted}; ReconcileLabelingConfigsResult{scanned, healed, unchanged, unrecognized}",
+    "fishsense_shared.ingest_contracts: ChecksumMismatch, VerifyChecksumsReport, DiveVerificationSummary(is_clean, error), VerifyAllDivesProgress, VerifyAllDivesReport (not yet in v2 orchestrator/ingest/contracts.py)",
+    "Backup: BackupDatabasesInput{databases, nas_root_path, retention_count}, PgDumpDatabaseInput{db_name, nas_root_path}, PruneDatabaseBackupsInput{db_name, nas_root_path, keep} (pydantic); NAS layout {nas_root_path}/{db}/{YYYY-MM-DDTHH-MM-SSZ}.dump (-Fc)",
+    "Scheduled workflow id convention: `{WorkflowClassName}-workflow`, args=(), task_queue=fishsense_api_queue (worker.py:406)"
+  ],
+  "v2_schema_gaps": [
+    "No per-dive integer key for Label Studio titles: v1 titles embed `#{int dive_id}` and ensure_project_shows_predictions matches on it; v2 dives.id is uuid and dives.v1_id is NULL for new dives. Need a stable short id/sequence on dives, or a label_studio_projects(tenant_id, dive_id, kind, ls_project_id) table (v1 has none; project ids are only inferred from label rows)",
+    "GPU-fallback state: v1 stores it in annotations on the GPU Deployment; v2's decided stand-up/tear-down (PLAN \u00a74.8) deletes the Deployment, erasing the counter. Needs a home that survives deletion (a small table, or a ConfigMap) -- not present in 0001-0017",
+    "slate_templates.id is uuid; v1 scratch key is `slate_pdf/{int slate_id}.pdf`. Key layout must switch to uuid or v1_id (no schema change strictly needed, but contract change)",
+    "captures has source_path, raw_object_key, checksum, checksum_algorithm, is_canonical, captured_at -- enough for staging, cleanup and checksum verify (uncertain: whether source_path is stored share-relative like v1 image.path; staging prepends raw_root_path)",
+    "No object-key columns for processed JPEGs (derived from checksum + folder in v1); fine if v2 keeps derivation, but PLAN \u00a79.11 wants every NEW key under a tenant prefix -- the layout, not a column",
+    "No table for checksum-verification results (v1 returns them only as workflow results); none required for parity",
+    "Backup worker needs no schema; but backup.databases must name v2's new database (PLAN \u00a76.1: new DB in same instance) plus superset",
+    "Users with label_studio_id (for sync_users) absent in 0002 -- v2 intentionally dropped user sync (labels/workflow.py docstring); listed for completeness"
+  ],
+  "dependencies": [
+    "Depends on: Temporal connection/contracts (v2 fishsense_services_contracts/temporal.py, task_queues.py -- done)",
+    "Depends on: NAS client/errors/frames (v2 orchestrator/ingest/nas*.py -- done, reuse for staging + verify)",
+    "Depends on: captures/dives/slate_templates schema (0005, 0004) and a tenant-scoped store for 'captures of dive (canonical)', 'slate template path', 'canonical dive ids'",
+    "Depends on: v2 LabelStudioClient (orchestrator/labels/label_studio.py -- has throttle + annotator helpers already; lacks workspace resolve, project create/heal, s3 storage, import/publish)",
+    "Needed by: every processor-dispatching parent (preprocess 0.1/2/5.1/9, predict laser/headtail/slate, checkerboard calibration, lattice verify, laser calibration, measure, depth, auto-accept, clustering) for wake/stage/cleanup",
+    "Needed by: every populate kind (create_or_get project, import/dedup, publish, JPEG gate) and prediction backfills (ensure_project_shows_predictions)",
+    "Needed by: ops parity items in PLAN \u00a76.2 (nightly backups, NRP cert sync, image prune, Temporal reload)",
+    "Clustering (already ported) currently has no NRP scale-up step (v2 clustering/workflow.py:30) -- waits on this slice",
+    "Processor slices must register each workflow/activity in exactly one role (roles.py contract)"
+  ],
+  "gotchas": [
+    "NAS is read-only from the orchestrator; cleanup deletes only Garage raw/ scratch; a tripwire test asserts the cleanup module imports no NAS client (CLAUDE.md 'Garage object-store key contract')",
+    "No inner retry loop around NAS downloads: bounded jittered STAGE_RAW_RETRY_POLICY (2s, x2, max 60s, 5 attempts, NasFileNotFound non-retryable) -- an inner loop caused the 200x storm that tripped the NAS auto-block (krg-infra#501)",
+    "TaskGroup wraps failures in ExceptionGroup, hiding non_retryable; staging unwraps and re-raises the leaf ApplicationError (stage_raw_bytes_for_dive_activity.py:203)",
+    "Staging concurrency default 1 (FileStation 502s under concurrency); never skip a missing file",
+    "FileStation surfaces an unresolved path as 502 not 404: prefix e4e_nas.raw_root_path (/fishsense_data/REEF/data) to share-relative DB paths; absolute paths pass through",
+    "Staging and resolvers are canonical-only; cleanup is deliberately NOT canonical-filtered (evicts older scratch); verify is NOT canonical-filtered (duplicates are least-trusted)",
+    "Cleanup must skip while any raw-reading sibling child is Running (dive-442 incident, 2026-09-07); fails CLOSED if Temporal unreachable; every new raw-reading child id must be added to raw_scratch_reader_ids; exact WorkflowId IN, never prefix match (dive 44 vs 442)",
+    "dispatch_child returns CHILD_ALREADY_RUNNING on WorkflowAlreadyStartedError; caller must then skip cleanup and flag clearing",
+    "Child ids deterministic + ALLOW_DUPLICATE (not FAILED_ONLY) for both processor and populate children (prod dives 59/439/60)",
+    "_dispatch/_populate emit the same command sequence as the inlined code -- replay contract; per-stage timeouts are parameters (slate PDF 5m vs 15m)",
+    "Scaling is off unless kubernetes.kubeconfig_path set; then namespace required; replicas always ABSOLUTE; active/light/gpu replicas clamped [1,4], fallback [1,2], max_start_failures >=1, wedge_grace clamped <= gpu_start_timeout",
+    "Parents only scale up; only the +55 sweeper scales down; sweeper writes only deployments/scale, never GPU annotations (else a long outage resets its own counter)",
+    "Sweeper scales a busy-but-wedged Deployment (spec.replicas>0, readyReplicas absent) to 0 -- k8s omits readyReplicas, treat None as 0 (2026-08-14 GPUs pinned by expired cert)",
+    "A Deployment missing from sweep_targets is never scaled down -- add every role there",
+    "On 'unavailable' the predict parents must return BEFORE staging; dispatching onto an unserved queue hangs until execution timeout",
+    "GPU fallback window expires (default 180m) so NRP trouble can't strand predict on CPU; naive annotation timestamps read as UTC; malformed annotations degrade to defaults",
+    "Python 3.13 VERIFY_X509_STRICT rejects NRP apiserver cert (no AKI): clear only that flag, keep CERT_REQUIRED (k8s_scaling.py:260)",
+    "Build k8s Configuration explicitly (no global default mutation); kubernetes import lazy",
+    "gpu_active_replicas separate from active_replicas: a 2nd GPU pod sat Pending on Insufficient nvidia.com/gpu (2026-08-20)",
+    "Per-image (cpu) role max_concurrent_activities=2 is a memory ceiling (OOM at 4, 17 restarts 2026-07-21); light role cap 8; gpu-cpu-fallback cap 1; memory limits derived from cap",
+    "Light queue exists because sub-second jobs expired with ScheduleToStart behind 2-slot per-image dispatch (2026-09-04)",
+    "roles.py: every activity/workflow in exactly one role list; `all` role runs every queue for local dev; role vocabulary in leaf role_names.py to avoid config->roles->activities->config import cycle",
+    "GRACEFUL_SHUTDOWN_TIMEOUT 30s; terminationGracePeriodSeconds 45 must be >= it",
+    "Data-worker has no NAS access and no k8s token (automountServiceAccountToken false)",
+    "v2 decided stand-up/tear-down (PLAN \u00a74.8): NRP GC's Deployments >2 weeks old; v1's were apply'd once and scaled, and got deleted ~09-21 (5 days of stages silently didn't run). v2 needs create/delete on deployments, not just scale, and wedge check must tolerate a missing Deployment",
+    "nrp_cert_sync (deploy/incus/nrp_cert_sync/sync.sh:44) rollout-restarts all four Deployments and skips missing ones; with tear-down, only the Secret update matters (a new Deployment mounts the current leaf). 7-day leaf; expired NRP cert caused the 2026-08-14 outage",
+    "ensure_schedule never updates in place (delete + redeploy); v2 inherits (orchestrator/schedules.py); PLAN \u00a74.5 calls it a footgun to fix; retired schedules must be actively deleted at startup (_RETIRED_SCHEDULE_IDS)",
+    "Selector schedules use overlap SKIP; LS sync schedules ALLOW_ALL with 3h run timeout",
+    "LS 429 is not a missing project: back off per `Expected available in N seconds` +2s (default 30s), max 5 attempts, then raise (project 274633 silently skipped)",
+    "Hosted LS import is async: never re-import on invisible tasks; dedup by URL against project and batch; decode `fileuri=` base64 resolve-wrapper URLs; IMPORT_ISSUED heartbeat marker (every later heartbeat must carry it); publish only when ImportResult.deferred == 0",
+    "Label config drift compared structurally (LS reformats XML); LS rejection of a config change is logged and swallowed",
+    "Workspace name configured but not found -> raise (never scatter projects into default workspace)",
+    "LS project titles <= 50 chars, `#{dive_id}` tail never truncated; dive names are not unique",
+    "ensure_project_shows_predictions: most-populated tag wins, ties to current; only per-dive projects (#{dive_id} in title); never raises",
+    "label_studio.bot_user_id stamps completed_by on imported annotations (0 = omit field), populate_laser_label_studio_project_activity.py:174",
+    "verify_dive_checksums_activity heartbeats the index but never reads heartbeat_details, so despite its docstring a retry re-downloads from the start (uncertain intent; the workflow docstring claims resume)",
+    "Checksum convention: md5 of whole file, 8192-byte chunks; taken_datetime = naive EXIF 0x0132 stamped UTC, camera offset NOT applied (verified on 1,619 frames/272 dives 2026-08-17)",
+    "BackupDatabasesWorkflow uses asyncio.gather without return_exceptions: one failed dump fails the workflow and skips ALL pruning, contradicting its docstring's 'independent' claim; the pg_dump/prune activities heartbeat but the workflow sets no heartbeat_timeout (pump is inert)",
+    "pg_dump per activity in its own TemporaryDirectory (2026-05-03 collision incident); password via PGPASSWORD env, never argv; -Fc; prune ignores non-canonical filenames",
+    "Backup target is the NAS, which v2 retires (PLAN \u00a79.5/\u00a79.15): must not move onto the same single-node Garage",
+    "Dynaconf validates ALL validators on first settings access; worker object_store imports config function-locally (v2 uses pydantic-settings, less relevant)",
+    "E4EFS_DOCKER truthiness must be an explicit truthy string ('false' must not mean Docker)",
+    "url_condition not validators.url (docker hostnames without TLD)",
+    "Object-store _exists maps only 404/NoSuchKey/NotFound to False; other errors propagate; _get must close StreamingBody (connection-pool leak)",
+    "boto3 path-style addressing required for Garage",
+    "Stale docs to not copy: deployment.yaml header says cpu runs clustering/calibration etc (now light); scale_down activity docstring says 3 Deployments/2 queues (now 4/3); data-worker settings.toml says 12Gi limit (actual 16Gi); checkpoint_cache mentions a PVC but pods use emptyDir (weights re-download each cold start)",
+    "Checkerboard calibration staging runs through the +55 sweeper (staging is on the api queue), so its parent re-wakes the data-worker after staging (worker.py:787)"
+  ],
+  "size": "v1 source ~6,070 lines across ~33 api-worker/shared/data-worker infra files (largest: populate_utils.py 785, k8s_scaling.py 413, worker.py 980 of which ~460 is schedules, _dispatch.py 345, gpu_fallback.py 272, object_store.py 272) + backup worker 787 lines (13 files) + k8s manifests 905 lines (6 YAML + settings.toml + 23 KB README) + deploy/incus nrp_cert_sync/secrets/prune. Tests: ~52 files, ~7,840 lines, ~350 test functions (api-worker ~29 files/~245 tests incl. 3 integration: k8s, scale-down query, LS; data-worker 5 files/27; backup 9 files/46; shared 6 files/53). Schedules: 21 on the api-worker + 1 backup = 22 (plus 1 retired, actively deleted)."
+}

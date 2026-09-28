@@ -1,0 +1,418 @@
+{
+  "slice": "species (stage 2 species preprocess + overlay, species LS project create/populate (decoupled scheduled parent), stage 4.2 species label sync incl. dive slate/calibration-target/notes side effects, stage 6.1 UpdateDiveImageGroupsWorkflow \u2192 LABEL_STUDIO clusters)",
+  "workflows": [
+    {
+      "name": "PreprocessSpeciesImagesParentWorkflow",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/preprocess_species_images_parent_workflow.py",
+      "worker": "api-worker (fishsense_api_queue)",
+      "schedule": "preprocess-species-images-workflow-schedule; every 1h, offset +15min, overlap SKIP, run_timeout 2h (worker.py:603-611)",
+      "calls": [
+        "_dispatch.select_dive('select_next_high_priority_dive_for_species_preprocessing_activity') [5min, SDK_FAIL_FAST]",
+        "_dispatch.resolve_inputs('resolve_species_preprocess_inputs_activity') -> PreprocessSpeciesImagesInput [5min]",
+        "if no clusters/0 images: run_sdk_activity('clear_species_reprocess_flags_activity', ClearReprocessFlagsInput(dive_id, checksums=None)) and return (lines 64-79)",
+        "_dispatch.wake_data_worker() -> ensure_data_worker_running_activity (NRP scale)",
+        "_dispatch.stage_raw(dive_id) -> stage_raw_bytes_for_dive_activity (NAS -> Garage raw/, 1h, hb 5min)",
+        "_dispatch.dispatch_child('PreprocessSpeciesImagesWorkflow', id='preprocess-species-{dive_id}', execution_timeout=2h, cpu queue, ALLOW_DUPLICATE); CHILD_ALREADY_RUNNING -> return without cleanup/clear",
+        "_dispatch.cleanup_raw(dive_id) -> cleanup_raw_bytes_for_dive_activity",
+        "run_sdk_activity('clear_species_reprocess_flags_activity', checksums=every checksum dispatched) (lines 105-111)"
+      ]
+    },
+    {
+      "name": "PreprocessSpeciesImagesWorkflow",
+      "file": "services/fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/workflows/preprocess_species_images_workflow.py",
+      "worker": "data-worker, role cpu (fishsense_data_processing_queue)",
+      "schedule": "child of the parent above",
+      "calls": [
+        "for each group in payload.cluster_members (fallback: positional numbering from payload.clusters when None, lines 64-76): asyncio.gather of preprocess_species_image(PreprocessSpeciesImageInput{checksum, cluster_index, cluster_size, output_folder='preprocess_groups_jpeg', camera_matrix, distortion_coefficients}) start_to_close 5min; groups run sequentially"
+      ]
+    },
+    {
+      "name": "CreateSpeciesLabelStudioProjectWorkflow",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/create_species_label_studio_project_workflow.py",
+      "worker": "api-worker",
+      "schedule": "on-demand (registered, not scheduled)",
+      "calls": [
+        "create_species_label_studio_project_activity(dive_id) [schedule_to_close 5min] -> project_id"
+      ]
+    },
+    {
+      "name": "PopulateSpeciesLabelStudioProjectWorkflow",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/populate_species_label_studio_project_workflow.py (body in workflows/_populate.py create_then_populate)",
+      "worker": "api-worker",
+      "schedule": "child of the populate parent; also on-demand",
+      "calls": [
+        "create_species_label_studio_project_activity(dive_id) [5min]",
+        "populate_species_label_studio_project_activity(dive_id, project_id) [s2c 30min, heartbeat 2min, retry initial 30s x2 backoff max 5min, max 5 attempts (_populate.py:41-47)]"
+      ]
+    },
+    {
+      "name": "PopulateSpeciesLabelStudioProjectParentWorkflow",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/populate_species_label_studio_project_parent_workflow.py",
+      "worker": "api-worker",
+      "schedule": "populate-species-labels-workflow-schedule; every 1h, offset +20min, overlap SKIP, run_timeout 1h (worker.py:613-629)",
+      "calls": [
+        "select_dives_needing_species_population_activity [5min, SDK_FAIL_FAST] -> list[dive_id]",
+        "per dive (Semaphore 4): execute_child_workflow('PopulateSpeciesLabelStudioProjectWorkflow', id='populate-species-{dive_id}', execution_timeout=30min, ALLOW_DUPLICATE); WorkflowAlreadyStartedError logged+skipped; failures suppressed via ExceptionGroupErrorLogging(suppress=True)"
+      ]
+    },
+    {
+      "name": "SyncLabelStudioSpeciesLabelsWorkflow",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/sync_label_studio_species_labels_workflow.py",
+      "worker": "api-worker",
+      "schedule": "sync-label-studio-species-labels-workflow-schedule; every 1h, offset 0, overlap ALLOW_ALL (default), run_timeout 3h (default) (worker.py:473-479)",
+      "calls": [
+        "sync_users_label_studio_activity [10min]",
+        "get_species_label_studio_project_ids_activity [10min]",
+        "per project (Semaphore 4): sync_species_labels_for_label_studio_project_activity(project_id) [s2c 2h, hb 2min]; ExceptionGroupErrorLogging without suppress (one project failure fails the run)"
+      ]
+    },
+    {
+      "name": "UpdateDiveImageGroupsWorkflow (stage 6.1)",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/update_dive_image_groups_workflow.py",
+      "worker": "api-worker",
+      "schedule": "on-demand only (operator, per dive, after species labeling is complete)",
+      "calls": [
+        "update_dive_image_groups_activity(dive_id) [s2c 15min, hb 2min] -> UpdateDiveImageGroupsResult{skipped_already_grouped, new_clusters_created, species_labels_seen}"
+      ]
+    },
+    {
+      "name": "ReconcileLabelingConfigsWorkflow (adjacent, not species-owned)",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/reconcile_labeling_configs_activity.py",
+      "worker": "api-worker",
+      "schedule": "reconcile-labeling-configs-workflow-schedule, hourly +25min",
+      "calls": [
+        "heals every '* - Species Labeling' project onto SPECIES_LABELING_CONFIG_XML (maps suffix -> XML at line 58); belongs to the LS-infra slice but must ship with species"
+      ]
+    }
+  ],
+  "activities": [
+    {
+      "name": "select_next_high_priority_dive_for_species_preprocessing_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/select_next_high_priority_dive_for_species_preprocessing_activity.py",
+      "purpose": "stage-2 cohort selector via cohort_selection.select_next_dive",
+      "touches": [
+        "db:dive/laserlabel/specieslabel/diveframecluster read via GET /api/v1/dives/select-next/species-preprocessing/"
+      ]
+    },
+    {
+      "name": "resolve_species_preprocess_inputs_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/resolve_species_preprocess_inputs_activity.py",
+      "purpose": "build PreprocessSpeciesImagesInput: canonical images only; eligible = (valid laser AND no row with project_id) OR species needs_reprocess; per PREDICTION cluster keep eligible frames with FULL-cluster position (_build_clusters 49-92); eligible frames in no cluster emitted as singleton 1/1 (181-192); intrinsics from dive.camera_id",
+      "touches": [
+        "db:dive GET /dives/{id}",
+        "db:cameraintrinsics via cameras.get_intrinsics",
+        "db:diveframecluster GET /dives/{id}/images/clusters/PREDICTION",
+        "db:image GET /dives/{id}/images",
+        "db:laserlabel GET /dives/{id}/labels/laser",
+        "db:specieslabel GET /dives/{id}/labels/species"
+      ]
+    },
+    {
+      "name": "clear_species_reprocess_flags_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/clear_species_reprocess_flags_activity.py",
+      "purpose": "lower needs_reprocess on species labels of canonical images; checksums=None = whole dive, list = only those frames",
+      "touches": [
+        "db:specieslabel write via DELETE /api/v1/dives/{id}/labels/species/needs-reprocess?checksums="
+      ]
+    },
+    {
+      "name": "preprocess_species_image",
+      "file": "services/fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/activities/preprocess_species_image.py",
+      "purpose": "download raw ORF, RectifiedImage(RawImage, intrinsics) (rawpy+undistort+CLAHE) in to_thread, overlay_and_encode_jpeg draws '{i}/{N}' at (w-350, h-75), FONT_HERSHEY_SIMPLEX scale 5, BGR (0,0,255) red, thickness 10, LINE_AA, cv2.imencode('.jpg') default quality; PUT JPEG",
+      "touches": [
+        "object-store:raw/{checksum}.ORF (scratch bucket, GET)",
+        "object-store:{labels_prefix}/preprocess_groups_jpeg/{checksum}.JPG (labels bucket, PUT overwrite)",
+        "fishsense-core RectifiedImage (imports v1 SDK CameraIntrinsics)"
+      ]
+    },
+    {
+      "name": "create_species_label_studio_project_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/create_species_label_studio_project_activity.py",
+      "purpose": "title-match-or-create per-dive project '{name[:budget]} #{dive_id} - Species Labeling' (<=50 chars) in the configured workspace, heal config onto SPECIES_LABELING_CONFIG_XML (lines 54-145), ensure Garage S3 source storage; created as unpublished draft",
+      "touches": [
+        "label-studio:projects list/create/update label_config, S3 import storage",
+        "db:dive read (title)"
+      ]
+    },
+    {
+      "name": "select_dives_needing_species_population_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/select_dives_needing_species_population_activity.py",
+      "purpose": "list all dives needing species populate",
+      "touches": [
+        "db via GET /api/v1/dives/needing-species-population/"
+      ]
+    },
+    {
+      "name": "populate_species_label_studio_project_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/populate_species_label_studio_project_activity.py",
+      "purpose": "select valid-laser images not completed-any-project and without live row in THIS project (_select_target_images 87-128); JPEG-gate each via has_processed_jpeg (48-74); build tasks {data:{image,img,taken,image_id}, predictions:[sentinel judgement] , annotations:[]}; import_tasks_and_record_labels -> put a SpeciesLabel row per task; supersede incomplete rows of OTHER projects (skip sentinels, 288-304); publish only if deferred==0 and import complete and project has tasks (318-327)",
+      "touches": [
+        "db:laserlabel read",
+        "db:specieslabel read+PUT /api/v1/labels/species/{image_id}",
+        "db:image GET per image (N+1)",
+        "object-store:HEAD labels bucket preprocess_groups_jpeg/{checksum}.JPG",
+        "label-studio:import tasks, list tasks, projects.update is_published"
+      ]
+    },
+    {
+      "name": "species_preannotation.build_prediction (helper, not an activity)",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/species_preannotation.py",
+      "purpose": "sentinel SpeciesLabel -> LS prediction {model_version:'species-csv-import-2026-09', result:[taxonomy results]}; exact inverse of sync _parse_results; refuses non-leaf species path (<2 parts or empty part); attribute taxonomies as single-element paths; never grouping/exclude/slate type",
+      "touches": []
+    },
+    {
+      "name": "get_species_label_studio_project_ids_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/get_species_label_studio_project_ids_activity.py",
+      "purpose": "distinct project ids of live species labels",
+      "touches": [
+        "db:specieslabel via GET /api/v1/labels/species/label-studio-project-ids"
+      ]
+    },
+    {
+      "name": "sync_species_labels_for_label_studio_project_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/sync_species_labels_for_label_studio_project_activity.py",
+      "purpose": "cursor-based LS task sync (utils.sync_label_studio_project kind='species'); per task: find row by task id, set user, label_studio_json, completed=is_labeled, updated_at, parsed fields from annotations[0] (keep stored when None); then for completed tasks resolve per-dive slate type -> dive_slate_id, calibration target -> calibration_target_id (latest ts wins, _reduce_winners), and 'Slate not in list' -> Dive.notes if empty",
+      "touches": [
+        "label-studio:list tasks",
+        "db:specieslabel GET /labels/species/label-studio/{task_id}, PUT /labels/species/{image_id}",
+        "db:labelstudiosynccursor GET/PUT /labels/sync-cursor/species/{pid}",
+        "db:user get_by_label_studio_id",
+        "db:diveslate GET list",
+        "db:calibrationtarget GET list",
+        "db:image GET (dive lookup)",
+        "db:dive set_dive_slate / set_calibration_target / GET + set_notes (PUT /dives/{id}/notes)"
+      ]
+    },
+    {
+      "name": "update_dive_image_groups_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/update_dive_image_groups_activity.py",
+      "purpose": "stage 6.1: refuse if any LABEL_STUDIO cluster exists; select_species_label_per_image (skip sentinel, skip superseded, tie -> highest id, 68-114); regroup_by_species_labels (117-146); POST one LABEL_STUDIO cluster per group, one at a time (149-161)",
+      "touches": [
+        "db:diveframecluster GET /dives/{id}/images/clusters/LABEL_STUDIO and /PREDICTION",
+        "db:specieslabel GET /dives/{id}/labels/species",
+        "db:diveframecluster+mapping POST /dives/{id}/images/clusters/"
+      ]
+    }
+  ],
+  "api_endpoints": [
+    {
+      "route": "GET /api/v1/dives/select-next/species-preprocessing/",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/dive_cohort_controller.py:504-595",
+      "semantics": "first Dive.id (ORDER BY id LIMIT 1) with priority=HIGH AND (EXISTS canonical image of the dive with a valid LaserLabel (completed, NOT superseded, x,y NOT NULL) AND NOT EXISTS SpeciesLabel(project_id NOT NULL AND superseded=false) on that image AND that same image is in a PREDICTION cluster  OR  _has_image_flagged_for_reprocess(SpeciesLabel): canonical image with species needs_reprocess=true AND superseded=false (353-395))"
+    },
+    {
+      "route": "GET /api/v1/dives/needing-species-population/",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/dive_cohort_controller.py:598-650",
+      "semantics": "ALL Dive.id ORDER BY id: priority=HIGH AND EXISTS canonical image with valid laser and no SpeciesLabel(project_id NOT NULL, superseded=false). No cluster gate, no needs_reprocess term."
+    },
+    {
+      "route": "GET /api/v1/dives/{dive_id}/labels/species",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/label_controller.py:626-645",
+      "semantics": "all species labels of dive with superseded=false (INCLUDES sentinels, NOT canonical-filtered), ORDER BY image_id; 404 when empty (SDK -> None)"
+    },
+    {
+      "route": "GET /api/v1/labels/species/label-studio-project-ids?incomplete=",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/label_controller.py:648-681",
+      "semantics": "DISTINCT project_id where NOT NULL and superseded=false; incomplete=true adds completed false/NULL (web landing page). Must be registered before /labels/species/{image_id}."
+    },
+    {
+      "route": "GET /api/v1/labels/species/{image_id}",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/label_controller.py:684-700",
+      "semantics": "first non-superseded species row of image (arbitrary if several)"
+    },
+    {
+      "route": "PUT /api/v1/labels/species/{image_id}",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/label_controller.py:703-711 (+ _upsert_label 27-110)",
+      "semantics": "upsert: only fields present in body are written; id None + project_id sent -> natural key (image, project); project_id absent -> sole row for image or 409; id of another image -> 409"
+    },
+    {
+      "route": "GET /api/v1/labels/species/label-studio/{label_studio_id}",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/label_controller.py:714-732",
+      "semantics": "non-superseded row by label_studio_task_id; 404 if none (sync skips)"
+    },
+    {
+      "route": "GET|PUT /api/v1/labels/sync-cursor/{kind}/{label_studio_project_id}",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/label_controller.py:735-770",
+      "semantics": "per (kind='species', project) last_synced_at cursor; already ported generically in v2 label_sync_store"
+    },
+    {
+      "route": "PUT /api/v1/dives/{dive_id}/labels/species/needs-reprocess?only_incomplete=true",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/label_reprocess_controller.py:183-200",
+      "semantics": "raise needs_reprocess on canonical-image, superseded=false species rows (default incomplete only) -> dive re-enters stage 2; JPEGs redrawn at same keys, LS tasks untouched"
+    },
+    {
+      "route": "DELETE /api/v1/dives/{dive_id}/labels/species/needs-reprocess?checksums=",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/label_reprocess_controller.py:203-220 (+ _set_needs_reprocess 36-138)",
+      "semantics": "lower flag; checksums scopes to those canonical frames; unfiltered on superseded when clearing; 0 not 404 when nothing"
+    },
+    {
+      "route": "GET /api/v1/dives/{dive_id}/images/clusters/{data_source}",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/image_controller.py:277-324",
+      "semantics": "clusters of dive+data_source with image_ids from mapping table; NO ORDER BY on clusters or members (order is DB-incidental)"
+    },
+    {
+      "route": "POST /api/v1/dives/{dive_id}/images/clusters/",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/image_controller.py:327-366",
+      "semantics": "insert one cluster + mappings; images looked up by id IN (...) with no dive check; non-atomic across calls"
+    },
+    {
+      "route": "PUT /api/v1/dives/{id}/dive-slate, /calibration-target, /notes (SDK set_dive_slate/set_calibration_target/set_notes)",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/dive_controller.py (exact lines not checked)",
+      "semantics": "written only by species sync; uncertain exact route spellings \u2014 verify before porting"
+    }
+  ],
+  "tests": [
+    "services/fishsense-api-workflow-worker/tests/test_preprocess_species_images_parent_workflow.py (6)",
+    "services/fishsense-api-workflow-worker/tests/test_resolve_species_preprocess_inputs_activity.py (18)",
+    "services/fishsense-api-workflow-worker/tests/test_species_cluster_positions.py (3)",
+    "services/fishsense-api-workflow-worker/tests/test_select_next_high_priority_dive_for_species_preprocessing_activity.py (2)",
+    "services/fishsense-api-workflow-worker/tests/test_select_dives_needing_species_population_activity.py (2)",
+    "services/fishsense-api-workflow-worker/tests/test_populate_species_label_studio_project_activity.py (18)",
+    "services/fishsense-api-workflow-worker/tests/test_populate_species_label_studio_project_parent_workflow.py (2)",
+    "services/fishsense-api-workflow-worker/tests/test_species_labeling_config_xml_structure.py (10)",
+    "services/fishsense-api-workflow-worker/tests/test_species_xml_model_parity.py (9)",
+    "services/fishsense-api-workflow-worker/tests/test_species_preannotation.py (12)",
+    "services/fishsense-api-workflow-worker/tests/test_species_slate_content_path_order.py (10)",
+    "services/fishsense-api-workflow-worker/tests/test_sync_species_labels_activity.py (35)",
+    "services/fishsense-api-workflow-worker/tests/test_sync_label_studio_species_labels_workflow.py (3)",
+    "services/fishsense-api-workflow-worker/tests/test_update_dive_image_groups_activity.py (15)",
+    "services/fishsense-api-workflow-worker/tests/test_update_dive_image_groups_workflow.py (1)",
+    "shared, species parts: services/fishsense-api-workflow-worker/tests/test_reprocess_flag_drains.py, test_resolvers_honour_needs_reprocess.py, test_populate_label_studio_project_workflows.py, test_populate_workflow_retry_policy.py, test_schedule_registration.py",
+    "services/fishsense-data-processing-workflow-worker/tests/test_preprocess_species_images_workflow.py (4)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_overlay_and_encode_jpeg.py (5)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_stage2_integration.py (1, integration, real .ORF)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_stage2_notebook_parity.py (2, integration, byte-for-byte)",
+    "services/fishsense-api/tests/test_select_next_dive_endpoints.py (17 species/population tests of 77: lines 624-986, 1884-2130)",
+    "services/fishsense-api/tests/test_species_slate_reads_superseded.py (4)",
+    "services/fishsense-api/tests/test_species_label_angle_degrees.py (4)",
+    "services/fishsense-api/tests/test_get_clusters_data_source_filter.py (2)",
+    "services/fishsense-api/tests/test_label_needs_reprocess_flag.py, test_cohort_needs_reprocess_all_kinds.py (species cases)",
+    "services/fishsense-api/tests/test_dive_pipeline_status_view.py (has_prediction_clusters / dive_images_preprocessed / species_labeling_complete columns)"
+  ],
+  "shared_helpers": [
+    {
+      "name": "_dispatch (select_dive, resolve_inputs, wake_data_worker, stage_raw, dispatch_child/CHILD_ALREADY_RUNNING, run_sdk_activity, cleanup_raw)",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/_dispatch.py",
+      "used_by_slices": "all six preprocess/predict parents (laser, species, headtail, slate)"
+    },
+    {
+      "name": "cohort_selection.select_next_dive",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/cohort_selection.py",
+      "used_by_slices": "all nine select_next_* selectors"
+    },
+    {
+      "name": "reprocess_scope.ClearReprocessFlagsInput",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/reprocess_scope.py",
+      "used_by_slices": "laser/species/headtail/slate preprocess parents"
+    },
+    {
+      "name": "_populate.create_then_populate + POPULATE retry policy",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/_populate.py",
+      "used_by_slices": "Populate{Laser,Species,HeadTail,DiveSlate}LabelStudioProjectWorkflow"
+    },
+    {
+      "name": "populate_utils (build_per_dive_title, create_or_get_label_studio_project, heal_labeling_config, ensure_label_studio_s3_storage, _resolve_workspace_id, build_image_url, build_task_data, import_tasks_and_record_labels + IMPORT_ISSUED heartbeat reconcile, ImportResult, publish_label_studio_project)",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/populate_utils.py (785 lines)",
+      "used_by_slices": "all four LS create/populate kinds + reconcile_labeling_configs"
+    },
+    {
+      "name": "utils.sync_label_studio_project / resolve_annotator_user / _coerce_updated_at / SYNC_CONCURRENCY",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/utils.py",
+      "used_by_slices": "all four LS syncs (v2 generic already exists: fishsense_services_orchestrator/labels/sync.py sync_label_studio_project)"
+    },
+    {
+      "name": "_is_valid_laser (duplicated)",
+      "file": "resolve_species_preprocess_inputs_activity.py:39 and populate_species_label_studio_project_activity.py:77",
+      "used_by_slices": "species, headtail (same predicate); v2 has VALID_LASER in clustering_store.py"
+    },
+    {
+      "name": "fishsense_shared.taxonomy (SLATE_LASER_CONTENT, SLATE_NOT_IN_LIST_LEAF, calibration_target_leaf, is_measurable, measurable_species_sql, MEASURABILITY_CORPUS)",
+      "file": "libs/fishsense-shared/src/fishsense_shared/taxonomy.py",
+      "used_by_slices": "species sync, slate stage 9 cohort, measure stage 14, pipeline view"
+    },
+    {
+      "name": "ObjectStoreClient (download_raw, upload_processed_jpeg, has_processed_jpeg) + raw_key/jpeg_key",
+      "file": "libs/fishsense-shared/src/fishsense_shared/object_store.py",
+      "used_by_slices": "every preprocess stage + populate JPEG gate"
+    },
+    {
+      "name": "_valid_laser_conditions, _has_image_flagged_for_reprocess",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/dive_cohort_controller.py:90,353",
+      "used_by_slices": "stages 0.1/1/2/5.1/9/14 cohorts"
+    },
+    {
+      "name": "_upsert_label / _set_needs_reprocess",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/label_controller.py:27, label_reprocess_controller.py:36",
+      "used_by_slices": "all four label kinds"
+    },
+    {
+      "name": "select_species_label_per_image",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/update_dive_image_groups_activity.py:68",
+      "used_by_slices": "CLAUDE.md: any new reader of get_species_labels must go through it (stage 6.1; likely stage 14 in v2)"
+    }
+  ],
+  "contracts": [
+    "PreprocessSpeciesImagesInput (libs/fishsense-shared/src/fishsense_shared/preprocess_contracts.py:97-119): dive_id:int, clusters: List[List[str checksum]], camera_matrix: 3x3 floats, distortion_coefficients: List[float], cluster_members: Optional[List[List[SpeciesClusterMember]]]",
+    "SpeciesClusterMember (preprocess_contracts.py:80-94): checksum, cluster_index (1-based, in WHOLE PREDICTION cluster), cluster_size (whole cluster)",
+    "PreprocessSpeciesImageInput (data-worker internal, preprocess_species_images_workflow.py:29-37): checksum, cluster_index, cluster_size, output_folder='preprocess_groups_jpeg', camera_matrix, distortion_coefficients",
+    "v2 note: `clusters` + Optional `cluster_members` exist only for v1 rolling-deploy compatibility; a fresh v2 contract (fishsense_services_contracts/species.py) can carry just members with capture_id + object keys, since v2 names its own queues",
+    "ClearReprocessFlagsInput (api-worker internal): dive_id, checksums Optional[List[str]] (None = whole dive)",
+    "UpdateDiveImageGroupsResult (dataclass, workflow return): skipped_already_grouped, new_clusters_created, species_labels_seen",
+    "Object keys: scratch bucket raw/{checksum}.ORF (api-worker PUT, data-worker GET, deleted after child); labels bucket {labels_prefix}/preprocess_groups_jpeg/{checksum}.JPG (durable, overwritten on redraw); LS task data image/img = s3://{labels_bucket}/{labels_prefix}/preprocess_groups_jpeg/{checksum}.JPG (populate_utils.build_image_url), also stored in species_labels.image_url",
+    "LS task data shape: {image, img, taken: ISO-8601 text, image_id: v1 int}; predictions: [{model_version:'species-csv-import-2026-09', result:[{from_name, to_name:'image', type:'taxonomy', value:{taxonomy:[[...]]}}]}]",
+    "LS labeling-config control names (load-bearing): grouping ('Part of previous group'/'Not part of current group'), exclude ('Top 3 photos of group'), species taxonomy (leafsOnly), measurable, fishAngles, fishCurve; object 'image' value $image",
+    "Queue: v1 fishsense_data_processing_queue (cpu) -> v2 PROCESSOR_TASK_QUEUE 'fishsense_processor'"
+  ],
+  "v2_schema_gaps": [
+    "dive_frame_cluster_captures (0012) has no member position; v1 has none either (GET clusters has no ORDER BY). 'image i of N' and stage 6.1 'first frame of cluster' need an order: derive ORDER BY captures.captured_at, id in the store, or add a position column. Parity with v1's incidental order is uncertain.",
+    "Cluster ORDER is also load-bearing for 6.1 ('Part of previous group' crosses cluster boundaries). v2 ids are random uuids, and persist_prediction_clusters inserts every cluster in one transaction with now(), so created_at/updated_at tie. Order clusters by min(member captured_at).",
+    "No dive-to-LS-project mapping. v1 finds a project by title '{name} #{v1 int dive_id} - Species Labeling'. A v2 title built from a uuid would miss every migrated project and create duplicates. Either build titles from dives.v1_id when present, or add a label_studio_projects(tenant_id, dive_id, kind, ls_project_id) table. Decision needed.",
+    "species_labels.source is NOT NULL for new rows (CHECK source IS NOT NULL OR v1_id). Decide the value for populate-seeded rows ('human'?), sentinel imports ('import'), and rows whose task carries a prediction ('pre_annotation'?). v1 has no equivalent.",
+    "species_labels has ls_labeler_id instead of v1 user_id, and no laser_x/laser_y/laser_label/slate_upside_down. The sync writes the LS id directly, so sync_users is not needed. v1_migration.py:390-394 does not carry those four legacy columns, so historical values are dropped. Confirm that is intended.",
+    "v1 Dive.dive_slate_id maps to dives.slate_template_id (slate_templates.name UNIQUE, OK). calibration_targets.name is NOT unique (versioned by valid_from), so the sync must resolve names through the current_calibration_targets view.",
+    "No dive_pipeline_status view in v2 (no has_prediction_clusters, dive_images_preprocessed or species_labeling_complete). The Superset/research-views slice owns it, but its predicates must mirror these cohorts.",
+    "No object-store module or key contract in v2 yet; captures.raw_object_key exists (0005). The existing JPEG keys under preprocess_groups_jpeg must stay readable, because LS tasks and species_labels.image_url hold them.",
+    "Camera intrinsics: v1 uses dive.camera_id -> cameraintrinsics. v2 uses dives.device_id -> current_camera_calibrations (0007), which also has medium/coordinate_frame. The resolver must pick the row v1 would (uncertain whether filtering on medium/frame is needed).",
+    "needs_reprocess exists on species_labels (0010). No new column is needed for the flag, but the scoped clear needs captures.checksum joined on canonical captures (available)."
+  ],
+  "dependencies": [
+    "Depends on (already ported): stage 1 clustering (PREDICTION clusters, clustering_store.py), laser labels + laser sync (VALID_LASER cohort gate), dive ingest (captures, is_canonical, checksum, captured_at)",
+    "Depends on (not yet ported): the shared Label Studio write-side client (workspace resolve, project create/list-by-title, heal label_config, S3 import storage, import tasks with IMPORT_ISSUED heartbeat reconcile + URL dedup, publish). Likely owned by the laser populate slice. v2 labels/label_studio.py has only project_exists + list_tasks.",
+    "Depends on: object store (raw staging NAS->scratch, cleanup_raw, JPEG PUT, has_processed_jpeg HEAD), NRP processor stand-up/tear-down (wake_data_worker), processor per-image (cpu) queue",
+    "Depends on: fishsense-core RectifiedImage without the v1 SDK CameraIntrinsics import (PLAN \u00a76.3 Phase 0 SDK untangling is a hard prerequisite)",
+    "Depends on: reference data slate_templates, current_calibration_targets; dive UPDATE of slate_template_id, calibration_target_id, notes",
+    "Depended on by: stage 9 slate preprocess cohort (content_of_image 'Slate, Laser on slate'); stage 13 slate calibration (slate_template_id written only by species sync); checkerboard calibration (calibration_target_id written only by species sync); stage 14 measure (LABEL_STUDIO clusters from 6.1, top_three_photos_of_group, content_of_image measurability); dive_pipeline_status/Superset views; web portal landing page (species project ids ?incomplete=true); ReconcileLabelingConfigs (species XML constant)"
+  ],
+  "gotchas": [
+    "The overlay i/N is the frame's position in the WHOLE PREDICTION cluster, not in the redrawn subset. Redrawing 3 of 7 as 1/3..3/3 corrupts the same keys silently (preprocess_contracts.py:80-94; test_species_cluster_positions.py).",
+    "Eligible frames in no PREDICTION cluster become singleton '1/1' clusters. Never lump them into one synthetic cluster. One orphan keeps the whole LS project an unpublished draft (resolver:159-192; prod dives 442/87/94).",
+    "Selector vs resolver mismatch: the selector requires the qualifying image to be IN a PREDICTION cluster (dive_cohort_controller.py:559-574), but the resolver also emits orphans. A dive whose only work is an unflagged orphan is never selected. The selector docstring is stale on this. Mostly latent now that stage 1 clusters every canonical frame.",
+    "Resolvers must mirror the selector predicate exactly, including canonical-only and needs_reprocess. Otherwise the dive is selected, resolves to nothing, re-stages ORFs hourly and head-of-line blocks higher-id dives (CLAUDE.md 'Cluster correctness'; prod dives 59/60/439).",
+    "When a run resolves no work, lower the flag for the whole dive. On success, clear only the checksums actually dispatched: the child can run 2h and a flag raised meanwhile must survive (parent:64-111).",
+    "If CHILD_ALREADY_RUNNING, do NOT clean up raw or clear flags; the running owner does both (parent:89-98).",
+    "Preprocess child id 'preprocess-species-{dive_id}' and populate id 'populate-species-{dive_id}' use ALLOW_DUPLICATE, never FAILED_ONLY. Dedup lives inside the activities. FAILED_ONLY stranded late-eligible frames (prod dives 59/439/60).",
+    "Stage 2 does not drain on its own work. Its cohort clears only when the +20 populate parent seeds species rows, so firing preprocess N times rebuilds one dive N times (CLAUDE.md ~1186-1194; prod dive 8).",
+    "Both cohorts count only non-superseded rows with a project. A superseded row is not evidence of done work; ignoring supersede deadlocked the two cohorts (1,826 images stranded, fixed 2026-07-21).",
+    "Sentinel = species row with no LS project. Cohorts, 6.1, and populate's supersede pass must each honour it explicitly. The supersede pass must skip sentinels or it destroys imported judgements (populate:291-299; test_the_supersede_pass_leaves_judgement_sentinels_alone).",
+    "A completed or superseded sentinel is refused as a pre-annotation source. A completed sentinel removes its image from population forever, because completed_ids has no project filter (populate:149-164).",
+    "Pre-annotations go in predictions, never annotations: sync would write annotations back as human work. build_prediction must round-trip exactly through the sync's _parse_results (test_species_preannotation.py). Emit only leaf paths (>=2 non-empty parts), single-element paths for measurable/fishAngles/fishCurve, and never grouping, exclude, or slate type.",
+    "Populate is JPEG-gated. Never seed a species row before the stage-2 JPEG exists, or the image leaves the preprocess cohort with no JPEG forever (populate:48-74).",
+    "Publish only when deferred==0, the import is complete, and the project has tasks. Projects are created as drafts so annotators never see a half-filled project (populate:306-327).",
+    "Populate retries are bounded (5 attempts, 30s initial) and a retry must reconcile rather than re-import, using the IMPORT_ISSUED heartbeat details. Every heartbeat after the import must carry the marker (_populate.py:25-47; dive 424 reached 23 copies).",
+    "LS task order is fixed at import. Feed tasks in capture order: v1 orders labels by image_id and adds 'taken' ISO text plus image_id. v2 has uuids, so order by captured_at, id. Decide what image_id means in new task data.",
+    "Per-dive title '{name} #{dive_id} - Species Labeling' is capped at 50 chars by truncating the name, never the '#id' tail. Dive names are not unique. Matching is by title within the workspace.",
+    "Sync, content_of_image: prefer a path in SLATE_LASER_CONTENT over path 0, because LS returns sibling paths in click order. The old path-0 read cost 34 rows across 6 dives (sync:68-103; test_species_slate_content_path_order.py).",
+    "Sync: 'Slate not in list' must never resolve to a slate. It writes Dive.notes only, only when notes are empty, never priority, and only for dives with no real slate answer this run (sync:146-173, 382-410).",
+    "Sync: a Calibration Targets leaf is matched on the whole path, the Ruler is refused (it is validation data), and an unknown name resolves to nothing (taxonomy.calibration_target_leaf).",
+    "Sync: the most recent completed annotation wins per dive; a vote with no timestamp never displaces a timestamped one (_reduce_winners 222-243).",
+    "Sync: a parsed None keeps the stored value (_apply_parsed). v1's fetch-mutate-PUT clobbers a needs_reprocess raised mid-sync; v2 should use a column-scoped UPDATE as apply_laser_sync already does.",
+    "Sync cursor: a fix whose LS updated_at does not move is skipped. Parser fixes need a cursor rewind (CLAUDE.md ~870-900).",
+    "6.1 starts a new group at a cluster's first frame unless that frame says 'Part of previous group'. 'Not part of current group' breaks mid-cluster. Frames with no real label are omitted. Prod dive 5: a sentinel split one hogfish into two Fish rows.",
+    "6.1 refuses to run when any LABEL_STUDIO cluster exists (v1 has no DELETE). v1 POSTs clusters one at a time, so a failure mid-run leaves a partial set that blocks all re-runs. v2 should persist all-or-nothing under an advisory lock, as persist_prediction_clusters does.",
+    "get_species_labels returns sentinels and filters only superseded. It is not canonical-filtered and 404s when empty.",
+    "Species XML is load-bearing and pinned by test_species_labeling_config_xml_structure.py and test_species_xml_model_parity.py. A new measurable leaf also needs taxonomy.MEASURABLE_* and views.KNOWN_FISH_MODELS entries.",
+    "Overlay parity is byte-for-byte with the notebook (test_stage2_notebook_parity.py): text '{i}/{N}' at (w-350, h-75), HERSHEY_SIMPLEX scale 5, red (0,0,255), thickness 10, LINE_AA, default JPEG quality. Keep the fishsense-core pin.",
+    "v2 Temporal names must differ from v1's (PLAN \u00a76.5): queue, workflow-id and schedule-id prefixes. Schedules are created, never updated in place."
+  ],
+  "size": "About 15 orchestrator source files (~1,940 lines, excluding shared populate_utils 785 / _dispatch 345 / utils) + 2 data-worker files (~205 lines) + ~6 API handlers (~300 lines incl. cohort SQL). Tests ~5,100 lines, ~170 test functions: worker 146 across 15 files; data-worker 12 across 4 files (2 files need a real .ORF fixture); API ~33 species-related (17 in test_select_next_dive_endpoints.py plus 5 smaller files)."
+}

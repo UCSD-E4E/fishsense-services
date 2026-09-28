@@ -1,0 +1,223 @@
+{
+  "slice": "web-portal (apps/fishsense-lite-web; the only app under apps/)",
+  "workflows": [],
+  "activities": [
+    {
+      "name": "/ (public landing, app/page.tsx)",
+      "file": "apps/fishsense-lite-web/app/page.tsx",
+      "purpose": "SSR, force-dynamic, fetches cached with revalidate 300s. Shows project-hub cards grouped as Laser / Head-Tail / Species / Slate Labeling (links to ${LABELER_BASE|LABEL_STUDIO_URL}/projects/{id}), then static Results (two Superset dashboards) and Administration (Temporal UI) cards. Shows a 'Some projects could not be loaded' notice when degraded>0. Has a Sign-in button to /portal. No auth. Logic lives in lib/active-projects.ts, lib/label-projects.ts and lib/sections.ts. Drops unpublished projects and projects where LS finished_task_number>=task_number (fails open).",
+      "touches": [
+        "GET /api/v1/labels/laser/label-studio-project-ids?incomplete=true&gated=true",
+        "GET /api/v1/labels/headtail/label-studio-project-ids?incomplete=true",
+        "GET /api/v1/labels/species/label-studio-project-ids?incomplete=true",
+        "GET /api/v1/labels/dive-slate/label-studio-project-ids?incomplete=true",
+        "label-studio: POST /api/token/refresh",
+        "label-studio: GET /api/projects/{id} (throttled via lib/label-studio-limiter.ts, uses Promise.allSettled)",
+        "static: ANALYTICS_BASE/fishsense-fish-measurements and /fishsense-pipeline-status, WORKFLOWS_URL"
+      ]
+    },
+    {
+      "name": "/portal (portal index, app/portal/page.tsx)",
+      "file": "apps/fishsense-lite-web/app/portal/page.tsx",
+      "purpose": "Hub page. A signed-out user is redirected to /api/auth/signin?callbackUrl=/portal. A signed-in user outside PORTAL_ALLOWED_GROUPS gets a dead-end page explaining why, with a 'Sign out and retry' server action. Otherwise it shows name, email and groups, a sign-out server action, and cards from lib/portal-sections.ts (triage, calibration). Makes no API calls.",
+      "touches": [
+        "next-auth session only"
+      ]
+    },
+    {
+      "name": "/portal/calibration (dive calibration links)",
+      "file": "apps/fishsense-lite-web/app/portal/calibration/page.tsx",
+      "purpose": "Gated by requirePortalUser (app/portal/guard.ts). Table of every dive (calibration-links.tsx) showing label '{name||Dive id} #{id}', date, and a has-own-slate tick (dive_slate_id != null). Each row has a <select> of source dives (those with dive_slate_id != null, sorted by id, excluding itself) plus Save and Clear buttons. Filter: 'only needing link'. Writes go through server actions setCalibrationSourceAction and clearCalibrationSourceAction in actions.ts. Each action re-checks auth and authz, refuses self-links, then calls revalidatePath('/portal').",
+      "touches": [
+        "GET /api/v1/dives/",
+        "PUT /api/v1/dives/{dive_id}/calibration-source/{source_dive_id}",
+        "DELETE /api/v1/dives/{dive_id}/calibration-source/"
+      ]
+    },
+    {
+      "name": "/portal/triage?kind=laser|headtail (mobile triage)",
+      "file": "apps/fishsense-lite-web/app/portal/triage/page.tsx",
+      "purpose": "Gated. Tabs for Laser and Head/tail; an unknown kind falls back to laser. loadQueue (lib/triage-queue.ts) takes the live project ids from the fishsense-api, sorts them newest first (id desc) and resolves each LS project one at a time: at most 24 resolved, 12 walked and 30 task hydrations. It lists page 1 of tasks, skips is_labeled, hydrates each task and filters with rejectionReason (lib/triage.ts: title suffix, from_name, requiredLabels Snout/Fork for headtail), returning 12 items. The client (triage-client.tsx) shows the frame via /api/triage/image/{taskId} with pinch-zoom and keypoint overlay, plus Accept, Skip and Undo. Skip writes nothing. Accept posts the prediction's result verbatim to LS. Undo deletes that annotation.",
+      "touches": [
+        "GET /api/v1/labels/{laser|headtail}/label-studio-project-ids?incomplete=true[&gated=true for laser] (revalidate 0)",
+        "label-studio: GET /api/projects/{id}",
+        "label-studio: GET /api/tasks/?project={id}&page=1&page_size=50",
+        "label-studio: GET /api/tasks/{id}/",
+        "label-studio: POST /api/tasks/{id}/annotations/ {result, lead_time, was_cancelled:false} (server action acceptAction)",
+        "label-studio: DELETE /api/annotations/{id}/ (server action undoAcceptAction; 404 ok)"
+      ]
+    },
+    {
+      "name": "/api/triage/image/[taskId] (route handler, image proxy)",
+      "file": "apps/fishsense-lite-web/app/api/triage/image/[taskId]/route.ts",
+      "purpose": "Portal-authz gated (403 otherwise). Takes a positive integer task id only. Fetches the LS task with ?resolve_uri=true and reads data.image. s3:// or gs:// returns 502 'unresolved'. An absolute http(s) URL is fetched without auth, but only when its host is the LS host or listed in TRIAGE_IMAGE_HOSTS (else 502 'blocked'). A relative path is fetched from LS with the Bearer token. The body is streamed back with cache-control private, max-age=3600.",
+      "touches": [
+        "label-studio: GET /api/tasks/{id}/?resolve_uri=true",
+        "presigned object-store URL (host allowlist)"
+      ]
+    },
+    {
+      "name": "/api/auth/[...nextauth] (NextAuth handlers)",
+      "file": "apps/fishsense-lite-web/app/api/auth/[...nextauth]/route.ts",
+      "purpose": "Auth.js v5 GET/POST handlers: signin, callback/authentik, signout and session. The config is in auth.ts: Authentik provider, scope 'openid email profile groups', JWT session, trustHost. The callbacks in lib/auth-callbacks.ts copy access_token and profile.groups into the JWT and then the session.",
+      "touches": [
+        "Authentik OIDC (AUTH_AUTHENTIK_ISSUER)"
+      ]
+    },
+    {
+      "name": "error boundary (app/error.tsx) and root layout (app/layout.tsx)",
+      "file": "apps/fishsense-lite-web/app/error.tsx",
+      "purpose": "The error boundary logs the digest and offers a retry. The layout adds a footer showing the package.json version (0.13.0) and uses Tailwind light/dark classes.",
+      "touches": []
+    }
+  ],
+  "api_endpoints": [
+    {
+      "route": "GET /api/v1/labels/laser/label-studio-project-ids?incomplete=bool&gated=bool|null",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/label_controller.py:423",
+      "semantics": "Returns List[int], the DISTINCT LaserLabel.label_studio_project_id where it is not null and superseded=false. incomplete=true adds completed=false OR completed IS NULL. gated=true keeps only projects where some live label's image has a LaserPrediction with gate_verdict not null AND none has gate_verdict null (_gate_scan at :386, a correlated EXISTS over an aliased label table). gated=false is the complement; omitted means no filter. The web always sends incomplete=true&gated=true (lib/fishsense-api.ts GATED_KINDS = {laser}). Cached with revalidate 300 on the landing page and 0 in triage."
+    },
+    {
+      "route": "GET /api/v1/labels/headtail/label-studio-project-ids?incomplete=bool",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/label_controller.py:272",
+      "semantics": "Returns List[int], the distinct HeadTailLabel.label_studio_project_id where it is not null and superseded=false. incomplete adds completed false or null. There is no gated flag. Used by the landing page and the headtail triage queue."
+    },
+    {
+      "route": "GET /api/v1/labels/species/label-studio-project-ids?incomplete=bool",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/label_controller.py:648",
+      "semantics": "Same shape as headtail, over SpeciesLabel. Used by the landing page only."
+    },
+    {
+      "route": "GET /api/v1/labels/dive-slate/label-studio-project-ids?incomplete=bool",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/label_controller.py:166",
+      "semantics": "Same shape, over DiveSlateLabel. The web kind is 'dive-slate' and the section is titled 'Slate Labeling'. Used by the landing page only."
+    },
+    {
+      "route": "GET /api/v1/dives/",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/dive_controller.py:37",
+      "semantics": "Returns every Dive row (List[Dive]) with no filter and no ordering. The web types only id:int, name, dive_datetime, priority, dive_slate_id and calibration_dive_id (lib/dives.ts). Fetched with revalidate 0 by the calibration page."
+    },
+    {
+      "route": "PUT /api/v1/dives/{dive_id}/calibration-source/{source_dive_id}",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/dive_controller.py:422",
+      "semantics": "Sets Dive.calibration_dive_id = source_dive_id and returns dive_id (int). 400 on a self-link, 404 if either dive is missing. No body. It does NOT check that the source has a slate; only the UI restricts that. The web validates both ids as non-negative integers (safeId)."
+    },
+    {
+      "route": "DELETE /api/v1/dives/{dive_id}/calibration-source/",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/dive_controller.py:464",
+      "semantics": "Sets calibration_dive_id=NULL and returns 204. Idempotent; 404 only if the dive is missing. Note the trailing slash."
+    },
+    {
+      "route": "(auth for all of the above)",
+      "file": "apps/fishsense-lite-web/lib/api-auth.ts",
+      "semantics": "HTTP Basic with FISHSENSE_API_USERNAME/PASSWORD (a service account), sent to the interior URL http://fishsense-api:8000, which bypasses Traefik and Authentik. The user's identity is never forwarded to the API. v2 needs instead: a user bearer token (the session already keeps the Authentik access_token), or a service principal plus a tenant slug."
+    },
+    {
+      "route": "v2 targets to build (proposed, not existing)",
+      "file": "services/fishsense-services-api (v2 exposes only /healthz and /tenants/{slug}/devices today, app.py:84-130)",
+      "semantics": "Proposed routes: GET /tenants/{slug}/label-studio-projects?kind=laser|head_tail|species|slate&incomplete=true&gated=true -> [int]. GET /tenants/{slug}/dives -> [{id uuid, name, dived_at, priority, slate_template_id, calibration_source_dive_id, v1_id?}]. PUT /tenants/{slug}/dives/{id}/calibration-source/{source_id}. DELETE /tenants/{slug}/dives/{id}/calibration-source. Each needs an admin-role check to replace PORTAL_ALLOWED_GROUPS."
+    }
+  ],
+  "tests": [
+    "apps/fishsense-lite-web/lib/fishsense-api.test.ts (6: URL shape, gated only for laser)",
+    "apps/fishsense-lite-web/lib/dives.test.ts (7: list, PUT/DELETE calibration-source, safeId)",
+    "apps/fishsense-lite-web/app/portal/calibration/actions.test.ts (14: authz gate before write, self-link, revalidate)",
+    "apps/fishsense-lite-web/lib/authz.test.ts (10: fail-closed PORTAL_ALLOWED_GROUPS, exact match)",
+    "apps/fishsense-lite-web/lib/auth-callbacks.test.ts (7)",
+    "apps/fishsense-lite-web/lib/env.test.ts (12)",
+    "apps/fishsense-lite-web/lib/active-projects.test.ts (15)",
+    "apps/fishsense-lite-web/lib/label-projects.test.ts (13: kill switch, isPublished, hasOutstandingTasks)",
+    "apps/fishsense-lite-web/lib/sections.test.ts (8)",
+    "apps/fishsense-lite-web/lib/portal-sections.test.ts (5)",
+    "apps/fishsense-lite-web/lib/label-studio.test.ts (17)",
+    "apps/fishsense-lite-web/lib/token-refresh.test.ts (3)",
+    "apps/fishsense-lite-web/lib/label-studio-limiter.test.ts (6)",
+    "apps/fishsense-lite-web/lib/label-studio-tasks.test.ts (17)",
+    "apps/fishsense-lite-web/lib/task-shape.test.ts (7, fixtures lib/__fixtures__/task-list.json, task-detail.json [empty file])",
+    "apps/fishsense-lite-web/lib/triage.test.ts (17)",
+    "apps/fishsense-lite-web/lib/triage-headtail.test.ts (7)",
+    "apps/fishsense-lite-web/lib/triage-queue.test.ts (7)",
+    "apps/fishsense-lite-web/lib/triage-view.test.ts (10)",
+    "apps/fishsense-lite-web/tests/integration/{auth,dashboard,portal}.integration.test.ts (2+5+4; need a running container, mint session JWE with AUTH_SECRET from deploy/compose.local.yml, PORTAL_ALLOWED_GROUPS=test-group)",
+    "v1 API-side tests backing these endpoints: services/fishsense-api/tests/test_label_studio_project_ids_gated.py, test_label_studio_project_ids_superseded.py, test_label_route_disambiguation.py, test_label_route_registration.py, test_calibration_source_endpoints.py"
+  ],
+  "shared_helpers": [
+    {
+      "name": "liveProjectIds / isPublished / hasOutstandingTasks (one definition of 'live project')",
+      "file": "apps/fishsense-lite-web/lib/label-projects.ts",
+      "used_by_slices": "web landing + triage; semantics mirror v1 API project-ids endpoints and LS sync (label-sync slice)"
+    },
+    {
+      "name": "getAccessToken (LS refresh-token -> Bearer JWT, cached, deduped, TTL default 240s, 30s skew)",
+      "file": "apps/fishsense-lite-web/lib/label-studio.ts",
+      "used_by_slices": "web only (orchestrator has its own LS client)"
+    },
+    {
+      "name": "lsFetch shared throttle / 429 Retry-After backoff",
+      "file": "apps/fishsense-lite-web/lib/label-studio-limiter.ts",
+      "used_by_slices": "web only"
+    },
+    {
+      "name": "QUEUE_KINDS (title suffix 'Laser Calibration Labeling' / 'HeadTail Labeling', from_names, required labels)",
+      "file": "apps/fishsense-lite-web/lib/triage.ts:98",
+      "used_by_slices": "must match orchestrator LS project creation (LASER_PROJECT_TITLE_SUFFIX) and sync activities' from_name/label parsing (label-studio slices)"
+    },
+    {
+      "name": "isPortalAuthorized / portalAllowedGroups",
+      "file": "apps/fishsense-lite-web/lib/authz.ts",
+      "used_by_slices": "web only; v2 replaces with membership role"
+    },
+    {
+      "name": "requirePortalUser",
+      "file": "apps/fishsense-lite-web/app/portal/guard.ts",
+      "used_by_slices": "all /portal/* pages"
+    }
+  ],
+  "contracts": [
+    "No fishsense_shared or fishsense-api-sdk use. The web is TypeScript and hand-types its responses (lib/dives.ts Dive type; number[] for project ids).",
+    "The Label Studio task shape used by triage (lib/triage.ts LsTask/LsPrediction/LsRegion): regions are percentages; the fields value.x, value.y, value.keypointlabels[0], original_width, original_height and from_name are read back by the v1 sync activities, so accept posts the prediction's result verbatim.",
+    "LS project title format '{dive.name} #{dive_id} - {suffix}' (diveNameFromTitle). In v2, dive ids become uuids, so the orchestrator's title format and this parser must agree.",
+    "There are no object-store keys in the web itself. Frames come via LS resolve_uri, either as presigned URLs (host must be in TRIAGE_IMAGE_HOSTS) or as LS-relative paths.",
+    "PLAN \u00a76.1: the v2 port should use a generated openapi-typescript client with tenant-scoped paths and no v1-compatible endpoints."
+  ],
+  "v2_schema_gaps": [
+    "No schema gap for calibration linking: dives.calibration_source_dive_id exists (0005, FK plus a not-self CHECK), and dives has UPDATE grant (0005:38). The API endpoints are missing, though.",
+    "The dive list maps fields: v1 dive_datetime -> v2 dived_at; dive_slate_id -> slate_template_id; calibration_dive_id -> calibration_source_dive_id; id int -> uuid (v1_id bigint kept). The web's safeId (non-negative int), numeric sort and '#id' label must change.",
+    "Project-ids: laser_labels, head_tail_labels, species_labels and slate_labels have ls_project_id, completed (NOT NULL, so no null branch) and superseded (0010). This is enough; the endpoint is missing.",
+    "Gated predicate: v2 laser_predictions.gate_verdict exists (0011, 'auto_accepted' added in 0014). Predictions are append-only (GRANT SELECT, INSERT, 0011:122) with a current_laser_predictions view (DISTINCT ON capture_id ORDER BY seq DESC). The gate must read current_*. UNCERTAIN: how the gate records a verdict with no UPDATE grant (insert a new row?). That is the gate slice's decision, but it determines this predicate.",
+    "No label_studio_projects table with a title or publish state. The web gets those from LS directly, so this is not needed (label_studio_sync_cursors has kind+ls_project_id if a project list is wanted).",
+    "Authz: memberships.role is free text (0002:41) with no defined 'admin' value. A tenant-admin role that covers calibration-source edits and triage is needed (PLAN \u00a74.2 line 347-349). Not checked: whether role values are constrained anywhere else."
+  ],
+  "dependencies": [
+    "Depends on the v2 API auth (Authentik JWT -> users/memberships -> tenant) plus the four endpoint groups above. Today it depends on the v1 fishsense-api label and dive controllers.",
+    "Depends on the Label Studio laser-label sync (already ported) and on the headtail/species/slate syncs to flip completed. Otherwise cards and queues persist up to one sync cycle; the hasOutstandingTasks LS check narrows this.",
+    "Depends on the auto-accept gate slice (gate_verdict), for the laser gated=true filter.",
+    "Depends on the orchestrator's LS project creation (title suffixes, from_name 'laser'/'kp-1', Snout/Fork labels) and LS storage presigning (object-store host goes in TRIAGE_IMAGE_HOSTS).",
+    "Triage accept feeds the laser/headtail sync activities (they read the stored annotation).",
+    "Nothing else depends on the web. Superset and Temporal UI are only linked (static-links.ts); the Superset dashboard slugs must survive the \u00a79.20 consumer port.",
+    "Deploy: v1 deploy/incus/compose.yml 'web' service (image ghcr.io/ucsd-e4e/fishsense-lite-web). At cutover the v2 repo needs its own build/promote for the web app (PLAN \u00a76.1/\u00a79.9)."
+  ],
+  "gotchas": [
+    "The portal authz fails CLOSED. With PORTAL_ALLOWED_GROUPS unset or empty, everyone is denied. The group name must match exactly (prod: 'FishSense-Prod-Admins'); see deploy/incus/compose.yml:86-111 and lib/authz.ts.",
+    "The OIDC request must ask for the 'groups' scope, or every session has no groups (auth.ts). v2 clients must also request the 'org' scope (PLAN \u00a74.2).",
+    "Server actions are public endpoints. Every action re-checks the session and authz BEFORE any write (actions.test.ts 'checks the session BEFORE touching the API'). The v2 API should enforce this itself, since in v1 the API enforces nothing.",
+    "A self-link is refused in three places: the UI, the server action and the API (400). v2 also has a CHECK constraint.",
+    "Setting a calibration source changes measured fish lengths: a borrowed calibration gives -8..+2% error against about 1% for the dive's own (lib/authz.ts comment).",
+    "Skip writes NOTHING to LS or the DB. Writing a skip would flip completed/is_labeled and permanently exclude the image (lib/triage.ts, triage/actions.ts).",
+    "Headtail predictions missing Snout or Fork must be refused, not offered as partial. The sync writes x/y only when both are present but sets completed anyway, which permanently excludes the image (lib/triage.ts:60-75).",
+    "Accept posts the prediction's result verbatim, with lead_time in ms (used to detect rubber-stamping).",
+    "LABEL_STUDIO_API_KEY is a refresh token. Exchange it at /api/token/refresh for a Bearer JWT (about 5 min) and re-mint on 401/403 (lib/label-studio.ts, label-studio-tasks.ts authed()).",
+    "Hosted LS rate-limits (429). Use a shared throttle plus Retry-After, and resolve projects lazily and sequentially in triage (budgets 24/12/30).",
+    "LS task list rows lack predictions and annotations, so each task must be fetched from the detail endpoint to judge it (triage-queue.ts:63-78). DRF answers a page past the end with a 404, which is not an error.",
+    "The image proxy takes a task id only, never a URI, to avoid an open proxy/SSRF, and presigned hosts are allowlisted. TRIAGE_IMAGE_HOSTS is NOT set in deploy/incus/compose.yml, so presigned object-store frames may currently be blocked (UNCERTAIN whether prod LS returns relative paths instead).",
+    "LABEL_STUDIO_ENABLED is compared against a truthy allowlist, because the string 'false' is otherwise truthy. The kill switch also blanks triage (lib/label-projects.ts).",
+    "A discovery failure must surface as an error, never as an empty queue (triage-queue.ts:106-114). The landing page shows a degraded notice when LS drops projects.",
+    "Filtering fails open: a missing is_published or task counts keeps the project. finished_task_number falls back to num_tasks_with_annotations.",
+    "The env proxy is lazy (lib/env.ts), and NextAuth uses a function-form config so that `next build` works without AUTH_* set. The landing page must stay public and work without AUTH_*.",
+    "AUTH_URL must be set in prod, or OAuth callbacks get built against 0.0.0.0:3000 (README).",
+    "v1 SSR calls the API on the interior network with Basic auth, bypassing Traefik forwardAuth. Do not switch to the public host (README).",
+    "Route order in v1: the literal label-studio-project-ids path must be registered before {image_id} (label_controller.py docstrings). Avoid the same collision in v2.",
+    "Dive names are not unique, so '#id' is kept in project titles and labels."
+  ],
+  "size": "1 app (apps/fishsense-lite-web, v0.13.0): Next.js 15.5.21 App Router, React 19.2, next-auth 5 beta.32, Tailwind 3.4, vitest 4, standalone Docker (node:24-alpine) built from the repo root. About 45 source/config files. Non-test TS/TSX is about 2,900 lines (largest: triage-client.tsx 417, label-studio.ts 267, label-studio-tasks.ts 243, triage-queue.ts 238, triage.ts 220, calibration-links.tsx 216). Tests are about 2,700 lines: 199 test cases in 22 files (188 unit, 11 integration). There are 4 pages (/, /portal, /portal/calibration, /portal/triage) and 2 route handlers (NextAuth, image proxy). It calls 7 distinct v1 API endpoints (4 project-ids, dive list, calibration-source PUT and DELETE) and 7 Label Studio endpoints. No other app exists under apps/."
+}
