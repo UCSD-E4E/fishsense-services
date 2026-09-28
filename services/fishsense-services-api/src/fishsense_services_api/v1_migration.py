@@ -424,6 +424,37 @@ def _dive_laser_lines(v1, v2, tenant, report) -> None:
     _account(v1, v2, report, "divelaserline", "dive_laser_lines")
 
 
+#: v2 label table -> its label_studio_projects kind.
+PROJECT_KINDS = {
+    "laser_labels": "laser",
+    "head_tail_labels": "head_tail",
+    "slate_labels": "slate",
+    "species_labels": "species",
+}
+
+
+def _label_studio_projects(v1, v2, tenant, report) -> None:
+    """Record each Label Studio project v1's labels point at, against the dive
+    holding most of its labels (ties to the lowest number). v1 only ever found
+    them by title."""
+    for table, kind in PROJECT_KINDS.items():
+        v2.execute(
+            text(f"""
+                INSERT INTO label_studio_projects (tenant_id, dive_id, kind,
+                                                   ls_project_id)
+                SELECT DISTINCT ON (l.ls_project_id)
+                       :tenant, c.dive_id, :kind, l.ls_project_id
+                FROM {table} l JOIN captures c ON c.id = l.capture_id
+                JOIN dives d ON d.id = c.dive_id
+                WHERE l.tenant_id = :tenant AND l.ls_project_id IS NOT NULL
+                GROUP BY l.ls_project_id, c.dive_id, d.number
+                ORDER BY l.ls_project_id, count(*) DESC, d.number
+                ON CONFLICT (tenant_id, kind, ls_project_id) DO NOTHING
+                """),
+            {"tenant": tenant, "kind": kind},
+        )
+
+
 # v1 label table -> (v2 table, its kind-specific columns, which of them are JSON)
 LABEL_TABLES = {
     "laserlabel": ("laser_labels", ["x", "y", "label"], []),
@@ -718,6 +749,7 @@ STEPS: list[Callable] = [
     _laser_calibrations,
     _dive_laser_lines,
     _labels,
+    _label_studio_projects,
     _sync_cursors,
     _predictions,
     _fish_and_clusters,

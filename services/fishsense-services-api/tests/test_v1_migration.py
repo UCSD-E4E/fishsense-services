@@ -876,3 +876,20 @@ def test_a_new_row_after_the_migration_is_numbered_above_v1s(v1, v2):
             {"t": tenant},
         ).scalar_one()
     assert new > _rows(v1, "SELECT max(id) FROM dive")[0][0]
+
+
+def test_label_studio_projects_are_recorded_from_v1s_labels(v1, v2):
+    """v1 found projects by title; v2 records them, from the projects v1's
+    labels point at. A sentinel (no project) records nothing. A project whose
+    labels span dives (project 7: dives 10 and 12) is recorded against the dive
+    holding most of them, ties to the lowest number."""
+    _seed_v1(v1)
+    _seed_labels(v1)
+
+    _run(v1, v2)
+
+    assert _rows(
+        v2,
+        "SELECT p.kind, p.ls_project_id, d.v1_id FROM label_studio_projects p "
+        "JOIN dives d ON d.id = p.dive_id ORDER BY p.ls_project_id",
+    ) == [("laser", 7, 10), ("head_tail", 8, 10), ("slate", 9, 11)]
