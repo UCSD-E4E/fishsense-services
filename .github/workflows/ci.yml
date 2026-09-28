@@ -72,6 +72,49 @@ jobs:
           docker logs api
           exit 1
 
+  web:
+    name: web portal (types, lint, tests, build, image)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      # The API's unit tier pins apps/web/openapi.json to the live spec; this
+      # pins the generated client types to that document (PLAN.md §3).
+      - name: Generated API types are current
+        run: npm run api:check
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Image
+        working-directory: .
+        run: docker build -f apps/web/Dockerfile -t fishsense-web:ci .
+      - name: Integration tests (against the built image)
+        env:
+          AUTH_SECRET: fishsense-web-ci-only-auth-secret
+          FISHSENSE_WEB_URL: http://127.0.0.1:3000
+        run: |
+          docker run -d --name web -p 127.0.0.1:3000:3000 \
+            -e AUTH_SECRET -e AUTH_URL=http://127.0.0.1:3000 \
+            -e AUTH_AUTHENTIK_ID=fishsense-web -e AUTH_AUTHENTIK_SECRET=unused \
+            -e AUTH_AUTHENTIK_ISSUER=https://auth.example.invalid/application/o/fishsense-web \
+            -e FISHSENSE_API_URL=http://api.example.invalid:8000 \
+            fishsense-web:ci
+          npm run test:integration || { docker logs web; exit 1; }
+
   e2e:
     name: end to end (built image under compose)
     runs-on: ubuntu-latest
