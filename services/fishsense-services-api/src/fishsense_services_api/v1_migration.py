@@ -475,6 +475,20 @@ LABEL_TABLES = {
 }  # fmt: skip
 
 
+def _superseded(v1_table: str, superseded: bool | None) -> bool:
+    """A v1 laser label whose `superseded` is NULL arrives superseded (its
+    reason stays unknown). v1 added the column nullable with no backfill and
+    read NULL as not live everywhere: every getter filters `superseded ==
+    False` and the validator writes only `superseded is False` rows
+    (fishsense-lite@77e8f8e5 fishsense-api controllers/label_controller.py,
+    data-processing-workflow-worker activities/validate_laser_labels_for_dive_
+    activity.py). Counting it live would hand the resolvers, gate and
+    validator a label v1 never did."""
+    if v1_table == "laserlabel" and superseded is None:
+        return True
+    return bool(superseded)
+
+
 def _labels(v1, v2, tenant, report) -> None:
     """The four label kinds. A source is named only when certain: a sentinel
     (no project) carries an imported judgement; a laser label on a frame whose
@@ -517,7 +531,7 @@ def _labels(v1, v2, tenant, report) -> None:
                     "tenant": tenant,
                     "capture": captures.get(r["image_id"]),
                     "completed": bool(r["completed"]),
-                    "superseded": bool(r["superseded"]),
+                    "superseded": _superseded(v1_table, r["superseded"]),
                 }
                 for r in _rows(
                     v1,

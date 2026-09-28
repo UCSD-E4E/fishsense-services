@@ -413,7 +413,7 @@ def test_labels_keep_their_label_studio_identity_and_state(v1, v2):
         "FROM laser_labels l JOIN captures c ON c.id = l.capture_id ORDER BY l.v1_id",
     ) == [
         (1, 100, 7, 70, 55, True, False, 10.5, "red", '{"id": 70}'),
-        (2, 101, 7, 71, None, True, False, 11.0, "red", None),
+        (2, 101, 7, 71, None, True, True, 11.0, "red", None),  # NULL: not live
     ]
     assert _rows(v2, "SELECT v1_id, superseded, tail_y FROM head_tail_labels") == [
         (1, True, 4.0)
@@ -787,6 +787,25 @@ def test_a_superseded_reason_is_carried_when_v1_records_one(v1, v2):
         v2,
         "SELECT v1_id, superseded, superseded_reason FROM laser_labels ORDER BY v1_id",
     ) == [(1, True, "validator_3sigma"), (2, False, "remediation")]
+
+
+def test_a_legacy_null_superseded_laser_label_arrives_not_live(v1, v2):
+    """v1 added `laserlabel.superseded` nullable with no backfill, and read
+    NULL as not live everywhere: every getter filters `superseded == False`
+    and the validator writes only `superseded is False` rows
+    (fishsense-lite@77e8f8e5 label_controller.py, validate_laser_labels_for_dive_
+    activity.py). v2's column is a boolean, so NULL arrives superseded, and
+    why stays unknown."""
+    _seed_v1(v1)
+    _v1_with_superseded_reason(v1)
+    _seed_labels(v1)
+
+    _run(v1, v2)
+
+    assert _rows(
+        v2,
+        "SELECT v1_id, superseded, superseded_reason FROM laser_labels ORDER BY v1_id",
+    ) == [(1, False, None), (2, True, None)]
 
 
 def test_a_v1_without_superseded_reasons_leaves_them_unknown(v1, v2):
