@@ -346,3 +346,22 @@ async def test_the_workflow_runs_the_reconcile_with_v1s_timeouts():
     ]
     assert scheduled.schedule_to_close_timeout.ToTimedelta() == timedelta(minutes=15)
     assert scheduled.heartbeat_timeout.ToTimedelta() == timedelta(minutes=2)
+
+
+def test_every_per_dive_kind_declares_its_labeling_config():
+    """The integration seam: the reconcile discovers each kind's
+    `<package>/labeling_config.py`, and the four populate slices were ported in
+    parallel with it, so none declared one -- the reconcile would heal nothing.
+    v1 imported all four (reconcile_labeling_configs_activity._CONFIG_BY_SUFFIX)."""
+    from fishsense_services_orchestrator.ops.labeling_configs.registry import (
+        labeling_configs,
+    )
+
+    declared = {c.kind: c.title_suffix for c in labeling_configs()}
+
+    assert declared == {
+        "laser": "Laser Calibration Labeling",
+        "species": "Species Labeling",
+        "head_tail": "HeadTail Labeling",
+        "slate": "Dive Slate Labeling",
+    }
