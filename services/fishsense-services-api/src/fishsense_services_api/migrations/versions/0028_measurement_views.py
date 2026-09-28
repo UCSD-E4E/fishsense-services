@@ -36,13 +36,13 @@ cohort pass at 40k captures. `measurement_subjects` did the same to
 
 Additive: two views replaced with the same columns, two indexes.
 
-Revision ID: depth_measure_01
+Revision ID: 0028
 Revises: 0027
 """
 
 from alembic import op
 
-revision = "depth_measure_01"
+revision = "0028"
 down_revision = "0027"
 
 #: v1's stale binding (0026): the capture's subject names another fish -- a

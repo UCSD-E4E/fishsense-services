@@ -845,7 +845,7 @@ def preflight(target_url: str, head: str) -> list[str]:
 # (0026); read the way v2 reads its copy: the frame's live,
 # non-sentinel, highest-id species label, its highest-id Label Studio cluster.
 # Only on a HIGH-priority dive: v1's measure run never visits another, so a
-# stale row there is one v1 keeps and v2 counts (depth_measure_01).
+# stale row there is one v1 keeps and v2 counts (0028).
 _V1_FRESH = """
     WITH plausible AS (
         SELECT e.id, e.dive_id FROM laserextrinsics e

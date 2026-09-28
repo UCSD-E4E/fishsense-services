@@ -32,7 +32,7 @@ from fishsense_services_contracts.task_queues import (
     PROCESSOR_TASK_QUEUE,
 )
 
-CONTRACT_VERSION = 3
+CONTRACT_VERSION = 4
 
 
 def _discover_models() -> tuple[type[BaseModel], ...]:
