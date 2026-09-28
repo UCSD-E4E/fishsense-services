@@ -15,6 +15,7 @@ v1's production data is only ever used in local rehearsals, never in tests.
 
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 from sqlalchemy import Connection, create_engine, text
 
@@ -332,21 +333,47 @@ def _laser_calibrations(v1, v2, tenant, report) -> None:
     )
 
 
+#: When v1's data-worker began fitting with fishsense-core 4.1.0, whose
+#: label-noise estimate uses signed residuals (see migration 0017).
+SIGNED_MAD_SINCE = datetime(2026, 9, 26, 22, 19, 45, tzinfo=UTC)
+
+
+def _noise_estimator(fitted_at: datetime | None) -> str:
+    """v1 rewrites a dive's line on each run, so `fitted_at` says which
+    estimator produced it; a missing stamp predates the stamping, so the old."""
+    if fitted_at is not None and fitted_at >= SIGNED_MAD_SINCE:
+        return "signed_residual_mad"
+    return "absolute_residual_mad"
+
+
+def _has_column(v1, table: str, column: str) -> bool:
+    """Whether v1's schema has `column`: the dump migrated may predate it."""
+    return v1.execute(
+        text(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = :t "
+            "AND column_name = :c)"
+        ),
+        {"t": table, "c": column},
+    ).scalar_one()
+
+
 def _dive_laser_lines(v1, v2, tenant, report) -> None:
     dives = _ids(v2, "dives")
     _insert(
         v2,
         "INSERT INTO dive_laser_lines (tenant_id, v1_id, dive_id, a, b, c, n_points, "
         "inlier_count, inlier_fraction, residual_std, label_noise_mad, "
-        "line_confidence, fitted_at) VALUES (:tenant, :id, :dive, :a, :b, :c, "
-        ":n_points, :inlier_count, :inlier_fraction, :residual_std, "
-        ":label_noise_mad, :line_confidence, coalesce(:fitted_at, now())) "
-        "ON CONFLICT DO NOTHING",
+        "noise_estimator, line_confidence, fitted_at) VALUES (:tenant, :id, "
+        ":dive, :a, :b, :c, :n_points, :inlier_count, :inlier_fraction, "
+        ":residual_std, :label_noise_mad, :noise_estimator, :line_confidence, "
+        "coalesce(:fitted_at, now())) ON CONFLICT DO NOTHING",
         (
-            {**r, "tenant": tenant, "dive": dives.get(r["dive_id"])}
+            {**r, "tenant": tenant, "dive": dives.get(r["dive_id"]),
+             "noise_estimator": _noise_estimator(r["fitted_at"])}
             for r in _rows(v1, "SELECT * FROM divelaserline ORDER BY fitted_at, id")
         ),
-    )
+    )  # fmt: skip
     _account(v1, v2, report, "divelaserline", "dive_laser_lines")
 
 
@@ -377,6 +404,12 @@ def _labels(v1, v2, tenant, report) -> None:
     Label Studio user id -- v1's user emails and names are not copied."""
     captures = _ids(v2, "captures")
     for v1_table, (v2_table, columns, json_columns) in LABEL_TABLES.items():
+        if v1_table == "laserlabel" and _has_column(
+            v1, "laserlabel", "superseded_reason"
+        ):
+            # fishsense-lite #932 on: why a label was superseded. Older v1s
+            # leave it unknown (NULL).
+            columns = [*columns, "superseded_reason"]
         auto_accepted = (
             "WHEN EXISTS (SELECT 1 FROM laserprediction p "
             "WHERE p.image_id = l.image_id AND p.auto_accept) THEN 'auto_accept' "

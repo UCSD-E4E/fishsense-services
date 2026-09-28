@@ -386,6 +386,9 @@ class DiveLaserLine(Base):
     inlier_fraction: Mapped[float] = mapped_column(Double)
     residual_std: Mapped[float] = mapped_column(Double)
     label_noise_mad: Mapped[float] = mapped_column(Double)
+    #: Which estimator produced `label_noise_mad`; its scale changed with
+    #: fishsense-core 4.1.0 (migration 0017).
+    noise_estimator: Mapped[str] = mapped_column(Text)
     line_confidence: Mapped[float] = mapped_column(Double)
     fitted_at: Mapped[datetime] = _created_at()
 
@@ -433,6 +436,8 @@ class LaserLabel(_LabelCore, Base):
     x: Mapped[float | None] = mapped_column(Double)
     y: Mapped[float | None] = mapped_column(Double)
     label: Mapped[str | None] = mapped_column(Text)
+    #: Why it was superseded, as v1 records it (migration 0017); NULL unknown.
+    superseded_reason: Mapped[str | None] = mapped_column(Text)
 
 
 class HeadTailLabel(_LabelCore, Base):

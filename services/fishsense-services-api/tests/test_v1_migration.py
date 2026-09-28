@@ -753,3 +753,70 @@ async def test_migrate_v1_names_missing_configuration(monkeypatch, capsys):
     err = capsys.readouterr().err
     assert "FISHSENSE_V1_DATABASE_URL" in err
     assert "FISHSENSE_MIGRATION_DATABASE_URL" in err
+
+
+# -- laser provenance from fishsense-lite #927/#932 --------------------------------
+
+
+def _v1_with_superseded_reason(v1: Engine) -> None:
+    """v1 at alembic e5a9c3d71b24 (fishsense-lite #932): laserlabel records why
+    a label was superseded. The rehearsal dump predates it."""
+    with v1.begin() as conn:
+        conn.execute(
+            text("ALTER TABLE laserlabel ADD COLUMN superseded_reason varchar(40)")
+        )
+
+
+def test_a_superseded_reason_is_carried_when_v1_records_one(v1, v2):
+    """Including `remediation` on a live row: it means "last changed by the
+    reviewed remediation", not "superseded"."""
+    _seed_v1(v1)
+    _v1_with_superseded_reason(v1)
+    _seed_labels(v1)
+    with v1.begin() as conn:
+        conn.execute(text("""
+            UPDATE laserlabel SET superseded = true,
+                superseded_reason = 'validator_3sigma' WHERE id = 1;
+            UPDATE laserlabel SET superseded = false,
+                superseded_reason = 'remediation' WHERE id = 2;
+            """))
+
+    _run(v1, v2)
+
+    assert _rows(
+        v2,
+        "SELECT v1_id, superseded, superseded_reason FROM laser_labels ORDER BY v1_id",
+    ) == [(1, True, "validator_3sigma"), (2, False, "remediation")]
+
+
+def test_a_v1_without_superseded_reasons_leaves_them_unknown(v1, v2):
+    _seed_v1(v1)
+    _seed_labels(v1)
+
+    _run(v1, v2)
+
+    assert _rows(v2, "SELECT DISTINCT superseded_reason FROM laser_labels") == [(None,)]
+
+
+def test_laser_lines_say_which_noise_estimator_made_them(v1, v2):
+    """fishsense-core 4.1.0 (deployed to v1 at 2026-09-26T22:19:45Z) estimates
+    label noise from *signed* residuals; before it, v1 took the MAD of absolute
+    distances, about 0.59 sigma. v1 keeps one line per dive, rewritten on each
+    run with `fitted_at` stamped, and no validator ran between NRP deleting
+    the workers (09-21) and that deploy -- so `fitted_at` says which."""
+    _seed_v1(v1)
+    _seed_calibrations(v1)
+    with v1.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO divelaserline (id, dive_id, a, b, c, n_points,
+                inlier_count, inlier_fraction, residual_std, label_noise_mad,
+                line_confidence, fitted_at)
+            VALUES (2, 12, 0.6, 0.8, -1200, 40, 38, 0.95, 1.4, 1.85, 30.0,
+                    '2026-09-26T23:00:00Z');
+            """))
+
+    _run(v1, v2)
+
+    assert _rows(
+        v2, "SELECT v1_id, noise_estimator FROM dive_laser_lines ORDER BY v1_id"
+    ) == [(1, "absolute_residual_mad"), (2, "signed_residual_mad")]
