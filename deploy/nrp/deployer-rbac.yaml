@@ -32,8 +32,9 @@ metadata:
 #  - the wakes: server-side apply of a Deployment (`patch`, which creates it
 #    when missing, so also `create`), and `get` for the readiness reads;
 #  - the sweeper: `delete`;
-#  - the GPU fallback: get/create/patch on its one ConfigMap.
-# No pods, no secrets, no watch, nothing cluster-scoped.
+#  - the GPU fallback: get/create/patch on its one ConfigMap;
+#  - the Temporal cert sync: create, and get/patch on its one Secret.
+# No pods, no other Secret, no watch, nothing cluster-scoped.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -51,6 +52,20 @@ rules:
   - apiGroups: [""]
     resources: ["configmaps"]
     resourceNames: ["fishsense-processor-gpu-fallback"]
+    verbs: ["get", "patch"]
+  # The Temporal cert sync (ops.cert_sync; v1's deploy/incus/nrp_cert_sync),
+  # which runs on the slot with this identity: it WRITES the processor's
+  # Temporal leaf and can READ no other Secret (fishsense-processor-secrets
+  # holds the S3 keys). `create` can't be scoped by name, so it stays
+  # unrestricted -- some new Secret, never an existing one read; `get` and
+  # `patch` are pinned to the one name. No `list`: it can't be name-scoped
+  # and would hand over every Secret in the namespace.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["fishsense-data-worker-temporal-certs"]
     verbs: ["get", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
