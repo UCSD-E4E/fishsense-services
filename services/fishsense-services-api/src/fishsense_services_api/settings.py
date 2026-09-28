@@ -72,3 +72,16 @@ class V1MigrationSettings(BaseSettings):
     #: v1's ``fishsense`` database, read-only use.
     v1_database_url: SecretStr
     app_role: str = "fishsense_app"
+
+
+class AuditSettings(BaseSettings):
+    """For the read-only audit commands (``audit-range-trend``) only.
+
+    Just the database: an audit runs as the app role under a tenant's RLS
+    scope, and needs none of the API's OIDC configuration.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="FISHSENSE_")
+
+    #: DSN for the role the audit reads as -- normally the app role.
+    database_url: SecretStr
