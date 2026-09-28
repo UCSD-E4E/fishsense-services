@@ -49,6 +49,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
+    "LASER_DEPTH_COHORT",
     "CaptureDots",
     "DepthRecord",
     "DepthRefusal",
@@ -64,6 +65,15 @@ __all__ = [
     "next_dive_for_laser_depth",
     "persist_laser_depths",
 ]
+
+#: The cohort over dive `d`, but for the tenant and priority terms the
+#: selector adds: the dive has a row of migration 0026's `laser_depth_work`.
+#: Named so `dive_pipeline_status` reads the same predicate (migration
+#: pipeline_status_01).
+LASER_DEPTH_COHORT = """EXISTS (
+    SELECT 1 FROM laser_depth_work w
+    WHERE w.tenant_id = d.tenant_id AND w.dive_id = d.id
+)"""
 
 Vector3 = tuple[float, float, float]
 
@@ -161,13 +171,10 @@ async def next_dive_for_laser_depth(
     """The tenant's oldest high-priority dive with laser-depth work."""
     row = (
         await conn.execute(
-            text("""
+            text(f"""
                 SELECT d.id, d.created_at, d.number FROM dives d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
-                  AND EXISTS (
-                      SELECT 1 FROM laser_depth_work w
-                      WHERE w.tenant_id = d.tenant_id AND w.dive_id = d.id
-                  )
+                  AND {LASER_DEPTH_COHORT}
                 ORDER BY d.created_at, d.number
                 LIMIT 1
                 """),

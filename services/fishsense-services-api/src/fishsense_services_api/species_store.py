@@ -71,6 +71,9 @@ from fishsense_services_api.clustering_store import (
 from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
+    "HAS_LIVE_SPECIES_TASK",
+    "SPECIES_PREPROCESS_COHORT",
+    "SPECIES_PREPROCESS_WORK",
     "REFUSAL_OUTLIVED_SQL",
     "CameraIntrinsicsRow",
     "SpeciesCandidate",
@@ -118,7 +121,7 @@ REFUSAL_OUTLIVED_SQL = (
 #: select_target_captures`), so its dive was re-staged hourly, forever, ahead
 #: of every younger one. The stage-2 resolver (`species.preprocess`) and
 #: populate read "done" the same way.
-_HAS_LIVE_SPECIES_TASK = """
+HAS_LIVE_SPECIES_TASK = """
     EXISTS (
         SELECT 1 FROM species_labels s
         WHERE s.tenant_id = c.tenant_id AND s.capture_id = c.id
@@ -126,6 +129,47 @@ _HAS_LIVE_SPECIES_TASK = """
           AND NOT s.superseded
     )
 """
+
+#: Dive `d` has stage-2 work: a canonical capture with a valid laser, no live
+#: species task and a prediction cluster, or a canonical capture whose live
+#: species row is flagged for a redraw. Named, with the cohort below, so
+#: `dive_pipeline_status` reads the same predicates (migration
+#: pipeline_status_01).
+SPECIES_PREPROCESS_WORK = f"""
+    (
+        EXISTS (
+            SELECT 1 FROM captures c
+            JOIN laser_labels l
+              ON l.tenant_id = c.tenant_id AND l.capture_id = c.id
+            WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+              AND c.is_canonical AND {VALID_LASER}
+              AND NOT {HAS_LIVE_SPECIES_TASK}
+              -- The qualifying capture must itself be clustered:
+              -- the resolver needs its cluster for "i of N".
+              AND EXISTS (
+                  SELECT 1 FROM dive_frame_cluster_captures m
+                  JOIN dive_frame_clusters k
+                    ON k.tenant_id = m.tenant_id
+                   AND k.id = m.cluster_id
+                  WHERE m.tenant_id = c.tenant_id
+                    AND m.capture_id = c.id
+                    AND k.formed_by = 'prediction'
+              )
+        )
+        OR EXISTS (
+            SELECT 1 FROM captures c
+            JOIN species_labels s
+              ON s.tenant_id = c.tenant_id AND s.capture_id = c.id
+            WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+              AND c.is_canonical AND s.needs_reprocess
+              AND NOT s.superseded
+        )
+    )
+"""
+
+#: The stage-2 cohort over dive `d`, but for the tenant and priority terms the
+#: selector adds. v2: only a dive the resolver can rectify (`camera_sql`).
+SPECIES_PREPROCESS_COHORT = f"{RECTIFIABLE_DIVE} AND {SPECIES_PREPROCESS_WORK}"
 
 _LABEL_COLUMNS = """
     s.id, s.number, s.capture_id, s.ls_project_id, s.ls_task_id, s.completed,
@@ -230,37 +274,7 @@ async def next_dive_for_species_preprocessing(
             text(f"""
                 SELECT d.id, d.created_at FROM dives d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
-                  -- v2: only a dive the resolver can rectify (`camera_sql`).
-                  AND {RECTIFIABLE_DIVE}
-                  AND (
-                      EXISTS (
-                          SELECT 1 FROM captures c
-                          JOIN laser_labels l
-                            ON l.tenant_id = c.tenant_id AND l.capture_id = c.id
-                          WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
-                            AND c.is_canonical AND {VALID_LASER}
-                            AND NOT {_HAS_LIVE_SPECIES_TASK}
-                            -- The qualifying capture must itself be clustered:
-                            -- the resolver needs its cluster for "i of N".
-                            AND EXISTS (
-                                SELECT 1 FROM dive_frame_cluster_captures m
-                                JOIN dive_frame_clusters k
-                                  ON k.tenant_id = m.tenant_id
-                                 AND k.id = m.cluster_id
-                                WHERE m.tenant_id = c.tenant_id
-                                  AND m.capture_id = c.id
-                                  AND k.formed_by = 'prediction'
-                            )
-                      )
-                      OR EXISTS (
-                          SELECT 1 FROM captures c
-                          JOIN species_labels s
-                            ON s.tenant_id = c.tenant_id AND s.capture_id = c.id
-                          WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
-                            AND c.is_canonical AND s.needs_reprocess
-                            AND NOT s.superseded
-                      )
-                  )
+                  AND {SPECIES_PREPROCESS_COHORT}
                 ORDER BY d.created_at, d.id
                 LIMIT 1
                 """),
@@ -286,7 +300,7 @@ async def dives_needing_species_population(
                     ON l.tenant_id = c.tenant_id AND l.capture_id = c.id
                   WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
                     AND c.is_canonical AND {VALID_LASER}
-                    AND NOT {_HAS_LIVE_SPECIES_TASK}
+                    AND NOT {HAS_LIVE_SPECIES_TASK}
               )
             ORDER BY d.created_at, d.id
             """),

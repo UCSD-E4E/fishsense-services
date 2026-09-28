@@ -60,6 +60,8 @@ from fishsense_services_api.clustering_store import VALID_LASER
 from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
+    "HEADTAIL_PREPROCESS_COHORT",
+    "HEADTAIL_PREPROCESS_WORK",
     "CurrentHeadTailPrediction",
     "ForeignCapture",
     "ForeignLaserLabel",
@@ -80,6 +82,7 @@ __all__ = [
     "dives_needing_headtail_population",
     "headtail_populate_state",
     "headtail_predict_captures",
+    "headtail_prediction_cohort",
     "headtail_preprocess_inputs",
     "next_dive_for_headtail_prediction",
     "next_dive_for_headtail_preprocessing",
@@ -117,6 +120,37 @@ _RENDERABLE_CAMERA_MODEL = RECTIFIABLE_CAMERA_MODEL
 #: dive behind it. v1 had no such term (and no axial camera); a dive with no
 #: intrinsics wedged its stage 5.1 the same way.
 _RENDERABLE = RECTIFIABLE_DIVE
+
+
+#: Dive `d` has stage-5.1 work: a canonical capture with a valid laser and no
+#: live head/tail row in a project, or a canonical capture whose live row is
+#: flagged for a redraw. Named, with the cohorts below, so
+#: `dive_pipeline_status` reads the same predicates (migration
+#: pipeline_status_01).
+HEADTAIL_PREPROCESS_WORK = f"""EXISTS (
+    SELECT 1 FROM captures c
+    WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+      AND c.is_canonical
+      AND (
+          ({_LIVE_LASER} AND NOT EXISTS (
+              SELECT 1 FROM head_tail_labels h
+              WHERE h.tenant_id = c.tenant_id
+                AND h.capture_id = c.id
+                AND h.ls_project_id IS NOT NULL
+                AND NOT h.superseded
+          ))
+          OR EXISTS (
+              SELECT 1 FROM head_tail_labels h
+              WHERE h.tenant_id = c.tenant_id
+                AND h.capture_id = c.id
+                AND h.needs_reprocess AND NOT h.superseded
+          )
+      )
+)"""
+
+#: The stage-5.1 cohort over dive `d`, but for the tenant and priority terms
+#: the selector adds.
+HEADTAIL_PREPROCESS_COHORT = f"{_RENDERABLE} AND {HEADTAIL_PREPROCESS_WORK}"
 
 
 class UnsupportedCameraModel(ValueError):
@@ -269,27 +303,7 @@ async def next_dive_for_headtail_preprocessing(
             text(f"""
                 SELECT d.id, d.created_at FROM dives d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
-                  AND {_RENDERABLE}
-                  AND EXISTS (
-                      SELECT 1 FROM captures c
-                      WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
-                        AND c.is_canonical
-                        AND (
-                            ({_LIVE_LASER} AND NOT EXISTS (
-                                SELECT 1 FROM head_tail_labels h
-                                WHERE h.tenant_id = c.tenant_id
-                                  AND h.capture_id = c.id
-                                  AND h.ls_project_id IS NOT NULL
-                                  AND NOT h.superseded
-                            ))
-                            OR EXISTS (
-                                SELECT 1 FROM head_tail_labels h
-                                WHERE h.tenant_id = c.tenant_id
-                                  AND h.capture_id = c.id
-                                  AND h.needs_reprocess AND NOT h.superseded
-                            )
-                        )
-                  )
+                  AND {HEADTAIL_PREPROCESS_COHORT}
                 ORDER BY d.created_at, d.id
                 LIMIT 1
                 """),
@@ -475,6 +489,18 @@ def _needs_prediction(version_param: str) -> str:
         )"""
 
 
+def headtail_prediction_cohort(version: str) -> str:
+    """The head/tail-prediction cohort over dive `d`, but for the tenant and
+    priority terms the selector adds; `version` is SQL for the stage's current
+    version (a bind parameter, or a literal in a view)."""
+    return f"""{_RENDERABLE}
+        AND EXISTS (
+            SELECT 1 FROM captures c
+            WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+              AND c.is_canonical AND {_needs_prediction(version)}
+        )"""
+
+
 async def next_dive_for_headtail_prediction(
     conn: AsyncConnection, tenant_id: uuid.UUID, *, predictor_version: int
 ) -> PredictionCandidate | None:
@@ -496,12 +522,7 @@ async def next_dive_for_headtail_prediction(
                 ) AS never_predicted
                 FROM dives d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
-                  AND {_RENDERABLE}
-                  AND EXISTS (
-                      SELECT 1 FROM captures c
-                      WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
-                        AND c.is_canonical AND {_needs_prediction(":version")}
-                  )
+                  AND {headtail_prediction_cohort(":version")}
                 ORDER BY never_predicted DESC, d.created_at, d.id
                 LIMIT 1
                 """),

@@ -28,6 +28,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
+    "CLUSTERING_COHORT",
+    "VALID_LASER",
     "ClusteringCandidate",
     "ClusteringCatalog",
     "ForeignCapture",
@@ -41,6 +43,26 @@ __all__ = [
 #: labeler placed a point, the validator signed off, and no RANSAC fit has
 #: superseded it. Stages 1, 2, 5.1 and 14 all cascade from it.
 VALID_LASER = "l.completed AND NOT l.superseded AND l.x IS NOT NULL AND l.y IS NOT NULL"
+
+
+#: The stage-1 cohort over dive `d`, but for the tenant and priority terms the
+#: selector adds: a valid laser label on a canonical capture, and no
+#: prediction cluster yet. Named so `dive_pipeline_status` reads the same
+#: predicate (migration pipeline_status_01).
+CLUSTERING_COHORT = f"""
+    EXISTS (
+        SELECT 1 FROM laser_labels l
+        JOIN captures c
+          ON c.tenant_id = l.tenant_id AND c.id = l.capture_id
+        WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+          AND c.is_canonical AND {VALID_LASER}
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM dive_frame_clusters k
+        WHERE k.tenant_id = d.tenant_id AND k.dive_id = d.id
+          AND k.formed_by = 'prediction'
+    )
+"""
 
 
 class InvalidClusters(ValueError):
@@ -66,18 +88,7 @@ async def next_dive_for_clustering(
             text(f"""
                 SELECT d.id, d.created_at FROM dives d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
-                  AND EXISTS (
-                      SELECT 1 FROM laser_labels l
-                      JOIN captures c
-                        ON c.tenant_id = l.tenant_id AND c.id = l.capture_id
-                      WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
-                        AND c.is_canonical AND {VALID_LASER}
-                  )
-                  AND NOT EXISTS (
-                      SELECT 1 FROM dive_frame_clusters k
-                      WHERE k.tenant_id = d.tenant_id AND k.dive_id = d.id
-                        AND k.formed_by = 'prediction'
-                  )
+                  AND {CLUSTERING_COHORT}
                 ORDER BY d.created_at, d.id
                 LIMIT 1
                 """),

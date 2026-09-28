@@ -83,6 +83,8 @@ from fishsense_services_api.service_principal import ServicePrincipal
 from fishsense_services_api.species_store import REFUSAL_OUTLIVED_SQL
 
 __all__ = [
+    "CHECKERBOARD_CALIBRATION_COHORT",
+    "LASER_CALIBRATION_COHORT",
     "MIN_SLATE_LASER_POINTS",
     "BoardFrame",
     "CalibrationCandidate",
@@ -308,15 +310,41 @@ _REFUSAL_STANDS = f"""
 """
 
 
-async def _next(conn, tenant_id, where: str) -> CalibrationCandidate | None:
+def _cohort(where: str) -> str:
+    """A calibration cohort over dive `d`, but for the tenant and priority
+    terms the selector adds: no usable calibration of its own, `where`, and
+    no refusal standing."""
+    return f"""
+        NOT {_HAS_OWN_CALIBRATION}
+        AND {where}
+        AND NOT {_REFUSAL_STANDS}
+    """
+
+
+#: The stage-13 (slate) and checkerboard cohorts over dive `d`, but for the
+#: tenant and priority terms the selector adds. Named so
+#: `dive_pipeline_status` reads the same predicates (migration
+#: pipeline_status_01).
+LASER_CALIBRATION_COHORT = _cohort(
+    f"{_STAGE_13_CAN_CALIBRATE} AND {_HAS_CAMERA} AND {_TEMPLATE_CAN_SCALE}"
+)
+CHECKERBOARD_CALIBRATION_COHORT = _cohort(f"""
+    d.calibration_target_id IS NOT NULL
+    AND {_HAS_CAMERA}
+    AND NOT {_STAGE_13_CAN_CALIBRATE}
+    AND (SELECT count(*) FROM captures c
+         WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+           AND c.is_canonical AND {_LIVE_DOT}) >= {MIN_SLATE_LASER_POINTS}
+""")
+
+
+async def _next(conn, tenant_id, cohort: str) -> CalibrationCandidate | None:
     row = (
         await conn.execute(
             text(f"""
                 SELECT d.id, d.created_at, {_REENTRY} AS reentry FROM dives d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
-                  AND NOT {_HAS_OWN_CALIBRATION}
-                  AND {where}
-                  AND NOT {_REFUSAL_STANDS}
+                  AND {cohort}
                 ORDER BY reentry, d.created_at, d.id
                 LIMIT 1
                 """),
@@ -334,29 +362,14 @@ async def next_dive_for_laser_calibration(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> CalibrationCandidate | None:
     """The tenant's next dive in the stage-13 (slate) cohort."""
-    return await _next(
-        conn,
-        tenant_id,
-        f"{_STAGE_13_CAN_CALIBRATE} AND {_HAS_CAMERA} AND {_TEMPLATE_CAN_SCALE}",
-    )
+    return await _next(conn, tenant_id, LASER_CALIBRATION_COHORT)
 
 
 async def next_dive_for_checkerboard_calibration(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> CalibrationCandidate | None:
     """The tenant's next dive in the checkerboard cohort."""
-    return await _next(
-        conn,
-        tenant_id,
-        f"""
-        d.calibration_target_id IS NOT NULL
-        AND {_HAS_CAMERA}
-        AND NOT {_STAGE_13_CAN_CALIBRATE}
-        AND (SELECT count(*) FROM captures c
-             WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
-               AND c.is_canonical AND {_LIVE_DOT}) >= {MIN_SLATE_LASER_POINTS}
-        """,
-    )
+    return await _next(conn, tenant_id, CHECKERBOARD_CALIBRATION_COHORT)
 
 
 # --- inputs ---------------------------------------------------------------------
