@@ -37,7 +37,8 @@ v2 changes:
 * **predictions are appended** (migration 0011): v1's upsert on the image is
   an INSERT, and every reader judges the current one;
 * intrinsics are the dive's device's current camera calibration, and a
-  non-pinhole one is refused rather than rectified as a pinhole;
+  non-pinhole one is refused rather than rectified as a pinhole; stage 5.1's
+  and predict's cohorts leave out a dive the resolver would refuse;
 * **the processor's output is checked** (PLAN.md §9.11): predictions for
   another dive's captures, or naming another capture's laser label, are
   refused, and nothing is written;
@@ -104,6 +105,21 @@ _LIVE_LABEL = """EXISTS (
 _ANY_PREDICTION = """EXISTS (
     SELECT 1 FROM head_tail_predictions p
     WHERE p.tenant_id = c.tenant_id AND p.capture_id = c.id
+)"""
+
+#: The one camera model stage 5.1 rectifies (see `UnsupportedCameraModel`).
+_RENDERABLE_CAMERA_MODEL = "pinhole"
+
+#: Dive `d` can be rendered by stage 5.1: its device's current calibration is
+#: a pinhole. The resolver refuses everything else (no device, no calibration,
+#: an axial camera), so both cohorts carry this, or a refused dive is
+#: re-selected every hour and -- oldest first, across tenants -- blocks every
+#: dive behind it. v1 had no such term (and no axial camera); a dive with no
+#: intrinsics wedged its stage 5.1 the same way.
+_RENDERABLE = f"""EXISTS (
+    SELECT 1 FROM current_camera_calibrations cc
+    WHERE cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
+      AND cc.camera_model = '{_RENDERABLE_CAMERA_MODEL}'
 )"""
 
 
@@ -250,12 +266,14 @@ async def next_dive_for_headtail_preprocessing(
 ) -> HeadtailCandidate | None:
     """The tenant's oldest dive in the stage-5.1 cohort: a canonical capture
     with a valid laser and no live head/tail row in a project, or a canonical
-    capture whose live row is flagged for a redraw."""
+    capture whose live row is flagged for a redraw. Only a dive the resolver
+    can render (`_RENDERABLE`)."""
     row = (
         await conn.execute(
             text(f"""
                 SELECT d.id, d.created_at FROM dives d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
+                  AND {_RENDERABLE}
                   AND EXISTS (
                       SELECT 1 FROM captures c
                       WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
@@ -301,34 +319,36 @@ async def headtail_preprocess_inputs(
     Mirrors the cohort: canonical captures with a valid laser and no live row
     in a project, in laser-label order, then flagged frames (no laser gate) in
     capture order. Raises if the dive, its device or its calibration is
-    missing, as v1 did for the dive, its camera and its intrinsics.
+    missing, as v1 did for the dive, its camera and its intrinsics, or if the
+    calibration is not a pinhole; the cohorts' `_RENDERABLE` is the same test,
+    so a dive refused here is never selected.
     """
-    dive = (
+    calibration = (
         await conn.execute(
-            text("SELECT device_id FROM dives WHERE tenant_id = :t AND id = :d"),
+            text(f"""
+                SELECT d.device_id, cc.camera_model, cc.camera_matrix,
+                       cc.distortion_coefficients, {_RENDERABLE} AS renderable
+                FROM dives d
+                LEFT JOIN current_camera_calibrations cc
+                  ON cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
+                WHERE d.tenant_id = :t AND d.id = :d
+                """),
             {"t": tenant_id, "d": dive_id},
         )
     ).one_or_none()
-    if dive is None:
-        raise ValueError(f"dive {dive_id} not found")
-    if dive.device_id is None:
-        raise ValueError(f"dive {dive_id} has no device")
-    calibration = (
-        await conn.execute(
-            text("""
-                SELECT camera_model, camera_matrix, distortion_coefficients
-                FROM current_camera_calibrations
-                WHERE tenant_id = :t AND device_id = :device
-                """),
-            {"t": tenant_id, "device": dive.device_id},
-        )
-    ).one_or_none()
     if calibration is None:
-        raise ValueError(f"device {dive.device_id} has no camera calibration")
-    if calibration.camera_model != "pinhole":
+        raise ValueError(f"dive {dive_id} not found")
+    if not calibration.renderable:
+        if calibration.device_id is None:
+            raise ValueError(f"dive {dive_id} has no device")
+        if calibration.camera_model is None:
+            raise ValueError(
+                f"device {calibration.device_id} has no camera calibration"
+            )
         raise UnsupportedCameraModel(
-            f"device {dive.device_id}'s camera is {calibration.camera_model!r}; "
-            "stage 5.1 rectifies only a pinhole camera"
+            f"device {calibration.device_id}'s camera is "
+            f"{calibration.camera_model!r}; stage 5.1 rectifies only a "
+            f"{_RENDERABLE_CAMERA_MODEL} camera"
         )
 
     rows = (
@@ -463,7 +483,12 @@ async def next_dive_for_headtail_prediction(
     conn: AsyncConnection, tenant_id: uuid.UUID, *, predictor_version: int
 ) -> PredictionCandidate | None:
     """The tenant's next dive for the detector: never-predicted work first,
-    then the oldest. `predictor_version` is the stage's current version."""
+    then the oldest. `predictor_version` is the stage's current version.
+
+    Only a dive stage 5.1 can render (`_RENDERABLE`): predict reads its JPEG,
+    and a refused dive, never predicted, would otherwise head the cohort with
+    every image deferred, every hour.
+    """
     row = (
         await conn.execute(
             text(f"""
@@ -475,6 +500,7 @@ async def next_dive_for_headtail_prediction(
                 ) AS never_predicted
                 FROM dives d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
+                  AND {_RENDERABLE}
                   AND EXISTS (
                       SELECT 1 FROM captures c
                       WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
