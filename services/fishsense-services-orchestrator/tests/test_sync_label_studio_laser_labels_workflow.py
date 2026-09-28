@@ -52,7 +52,13 @@ def _stubs(projects, calls: List, *, fail=(), gate=None):
             raise ApplicationError("simulated failure", non_retryable=True)
         calls.append(f"sync:{project.ls_project_id}")
 
-    return [stub_projects, stub_sync]
+    # The post-sync validation pass (tests: test_laser_validation_workflows.py):
+    # no dive is complete here.
+    @activity.defn(name="laser_dives_with_complete_labeling")
+    async def stub_complete() -> list:
+        return []
+
+    return [stub_projects, stub_sync, stub_complete]
 
 
 async def _run(activities):

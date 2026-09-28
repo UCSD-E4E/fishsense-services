@@ -457,6 +457,43 @@ class LabelStudioClient:
             ),
         )
 
+    # -- annotations (the laser auto-accept apply) ---------------------------------
+
+    async def untouched_task_ids(self, project_id: int) -> set[int]:
+        """Tasks nobody has started: no annotation and no draft
+        (fishsense-lite@77e8f8e5 apply_laser_auto_accept_activity.py
+        `_untouched_task_ids`). An allow-list: a task the listing does not
+        mention stays unknown, and is never annotated blind."""
+        raw = await self._throttled(
+            lambda: self._listing(project_id, beat=heartbeat_again),
+            what=f"tasks.list({project_id})",
+        )
+        return {
+            task.id
+            for task in raw
+            if not getattr(task, "annotations", None)
+            and not getattr(task, "drafts", None)
+        }
+
+    async def create_annotation(
+        self,
+        task_id: int,
+        project_id: int,
+        result: Sequence[dict],
+        ground_truth: bool,
+    ) -> None:
+        """Annotate a task as the API caller (the bot account). `ground_truth`
+        is always sent: left unset, Label Studio defaults it to true."""
+        await self._sdk_call(
+            f"annotations.create(task={task_id})",
+            lambda: self._sdk.annotations.create(
+                id=task_id,
+                project=project_id,
+                result=list(result),
+                ground_truth=ground_truth,
+            ),
+        )
+
     async def s3_import_storages(self, project_id: int) -> list[tuple[Any, Any]]:
         """`(bucket, title)` of each S3 source storage on the project."""
         storages = await self._sdk_call(
