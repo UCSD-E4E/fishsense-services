@@ -433,6 +433,8 @@ class LaserActivities:
         )
         located = []
         for item in population.items:
+            # One HEAD per frame: a big dive's gate outlasts the heartbeat.
+            heartbeat_again()
             ref = await self._store.locate_processed_jpeg(
                 tenant,
                 LASER_JPEG_FOLDER,
