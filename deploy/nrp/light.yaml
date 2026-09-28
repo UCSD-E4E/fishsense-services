@@ -47,6 +47,8 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
+        # The image's `app` user, by number: kubelet cannot check a name.
+        runAsUser: 10001
         seccompProfile:
           type: RuntimeDefault
       containers:

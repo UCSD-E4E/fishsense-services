@@ -147,6 +147,17 @@ def test_the_ephemeral_limit_covers_every_volume():
         assert limit >= volumes, kind
 
 
+def test_the_pods_run_as_the_images_numeric_user():
+    """The image's USER is a name (`app`, uid 10001 -- see the Dockerfile).
+    With `runAsNonRoot` and no numeric `runAsUser`, kubelet cannot verify a
+    name is non-root and refuses to start the container
+    (CreateContainerConfigError): a pod that never goes Ready."""
+    for kind, manifest in LOADED.items():
+        security = manifest.body["spec"]["template"]["spec"]["securityContext"]
+        assert security["runAsNonRoot"] is True, kind
+        assert security["runAsUser"] == 10001, kind
+
+
 def test_the_selector_matches_the_pods():
     for manifest in LOADED.values():
         selector = manifest.body["spec"]["selector"]["matchLabels"]
