@@ -559,6 +559,46 @@ class LaserPrediction(_PredictionCore, Base):
     line_position_z: Mapped[float | None] = mapped_column(Double)
 
 
+class LaserPredictionVerdict(Base):
+    """The auto-accept gate's verdict on one laser prediction; append-only
+    (migration laser_01). The latest per prediction is its verdict; a new
+    prediction has none, so it reads as unjudged."""
+
+    __tablename__ = "laser_prediction_verdicts"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "prediction_id"],
+            ["laser_predictions.tenant_id", "laser_predictions.id"],
+        ),
+        CheckConstraint(
+            "gate_verdict IN ('auto_accepted', 'off_line', 'along_line_outlier', "
+            "'audit_sample', 'dive_ineligible', 'no_prediction')",
+            name="laser_prediction_verdicts_gate_verdict_check",
+        ),
+        CheckConstraint(
+            "NOT auto_accept OR gate_verdict = 'auto_accepted'",
+            name="laser_prediction_verdicts_accept_is_a_verdict_check",
+        ),
+        Index(
+            "laser_prediction_verdicts_prediction_idx",
+            "tenant_id",
+            "prediction_id",
+            "seq",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    prediction_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    auto_accept: Mapped[bool] = mapped_column(Boolean)
+    gate_verdict: Mapped[str] = mapped_column(Text)
+    line_offset_px: Mapped[float | None] = mapped_column(Double)
+    line_position_z: Mapped[float | None] = mapped_column(Double)
+    created_at: Mapped[datetime] = _created_at()
+
+
 class SlatePrediction(_PredictionCore, Base):
     __tablename__ = "slate_predictions"
 
