@@ -25,6 +25,11 @@ NAS = {
     "FISHSENSE_NAS_RAW_ROOT_PATH": "/fishsense_data/REEF/data",
     "FISHSENSE_LABEL_STUDIO_URL": "https://label-studio.example.test",
     "FISHSENSE_LABEL_STUDIO_API_KEY": "unused",
+    "FISHSENSE_OBJECT_STORE_ENDPOINT_URL": "https://s3.example.test",
+    "FISHSENSE_OBJECT_STORE_REGION": "garage",
+    "FISHSENSE_OBJECT_STORE_ACCESS_KEY_ID": "unused",
+    "FISHSENSE_OBJECT_STORE_SECRET_ACCESS_KEY": "unused",
+    "FISHSENSE_OBJECT_STORE_BUCKET": "fishsense-lite",
 }
 
 
