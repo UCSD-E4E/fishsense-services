@@ -84,6 +84,7 @@ __all__ = [
     "SlateObservationRow",
     "checkerboard_calibration_inputs",
     "clear_calibration_refusal",
+    "dive_for_number",
     "next_dive_for_checkerboard_calibration",
     "next_dive_for_laser_calibration",
     "record_laser_calibration",
@@ -506,6 +507,19 @@ async def checkerboard_calibration_inputs(
     )
 
 
+async def dive_for_number(
+    conn: AsyncConnection, tenant_id: uuid.UUID, number: int
+) -> uuid.UUID | None:
+    """The tenant's dive with this number (v1's id for a migrated dive): how
+    an operator names the dives of a lattice study (v1: `dive_ids`)."""
+    return (
+        await conn.execute(
+            text("SELECT id FROM dives WHERE tenant_id = :tenant AND number = :n"),
+            {"tenant": tenant_id, "n": number},
+        )
+    ).scalar_one_or_none()
+
+
 # --- writes ---------------------------------------------------------------------
 
 
@@ -606,6 +620,12 @@ class LaserCalibrationCatalog(ServicePrincipal):
     ) -> CheckerboardInputs:
         async with self._tenant(tenant_id) as conn:
             return await checkerboard_calibration_inputs(conn, tenant_id, dive_id)
+
+    async def dive_for_number(
+        self, tenant_id: uuid.UUID, number: int
+    ) -> uuid.UUID | None:
+        async with self._tenant(tenant_id) as conn:
+            return await dive_for_number(conn, tenant_id, number)
 
     async def record_laser_calibration(
         self, tenant_id: uuid.UUID, dive_id: uuid.UUID, record: CalibrationRecord

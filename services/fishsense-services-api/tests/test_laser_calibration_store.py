@@ -75,6 +75,7 @@ from fishsense_services_api.laser_calibration_store import (
     LaserCalibrationCatalog,
     checkerboard_calibration_inputs,
     clear_calibration_refusal,
+    dive_for_number,
     next_dive_for_checkerboard_calibration,
     next_dive_for_laser_calibration,
     record_laser_calibration,
@@ -1142,3 +1143,22 @@ async def test_the_catalog_works_within_a_served_tenant(
     await catalog.record_laser_calibration(lab, only, _accepted())
     assert await catalog.next_dive_for_laser_calibration(lab) is None
     assert await catalog.clear_calibration_refusal(lab, only) is False
+    assert await catalog.dive_for_number(lab, -1) is None
+
+
+# ---------- the lattice study names dives by number ----------
+
+
+async def test_a_dive_is_found_by_its_number_within_its_tenant(
+    owner_engine, app_engine
+):
+    """v1's study took dive ids ("dive_ids": [493, 495, ...]); v2's dives are
+    UUIDs, and a migrated dive's number is its v1 id, so the operator's list
+    still reads the same. Another tenant's dive of that number is not found."""
+    lab, reef = await tenant(owner_engine), await tenant(owner_engine, "reef")
+    mine = await dive(owner_engine, lab, v1_id=493)
+    await dive(owner_engine, reef, v1_id=495)
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        assert await dive_for_number(conn, lab, 493) == mine
+        assert await dive_for_number(conn, lab, 495) is None
