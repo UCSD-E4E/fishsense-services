@@ -224,3 +224,22 @@ def test_loading_refuses_anything_but_a_deployment(tmp_path):
     body["kind"] = "StatefulSet"
     with pytest.raises(ValueError, match="Deployment"):
         Manifest.load(_manifest_file(tmp_path, body))
+
+
+def test_a_wake_stamps_the_deployment_not_its_pods():
+    """On the Deployment's own metadata, so the sweeper can give a fresh wake
+    time to reach its queue; not on the pod template, where a changing value
+    would roll the pods on every wake."""
+    from datetime import datetime, timezone
+
+    from fishsense_services_orchestrator.nrp.manifests import WOKEN_AT, load_manifests
+
+    woken = datetime(2026, 9, 27, 18, 0, tzinfo=timezone.utc)
+    manifest = next(iter(load_manifests(MANIFEST_DIR).values()))
+
+    body = manifest.render(namespace="fishsense", image_tag="v1", replicas=1,
+                           woken_at=woken)  # fmt: skip
+
+    assert body["metadata"]["annotations"][WOKEN_AT] == woken.isoformat()
+    template = body["spec"]["template"]["metadata"].get("annotations") or {}
+    assert WOKEN_AT not in template

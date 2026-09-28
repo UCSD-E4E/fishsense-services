@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Final
 
@@ -57,6 +58,13 @@ def _has_tag(image: str) -> bool:
     return ":" in image.rsplit("/", 1)[-1] or "@" in image
 
 
+#: When the orchestrator last stood a Deployment up. A parent wakes a
+#: processor, then stages raw frames for a while before its child reaches the
+#: queue; a sweep in between saw a quiet queue and deleted the fresh
+#: Deployment, leaving the child on an unserved queue (v1 had the same race).
+WOKEN_AT: Final = "fishsense.e4e/woken-at"
+
+
 @dataclass(frozen=True)
 class Manifest:
     """One Deployment, as committed."""
@@ -82,12 +90,27 @@ class Manifest:
                 )
         return cls(body)
 
-    def render(self, *, namespace: str, image_tag: str, replicas: int) -> dict:
+    def render(
+        self,
+        *,
+        namespace: str,
+        image_tag: str,
+        replicas: int,
+        woken_at: datetime | None = None,
+    ) -> dict:
         """The body to apply: the file, in ``namespace``, at ``replicas``,
         every container on ``image_tag``. Pure, so the same inputs give the
-        same body, and re-applying it is a no-op that rolls no pods."""
+        same body, and re-applying it rolls no pods.
+
+        ``woken_at`` stamps the **Deployment's** metadata, so the sweeper can
+        give a fresh wake time to reach its queue (`WOKEN_AT`). Never the pod
+        template's, where a changing value would roll the pods on every wake.
+        """
         body = copy.deepcopy(self.body)
         body["metadata"]["namespace"] = namespace
+        if woken_at is not None:
+            annotations = body["metadata"].setdefault("annotations", {})
+            annotations[WOKEN_AT] = woken_at.isoformat()
         body["spec"]["replicas"] = replicas
         for container in _containers(body):
             container["image"] = f"{container['image']}:{image_tag}"

@@ -19,7 +19,13 @@ from temporalio.testing import ActivityEnvironment
 
 from fishsense_services_orchestrator.nrp.activities import NrpActivities
 
-from ._nrp import LIGHT, PER_IMAGE, FakeCluster, config
+from ._nrp import (
+    FakeCluster,
+    LIGHT,
+    PER_IMAGE,
+    config,
+    without_wake,
+)
 
 
 def _activities(cluster: FakeCluster, **overrides) -> NrpActivities:
@@ -108,5 +114,5 @@ async def test_overlapping_wakes_converge_rather_than_accumulate():
     await env.run(activities.ensure_light_processor_running)
 
     (_, first), (_, second) = cluster.applies
-    assert first == second
+    assert without_wake(first) == without_wake(second)
     assert cluster.replicas(LIGHT) == 2

@@ -48,6 +48,7 @@ from ._nrp import (
     FakeCluster,
     config,
     settings,
+    without_wake,
 )
 
 
@@ -142,7 +143,7 @@ def test_a_positive_target_applies_the_whole_manifest_server_side():
 
     ((name, body),) = cluster.applies
     assert name == LIGHT
-    assert body == cfg.manifest(LIGHT).render(
+    assert without_wake(body) == cfg.manifest(LIGHT).render(
         namespace="fishsense", image_tag="v1.2.3", replicas=2
     )
     field_manager, force, options = cluster.apply_options[0]

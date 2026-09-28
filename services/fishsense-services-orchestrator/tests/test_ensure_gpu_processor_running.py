@@ -32,7 +32,14 @@ from fishsense_services_orchestrator.nrp.gpu_fallback import (
     MODE_UNAVAILABLE,
 )
 
-from ._nrp import FALLBACK, GPU, STATE, FakeCluster, config
+from ._nrp import (
+    FALLBACK,
+    FakeCluster,
+    GPU,
+    STATE,
+    config,
+    without_wake,
+)
 
 
 def _activities(cluster: FakeCluster, **gpu) -> NrpActivities:
@@ -207,8 +214,8 @@ async def test_never_writes_the_state_into_a_deployment():
     assert all(name == STATE for name, _ in cluster.config_map_writes)
     gpu_bodies = [body for name, body in cluster.applies if name == GPU]
     assert len(gpu_bodies) >= 2
-    assert all(body == gpu_bodies[0] for body in gpu_bodies)
+    assert all(without_wake(body) == without_wake(gpu_bodies[0]) for body in gpu_bodies)
     rendered = activities.config.manifest(GPU).render(
         namespace=cluster.namespace, image_tag="v1.2.3", replicas=1
     )
-    assert gpu_bodies[0] == rendered
+    assert without_wake(gpu_bodies[0]) == rendered

@@ -165,7 +165,9 @@ class FakeCluster:
         if name not in self.deployments:
             raise _not_found()
         ready = self.ready.get(name, 0)
+        metadata = self.deployments[name].get("metadata", {})
         return SimpleNamespace(
+            metadata=SimpleNamespace(annotations=metadata.get("annotations") or None),
             spec=SimpleNamespace(replicas=self.deployments[name]["spec"]["replicas"]),
             # k8s omits readyReplicas rather than sending 0.
             status=SimpleNamespace(ready_replicas=ready or None),
@@ -187,3 +189,18 @@ class FakeCluster:
         self.deletes.append(name)
         del self.deployments[name]
         self.ready.pop(name, None)
+
+
+def without_wake(body: dict) -> dict:
+    """A Deployment body less its `WOKEN_AT` stamp, which records *when* it
+    was applied and so differs on every apply by design. What the stamp must
+    and mustn't touch is pinned in test_nrp_manifests.py."""
+    from fishsense_services_orchestrator.nrp.manifests import WOKEN_AT
+
+    body = copy.deepcopy(body)
+    annotations = body.get("metadata", {}).get("annotations")
+    if annotations is not None:
+        annotations.pop(WOKEN_AT, None)
+        if not annotations:
+            del body["metadata"]["annotations"]
+    return body

@@ -19,6 +19,7 @@ ordinary idle state: nothing to delete, and not reported as a tear-down.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from temporalio import activity
@@ -34,6 +35,7 @@ from fishsense_services_contracts import (
 from fishsense_services_orchestrator.nrp import activities as sut
 from fishsense_services_orchestrator.nrp.activities import NrpActivities
 from fishsense_services_orchestrator.nrp.gpu_fallback import FAILURES_KEY
+from fishsense_services_orchestrator.nrp.manifests import WOKEN_AT
 from fishsense_services_orchestrator.nrp.workflow import (
     TearDownIdleProcessorsWorkflow,
 )
@@ -238,3 +240,39 @@ async def test_workflow_returns_activity_result(tore_down: bool):
 
     assert result is tore_down
     assert calls == [True]
+
+
+# -- a wake is given time to reach its queue -----------------------------------------
+
+
+async def test_a_processor_woken_moments_ago_is_left_while_its_parent_stages():
+    """The race v1 had too: a parent wakes a processor, then stages raw frames
+    for a while before its child is on the queue. A sweep in between saw a
+    quiet queue and deleted the new Deployment, and the child then waited on
+    an unserved queue. A wake stamps the Deployment, and the sweeper leaves a
+    recent one alone."""
+    cluster = FakeCluster()
+    activities = NrpActivities(
+        config=config(), kubernetes=cluster.kubernetes, task_queue_busy=_busy(set())
+    )
+    await ActivityEnvironment().run(activities.ensure_light_processor_running)
+
+    await ActivityEnvironment().run(activities.tear_down_idle_processors)
+
+    assert cluster.exists(LIGHT)
+
+
+async def test_a_wake_older_than_the_grace_is_torn_down():
+    cluster = FakeCluster()
+    long_ago = datetime.now(timezone.utc) - timedelta(
+        minutes=config().wake_grace_minutes + 1
+    )
+    cluster.deployments[LIGHT] = {
+        "metadata": {"name": LIGHT, "annotations": {WOKEN_AT: long_ago.isoformat()}},
+        "spec": {"replicas": 1},
+    }
+    cluster.ready[LIGHT] = 1
+
+    await _sweep(cluster, busy=set())
+
+    assert not cluster.exists(LIGHT)

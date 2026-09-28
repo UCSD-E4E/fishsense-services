@@ -51,6 +51,7 @@ from fishsense_services_orchestrator.nrp.scaling import (
     read_gpu_state,
     readiness,
     set_deployment_replicas,
+    woken_within,
     write_gpu_state,
 )
 
@@ -324,6 +325,13 @@ class NrpActivities:
             apps = self._apis().apps
             outcomes = []
             for name, task_queue in targets:
+                # Before idleness: a fresh wake's child may not be on the
+                # queue yet, and its pods may not be Ready (`WOKEN_AT`).
+                if woken_within(
+                    apps, config.namespace, name, config.wake_grace_minutes
+                ):
+                    outcomes.append((name, "just-woken"))
+                    continue
                 if task_queue in busy and not deployment_is_wedged(
                     apps, config.namespace, name
                 ):

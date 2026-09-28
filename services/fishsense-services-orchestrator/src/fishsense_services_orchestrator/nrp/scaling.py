@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import ssl
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Final, Mapping
 
@@ -46,7 +46,11 @@ from fishsense_services_contracts import (
 )
 from fishsense_services_orchestrator.nrp import manifests as kinds
 from fishsense_services_orchestrator.nrp.gpu_fallback import FallbackPolicy, GpuState
-from fishsense_services_orchestrator.nrp.manifests import Manifest, load_manifests
+from fishsense_services_orchestrator.nrp.manifests import (
+    Manifest,
+    WOKEN_AT,
+    load_manifests,
+)
 
 # Upper bound on any role's replica count. >1 is only ever a deliberate
 # operator choice (a giant single dive, or resilience on a preemption-prone
@@ -87,6 +91,10 @@ class NrpSettings(BaseSettings):
     active_replicas: int = 1
     light_active_replicas: int = 1
     idle_cooldown_minutes: int = 15
+    #: How long a fresh wake is left alone by the sweeper, whatever its queue
+    #: says: a parent stages raw frames (v1: up to an hour) before its child
+    #: reaches the queue.
+    wake_grace_minutes: int = 90
     gpu_active_replicas: int = 1
     gpu_fallback_replicas: int = 1
     gpu_start_timeout_seconds: int = 600
@@ -140,6 +148,7 @@ class ScalingConfig:
     per_image_deployment: str
     active_replicas: int
     idle_cooldown_minutes: int
+    wake_grace_minutes: int = 90
     # Grouped rather than flattened: one subsystem each, which a caller that
     # only wants the per-image worker never touches.
     gpu: GpuScalingConfig = field(default_factory=GpuScalingConfig)
@@ -234,6 +243,7 @@ def resolve_scaling_config(settings: NrpSettings | None = None) -> ScalingConfig
             settings.active_replicas, MIN_ACTIVE_REPLICAS, MAX_ACTIVE_REPLICAS
         ),
         idle_cooldown_minutes=max(0, int(settings.idle_cooldown_minutes)),
+        wake_grace_minutes=max(0, int(settings.wake_grace_minutes)),
         gpu=GpuScalingConfig(
             deployment_name=by_kind[kinds.GPU].name,
             fallback_deployment_name=by_kind[kinds.GPU_CPU_FALLBACK].name,
@@ -444,6 +454,27 @@ def apply_deployment(apps, body: dict) -> None:
     )
 
 
+def woken_within(apps, namespace: str, name: str, minutes: int) -> bool:
+    """Whether the orchestrator stood Deployment ``name`` up within the last
+    ``minutes`` (its `WOKEN_AT` stamp). False when it doesn't exist, isn't
+    stamped, or the stamp is unreadable."""
+    try:
+        deployment = apps.read_namespaced_deployment(name=name, namespace=namespace)
+    except Exception as exc:  # pylint: disable=broad-except
+        if _is_not_found(exc):
+            return False
+        raise
+    annotations = getattr(getattr(deployment, "metadata", None), "annotations", None)
+    stamp = (annotations or {}).get(WOKEN_AT)
+    try:
+        woken = datetime.fromisoformat(stamp) if stamp else None
+    except ValueError:
+        return False
+    return woken is not None and (
+        datetime.now(timezone.utc) - woken < timedelta(minutes=minutes)
+    )
+
+
 def delete_deployment(apps, namespace: str, name: str) -> bool:
     """Delete the Deployment and its pods. False when it was already gone."""
     try:
@@ -475,6 +506,7 @@ def set_deployment_replicas(
                 namespace=config.namespace,
                 image_tag=config.image_tag,
                 replicas=replicas,
+                woken_at=datetime.now(timezone.utc),
             ),
         )
     else:
