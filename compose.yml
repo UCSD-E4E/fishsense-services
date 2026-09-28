@@ -95,12 +95,16 @@ services:
         condition: service_healthy
 
   # The processor's light role (stage 1 so far). No database or NAS access:
-  # everything it needs arrives in the workflow payload.
+  # everything it needs arrives in the workflow payload. On NRP each role is
+  # its own Deployment, stood up and torn down by the orchestrator; here it
+  # simply runs. A stage on another role adds a service like this one, with
+  # its own FISHSENSE_PROCESSOR_ROLE.
   processor:
     build:
       context: .
       target: processor
     environment:
+      FISHSENSE_PROCESSOR_ROLE: light
       FISHSENSE_TEMPORAL_ADDRESS: temporal:7233
       FISHSENSE_TEMPORAL_NAMESPACE: fishsense
     depends_on:
