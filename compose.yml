@@ -88,6 +88,14 @@ services:
       FISHSENSE_NAS_RAW_ROOT_PATH: ${FISHSENSE_NAS_RAW_ROOT_PATH:-/fishsense_data/REEF/data}
       FISHSENSE_LABEL_STUDIO_URL: ${FISHSENSE_LABEL_STUDIO_URL:-https://label-studio.example.invalid}
       FISHSENSE_LABEL_STUDIO_API_KEY: ${FISHSENSE_LABEL_STUDIO_API_KEY:-}
+      # Garage (PLAN.md §9.11). Placeholders until set: the worker starts, and only
+      # staging and JPEG checks fail. Production also sets LABELS_BUCKET.
+      FISHSENSE_OBJECT_STORE_ENDPOINT_URL: ${FISHSENSE_OBJECT_STORE_ENDPOINT_URL:-http://garage.example.invalid:3900}
+      FISHSENSE_OBJECT_STORE_REGION: ${FISHSENSE_OBJECT_STORE_REGION:-garage}
+      FISHSENSE_OBJECT_STORE_ACCESS_KEY_ID: ${FISHSENSE_OBJECT_STORE_ACCESS_KEY_ID:-unset}
+      FISHSENSE_OBJECT_STORE_SECRET_ACCESS_KEY: ${FISHSENSE_OBJECT_STORE_SECRET_ACCESS_KEY:-unset}
+      FISHSENSE_OBJECT_STORE_BUCKET: ${FISHSENSE_OBJECT_STORE_BUCKET:-fishsense-lite}
+      FISHSENSE_OBJECT_STORE_LEGACY_LABELS_PREFIX: ${FISHSENSE_OBJECT_STORE_LEGACY_LABELS_PREFIX:-fishsense-lite}
       # No FISHSENSE_NRP_KUBECONFIG_PATH: standing the processor up on NRP is
       # off, and its wakes are no-ops -- the processor below is always up.
     depends_on:
