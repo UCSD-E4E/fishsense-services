@@ -33,6 +33,7 @@ Names and reasons are v1's. v2 changes, each pinned by a test that says why:
 
 import uuid
 
+import pytest
 from sqlalchemy import text
 
 from _slate_calibration_seed import (
@@ -77,9 +78,21 @@ async def _next(app_engine, lab):
     return None if candidate is None else candidate.dive_id
 
 
-async def _slate_dive(owner_engine, lab, **kwargs):
+#: `_slate_dive`'s default: a device of its own with a camera calibration.
+_A_CAMERA = object()
+
+
+async def _slate_dive(owner_engine, lab, *, device=_A_CAMERA, template=None, **kwargs):
+    """A dive with a slate template (built from `template`'s overrides) whose
+    device has a camera calibration, unless `device` says otherwise."""
+    if device is _A_CAMERA:
+        device, _ = await device_with_camera(owner_engine, lab)
     return await dive(
-        owner_engine, lab, slate=await slate_template(owner_engine), **kwargs
+        owner_engine,
+        lab,
+        slate=await slate_template(owner_engine, **(template or {})),
+        device=device,
+        **kwargs,
     )
 
 
@@ -223,6 +236,55 @@ async def test_another_tenants_dive_is_never_offered(owner_engine, app_engine):
     await species(owner_engine, reef, await capture(owner_engine, reef, theirs))
 
     assert await _next(app_engine, lab) is None
+
+
+_UNRESOLVABLE = [
+    pytest.param({"device": None}, id="no camera calibration"),
+    pytest.param({"template": {"dpi": None}}, id="no dpi"),
+    pytest.param({"template": {"reference_points": []}}, id="no reference points"),
+    pytest.param({"template": {"source_path": None}}, id="no NAS path"),
+]
+
+
+@pytest.mark.parametrize("unresolvable", _UNRESOLVABLE)
+async def test_a_dive_stage_9_cannot_resolve_is_not_offered(
+    owner_engine, app_engine, unresolvable
+):
+    """v2 fix. The resolver refuses these (and `stage_slate_pdf` a template
+    with no NAS path) non-retryably, with nothing written, so a cohort that
+    offered the dive would hand it back every hour, ahead of every newer
+    one. Each is fixed in reference data, not by a rerun: the dive leaves the
+    cohort until then, and comes back by itself."""
+    lab = await tenant(owner_engine)
+    only = await _slate_dive(owner_engine, lab, **unresolvable)
+    await species(owner_engine, lab, await capture(owner_engine, lab, only))
+
+    assert await _next(app_engine, lab) is None
+
+
+@pytest.mark.parametrize("unresolvable", _UNRESOLVABLE)
+async def test_an_unresolvable_dive_does_not_hold_up_another_tenants(
+    owner_engine, app_engine, seed_memberships, unresolvable
+):
+    """The orchestrator takes the oldest candidate across every tenant it
+    serves; an older dive left in the cohort that can never resolve would be
+    that candidate every hour, and no other tenant's dive would be drawn."""
+    tenants = await seed_memberships(
+        {ORCHESTRATOR: {"lab": "member", "reef": "member"}}
+    )
+    lab, reef = tenants["lab"], tenants["reef"]
+    older = await _slate_dive(owner_engine, lab, created_at=T0, **unresolvable)
+    await species(owner_engine, lab, await capture(owner_engine, lab, older))
+    younger = await _slate_dive(owner_engine, reef, created_at=later(1))
+    await species(owner_engine, reef, await capture(owner_engine, reef, younger))
+    catalog = SlateCatalog(app_engine, sub=ORCHESTRATOR)
+
+    offered = [
+        candidate.dive_id
+        for tenant_id in await catalog.member_tenants()
+        if (candidate := await catalog.next_dive_for_slate_preprocessing(tenant_id))
+    ]
+    assert offered == [younger]
 
 
 # ---------- stage 9: the reprocess flag is the second way in ----------

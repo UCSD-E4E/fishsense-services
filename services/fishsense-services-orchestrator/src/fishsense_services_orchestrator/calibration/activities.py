@@ -20,7 +20,10 @@ v2 changes:
 * every resolver returns the provenance the result is recorded with, and
   the result is appended by `record_laser_calibration` (v1 upserted the
   extrinsics, or set the dive's refusal columns, from the data-worker);
-* a dive that cannot be resolved is a final refusal;
+* a dive that cannot be resolved is a final refusal. The cohorts no longer
+  offer the ones knowable from the database (no camera calibration, a
+  template with no dpi or reference points), so an old one cannot be the
+  oldest candidate every hour; what is left is a race with an edit;
 * the lattice study resolves its tenant by slug and each dive by number.
 """
 

@@ -38,6 +38,13 @@ v2 changes:
 
 * per tenant; candidates oldest first (`created_at`), re-entry last, so the
   orchestrator can take the oldest across the tenants it serves;
+* **a cohort offers only a dive its resolver can resolve**: the dive's
+  device has a camera calibration, and (stage 13) its template has a dpi and
+  reference points. v1 offered them and its resolver raised, every hour,
+  ahead of every younger dive; across tenants that wedges every tenant. None
+  of these is fixed by a refit, so no refusal is recorded: the dive leaves
+  the cohort until the reference data is fixed, then comes back by itself.
+  The stage-13/board partition is v1's and ignores them;
 * **a refusal is a row**: the dive's current `laser_calibrations` row is
   `refused`, so it stands only while nothing newer was appended. v1's
   `_clear_refusal` ran on a successful fit (here an accepted row simply
@@ -234,6 +241,26 @@ _EFFECTIVE_TARGET = """
      WHERE t.id = d.calibration_target_id)
 """
 
+#: The dive's device has a current camera calibration: without one both
+#: resolvers refuse (`_require_camera`).
+_HAS_CAMERA = """
+    EXISTS (
+        SELECT 1 FROM current_camera_calibrations cc
+        WHERE cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
+    )
+"""
+
+#: The dive's slate template can scale a fit: a dpi and reference points,
+#: which `slate_calibration_inputs` refuses without.
+_TEMPLATE_CAN_SCALE = """
+    EXISTS (
+        SELECT 1 FROM slate_templates st
+        WHERE st.id = d.slate_template_id AND st.dpi IS NOT NULL
+          AND jsonb_typeof(st.reference_points) = 'array'
+          AND st.reference_points <> '[]'::jsonb
+    )
+"""
+
 #: A label on the dive (any state) newer than refusal `r`'s inputs.
 _NEWER_LABEL = """
     EXISTS (
@@ -301,7 +328,11 @@ async def next_dive_for_laser_calibration(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> CalibrationCandidate | None:
     """The tenant's next dive in the stage-13 (slate) cohort."""
-    return await _next(conn, tenant_id, _STAGE_13_CAN_CALIBRATE)
+    return await _next(
+        conn,
+        tenant_id,
+        f"{_STAGE_13_CAN_CALIBRATE} AND {_HAS_CAMERA} AND {_TEMPLATE_CAN_SCALE}",
+    )
 
 
 async def next_dive_for_checkerboard_calibration(
@@ -313,6 +344,7 @@ async def next_dive_for_checkerboard_calibration(
         tenant_id,
         f"""
         d.calibration_target_id IS NOT NULL
+        AND {_HAS_CAMERA}
         AND NOT {_STAGE_13_CAN_CALIBRATE}
         AND (SELECT count(*) FROM captures c
              WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
