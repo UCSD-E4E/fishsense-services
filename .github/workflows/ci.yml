@@ -40,11 +40,14 @@ jobs:
         working-directory: services/fishsense-services-orchestrator
         env:
           DOCKER_HOST: unix:///nonexistent/docker.sock
-        run: uv run pytest -q
+        run: uv run pytest -q -m "not integration"
       # Tests run against real Postgres in Docker (testcontainers); the
       # hosted runner provides the daemon.
       - name: Integration tests
         working-directory: services/fishsense-services-api
+        run: uv run pytest -q -m integration
+      - name: Orchestrator integration tests
+        working-directory: services/fishsense-services-orchestrator
         run: uv run pytest -q -m integration
 
   image:
