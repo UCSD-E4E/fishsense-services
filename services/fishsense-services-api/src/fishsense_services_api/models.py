@@ -349,6 +349,10 @@ class LaserCalibration(Base):
             "outcome IN ('accepted', 'refused')",
             name="laser_calibrations_outcome_check",
         ),
+        CheckConstraint(
+            "slate_template_id IS NULL OR calibration_target_id IS NULL",
+            name="laser_calibrations_one_target_check",
+        ),
     )
 
     id: Mapped[uuid.UUID] = _id()
@@ -372,6 +376,40 @@ class LaserCalibration(Base):
     observation_count: Mapped[int | None] = mapped_column(Integer)
     residual_m: Mapped[float | None] = mapped_column(Double)
     core_version: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+    #: The target the fit (or refusal) used; at most one (slate_calibration_01).
+    slate_template_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("slate_templates.id")
+    )
+    calibration_target_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("calibration_targets.id")
+    )
+
+
+class LaserCalibrationRefusalClear(Base):
+    """An operator's clear of a refusal, appended (slate_calibration_01): v1
+    nulled the dive's refusal columns; v2's refusals are append-only rows."""
+
+    __tablename__ = "laser_calibration_refusal_clears"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        # Named: the default names pass Postgres's 63-character limit.
+        UniqueConstraint(
+            "tenant_id",
+            "laser_calibration_id",
+            name="laser_calibration_refusal_clears_refusal_key",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "laser_calibration_id"],
+            ["laser_calibrations.tenant_id", "laser_calibrations.id"],
+            name="laser_calibration_refusal_clears_refusal_fkey",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    laser_calibration_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    reason: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
 
 
