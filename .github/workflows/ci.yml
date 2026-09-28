@@ -54,7 +54,9 @@ jobs:
           sudo apt-get install -y postgresql-common
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install -y postgresql-client-17
-          test "$(pg_dump --version | grep -oE '[0-9]+' | head -n1)" -ge 17
+          # pg_wrapper would pick the runner's own cluster's (older) client.
+          echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
+          test "$(/usr/lib/postgresql/17/bin/pg_dump --version | grep -oE '[0-9]+' | head -n1)" -ge 17
       - name: Orchestrator integration tests
         working-directory: services/fishsense-services-orchestrator
         run: uv run pytest -q -m integration
