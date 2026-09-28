@@ -46,6 +46,15 @@ jobs:
       - name: Integration tests
         working-directory: services/fishsense-services-api
         run: uv run pytest -q -m integration
+      # The backup tests run pg_dump against Postgres 17, and pg_dump refuses a
+      # newer server. The runner ships an older client; the backup image
+      # insists on >= 17 too (Dockerfile).
+      - name: pg_dump 17
+        run: |
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-17
+          test "$(pg_dump --version | grep -oE '[0-9]+' | head -n1)" -ge 17
       - name: Orchestrator integration tests
         working-directory: services/fishsense-services-orchestrator
         run: uv run pytest -q -m integration
