@@ -203,6 +203,9 @@ class LaserActivities:
     # -- stage 0.1 ---------------------------------------------------------------
 
     async def _camera(self, target: LaserTarget):
+        # The cohorts select only dives with a camera (laser_store
+        # `_HAS_CAMERA`), so this fails only on a calibration removed between
+        # the select and the resolve: a one-off, not a dive re-selected hourly.
         camera = await self._catalog.dive_camera(target.tenant_id, target.dive_id)
         if camera is None:
             raise ApplicationError(

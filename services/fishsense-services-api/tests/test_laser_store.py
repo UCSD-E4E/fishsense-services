@@ -80,6 +80,10 @@ D = [-0.05, 0.01, 0.0, 0.0, 0.0]
 
 # -- seeding (as the owner, like an admin or migrate-v1) -------------------------
 
+#: `Seed.dive`'s default device: the tenant's one device with a camera
+#: calibration.
+_CALIBRATED = object()
+
 
 class Seed:
     """A tenant's rows, written as the schema owner."""
@@ -88,13 +92,21 @@ class Seed:
         self.owner = owner_engine
         self.tenant = tenant
         self._path = 0
+        self._device = None
 
     async def _one(self, sql, **params):
         async with self.owner.begin() as conn:
             result = await conn.execute(text(sql), params)
             return result.scalar() if result.returns_rows else None
 
-    async def dive(self, *, priority="high", number=None, created_at=None, device=None):
+    async def dive(self, *, priority="high", number=None, created_at=None,
+                   device=_CALIBRATED):  # fmt: skip
+        """A dive; by default on the tenant's one calibrated device, as the
+        stage-0.1 and prediction cohorts require. `device=None` has none."""
+        if device is _CALIBRATED:
+            if self._device is None:
+                self._device = await self.camera()
+            device = self._device
         self._path += 1
         return await self._one(
             "INSERT INTO dives (tenant_id, source_path, dived_at, priority, number, "
@@ -348,8 +360,67 @@ async def test_the_dive_camera_is_its_devices_current_calibration(lab, app_engin
     assert camera.camera_matrix == K
     assert camera.distortion_coefficients == D
     assert (
-        await _as_tenant(app_engine, lab.tenant, dive_camera, await lab.dive()) is None
+        await _as_tenant(
+            app_engine, lab.tenant, dive_camera, await lab.dive(device=None)
+        )
+        is None
     )
+
+
+@pytest.mark.parametrize(
+    "selector", [next_dive_for_laser_preprocessing, next_dive_for_laser_prediction]
+)
+async def test_a_dive_the_resolver_cannot_rectify_is_never_selected(
+    lab, app_engine, selector
+):
+    """v2: v1's cohorts did not ask for a camera, and its resolvers failed a
+    dive without one on every hourly run. With one selector across every
+    tenant, that dive would be re-selected forever and starve them all, so
+    the cohort asks for what the resolver needs: a current camera calibration
+    for the dive's device (no device, or a device with none, is out)."""
+    uncalibrated = await lab.dive(device=await lab._one(
+        "INSERT INTO devices (tenant_id, kind, serial) VALUES (:t, 'lite', :s) "
+        "RETURNING id", t=lab.tenant, s=uuid.uuid4().hex,
+    ))  # fmt: skip
+    deviceless = await lab.dive(device=None)
+    for dive in (uncalibrated, deviceless):
+        await lab.capture(dive)
+
+    assert await _next(app_engine, lab, selector) is None
+
+    calibrated = await lab.dive()
+    await lab.capture(calibrated)
+
+    assert await _next(app_engine, lab, selector) == calibrated
+
+
+@pytest.mark.parametrize(
+    "selector", ["next_dive_for_laser_preprocessing", "next_dive_for_laser_prediction"]
+)
+async def test_an_older_uncalibrated_dive_does_not_block_another_tenant(
+    owner_engine, app_engine, seed_memberships, selector
+):
+    """The orchestrator takes the single oldest candidate across its tenants
+    (the laser activities' `_oldest`), so an older dive of one tenant that the
+    resolver cannot serve must not be a candidate, or the other tenant's
+    younger dive never runs."""
+    tenants = await seed_memberships(
+        {ORCHESTRATOR: {"lab": "service", "reef": "service"}}
+    )
+    lab, reef = Seed(owner_engine, tenants["lab"]), Seed(owner_engine, tenants["reef"])
+    older = await lab.dive(device=None, created_at=T0)
+    await lab.capture(older)
+    younger = await reef.dive(created_at=T0 + timedelta(days=1))
+    await reef.capture(younger)
+    catalog = LaserCatalog(app_engine, sub=ORCHESTRATOR)
+
+    found = [
+        (candidate.created_at, candidate.number, candidate.dive_id)
+        for tenant in await catalog.member_tenants()
+        if (candidate := await getattr(catalog, selector)(tenant)) is not None
+    ]
+
+    assert min(found)[2] == younger
 
 
 # -- needs_reprocess -----------------------------------------------------------

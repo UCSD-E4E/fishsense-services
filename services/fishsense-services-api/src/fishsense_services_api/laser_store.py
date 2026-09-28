@@ -20,6 +20,10 @@ v2 changes:
 * per tenant; each cohort orders by (created_at, number), so the orchestrator
   can take the oldest candidate across tenants and a migrated dive -- whose
   rows share one created_at -- keeps v1's lowest-id order;
+* **the stage-0.1 and prediction cohorts ask for a camera**: a dive whose
+  device has no current camera calibration is not a candidate. v1's cohorts
+  did not ask, and its resolvers failed such a dive on every hourly run; with
+  one oldest candidate across every tenant, that dive would starve them all;
 * predictions are appended (0011), and "the dive's prediction for a capture" is
   its latest (`current_*`). **The gate's verdict is appended to
   laser_prediction_verdicts** (migration 0021) rather than written over the
@@ -251,6 +255,15 @@ _CANONICAL = "c.tenant_id = d.tenant_id AND c.dive_id = d.id AND c.is_canonical"
 
 _ORDER = "ORDER BY d.created_at, d.number"
 
+#: Dive `d` can be rectified: its device has a current camera calibration,
+#: which is what the preprocess and predict resolvers need (`dive_camera`).
+#: v2 only; without it the dive is re-selected, and fails, every hour ahead of
+#: every other tenant's.
+_HAS_CAMERA = """EXISTS (
+    SELECT 1 FROM current_camera_calibrations cc
+    WHERE cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
+)"""
+
 
 async def _lock_dive(conn: AsyncConnection, what: str, dive_id: uuid.UUID) -> None:
     """Serialise writes of one kind to one dive."""
@@ -323,11 +336,12 @@ async def next_dive_for_laser_preprocessing(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> LaserCandidate | None:
     """Stage 0.1: the tenant's oldest high-priority dive with a canonical
-    capture that needs its laser JPEG."""
+    capture that needs its laser JPEG, and a camera to rectify it with."""
     found = await _candidates(
         conn,
         tenant_id,
-        f"EXISTS (SELECT 1 FROM captures c WHERE {_CANONICAL} AND {_NEEDS_LASER_JPEG})",
+        f"EXISTS (SELECT 1 FROM captures c WHERE {_CANONICAL} AND {_NEEDS_LASER_JPEG})"
+        f" AND {_HAS_CAMERA}",
         limit=True,
     )
     return found[0] if found else None
@@ -449,7 +463,8 @@ async def next_dive_for_laser_prediction(
 ) -> LaserCandidate | None:
     """v1's two ways in: a canonical capture with no prediction and no live
     completed label; or, on a dive still being labeled, one whose current
-    prediction is from another stage version (NULL counts as stale)."""
+    prediction is from another stage version (NULL counts as stale). v2: and
+    a camera to rectify it with."""
     unpredicted = f"""EXISTS (
         SELECT 1 FROM captures c WHERE {_CANONICAL}
           AND NOT EXISTS (
@@ -476,7 +491,7 @@ async def next_dive_for_laser_prediction(
     found = await _candidates(
         conn,
         tenant_id,
-        f"{unpredicted} OR ({being_labeled} AND {stale})",
+        f"({unpredicted} OR ({being_labeled} AND {stale})) AND {_HAS_CAMERA}",
         limit=True,
     )
     return found[0] if found else None
