@@ -26,7 +26,8 @@ v2 changes, each pinned here:
 * **measurements are append-only**, so v1's stale-binding DELETE is the
   `current_measurements` view's job: a server measurement bound to a fish the
   capture's subject no longer names is history, not current, and the capture
-  is work again. The old row stays;
+  is work again. The old row stays. As in v1, only on a high-priority dive:
+  v1's DELETE ran in stage 14, which visits no other;
 * **tried, made no progress** (PLAN.md §9.16): a zero or non-finite length, or
   a real-fish leaf no name can be read from, is a refusal of exactly those
   inputs; the capture drops out until one of them changes. v1 dropped them
@@ -45,6 +46,7 @@ from sqlalchemy import text
 
 from depth_measure_seed import (  # noqa: F401  (forget_identities: a fixture)
     REAL_FISH,
+    T0,
     forget_identities,
     calibrate,
     calibrated_dive,
@@ -825,6 +827,33 @@ async def test_stale_model_binding_is_invalidated_and_remeasured(
     assert kept == 1, "append-only: the old binding stays as history"
 
 
+async def test_a_stale_binding_on_a_dive_stage_14_does_not_run_stays_current(
+    owner_engine, app_engine
+):
+    """v1 deleted a stale binding only when stage 14 re-measured the frame,
+    and stage 14 runs on high-priority dives alone: on a low-priority dive
+    v1 kept showing the measurement, and so does v2. Hiding it there would
+    count the frame as unmeasured forever, since nothing would re-measure it.
+    Once the dive is high priority, v1's rule applies and the frame is
+    work again."""
+    lab = await tenant(owner_engine)
+    dive_id, calibration = await calibrated_dive(owner_engine, lab, priority="low")
+    snook = await fish(owner_engine, lab, model="Snook")
+    image = await measurable_capture(
+        owner_engine, lab, dive_id, "Fish Model, Grouper", in_cluster=False
+    )
+    await measurement(owner_engine, lab, image, snook, calibration, length_m=0.44)
+
+    assert [row[0] for row in await _current(owner_engine, image)] == [snook]
+
+    await exec_(
+        owner_engine, "UPDATE dives SET priority = 'high' WHERE id = :d", d=dive_id
+    )
+
+    assert await _current(owner_engine, image) == []
+    assert await _next(app_engine, lab) == dive_id
+
+
 async def test_correct_model_binding_is_left_alone(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     dive_id, calibration = await calibrated_dive(owner_engine, lab)
@@ -1101,6 +1130,37 @@ async def test_a_capture_of_another_dive_is_not_written(owner_engine, app_engine
 
 
 # -- tenancy -----------------------------------------------------------------------
+
+
+async def _tied_dives(owner_engine, tenant_id):
+    """Two dives created in the same instant -- every migrated dive is, since
+    v1 recorded no creation time -- numbered against their UUID order.
+    Returns (lower-numbered, higher-numbered)."""
+    first, _ = await calibrated_dive(owner_engine, tenant_id, created_at=T0)
+    second, _ = await calibrated_dive(owner_engine, tenant_id, created_at=T0)
+    low_uuid, high_uuid = sorted((first, second))
+    for dive_id, number in ((high_uuid, 900_001), (low_uuid, 900_002)):
+        await exec_(
+            owner_engine,
+            "UPDATE dives SET number = :n WHERE id = :d",
+            n=number,
+            d=dive_id,
+        )
+    return high_uuid, low_uuid
+
+
+async def test_dives_created_together_drain_in_v1s_id_order(owner_engine, app_engine):
+    """v1 took `ORDER BY id`; v2 takes the oldest, then the lowest number --
+    v1's id for a migrated dive -- never the UUID, which is random."""
+    lab = await tenant(owner_engine)
+    first, second = await _tied_dives(owner_engine, lab)
+    for dive_id in (first, second):
+        await measurable_capture(owner_engine, lab, dive_id)
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        candidate = await next_dive_for_measurement(conn, lab)
+
+    assert (candidate.dive_id, candidate.number) == (first, 900_001)
 
 
 async def test_the_catalog_acts_only_in_tenants_it_is_a_member_of(

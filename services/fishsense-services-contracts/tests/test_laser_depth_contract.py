@@ -108,7 +108,31 @@ def test_a_depth_must_be_in_front_of_the_camera():
     depth at or behind the camera is a refusal, never a depth."""
     for bad in (0.0, -1.2, float("nan")):
         with pytest.raises(ValidationError):
-            LaserDepth(laser_label_id=uuid4(), depth_m=bad, range_m=1.0, residual_m=0.0)
+            LaserDepth(
+                laser_label_id=uuid4(),
+                x=1.0,
+                y=2.0,
+                depth_m=bad,
+                range_m=1.0,
+                residual_m=0.0,
+            )
+
+
+def test_a_depth_echoes_the_dot_it_was_computed_at():
+    """Label Studio sync moves a dot in place, keeping the label id: the
+    orchestrator checks the echoed dot against the label's current one before
+    it writes, as it does a refusal's."""
+    with pytest.raises(ValidationError):
+        LaserDepth(laser_label_id=uuid4(), depth_m=1.2, range_m=1.25, residual_m=None)
+    with pytest.raises(ValidationError):
+        LaserDepth(
+            laser_label_id=uuid4(),
+            x=math.nan,
+            y=2.0,
+            depth_m=1.2,
+            range_m=1.25,
+            residual_m=None,
+        )
 
 
 def test_a_refusal_says_why_and_what_was_tried():
@@ -159,7 +183,12 @@ def test_the_result_names_the_core_that_made_it():
             LaserDepthOutcome(
                 capture_id=uuid4(),
                 depth=LaserDepth(
-                    laser_label_id=uuid4(), depth_m=1.2, range_m=1.25, residual_m=None
+                    laser_label_id=uuid4(),
+                    x=1900.0,
+                    y=1400.0,
+                    depth_m=1.2,
+                    range_m=1.25,
+                    residual_m=None,
                 ),
                 refusals=[],
             )

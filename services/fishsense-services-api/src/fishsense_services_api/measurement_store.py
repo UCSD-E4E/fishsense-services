@@ -17,14 +17,16 @@ each a disagreement between its cohort SQL and its activity).
 
 v2 changes:
 
-* per tenant, ordered by `created_at` (v1: `id`); the orchestrator takes the
+* per tenant, ordered by `created_at` then `number` (v1: `id`, which
+  `number` is for a migrated dive); the orchestrator takes the
   oldest candidate across the tenants it serves;
 * one species label per capture: live, not a sentinel, the highest-numbered.
   And one laser label and one head/tail label: the lowest-numbered valid ones
   (v1's activity read "the first non-superseded", with no order);
 * **measurements are appended**; v1's stale-binding DELETE is
   `current_measurements`' rule (0026), so a re-bound capture is
-  simply work again;
+  simply work again. Like the DELETE, it holds only on high-priority dives
+  -- the ones stage 14 re-measures (depth_measure_01);
 * **tried, made no progress** (PLAN.md §9.16): a zero or non-finite length, or
   a real-fish leaf no name can be read from, is recorded as a refusal of those
   inputs, which closes the work until one of them changes;
@@ -79,6 +81,10 @@ SpeciesNames = Callable[[str | None], tuple[str, str] | None]
 class MeasurementCandidate:
     dive_id: uuid.UUID
     created_at: datetime
+    #: The tiebreak: v1's id for a migrated dive, and every migrated dive
+    #: shares one created_at (v1 recorded none), so the UUID would drain
+    #: them in random order.
+    number: int
 
 
 @dataclass(frozen=True)
@@ -173,19 +179,23 @@ async def next_dive_for_measurement(
     row = (
         await conn.execute(
             text("""
-                SELECT d.id, d.created_at FROM dives d
+                SELECT d.id, d.created_at, d.number FROM dives d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
                   AND EXISTS (
                       SELECT 1 FROM measurement_work w
                       WHERE w.tenant_id = d.tenant_id AND w.dive_id = d.id
                   )
-                ORDER BY d.created_at, d.id
+                ORDER BY d.created_at, d.number
                 LIMIT 1
                 """),
             {"tenant": tenant_id},
         )
     ).one_or_none()
-    return None if row is None else MeasurementCandidate(row.id, row.created_at)
+    return (
+        None
+        if row is None
+        else MeasurementCandidate(row.id, row.created_at, row.number)
+    )
 
 
 async def measurement_work(

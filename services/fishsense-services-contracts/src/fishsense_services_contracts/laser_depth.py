@@ -89,6 +89,11 @@ class LaserDepth(BaseModel):
     """Where the laser dot was, in metres, in camera coordinates."""
 
     laser_label_id: UUID
+    #: The dot it was computed at, echoed as a refusal echoes its dot. Label
+    #: Studio sync moves a dot in place, keeping the label id, so the
+    #: orchestrator writes the depth only if the label still sits here.
+    x: FiniteFloat
+    y: FiniteFloat
     #: The Z component: in front of the camera, or it is a refusal.
     depth_m: Annotated[float, Field(gt=0, allow_inf_nan=False)]
     #: The Euclidean norm; longer than the depth off the optical axis.

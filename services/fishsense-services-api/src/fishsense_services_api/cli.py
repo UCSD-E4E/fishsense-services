@@ -99,6 +99,9 @@ async def _migrate_v1() -> int:
     for table, (in_v1, in_v2) in report.items():
         flag = "" if in_v1 == in_v2 else "   <-- MISMATCH"
         print(f"  {table:30} {in_v1:>8} {in_v2:>10}{flag}")
+    for table, reasons in report.skipped.items():
+        for reason, n in reasons.items():
+            print(f"skipped {table}: {n} {reason} (v2 refuses it; not migrated)")
 
     no_go = [
         f"{table}: {in_v1} in v1, {in_v2} migrated"

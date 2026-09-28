@@ -93,10 +93,10 @@ class _Catalog:
         return [TENANT]
 
     async def next_dive_for_laser_depth(self, tenant_id):
-        return LaserDepthCandidate(DIVE, datetime(2025, 1, 1, tzinfo=UTC))
+        return LaserDepthCandidate(DIVE, datetime(2025, 1, 1, tzinfo=UTC), 1)
 
     async def next_dive_for_measurement(self, tenant_id):
-        return MeasurementCandidate(DIVE, datetime(2025, 1, 1, tzinfo=UTC))
+        return MeasurementCandidate(DIVE, datetime(2025, 1, 1, tzinfo=UTC), 1)
 
     async def laser_depth_work(self, tenant_id, dive_id):
         return self.work
