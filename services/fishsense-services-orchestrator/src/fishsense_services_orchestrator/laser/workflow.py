@@ -51,6 +51,10 @@ from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
 from temporalio.exceptions import ApplicationError, WorkflowAlreadyStartedError
 
 with workflow.unsafe.imports_passed_through():
+    from fishsense_services_orchestrator.labels.populate_policy import (
+        CREATE_PROJECT_RETRY,
+        POPULATE_RETRY,
+    )
     import annotated_types  # noqa: F401  pylint: disable=unused-import
     import pydantic  # noqa: F401  pylint: disable=unused-import
 
@@ -130,16 +134,6 @@ GATE_READ_TIMEOUT = timedelta(minutes=2, seconds=30)
 GATE_WRITE_TIMEOUT = timedelta(minutes=2, seconds=30)
 #: The validator's read and write around its processor child.
 VALIDATION_IO_TIMEOUT = timedelta(minutes=5)
-
-#: v1's `_populate.POPULATE_MAX_ATTEMPTS` retry: 30 s initial, doubling, 5 m
-#: cap, 5 attempts (~8 minutes of cover, never an unbounded re-import window).
-POPULATE_RETRY = RetryPolicy(
-    initial_interval=timedelta(seconds=30),
-    backoff_coefficient=2.0,
-    maximum_interval=timedelta(minutes=5),
-    maximum_attempts=5,
-    non_retryable_error_types=["NotAMember", "ForeignRows"],
-)
 
 #: Bounds on concurrent children, v1's.
 POPULATE_CONCURRENCY = 4
@@ -422,6 +416,7 @@ class CreateLaserLabelStudioProjectWorkflow:
             "create_laser_label_studio_project",
             target,
             schedule_to_close_timeout=timedelta(minutes=5),
+            retry_policy=CREATE_PROJECT_RETRY,
             result_type=int,
         )
 
@@ -438,6 +433,7 @@ class PopulateLaserLabelStudioProjectWorkflow:
             "create_laser_label_studio_project",
             target,
             schedule_to_close_timeout=timedelta(minutes=5),
+            retry_policy=CREATE_PROJECT_RETRY,
             result_type=int,
         )
         return await workflow.execute_activity(

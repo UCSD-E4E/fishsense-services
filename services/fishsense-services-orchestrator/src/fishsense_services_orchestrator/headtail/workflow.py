@@ -49,6 +49,10 @@ from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
 from temporalio.exceptions import ApplicationError, WorkflowAlreadyStartedError
 
 with workflow.unsafe.imports_passed_through():
+    from fishsense_services_orchestrator.labels.populate_policy import (
+        CREATE_PROJECT_RETRY,
+        POPULATE_RETRY,
+    )
     import annotated_types  # noqa: F401  pylint: disable=unused-import
     import pydantic  # noqa: F401  pylint: disable=unused-import
 
@@ -101,18 +105,6 @@ CHILD_ID_REUSE = WorkflowIDReusePolicy.ALLOW_DUPLICATE
 _DB_FAIL_FAST = RetryPolicy(
     initial_interval=timedelta(seconds=1),
     maximum_attempts=2,
-    non_retryable_error_types=["NotAMember"],
-)
-
-#: v1's `_POPULATE_RETRY`: bounded (unlimited let dive 424 reach attempt 10
-#: and 23 copies of three frames), but starting at 30 s so a Label Studio blip
-#: still has ~8 minutes of cover.
-POPULATE_MAX_ATTEMPTS = 5
-_POPULATE_RETRY = RetryPolicy(
-    initial_interval=timedelta(seconds=30),
-    backoff_coefficient=2.0,
-    maximum_interval=timedelta(minutes=5),
-    maximum_attempts=POPULATE_MAX_ATTEMPTS,
     non_retryable_error_types=["NotAMember"],
 )
 
@@ -312,13 +304,14 @@ async def create_then_populate(target: HeadtailTarget) -> int:
         "create_headtail_label_studio_project",
         target,
         schedule_to_close_timeout=timedelta(minutes=5),
+        retry_policy=CREATE_PROJECT_RETRY,
     )
     return await workflow.execute_activity(
         "populate_headtail_label_studio_project",
         args=(target, project_id),
         schedule_to_close_timeout=timedelta(minutes=30),
         heartbeat_timeout=timedelta(minutes=2),
-        retry_policy=_POPULATE_RETRY,
+        retry_policy=POPULATE_RETRY,
     )
 
 
@@ -392,6 +385,7 @@ class CreateHeadTailLabelStudioProjectWorkflow:
             "create_headtail_label_studio_project",
             target,
             schedule_to_close_timeout=timedelta(minutes=5),
+            retry_policy=CREATE_PROJECT_RETRY,
         )
 
 
