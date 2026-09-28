@@ -986,6 +986,35 @@ def test_a_binding_the_label_no_longer_names_is_stale_on_both_sides(v1, v2):
     assert _rows(v2, "SELECT v1_id FROM current_measurements") == [(1,)]
 
 
+def test_a_stale_binding_on_a_low_priority_dive_is_fresh_on_both_sides(v1, v2):
+    """v1's stage 14, the only thing that deleted a stale binding, never runs
+    on a low-priority dive: v1 keeps showing the Snook, and v2 counts it."""
+    _seed_everything(v1)
+    with v1.begin() as conn:
+        conn.execute(text(f"""
+                UPDATE dive SET priority = 'LOW' WHERE id = 10;
+                INSERT INTO fish (id, name, species_id) VALUES (3, 'Snook', NULL);
+                INSERT INTO image (id, path, taken_datetime, checksum, is_canonical,
+                                   dive_id, camera_id)
+                VALUES (103, 'dives/d10/P2.ORF', now(), '{"e" * 32}', true, 10, 1);
+                INSERT INTO specieslabel (id, image_id, content_of_image,
+                    top_three_photos_of_group, label_studio_project_id, superseded,
+                    needs_reprocess)
+                VALUES (2, 103, 'Fish Model, Grouper', true, 70, false, false);
+                INSERT INTO measurement (id, length_m, image_id, fish_id,
+                                         laser_extrinsics_id)
+                VALUES (3, 0.44, 103, 3, 1);
+                """))
+
+    _run(v1, v2)
+
+    assert _parity(v1, v2) == (2, 2, 1, 0)
+    assert _rows(v2, "SELECT v1_id FROM current_measurements ORDER BY v1_id") == [
+        (1,),
+        (3,),
+    ]
+
+
 def test_a_real_fish_bound_off_its_cluster_is_stale_on_both_sides(v1, v2):
     """Frame 100's Label Studio cluster now points at fish 4, while its
     measurement is bound to fish 1 (dives 341/383's shape)."""

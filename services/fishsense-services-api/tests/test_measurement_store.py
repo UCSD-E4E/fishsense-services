@@ -26,7 +26,8 @@ v2 changes, each pinned here:
 * **measurements are append-only**, so v1's stale-binding DELETE is the
   `current_measurements` view's job: a server measurement bound to a fish the
   capture's subject no longer names is history, not current, and the capture
-  is work again. The old row stays;
+  is work again. The old row stays. As in v1, only on a high-priority dive:
+  v1's DELETE ran in stage 14, which visits no other;
 * **tried, made no progress** (PLAN.md §9.16): a zero or non-finite length, or
   a real-fish leaf no name can be read from, is a refusal of exactly those
   inputs; the capture drops out until one of them changes. v1 dropped them
@@ -824,6 +825,33 @@ async def test_stale_model_binding_is_invalidated_and_remeasured(
             )
         ).scalar_one()
     assert kept == 1, "append-only: the old binding stays as history"
+
+
+async def test_a_stale_binding_on_a_dive_stage_14_does_not_run_stays_current(
+    owner_engine, app_engine
+):
+    """v1 deleted a stale binding only when stage 14 re-measured the frame,
+    and stage 14 runs on high-priority dives alone: on a low-priority dive
+    v1 kept showing the measurement, and so does v2. Hiding it there would
+    count the frame as unmeasured forever, since nothing would re-measure it.
+    Once the dive is high priority, v1's rule applies and the frame is
+    work again."""
+    lab = await tenant(owner_engine)
+    dive_id, calibration = await calibrated_dive(owner_engine, lab, priority="low")
+    snook = await fish(owner_engine, lab, model="Snook")
+    image = await measurable_capture(
+        owner_engine, lab, dive_id, "Fish Model, Grouper", in_cluster=False
+    )
+    await measurement(owner_engine, lab, image, snook, calibration, length_m=0.44)
+
+    assert [row[0] for row in await _current(owner_engine, image)] == [snook]
+
+    await exec_(
+        owner_engine, "UPDATE dives SET priority = 'high' WHERE id = :d", d=dive_id
+    )
+
+    assert await _current(owner_engine, image) == []
+    assert await _next(app_engine, lab) == dive_id
 
 
 async def test_correct_model_binding_is_left_alone(owner_engine, app_engine):

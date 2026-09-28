@@ -374,3 +374,49 @@ async def test_a_devices_own_measurement_is_never_a_stale_binding(owner_engine):
         )
 
     assert current == ["device"]
+
+
+# -- what the per-capture lookups stand on --------------------------------------
+
+
+@pytest.mark.parametrize(
+    "table",
+    [
+        # current_measurements, looked up per capture by measurement_work.
+        "measurements",
+        # measurement_subjects' Label Studio cluster, per species label.
+        "dive_frame_cluster_captures",
+        # measurement_subjects itself, and the valid labels (their UNIQUE
+        # (tenant_id, capture_id, ls_project_id) key serves).
+        "species_labels",
+        "laser_labels",
+        "head_tail_labels",
+    ],
+)
+async def test_every_per_capture_lookup_has_an_index(owner_engine, table):
+    """measurement_work reads each of these once per canonical capture. With
+    no index leading with (tenant_id, capture_id) each read is a scan, and the
+    cohort went quadratic: 30 s at 40k captures."""
+    async with owner_engine.connect() as conn:
+        leading = (
+            (
+                await conn.execute(
+                    text("""
+                        SELECT i.indexrelid FROM pg_index i
+                        WHERE i.indrelid = CAST(:table AS regclass)
+                          AND i.indnkeyatts >= 2
+                          AND (SELECT a.attname FROM pg_attribute a
+                               WHERE a.attrelid = i.indrelid
+                                 AND a.attnum = i.indkey[0]) = 'tenant_id'
+                          AND (SELECT a.attname FROM pg_attribute a
+                               WHERE a.attrelid = i.indrelid
+                                 AND a.attnum = i.indkey[1]) = 'capture_id'
+                        """),
+                    {"table": table},
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert leading, f"no index on {table} leads with (tenant_id, capture_id)"

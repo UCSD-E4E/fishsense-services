@@ -25,7 +25,8 @@ v2 changes:
   (v1's activity read "the first non-superseded", with no order);
 * **measurements are appended**; v1's stale-binding DELETE is
   `current_measurements`' rule (0026), so a re-bound capture is
-  simply work again;
+  simply work again. Like the DELETE, it holds only on high-priority dives
+  -- the ones stage 14 re-measures (depth_measure_01);
 * **tried, made no progress** (PLAN.md §9.16): a zero or non-finite length, or
   a real-fish leaf no name can be read from, is recorded as a refusal of those
   inputs, which closes the work until one of them changes;

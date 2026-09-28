@@ -747,6 +747,12 @@ class DiveFrameClusterCapture(Base):
         ForeignKeyConstraint(
             ["tenant_id", "capture_id"], ["captures.tenant_id", "captures.id"]
         ),
+        # A capture's clusters, for measurement_subjects (depth_measure_01).
+        Index(
+            "dive_frame_cluster_captures_tenant_id_capture_id_idx",
+            "tenant_id",
+            "capture_id",
+        ),
     )
 
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
@@ -818,6 +824,8 @@ class Measurement(Base):
         CheckConstraint(
             "source IN ('server', 'device')", name="measurements_source_check"
         ),
+        # A capture's measurements, per capture (depth_measure_01).
+        Index("measurements_tenant_id_capture_id_idx", "tenant_id", "capture_id"),
     )
 
     id: Mapped[uuid.UUID] = _id()

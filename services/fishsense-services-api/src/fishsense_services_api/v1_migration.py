@@ -830,6 +830,8 @@ def preflight(target_url: str, head: str) -> list[str]:
 # deletes (#527, #905) and v2's current_measurements no longer counts
 # (0026); read the way v2 reads its copy: the frame's live,
 # non-sentinel, highest-id species label, its highest-id Label Studio cluster.
+# Only on a HIGH-priority dive: v1's measure run never visits another, so a
+# stale row there is one v1 keeps and v2 counts (depth_measure_01).
 _V1_FRESH = """
     WITH plausible AS (
         SELECT e.id, e.dive_id FROM laserextrinsics e
@@ -880,13 +882,15 @@ _V1_FRESH = """
     ),
     classified AS (
         SELECT eff.refused,
-               coalesce(s.top_three AND m.fish_id IS NOT NULL AND (
+               coalesce(dv.priority = 'HIGH' AND s.top_three
+                        AND m.fish_id IS NOT NULL AND (
                    (s.real_fish AND k.fish_id IS NOT NULL AND k.fish_id <> m.fish_id)
                    OR (NOT s.real_fish AND s.model_name IS NOT NULL
                        AND f.name IS DISTINCT FROM s.model_name)
                ), false) AS stale
         FROM measurement m
         JOIN image i ON i.id = m.image_id
+        JOIN dive dv ON dv.id = i.dive_id
         JOIN effective eff
           ON eff.dive_id = i.dive_id AND eff.extrinsics_id = m.laser_extrinsics_id
         LEFT JOIN subject s ON s.image_id = m.image_id
