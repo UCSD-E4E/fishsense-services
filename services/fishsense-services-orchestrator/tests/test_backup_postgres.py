@@ -43,6 +43,10 @@ BACKUP_ROLE = "fishsense_backup"
 BACKUP_PASSWORD = "backup-test-only"
 
 
+#: Real Postgres in Docker: CI runs these in its integration step.
+pytestmark = pytest.mark.integration
+
+
 @pytest.fixture(scope="module")
 def postgres():
     with PostgresContainer("postgres:17.10", driver="asyncpg") as container:

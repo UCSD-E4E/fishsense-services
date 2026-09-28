@@ -52,5 +52,8 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 addopts = "--strict-markers"
+markers = [
+    "integration: real Postgres (Docker, via testcontainers)",
+]
 # The Label Studio SDK's own legacy (pydantic v1) validators; not ours.
 filterwarnings = ["ignore::DeprecationWarning:label_studio_sdk.*"]
