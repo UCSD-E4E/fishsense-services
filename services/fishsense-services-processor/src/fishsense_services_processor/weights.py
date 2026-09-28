@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import boto3
 from botocore.config import Config
@@ -88,8 +89,32 @@ class ModelWeightsSettings(BaseSettings):
     @field_validator("endpoint_url")
     @classmethod
     def _is_a_url(cls, value: str) -> str:
-        if not value.startswith(("https://", "http://")):
-            raise ValueError("endpoint_url must be an http(s) URL")
+        parts = urlsplit(value)
+        if parts.scheme not in ("https", "http") or not parts.hostname:
+            raise ValueError("endpoint_url must be an http(s) URL with a host")
+        return value
+
+    @field_validator("access_key_id", "bucket")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        # An env var from an empty Secret key is set, but blank.
+        if not value.strip():
+            raise ValueError("must not be blank")
+        return value
+
+    @field_validator("secret_access_key")
+    @classmethod
+    def _secret_not_blank(cls, value: SecretStr) -> SecretStr:
+        if not value.get_secret_value().strip():
+            raise ValueError("must not be blank")
+        return value
+
+    @field_validator("cache_dir", mode="before")
+    @classmethod
+    def _cache_dir_named(cls, value):
+        # Blank would become Path("."): multi-GB weights in the working directory.
+        if not str(value).strip():
+            raise ValueError("cache_dir must name the pod's cache volume")
         return value
 
     @field_validator("prefix")

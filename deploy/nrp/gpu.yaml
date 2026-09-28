@@ -110,6 +110,10 @@ spec:
             # every cold start: an emptyDir, since the Deployment is deleted.
             - name: XDG_CACHE_HOME
               value: /cache
+            # The weights cache (processor weights.py): on the cache volume, or
+            # every load downloads multi-GB checkpoints again.
+            - name: FISHSENSE_MODEL_WEIGHTS_CACHE_DIR
+              value: /cache/models
           envFrom:
             - secretRef:
                 name: fishsense-processor-secrets

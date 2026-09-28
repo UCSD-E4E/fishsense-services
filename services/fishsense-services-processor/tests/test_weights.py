@@ -442,3 +442,26 @@ def test_the_store_speaks_garages_dialect(env):
     assert client.meta.config.s3["addressing_style"] == "path"
     assert client.meta.config.signature_version == "s3v4"
     assert store.bucket == "model-weights"
+
+
+@pytest.mark.parametrize(
+    "blank",
+    [
+        {"FISHSENSE_MODEL_WEIGHTS_ENDPOINT_URL": "https://"},
+        {"FISHSENSE_MODEL_WEIGHTS_ACCESS_KEY_ID": ""},
+        {"FISHSENSE_MODEL_WEIGHTS_ACCESS_KEY_ID": "   "},
+        {"FISHSENSE_MODEL_WEIGHTS_SECRET_ACCESS_KEY": ""},
+        {"FISHSENSE_MODEL_WEIGHTS_BUCKET": ""},
+        {"FISHSENSE_MODEL_WEIGHTS_CACHE_DIR": ""},
+    ],
+    ids=["endpoint-no-host", "key-empty", "key-spaces", "secret-empty",
+         "bucket-empty", "cache-dir-empty"],
+)  # fmt: skip
+def test_a_blank_setting_fails_at_startup_too(env, blank):
+    """Review of foundation/taxonomy-weights: an env var from an empty Secret
+    key is set but blank, and passed. A blank cache_dir became Path('.'), so
+    multi-GB weights landed in the process's working directory."""
+    env(**blank)
+
+    with pytest.raises(ValidationError):
+        sut.ModelWeightsSettings()
