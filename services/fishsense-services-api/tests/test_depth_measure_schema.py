@@ -208,15 +208,20 @@ async def test_only_the_app_role_may_call_them(owner_engine):
                         WHERE routine_name IN ('ensure_species', 'ensure_fish_model')
                           AND privilege_type = 'EXECUTE'
                         """))).scalars())
-        definer = (await conn.execute(text("""
-                    SELECT bool_and(prosecdef AND proconfig IS NOT NULL)
-                    FROM pg_proc
+        functions = {
+            r.proname: (r.prosecdef, r.proconfig) for r in await conn.execute(text("""
+                    SELECT proname, prosecdef, proconfig FROM pg_proc
                     WHERE proname IN ('ensure_species', 'ensure_fish_model')
-                    """))).scalar_one()
+                    """))
+        }
 
     assert "PUBLIC" not in grantees
     assert "fishsense_app" in grantees
-    assert definer, "SECURITY DEFINER with a pinned search_path"
+    # SECURITY DEFINER with exactly this search_path: any other (a `$user`
+    # schema, `pg_temp` or a writable schema first) lets a caller shadow what
+    # the function resolves and run it as the owner.
+    pinned = (True, ["search_path=pg_catalog, public"])
+    assert functions == {"ensure_species": pinned, "ensure_fish_model": pinned}
 
 
 # -- the classification agrees with the taxonomy --------------------------------------
