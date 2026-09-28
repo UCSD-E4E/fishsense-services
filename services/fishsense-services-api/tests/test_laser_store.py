@@ -165,7 +165,7 @@ class Seed:
             t=self.tenant, c=capture, done=completed, gone=superseded,
         )  # fmt: skip
 
-    async def camera(self):
+    async def camera(self, model="pinhole"):
         device = await self._one(
             "INSERT INTO devices (tenant_id, kind, serial) VALUES (:t, 'lite', :s) "
             "RETURNING id",
@@ -173,9 +173,10 @@ class Seed:
         )  # fmt: skip
         await self._one(
             "INSERT INTO camera_calibrations (tenant_id, device_id, camera_matrix, "
-            "distortion_coefficients) VALUES (:t, :d, CAST(:k AS jsonb), "
-            "CAST(:dist AS jsonb))",
-            t=self.tenant, d=device, k=json.dumps(K), dist=json.dumps(D),
+            "distortion_coefficients, camera_model, port_model) VALUES (:t, :d, "
+            "CAST(:k AS jsonb), CAST(:dist AS jsonb), :m, "
+            "CASE WHEN :m = 'axial_refractive' THEN 'flat' END)",
+            t=self.tenant, d=device, k=json.dumps(K), dist=json.dumps(D), m=model,
         )  # fmt: skip
         return device
 
@@ -392,6 +393,25 @@ async def test_a_dive_the_resolver_cannot_rectify_is_never_selected(
     await lab.capture(calibrated)
 
     assert await _next(app_engine, lab, selector) == calibrated
+
+
+@pytest.mark.parametrize(
+    "selector", [next_dive_for_laser_preprocessing, next_dive_for_laser_prediction]
+)
+async def test_a_dive_on_an_axial_camera_is_never_selected(lab, app_engine, selector):
+    """PLAN.md §8: an axial (flat-port) camera must not be undistorted as a
+    pinhole. The laser resolvers rectify with pinhole maths, so such a dive is
+    no candidate, as in stage 5.1 (headtail_store._RENDERABLE)."""
+    axial = await lab.dive(device=await lab.camera(model="axial_refractive"))
+    await lab.capture(axial)
+
+    assert await _next(app_engine, lab, selector) is None
+
+
+async def test_an_axial_camera_is_not_a_dive_camera(lab, app_engine):
+    dive = await lab.dive(device=await lab.camera(model="axial_refractive"))
+
+    assert await _as_tenant(app_engine, lab.tenant, dive_camera, dive) is None
 
 
 @pytest.mark.parametrize(

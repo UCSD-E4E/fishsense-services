@@ -62,6 +62,7 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api.camera_sql import RECTIFIABLE_CAMERA_MODEL, RECTIFIABLE_DIVE
 from fishsense_services_api.clustering_store import (
     VALID_LASER,
     ForeignCapture,
@@ -229,6 +230,8 @@ async def next_dive_for_species_preprocessing(
             text(f"""
                 SELECT d.id, d.created_at FROM dives d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
+                  -- v2: only a dive the resolver can rectify (`camera_sql`).
+                  AND {RECTIFIABLE_DIVE}
                   AND (
                       EXISTS (
                           SELECT 1 FROM captures c
@@ -384,8 +387,13 @@ async def species_preprocess_facts(
                     SELECT camera_matrix, distortion_coefficients
                     FROM current_camera_calibrations
                     WHERE tenant_id = :t AND device_id = :device
+                      AND camera_model = :model
                     """),
-                {"t": tenant_id, "device": dive.device_id},
+                {
+                    "t": tenant_id,
+                    "device": dive.device_id,
+                    "model": RECTIFIABLE_CAMERA_MODEL,
+                },
             )
         ).one_or_none()
         if calibration is not None:

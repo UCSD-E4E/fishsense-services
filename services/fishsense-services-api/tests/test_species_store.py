@@ -78,7 +78,49 @@ async def _tenant(owner_engine, slug="lab") -> uuid.UUID:
         ).scalar_one()
 
 
-async def _dive(app_engine, tenant, path, *, priority="high", device=None):
+#: `_dive`'s default: the tenant's one device with a pinhole calibration, which
+#: the stage-2 cohort requires (`camera_sql`). `device=None` has none.
+_PINHOLE = object()
+_OWNER = None
+_PINHOLE_DEVICES: dict[uuid.UUID, uuid.UUID] = {}
+
+
+@pytest.fixture(autouse=True)
+def _seed_as_owner(owner_engine):
+    global _OWNER  # pylint: disable=global-statement
+    _OWNER = owner_engine
+    _PINHOLE_DEVICES.clear()
+
+
+async def _pinhole_device(tenant, model="pinhole"):
+    async with _OWNER.begin() as conn:
+        device = (
+            await conn.execute(
+                text(
+                    "INSERT INTO devices (tenant_id, kind, serial) "
+                    "VALUES (:t, 'lite', :s) RETURNING id"
+                ),
+                {"t": tenant, "s": uuid.uuid4().hex},
+            )
+        ).scalar_one()
+        await conn.execute(
+            text(
+                "INSERT INTO camera_calibrations (tenant_id, device_id, camera_model, "
+                "port_model, camera_matrix, distortion_coefficients) VALUES (:t, :d, "
+                ":m, :port, CAST(:k AS jsonb), CAST(:dist AS jsonb))"
+            ),
+            {"t": tenant, "d": device, "m": model,
+             "port": None if model == "pinhole" else "flat",
+             "k": K1, "dist": "[-0.1, 0.05, 0, 0, 0]"},
+        )  # fmt: skip
+    return device
+
+
+async def _dive(app_engine, tenant, path, *, priority="high", device=_PINHOLE):
+    if device is _PINHOLE:
+        if tenant not in _PINHOLE_DEVICES:
+            _PINHOLE_DEVICES[tenant] = await _pinhole_device(tenant)
+        device = _PINHOLE_DEVICES[tenant]
     async with tenant_transaction(app_engine, tenant) as conn:
         dive = await create_dive(
             conn, tenant, source_path=path, name=path, dived_at=T0, device_id=device
@@ -560,7 +602,7 @@ async def test_preprocess_facts_without_a_device_or_intrinsics(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    bare = await _dive(app_engine, lab, "d1")
+    bare = await _dive(app_engine, lab, "d1", device=None)
     device = await _device_with_intrinsics(owner_engine, lab)
     uncalibrated = await _dive(app_engine, lab, "d2", device=device)
 
@@ -569,6 +611,40 @@ async def test_preprocess_facts_without_a_device_or_intrinsics(
         facts = await species_preprocess_facts(conn, lab, uncalibrated)
         assert facts.device_id == device and facts.intrinsics is None
         assert await species_preprocess_facts(conn, lab, uuid.uuid4()) is None
+
+
+async def test_an_axial_camera_gives_no_intrinsics(owner_engine, app_engine):
+    """PLAN.md §8: stage 2 rectifies with pinhole maths, so an axial (flat
+    port) calibration is not intrinsics it may use (`camera_sql`)."""
+    lab = await _tenant(owner_engine)
+    device = await _pinhole_device(lab, model="axial_refractive")
+    dive = await _dive(app_engine, lab, "d1", device=device)
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        facts = await species_preprocess_facts(conn, lab, dive)
+
+    assert facts.device_id == device and facts.intrinsics is None
+
+
+@pytest.mark.parametrize("setup", ["no-device", "no-calibration", "axial"])
+async def test_a_dive_stage_2_cannot_rectify_is_not_a_candidate(
+    owner_engine, app_engine, setup
+):
+    """v2: the resolver fails a dive without pinhole intrinsics, and the
+    selector takes the oldest candidate across every tenant, so such a dive
+    must not be one -- or it is re-staged every hour ahead of them all."""
+    lab = await _tenant(owner_engine)
+    device = {
+        "no-device": None,
+        "no-calibration": await _device_with_intrinsics(owner_engine, lab),
+        "axial": await _pinhole_device(lab, model="axial_refractive"),
+    }[setup]
+    dive = await _dive(app_engine, lab, "d1", device=device)
+    capture = await _capture(app_engine, lab, dive, "a.ORF")
+    await _laser(owner_engine, lab, capture)
+    await _cluster(owner_engine, lab, dive, "prediction", [capture])
+
+    assert await _next(app_engine, lab) is None
 
 
 async def test_preprocess_facts_order_clusters_and_members_by_capture_time(

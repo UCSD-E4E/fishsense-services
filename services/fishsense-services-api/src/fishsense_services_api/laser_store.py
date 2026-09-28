@@ -51,6 +51,7 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api.camera_sql import RECTIFIABLE_CAMERA_MODEL, RECTIFIABLE_DIVE
 from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
@@ -255,14 +256,9 @@ _CANONICAL = "c.tenant_id = d.tenant_id AND c.dive_id = d.id AND c.is_canonical"
 
 _ORDER = "ORDER BY d.created_at, d.number"
 
-#: Dive `d` can be rectified: its device has a current camera calibration,
-#: which is what the preprocess and predict resolvers need (`dive_camera`).
-#: v2 only; without it the dive is re-selected, and fails, every hour ahead of
-#: every other tenant's.
-_HAS_CAMERA = """EXISTS (
-    SELECT 1 FROM current_camera_calibrations cc
-    WHERE cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
-)"""
+#: Dive `d` can be rectified, which the preprocess and predict resolvers need
+#: (`dive_camera`). v2 only; see `camera_sql`.
+_HAS_CAMERA = RECTIFIABLE_DIVE
 
 
 async def _lock_dive(conn: AsyncConnection, what: str, dive_id: uuid.UUID) -> None:
@@ -370,7 +366,8 @@ async def dive_camera(
 ) -> DiveCamera | None:
     """The intrinsics that rectify the dive: its device's current camera
     calibration (v1: the dive's camera's intrinsics). None when the dive has
-    no device or the device no calibration."""
+    no device, the device no calibration, or its calibration is not a
+    pinhole (`camera_sql`)."""
     row = (
         await conn.execute(
             text("""
@@ -379,8 +376,9 @@ async def dive_camera(
                 JOIN current_camera_calibrations cc
                   ON cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
                 WHERE d.tenant_id = :tenant AND d.id = :dive
+                  AND cc.camera_model = :model
                 """),
-            {"tenant": tenant_id, "dive": dive_id},
+            {"tenant": tenant_id, "dive": dive_id, "model": RECTIFIABLE_CAMERA_MODEL},
         )
     ).one_or_none()
     if row is None:

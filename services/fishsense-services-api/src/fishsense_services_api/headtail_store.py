@@ -55,6 +55,7 @@ from typing import Sequence
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api.camera_sql import RECTIFIABLE_CAMERA_MODEL, RECTIFIABLE_DIVE
 from fishsense_services_api.clustering_store import VALID_LASER
 from fishsense_services_api.service_principal import ServicePrincipal
 
@@ -107,8 +108,7 @@ _ANY_PREDICTION = """EXISTS (
     WHERE p.tenant_id = c.tenant_id AND p.capture_id = c.id
 )"""
 
-#: The one camera model stage 5.1 rectifies (see `UnsupportedCameraModel`).
-_RENDERABLE_CAMERA_MODEL = "pinhole"
+_RENDERABLE_CAMERA_MODEL = RECTIFIABLE_CAMERA_MODEL
 
 #: Dive `d` can be rendered by stage 5.1: its device's current calibration is
 #: a pinhole. The resolver refuses everything else (no device, no calibration,
@@ -116,11 +116,7 @@ _RENDERABLE_CAMERA_MODEL = "pinhole"
 #: re-selected every hour and -- oldest first, across tenants -- blocks every
 #: dive behind it. v1 had no such term (and no axial camera); a dive with no
 #: intrinsics wedged its stage 5.1 the same way.
-_RENDERABLE = f"""EXISTS (
-    SELECT 1 FROM current_camera_calibrations cc
-    WHERE cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
-      AND cc.camera_model = '{_RENDERABLE_CAMERA_MODEL}'
-)"""
+_RENDERABLE = RECTIFIABLE_DIVE
 
 
 class UnsupportedCameraModel(ValueError):
