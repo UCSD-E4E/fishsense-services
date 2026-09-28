@@ -75,6 +75,7 @@ __all__ = [
     "SpeciesPopulationFacts",
     "SpeciesPreprocessFacts",
     "calibration_targets_by_name",
+    "clear_dive_calibration_target",
     "dives_needing_species_population",
     "next_dive_for_species_preprocessing",
     "note_unidentified_slate",
@@ -92,9 +93,10 @@ __all__ = [
 ]
 
 #: A refused calibration row `r` of dive `d` that the dive's last link change
-#: has outlived. The species sync is the only writer of the links and stamps
-#: `calibration_links_changed_at` with every write, as v1 cleared the refusal
-#: with every write; both sides are the database's clock. The calibration
+#: has outlived. The link setters below (the species sync's, and an admin's
+#: through the portal) stamp `calibration_links_changed_at` with every write,
+#: as v1 cleared the refusal with every write; both sides are the database's
+#: clock. The calibration
 #: cohorts read a dive's current refused row as standing only while this is
 #: false (and while no label is newer than its `inputs_as_of`).
 REFUSAL_OUTLIVED_SQL = (
@@ -596,7 +598,7 @@ async def persist_label_studio_clusters(
     return len(groups)
 
 
-# -- the dive links (the species sync is their only writer) -----------------------
+# -- the dive links (written by the species sync, and by an admin's portal routes) --
 
 
 async def slate_templates_by_name(conn: AsyncConnection) -> dict[str, uuid.UUID]:
@@ -646,6 +648,23 @@ async def set_dive_calibration_target(
     return await _set_link(
         conn, tenant_id, dive_id, "calibration_target_id", calibration_target_id
     )
+
+
+async def clear_dive_calibration_target(
+    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+) -> bool:
+    """v1's `clear_dive_calibration_target`: unlink the dive from any board
+    (idempotent), so it leaves the checkerboard cohort. Like v1's, it does not
+    touch a refusal -- an unlinked dive has nothing more to fit from the board
+    -- so it does not stamp the link change. False if there is no such dive."""
+    updated = await conn.execute(
+        text("""
+            UPDATE dives SET calibration_target_id = NULL
+            WHERE tenant_id = :tenant AND id = :dive
+            """),
+        {"tenant": tenant_id, "dive": dive_id},
+    )
+    return updated.rowcount > 0
 
 
 async def note_unidentified_slate(

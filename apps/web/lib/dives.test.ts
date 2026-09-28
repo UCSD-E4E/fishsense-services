@@ -40,6 +40,7 @@ const DIVE = {
   dived_at: "2025-01-01T00:00:00Z",
   priority: "low",
   slate_template_number: null,
+  calibration_target_number: null,
   calibration_source_number: 1,
 };
 
