@@ -820,3 +820,59 @@ def test_laser_lines_say_which_noise_estimator_made_them(v1, v2):
     assert _rows(
         v2, "SELECT v1_id, noise_estimator FROM dive_laser_lines ORDER BY v1_id"
     ) == [(1, "absolute_residual_mad"), (2, "signed_residual_mad")]
+
+
+# -- numbers (migration 0019) ------------------------------------------------------
+
+
+def test_migrated_rows_keep_v1s_ids_as_their_numbers(v1, v2):
+    """Label Studio titles embed v1's dive id, so every existing project is
+    still found by its dive's number."""
+    _seed_v1(v1)
+
+    _run(v1, v2)
+
+    assert all(
+        number == v1_id
+        for number, v1_id in _rows(v2, "SELECT number, v1_id FROM dives")
+        + _rows(v2, "SELECT number, v1_id FROM captures")
+    )
+
+
+def test_rows_the_migration_creates_are_numbered_above_v1s(v1, v2):
+    """A refusal becomes its own laser_calibrations row with no v1 id. Numbered
+    from 1 it would take the number a later v1 fit needs, and that fit's
+    insert would be silently dropped as a conflict."""
+    _seed_v1(v1)
+    _seed_calibrations(v1)
+
+    _run(v1, v2)
+
+    refusals = _rows(
+        v2, "SELECT number FROM laser_calibrations WHERE outcome = 'refused'"
+    )
+    largest_v1 = _rows(v1, "SELECT max(id) FROM laserextrinsics")[0][0]
+    assert refusals and all(number > largest_v1 for (number,) in refusals)
+    assert (
+        _rows(v2, "SELECT count(*) FROM laser_calibrations WHERE v1_id IS NOT NULL")[0][
+            0
+        ]
+        == _rows(v1, "SELECT count(*) FROM laserextrinsics")[0][0]
+    )
+
+
+def test_a_new_row_after_the_migration_is_numbered_above_v1s(v1, v2):
+    _seed_v1(v1)
+
+    _run(v1, v2)
+
+    with v2.begin() as conn:
+        tenant = conn.execute(text("SELECT id FROM tenants")).scalar_one()
+        new = conn.execute(
+            text(
+                "INSERT INTO dives (tenant_id, source_path, dived_at) "
+                "VALUES (:t, 'new', now()) RETURNING number"
+            ),
+            {"t": tenant},
+        ).scalar_one()
+    assert new > _rows(v1, "SELECT max(id) FROM dive")[0][0]

@@ -19,6 +19,8 @@ from datetime import UTC, datetime
 
 from sqlalchemy import Connection, create_engine, text
 
+from fishsense_services_api.numbers import advance_numbers_sync
+
 BATCH = 5_000
 
 
@@ -53,8 +55,10 @@ def migrate_v1(
     try:
         with source.connect() as v1, target.begin() as v2:
             tenant = _ensure_tenant(v2, tenant_slug, tenant_name)
+            _reserve_numbers(v1, v2)
             for step in STEPS:
                 step(v1, v2, tenant, report)
+            advance_numbers_sync(v2)
     finally:
         source.dispose()
         target.dispose()
@@ -62,6 +66,49 @@ def migrate_v1(
 
 
 # --- helpers ---------------------------------------------------------------------
+
+#: v1 table -> the v2 table its rows land in, numbered by their v1 id
+#: (migration 0019). The label tables are added from LABEL_TABLES below.
+NUMBERED_TABLES = {
+    "calibrationtarget": "calibration_targets",
+    "fishmodelreference": "fish_model_references",
+    "species": "species",
+    "diveslate": "slate_templates",
+    "camera": "devices",
+    "dive": "dives",
+    "image": "captures",
+    "cameraintrinsics": "camera_calibrations",
+    "laserextrinsics": "laser_calibrations",
+    "divelaserline": "dive_laser_lines",
+    "labelstudiosynccursor": "label_studio_sync_cursors",
+    "laserprediction": "laser_predictions",
+    "slateprediction": "slate_predictions",
+    "headtailprediction": "head_tail_predictions",
+    "fish": "fish",
+    "diveframecluster": "dive_frame_clusters",
+    "laserdepth": "laser_depths",
+    "measurement": "measurements",
+}
+
+
+def _reserve_numbers(v1: Connection, v2: Connection) -> None:
+    """Move each numbered table's sequence past v1's largest id *before* any
+    row lands. Rows the migration creates without a v1 id -- a refusal, say --
+    would otherwise take a number a later v1 row needs, and that row's insert
+    would be dropped as a conflict. Never moves a sequence backwards."""
+    tables = {**NUMBERED_TABLES, **{v: t for v, (t, *_) in LABEL_TABLES.items()}}
+    for v1_table, v2_table in tables.items():
+        largest = v1.execute(text(f"SELECT max(id) FROM {v1_table}")).scalar_one()
+        if largest is None:
+            continue
+        seq = f"{v2_table}_number_seq"
+        v2.execute(
+            text(
+                f"SELECT setval('{seq}', greatest(:largest, "
+                f"(SELECT last_value FROM {seq})))"
+            ),
+            {"largest": largest},
+        )
 
 
 def _ensure_tenant(v2: Connection, slug: str, name: str):
