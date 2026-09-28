@@ -13,13 +13,18 @@ converge -- a no-op when the leaf is unchanged.
 
 v2 changes, each pinned here:
 
-* **no rollout restart.** v1 rolled every Deployment that mounted the Secret,
-  because its Deployments lived forever at zero replicas and a scale-up reused
-  the old pod template. v2 stands the processor up per wake and tears it down
-  when idle (PLAN.md §3), so the next wake's pods mount the current Secret. A
-  pod that outlives a rotation is still covered: kubelet refreshes a mounted
-  Secret in place, so a container that restarts on an expired leaf reads the
-  new one;
+* **the rollout is keyed on the leaf, not on the push.** v1 rolled every
+  Deployment mounting the Secret after a push, as v2 does: the processor reads
+  its leaf once, at connect, and a Deployment busy across a rotation is Ready
+  with a busy queue, so the sweeper never tears it down and it would hold the
+  old leaf past expiry (the 2026-08-14 outage). v2 records the leaf a
+  Deployment's pods mount on its pod template -- the sync when it rolls one,
+  a wake when it stands one up -- and rolls each existing Deployment whose
+  record isn't the current leaf. So a Deployment stood up after the rotation
+  isn't restarted for nothing, one the processor role doesn't have up is
+  skipped (v1 skipped a missing one too), and a roll that failed is retried by
+  the next run even though the Secret is then unchanged (v1's annotate-first
+  order made it a silent no-op);
 * one write, not two: the Secret's keys and its fingerprint annotation land
   together (v1 applied, then annotated);
 * Python on the orchestrator's image, reusing the NRP stage's kubeconfig
@@ -33,12 +38,12 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import inspect
 from pathlib import Path
 
 import pytest
 import yaml
 
+from fishsense_services_orchestrator.nrp.scaling import Kubernetes
 from fishsense_services_orchestrator.ops import cert_sync as sut
 
 NAMESPACE = "e4e-fishsense"
@@ -81,6 +86,53 @@ class FakeCore:
         self.secret = {"metadata": dict(body["metadata"]), "data": dict(body["data"])}
 
 
+#: Every processor Deployment (deploy/nrp), each mounting the Secret.
+PROCESSORS = [
+    "fishsense-processor",
+    "fishsense-processor-gpu",
+    "fishsense-processor-gpu-cpu-fallback",
+    "fishsense-processor-light",
+]
+
+
+class FakeApps:
+    """AppsV1Api's Deployment read and strategic-merge patch, over the pod
+    template annotations of the Deployments that are up."""
+
+    def __init__(self, up: dict[str, dict] | None = None, *, refuse=()):
+        #: name -> its pod template's annotations
+        self.up = {name: dict(a) for name, a in (up or {}).items()}
+        self.refuse = set(refuse)
+        self.rolls: list[str] = []
+        self.patches: list[tuple[str, dict, str | None]] = []
+
+    def read_namespaced_deployment(self, name, namespace):
+        assert namespace == NAMESPACE
+        if name not in self.up:
+            raise NotFound()
+        template = type("Meta", (), {"annotations": self.up[name] or None})()
+        spec = type("Spec", (), {"template": type("T", (), {"metadata": template})()})
+        return type("Deployment", (), {"spec": spec()})()
+
+    def patch_namespaced_deployment(self, name, namespace, body, field_manager=None):
+        assert namespace == NAMESPACE
+        if name in self.refuse:
+            raise Forbidden()
+        if name not in self.up:
+            raise NotFound()
+        self.patches.append((name, body, field_manager))
+        self.rolls.append(name)
+        self.up[name].update(body["spec"]["template"]["metadata"]["annotations"])
+
+
+class Forbidden(Exception):
+    status = 403
+
+
+def _every_processor_up(annotations: dict | None = None) -> dict[str, dict]:
+    return {name: dict(annotations or {}) for name in PROCESSORS}
+
+
 class _Obj:
     """What the kubernetes client returns: attributes, not keys."""
 
@@ -121,11 +173,16 @@ def _settings(certs, kubeconfig):
         client_cert=certs / "tls.crt",
         client_private_key=certs / "tls.key",
         server_root_ca_cert=certs / "ca.crt",
+        manifest_dir=MANIFEST_DIR,
     )
 
 
-def _sync(settings, core):
-    return sut.sync(settings, core_factory=lambda _path: core)
+def _cluster(core, apps=None):
+    return lambda _path: Kubernetes(apps=apps or FakeApps(), core=core)
+
+
+def _sync(settings, core, apps=None):
+    return sut.sync(settings, kubernetes=_cluster(core, apps))
 
 
 # -- v1's test_sync.sh, case by case ----------------------------------------------
@@ -137,7 +194,7 @@ def test_1_an_absent_kubeconfig_is_a_clean_no_op(certs, tmp_path, caplog):
     caplog.set_level("INFO")
     settings = _settings(certs, tmp_path / "nope")
 
-    assert sut.main(settings, core_factory=lambda _p: pytest.fail("no cluster")) == 0
+    assert sut.main(settings, kubernetes=lambda _p: pytest.fail("no cluster")) == 0
     assert "nothing to sync" in caplog.text
 
 
@@ -151,15 +208,13 @@ def test_1b_no_kubeconfig_configured_is_a_clean_no_op_too(certs):
 def test_2_a_missing_cert_render_is_a_hard_error(certs, kubeconfig):
     (certs / "tls.crt").unlink()
 
-    assert (
-        sut.main(_settings(certs, kubeconfig), core_factory=lambda _p: FakeCore()) == 1
-    )
+    assert sut.main(_settings(certs, kubeconfig), kubernetes=_cluster(FakeCore())) == 1
 
 
-def test_3_the_first_run_pushes_the_leaf_and_records_its_fingerprint(certs, kubeconfig):
-    core = FakeCore()
+def test_3_the_first_run_pushes_the_leaf_and_rolls_every_deployment(certs, kubeconfig):
+    core, apps = FakeCore(), FakeApps(_every_processor_up())
 
-    assert _sync(_settings(certs, kubeconfig), core) == sut.Outcome.PUSHED
+    assert _sync(_settings(certs, kubeconfig), core, apps) == sut.Outcome.PUSHED
 
     assert _decoded(core) == {
         "client.pem": "leaf-v1\n",
@@ -168,31 +223,38 @@ def test_3_the_first_run_pushes_the_leaf_and_records_its_fingerprint(certs, kube
     }
     expected = hashlib.sha256(b"leaf-v1\n").hexdigest()
     assert core.secret["metadata"]["annotations"][FP] == expected
+    # v1's "EVERY Deployment that mounts the Secret must be rolled".
+    assert sorted(apps.rolls) == PROCESSORS
+    assert all(apps.up[name] == {FP: expected} for name in PROCESSORS)
 
 
-def test_4_an_unchanged_leaf_is_not_pushed_again(certs, kubeconfig):
-    core = FakeCore()
-    _sync(_settings(certs, kubeconfig), core)
+def test_4_an_unchanged_leaf_is_not_pushed_again_nor_rolled(certs, kubeconfig):
+    core, apps = FakeCore(), FakeApps(_every_processor_up())
+    _sync(_settings(certs, kubeconfig), core, apps)
     core.writes.clear()
+    apps.rolls.clear()
 
-    assert _sync(_settings(certs, kubeconfig), core) == sut.Outcome.UNCHANGED
+    assert _sync(_settings(certs, kubeconfig), core, apps) == sut.Outcome.UNCHANGED
     assert core.writes == []
+    assert apps.rolls == []
 
 
-def test_5_a_rotated_leaf_is_pushed(certs, kubeconfig):
-    core = FakeCore()
-    _sync(_settings(certs, kubeconfig), core)
+def test_5_a_rotated_leaf_is_pushed_and_rolls_every_deployment(certs, kubeconfig):
+    core, apps = FakeCore(), FakeApps(_every_processor_up())
+    _sync(_settings(certs, kubeconfig), core, apps)
+    apps.rolls.clear()
     (certs / "tls.crt").write_text("leaf-v2\n")
     (certs / "tls.key").write_text("key-v2\n")
 
-    assert _sync(_settings(certs, kubeconfig), core) == sut.Outcome.PUSHED
+    assert _sync(_settings(certs, kubeconfig), core, apps) == sut.Outcome.PUSHED
 
     assert _decoded(core)["client.pem"] == "leaf-v2\n"
     assert _decoded(core)["client.key"] == "key-v2\n"
-    assert core.secret["metadata"]["annotations"][FP] == (
-        hashlib.sha256(b"leaf-v2\n").hexdigest()
-    )
+    rotated = hashlib.sha256(b"leaf-v2\n").hexdigest()
+    assert core.secret["metadata"]["annotations"][FP] == rotated
     assert core.writes == ["create", "patch"]
+    assert sorted(apps.rolls) == PROCESSORS
+    assert all(apps.up[name] == {FP: rotated} for name in PROCESSORS)
 
 
 def test_6_a_deleted_secret_is_recreated(certs, kubeconfig):
@@ -306,11 +368,75 @@ def test_the_pushed_keys_are_what_every_processor_deployment_mounts():
         assert env["FISHSENSE_TEMPORAL_SERVER_ROOT_CA_CERT"] == f"{root}/{sut.CA_KEY}"
 
 
-def test_it_never_touches_a_deployment():
-    """v2: no rollout restart (see the module docstring)."""
-    source = inspect.getsource(sut)
-    for forbidden in ("AppsV1", ".apps", "namespaced_deployment", "restartedAt"):
-        assert forbidden not in source, forbidden
+def test_a_deployment_that_is_down_is_skipped_not_created(certs, kubeconfig):
+    """v2 stands a role up only while it has work (PLAN.md §3), so most of the
+    time most of them don't exist; the next wake's pods mount the new leaf.
+    Rolling means patching, which must never bring one back (v1 skipped a
+    missing Deployment too)."""
+    apps = FakeApps({"fishsense-processor-light": {}})
+
+    assert _sync(_settings(certs, kubeconfig), FakeCore(), apps) == sut.Outcome.PUSHED
+
+    assert apps.rolls == ["fishsense-processor-light"]
+    assert set(apps.up) == {"fishsense-processor-light"}
+
+
+def test_a_deployment_stood_up_on_the_current_leaf_is_not_restarted(certs, kubeconfig):
+    """A wake stamps the leaf its pods mount; a Deployment stood up after the
+    push already runs on it, and restarting it would only interrupt its work."""
+    current = hashlib.sha256(b"leaf-v1\n").hexdigest()
+    apps = FakeApps(
+        {"fishsense-processor": {FP: "an-older-leaf"}, "fishsense-processor-gpu": {FP: current}}  # fmt: skip
+    )
+
+    _sync(_settings(certs, kubeconfig), FakeCore(), apps)
+
+    assert apps.rolls == ["fishsense-processor"]
+
+
+def test_the_roll_touches_only_the_pod_templates_leaf(certs, kubeconfig):
+    """A strategic-merge patch of one pod-template annotation -- which is what
+    `kubectl rollout restart` does with its own -- under a field manager of
+    its own, so the orchestrator's next server-side apply of the manifest
+    (`nrp.scaling.FIELD_MANAGER`) doesn't strip it and roll the pods again."""
+    apps = FakeApps({"fishsense-processor": {}})
+
+    _sync(_settings(certs, kubeconfig), FakeCore(), apps)
+
+    ((name, body, manager),) = apps.patches
+    assert name == "fishsense-processor"
+    fingerprint = hashlib.sha256(b"leaf-v1\n").hexdigest()
+    assert body == {"spec": {"template": {"metadata": {"annotations": {FP: fingerprint}}}}}  # fmt: skip
+    assert manager == sut.FIELD_MANAGER
+    assert manager != "fishsense-orchestrator"
+
+
+def test_a_roll_that_failed_is_retried_by_the_next_run(certs, kubeconfig):
+    """v1 annotated the Secret before rolling, so a roll that failed left a
+    Secret that read as current and every later run a no-op: the unrolled
+    Deployment kept the old leaf until it expired. v2 decides each roll from
+    the Deployment's own record, so the next converge finishes the job."""
+    core = FakeCore()
+    apps = FakeApps(_every_processor_up(), refuse={"fishsense-processor-gpu"})
+    with pytest.raises(Forbidden):
+        _sync(_settings(certs, kubeconfig), core, apps)
+    apps.refuse.clear()
+    apps.rolls.clear()
+
+    assert _sync(_settings(certs, kubeconfig), core, apps) == sut.Outcome.UNCHANGED
+
+    fingerprint = hashlib.sha256(b"leaf-v1\n").hexdigest()
+    assert "fishsense-processor-gpu" in apps.rolls
+    assert all(apps.up[name] == {FP: fingerprint} for name in PROCESSORS)
+
+
+def test_it_rolls_exactly_the_deployments_that_mount_the_secret():
+    """The four processor Deployments, by their manifests' names -- one place
+    a name is written, so a new role can't be missed the way v1's first
+    forwarder missed the GPU pair."""
+    settings = sut.CertSyncSettings(manifest_dir=MANIFEST_DIR)
+
+    assert sorted(sut.processor_deployments(settings)) == PROCESSORS
 
 
 def test_the_orchestrators_role_may_write_only_that_secret():
@@ -327,3 +453,15 @@ def test_the_orchestrators_role_may_write_only_that_secret():
     assert [(r["resourceNames"], sorted(r["verbs"])) for r in named] == [
         ([sut.DEFAULT_SECRET_NAME], ["get", "patch"])
     ]
+
+
+def test_the_orchestrators_role_may_roll_the_deployments():
+    """The roll reads each Deployment and patches its pod template: `get` and
+    `patch` on apps/deployments, which the wakes already hold."""
+    docs = list(yaml.safe_load_all((MANIFEST_DIR / "deployer-rbac.yaml").read_text()))
+    (role,) = [d for d in docs if d and d["kind"] == "Role"]
+    (deployments,) = [r for r in role["rules"] if "deployments" in r["resources"]]
+
+    assert deployments["apiGroups"] == ["apps"]
+    assert "resourceNames" not in deployments
+    assert {"get", "patch"} <= set(deployments["verbs"])

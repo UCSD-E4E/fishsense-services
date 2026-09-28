@@ -243,3 +243,29 @@ def test_a_wake_stamps_the_deployment_not_its_pods():
     assert body["metadata"]["annotations"][WOKEN_AT] == woken.isoformat()
     template = body["spec"]["template"]["metadata"].get("annotations") or {}
     assert WOKEN_AT not in template
+
+
+def test_the_leaf_a_wake_stamps_goes_on_the_pods():
+    """Unlike the wake time, the Temporal leaf's fingerprint belongs on the pod
+    template: it says which leaf the pods mounted, and it changes only when
+    the cert sync pushes a new one -- exactly when the pods must roll. It is
+    the key the sync compares (`ops.cert_sync`), and rendering is still pure."""
+    from fishsense_services_orchestrator.nrp.manifests import (
+        LEAF_SHA256,
+        load_manifests,
+    )
+    from fishsense_services_orchestrator.ops import cert_sync
+
+    manifest = next(iter(load_manifests(MANIFEST_DIR).values()))
+
+    body = manifest.render(namespace="fishsense", image_tag="v1", replicas=1,
+                           leaf_sha256="abc")  # fmt: skip
+    unstamped = manifest.render(namespace="fishsense", image_tag="v1", replicas=1)
+
+    assert LEAF_SHA256 == cert_sync.FINGERPRINT_ANNOTATION
+    assert body["spec"]["template"]["metadata"]["annotations"][LEAF_SHA256] == "abc"
+    assert LEAF_SHA256 not in (body["metadata"].get("annotations") or {})
+    assert LEAF_SHA256 not in (
+        unstamped["spec"]["template"]["metadata"].get("annotations") or {}
+    )
+    assert "annotations" not in manifest.body["spec"]["template"]["metadata"]

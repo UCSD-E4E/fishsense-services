@@ -27,9 +27,11 @@ import yaml
 __all__ = [
     "GPU",
     "GPU_CPU_FALLBACK",
+    "LEAF_SHA256",
     "LIGHT",
     "MANIFEST_FILES",
     "PER_IMAGE",
+    "TEMPORAL_CERT_SECRET",
     "Manifest",
     "load_manifests",
 ]
@@ -64,6 +66,18 @@ def _has_tag(image: str) -> bool:
 #: Deployment, leaving the child on an unserved queue (v1 had the same race).
 WOKEN_AT: Final = "fishsense.e4e/woken-at"
 
+#: Which Temporal leaf a Deployment's pods mount: its sha256, the fingerprint
+#: `ops.cert_sync` records on the Secret it pushes. On the pod template, so
+#: changing it rolls the pods -- which is how the sync moves a Deployment busy
+#: across a rotation onto the new leaf (the processor reads it once, at
+#: connect). A wake stamps the Secret's current value, so a Deployment stood
+#: up after the push isn't rolled for nothing.
+LEAF_SHA256: Final = "fishsense.e4e.ucsd.edu/leaf-sha256"
+
+#: The Secret every processor Deployment mounts its Temporal leaf from. The
+#: name is v1's, so v1's and v2's processors share one forwarded leaf.
+TEMPORAL_CERT_SECRET: Final = "fishsense-data-worker-temporal-certs"
+
 
 @dataclass(frozen=True)
 class Manifest:
@@ -97,6 +111,7 @@ class Manifest:
         image_tag: str,
         replicas: int,
         woken_at: datetime | None = None,
+        leaf_sha256: str | None = None,
     ) -> dict:
         """The body to apply: the file, in ``namespace``, at ``replicas``,
         every container on ``image_tag``. Pure, so the same inputs give the
@@ -105,12 +120,17 @@ class Manifest:
         ``woken_at`` stamps the **Deployment's** metadata, so the sweeper can
         give a fresh wake time to reach its queue (`WOKEN_AT`). Never the pod
         template's, where a changing value would roll the pods on every wake.
+        ``leaf_sha256`` does go on the pod template (`LEAF_SHA256`): it changes
+        only when the Temporal leaf does, which is when the pods must roll.
         """
         body = copy.deepcopy(self.body)
         body["metadata"]["namespace"] = namespace
         if woken_at is not None:
             annotations = body["metadata"].setdefault("annotations", {})
             annotations[WOKEN_AT] = woken_at.isoformat()
+        if leaf_sha256 is not None:
+            template = body["spec"]["template"].setdefault("metadata", {})
+            template.setdefault("annotations", {})[LEAF_SHA256] = leaf_sha256
         body["spec"]["replicas"] = replicas
         for container in _containers(body):
             container["image"] = f"{container['image']}:{image_tag}"
