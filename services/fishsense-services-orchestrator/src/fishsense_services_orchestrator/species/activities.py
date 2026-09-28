@@ -152,7 +152,7 @@ class SpeciesCatalog(Protocol):
         ls_project_id: int,
         ls_task_id: int,
         image_url: str,
-    ) -> None: ...
+    ) -> bool: ...
 
     async def supersede_species_labels(
         self, tenant_id: uuid.UUID, label_ids: list[uuid.UUID]
@@ -418,13 +418,22 @@ class SpeciesActivities:
 
             async def record(item, task_id: int) -> None:
                 capture, task_image = item
-                await self._catalog.record_species_label(
+                if not await self._catalog.record_species_label(
                     target.tenant_id,
                     capture_id=capture.capture_id,
                     ls_project_id=ls_project_id,
                     ls_task_id=task_id,
                     image_url=task_image.image.uri,
-                )
+                ):
+                    # A migrated duplicate holds the task (species_store).
+                    activity.logger.warning(
+                        "species task %d in project %d is already anchored to "
+                        "another capture's label; left it there and wrote no "
+                        "row for capture %s",
+                        task_id,
+                        ls_project_id,
+                        capture.capture_id,
+                    )
 
             import_result = await import_tasks_and_record_labels(
                 ls,

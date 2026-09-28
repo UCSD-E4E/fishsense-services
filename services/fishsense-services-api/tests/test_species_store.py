@@ -806,6 +806,60 @@ async def test_recording_revives_the_projects_superseded_row_and_keeps_its_flag(
     assert row.grouping is None
 
 
+async def test_a_task_held_by_a_migrated_duplicate_is_skipped_not_raised(
+    owner_engine, app_engine
+):
+    """v2 change: v1 anchored a duplicate frame and its twin to the one task
+    their shared JPEG URL dedupes to; the migration kept whichever row came
+    first, so a migrated duplicate can hold the task populate now finds for
+    its canonical twin. Task ids are unique per tenant, so recording it raised
+    every hour. The duplicate's row is left as it is (it may carry a
+    labeler's answer) and nothing is written for the twin."""
+    lab = await _tenant(owner_engine)
+    dive = await _dive(app_engine, lab, "d1")
+    twin = await _capture(app_engine, lab, dive, "a", checksum="7" * 32)
+    duplicate = await _capture(app_engine, lab, dive, "a2", checksum="7" * 32)
+    held = await _species(owner_engine, lab, duplicate, project=70, task=5001,
+                          completed=True, grouping="x")  # fmt: skip
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        recorded = await record_species_label(
+            conn, lab, capture_id=twin, ls_project_id=70, ls_task_id=5001,
+            image_url="s3://b/7.JPG",
+        )  # fmt: skip
+
+    assert recorded is False
+    async with owner_engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                text("SELECT capture_id FROM species_labels WHERE tenant_id = :t"),
+                {"t": lab},
+            )
+        ).all()
+    assert [r.capture_id for r in rows] == [duplicate]
+    row = await _row(owner_engine, "species_labels", held)
+    assert (row.ls_task_id, row.completed, row.grouping) == (5001, True, "x")
+
+
+async def test_recording_says_it_recorded(owner_engine, app_engine):
+    lab = await _tenant(owner_engine)
+    dive = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, dive, "a")
+    await _species(owner_engine, lab, capture, project=70, task=11, superseded=True)
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        fresh = await record_species_label(
+            conn, lab, capture_id=capture, ls_project_id=71, ls_task_id=21,
+            image_url="s3://b/k.JPG",
+        )  # fmt: skip
+        revived = await record_species_label(
+            conn, lab, capture_id=capture, ls_project_id=70, ls_task_id=12,
+            image_url="s3://b/k.JPG",
+        )  # fmt: skip
+
+    assert (fresh, revived) == (True, True)
+
+
 async def test_superseding_retires_only_the_named_open_rows(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
     dive = await _dive(app_engine, lab, "d1")

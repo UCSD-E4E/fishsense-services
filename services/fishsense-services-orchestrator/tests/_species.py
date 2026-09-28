@@ -143,6 +143,8 @@ class FakeSpeciesCatalog:
     population_candidates: dict = field(default_factory=dict)
     calls: list = field(default_factory=list)
     recorded: list = field(default_factory=list)
+    #: Task ids another capture's row already holds (the catalog skips them).
+    held_tasks: set = field(default_factory=set)
     superseded: list = field(default_factory=list)
     persisted: list = field(default_factory=list)
     slates: dict = field(default_factory=dict)
@@ -174,7 +176,10 @@ class FakeSpeciesCatalog:
     async def record_species_label(
         self, tenant_id, *, capture_id, ls_project_id, ls_task_id, image_url
     ):
+        if ls_task_id in self.held_tasks:
+            return False
         self.recorded.append((capture_id, ls_project_id, ls_task_id, image_url))
+        return True
 
     async def supersede_species_labels(self, tenant_id, label_ids):
         self.superseded.extend(label_ids)

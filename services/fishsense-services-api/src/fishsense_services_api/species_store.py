@@ -496,22 +496,36 @@ async def record_species_label(
     ls_project_id: int,
     ls_task_id: int,
     image_url: str,
-) -> None:
+) -> bool:
     """Anchor the (capture, task, project) triple: populate's row for a task.
+    False if nothing was written.
 
     v1's natural-key upsert on (image, project): a row the project already
     holds -- only a superseded one can reach here -- is re-anchored and
     revived with the fields v1's populate sent, and nothing else, so its
     `needs_reprocess` survives. `source` is `human`: a row seeded for a
     labeler (docs/port-plan.md).
+
+    v2 change: a task another capture's row already holds is skipped. v1
+    anchored a duplicate frame and its twin to the one task their shared
+    JPEG URL dedupes to; the migration kept one row per task (task ids are
+    unique per tenant here), so a migrated duplicate can hold the task
+    populate finds for its canonical twin, and writing it raised every hour.
+    That row is left as it is -- moving the task would rewrite a migrated
+    row that may carry a labeler's answer -- and the caller logs the skip.
     """
-    await conn.execute(
+    written = await conn.execute(
         text("""
             INSERT INTO species_labels
                 (tenant_id, capture_id, source, ls_project_id, ls_task_id,
                  image_url, completed, superseded, ls_payload)
-            VALUES (:tenant, :capture, 'human', :project, :task, :url, false,
-                    false, '{}'::jsonb)
+            SELECT :tenant, :capture, 'human', :project, :task, :url, false,
+                   false, '{}'::jsonb
+            WHERE NOT EXISTS (
+                SELECT 1 FROM species_labels held
+                WHERE held.tenant_id = :tenant AND held.ls_task_id = :task
+                  AND held.capture_id <> :capture
+            )
             ON CONFLICT (tenant_id, capture_id, ls_project_id) DO UPDATE SET
                 ls_task_id = excluded.ls_task_id,
                 image_url = excluded.image_url,
@@ -526,10 +540,12 @@ async def record_species_label(
                 fish_measurable_category = NULL,
                 fish_angle_category = NULL,
                 fish_curved_category = NULL
+            RETURNING id
             """),
         {"tenant": tenant_id, "capture": capture_id, "project": ls_project_id,
          "task": ls_task_id, "url": image_url},
     )  # fmt: skip
+    return written.first() is not None
 
 
 async def supersede_species_labels(
@@ -760,9 +776,9 @@ class SpeciesCatalog(ServicePrincipal):
         ls_project_id: int,
         ls_task_id: int,
         image_url: str,
-    ) -> None:
+    ) -> bool:
         async with self._tenant(tenant_id) as conn:
-            await record_species_label(
+            return await record_species_label(
                 conn,
                 tenant_id,
                 capture_id=capture_id,
