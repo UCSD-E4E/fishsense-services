@@ -18,6 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from testcontainers.community.postgres import PostgresContainer
 
 from fishsense_services_api.migrations import upgrade
+from research_seed import (
+    RESEARCH_GROUP,
+    RESEARCH_LOGIN,
+    RESEARCH_PASSWORD,
+    RESEARCH_SEARCH_PATH,
+)
 
 TIERS = {"unit", "integration", "e2e"}
 
@@ -83,6 +89,36 @@ async def app_engine(
     owner_engine: AsyncEngine, app_url: str
 ) -> AsyncIterator[AsyncEngine]:
     engine = create_async_engine(app_url)
+    yield engine
+    await engine.dispose()
+
+
+@pytest.fixture(scope="session")
+async def research_login(owner_engine: AsyncEngine) -> str:
+    """The research login role, created once; returns its name."""
+    async with owner_engine.begin() as conn:
+        await conn.execute(
+            text(
+                f"CREATE ROLE {RESEARCH_LOGIN} LOGIN PASSWORD '{RESEARCH_PASSWORD}' "
+                f"IN ROLE {RESEARCH_GROUP}"
+            )
+        )
+    return RESEARCH_LOGIN
+
+
+@pytest.fixture(scope="session")
+async def research_engine(
+    research_login: str, postgres: PostgresContainer
+) -> AsyncIterator[AsyncEngine]:
+    """Connects as a research login with only its search_path set -- no
+    tenant variable: the lab binding is the database's, not the session's."""
+    host = postgres.get_container_host_ip()
+    port = postgres.get_exposed_port(postgres.port)
+    engine = create_async_engine(
+        f"postgresql+asyncpg://{research_login}:{RESEARCH_PASSWORD}"
+        f"@{host}:{port}/{postgres.dbname}",
+        connect_args={"server_settings": {"search_path": RESEARCH_SEARCH_PATH}},
+    )
     yield engine
     await engine.dispose()
 
