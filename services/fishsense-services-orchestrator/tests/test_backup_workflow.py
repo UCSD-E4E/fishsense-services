@@ -30,6 +30,7 @@ v2 changes, each pinned here:
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import timedelta
 from typing import List
@@ -45,7 +46,7 @@ from temporalio.client import (
     WorkflowFailureError,
 )
 from temporalio.contrib.pydantic import pydantic_data_converter
-from temporalio.exceptions import ApplicationError
+from temporalio.exceptions import ApplicationError, CancelledError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -169,6 +170,60 @@ async def test_a_failed_dump_does_not_stop_the_others_and_is_never_pruned():
         "fishsense_v2",
         "other",
     }
+
+
+async def test_a_cancelled_run_prunes_nothing_and_ends_cancelled():
+    """Cancelling the run (an operator's `temporal workflow cancel`) is not a
+    failed dump. v2 gathers the dumps with `return_exceptions`, which turns
+    each dump's outcome into a value; had it also swallowed the run's own
+    cancellation, the run would go on to prune the dumps that happened to
+    finish, after being told to stop, and report a failure that never happened.
+    It doesn't: a cancelled gather re-raises even with `return_exceptions`
+    (asyncio's rule, which the workflow relies on rather than re-checking).
+    Mutation-checked: catching the CancelledError around the gather fails this."""
+    timeline: List[str] = []
+    finished = asyncio.Event()
+
+    @activity.defn(name="pg_dump_database")
+    async def dump(payload: PgDumpDatabaseInput) -> None:
+        timeline.append(f"dump:{payload.db_name}")
+        if payload.db_name == "fast":
+            finished.set()
+            return
+        while True:  # a long dump, heartbeating, until it is cancelled
+            activity.heartbeat()
+            await asyncio.sleep(0.05)
+
+    @activity.defn(name="prune_database_backups")
+    async def prune(payload: PruneDatabaseBackupsInput) -> None:
+        timeline.append(f"prune:{payload.db_name}")
+
+    async with await WorkflowEnvironment.start_local(
+        data_converter=pydantic_data_converter
+    ) as env:
+        async with Worker(
+            env.client,
+            task_queue=QUEUE,
+            workflows=[BackupDatabasesWorkflow],
+            activities=[dump, prune],
+        ):
+            handle = await env.client.start_workflow(
+                BackupDatabasesWorkflow.run,
+                BackupDatabasesInput(
+                    databases=["fast", "slow"],
+                    nas_root_path="/fishsense_backups",
+                    retention_count=14,
+                ),
+                id=f"backup-{uuid.uuid4()}",
+                task_queue=QUEUE,
+            )
+            await asyncio.wait_for(finished.wait(), timeout=30)
+            await handle.cancel()
+            with pytest.raises(WorkflowFailureError) as raised:
+                await handle.result()
+
+    assert isinstance(raised.value.cause, CancelledError), raised.value.cause
+    assert [e for e in timeline if e.startswith("prune:")] == []
 
 
 async def test_the_dumps_have_v1s_timeout_and_a_live_heartbeat():
