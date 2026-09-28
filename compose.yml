@@ -26,6 +26,7 @@ services:
       POSTGRES_PASSWORD: owner-dev-only
       POSTGRES_DB: fishsense
       FISHSENSE_APP_PASSWORD: app-dev-only
+      FISHSENSE_BACKUP_PASSWORD: backup-dev-only
     volumes:
       - ./deploy/local/initdb:/docker-entrypoint-initdb.d:ro
       - postgres-data:/var/lib/postgresql/data
@@ -98,6 +99,32 @@ services:
       FISHSENSE_OBJECT_STORE_LEGACY_LABELS_PREFIX: ${FISHSENSE_OBJECT_STORE_LEGACY_LABELS_PREFIX:-fishsense-lite}
       # No FISHSENSE_NRP_KUBECONFIG_PATH: standing the processor up on NRP is
       # off, and its wakes are no-ops -- the processor below is always up.
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      temporal:
+        condition: service_healthy
+
+  # The nightly backup (03:00 UTC): pg_dump to the NAS as the backup role, which
+  # reads every tenant's rows and writes none (deploy/local/initdb/02-backup-role.sh).
+  # Its own process and queue, so neither the API nor the orchestrator ever holds
+  # that credential. Without a real NAS the schedule still registers; only the
+  # night's upload fails.
+  backup:
+    build:
+      context: .
+      target: backup
+    environment:
+      FISHSENSE_BACKUP_DATABASE_HOST: postgres
+      FISHSENSE_BACKUP_DATABASE_USER: fishsense_backup
+      FISHSENSE_BACKUP_DATABASE_PASSWORD: backup-dev-only
+      FISHSENSE_BACKUP_DATABASES: '["fishsense"]'
+      FISHSENSE_BACKUP_NAS_ROOT_PATH: ${FISHSENSE_BACKUP_NAS_ROOT_PATH:-/fishsense_backups_dev}
+      FISHSENSE_TEMPORAL_ADDRESS: temporal:7233
+      FISHSENSE_TEMPORAL_NAMESPACE: fishsense
+      FISHSENSE_NAS_URL: ${FISHSENSE_NAS_URL:-https://nas.example.invalid:6021}
+      FISHSENSE_NAS_USERNAME: ${FISHSENSE_NAS_USERNAME:-}
+      FISHSENSE_NAS_PASSWORD: ${FISHSENSE_NAS_PASSWORD:-}
     depends_on:
       migrate:
         condition: service_completed_successfully
