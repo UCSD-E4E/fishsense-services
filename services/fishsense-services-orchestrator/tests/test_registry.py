@@ -31,6 +31,13 @@ NAS = {
     "FISHSENSE_OBJECT_STORE_SECRET_ACCESS_KEY": "unused",
     "FISHSENSE_OBJECT_STORE_BUCKET": "fishsense-lite",
     "FISHSENSE_OBJECT_STORE_LEGACY_LABELS_PREFIX": "fishsense-lite",
+    # The storage every populating stage registers on its projects
+    # (`labels.populate.LabelStudioStorageSettings`), read at the worker's start.
+    "FISHSENSE_LABEL_STUDIO_S3_BUCKET": "labels-fishsense-lite",
+    "FISHSENSE_LABEL_STUDIO_S3_ENDPOINT_URL": "https://s3.example.test",
+    "FISHSENSE_LABEL_STUDIO_S3_REGION": "garage",
+    "FISHSENSE_LABEL_STUDIO_S3_ACCESS_KEY": "unused",
+    "FISHSENSE_LABEL_STUDIO_S3_SECRET_KEY": "unused",
 }
 
 
