@@ -20,7 +20,10 @@ singletons use a double-checked lock (activities run in a thread pool).
 
 v2 changes: ids are UUIDs; SAM 3.1 is built through fishsense-core's
 `fish.sam3.build_segmenter` (whose own `Sam3RequiresGpu` is mapped to the same
-non-retryable error); the version constants come from the contract package.
+non-retryable error); the version constants come from the contract package;
+**an abstention names the dot it came from** (the dot on the kept mask for
+`headtail_failed`, else the crop's centre, the first), where v1 left it NULL
+and a corrected dot never made the row stale.
 """
 
 from __future__ import annotations
@@ -222,7 +225,16 @@ def predict_from_jpeg(
     )
 
     masks = segmenter.segment(crop)
-    placed = {"width": width, "height": height, "crop_x": origin_x, "crop_y": origin_y}
+    # v2: with no mask kept, the answer came from the crop, centred on the
+    # first dot, so the abstention names it: a correction to that dot then
+    # makes the row stale (v1 left it NULL, and "no fish" stood forever).
+    placed = {
+        "width": width,
+        "height": height,
+        "crop_x": origin_x,
+        "crop_y": origin_y,
+        "laser_label_id": laser_label_ids[0] if laser_label_ids else None,
+    }
     if not masks:
         return _abstain("no_detections", **placed)
 
@@ -268,6 +280,8 @@ def _keypoint(
         "predictor_version": options.predictor_version,
         "checkpoint": options.checkpoint,
         "core_version": options.core_version,
+        # The dot that chose the mask, on a failure too (v2; v1: NULL).
+        "laser_label_id": _laser_label_for_mask(local_points, laser_label_ids, binary),
     }
 
     try:
@@ -293,7 +307,6 @@ def _keypoint(
         tail_y=tail_y,
         mask_area_px=area,
         silhouette_ratio=silhouette_ratio(area, length),
-        laser_label_id=_laser_label_for_mask(local_points, laser_label_ids, binary),
         **common,
     )
 

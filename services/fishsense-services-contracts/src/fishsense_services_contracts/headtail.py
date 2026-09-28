@@ -191,6 +191,9 @@ class HeadtailPredictionResult(BaseModel):
     silhouette_ratio: Optional[float] = None
     crop_x: Optional[int] = None
     crop_y: Optional[int] = None
+    #: The dot the answer came from: the one on the kept mask, or, with no
+    #: mask kept, the first (the crop's centre). None only with no dot or no
+    #: decodable frame. v1 set it on a prediction only.
     laser_label_id: Optional[UUID] = None
     predictor_version: Optional[int] = None
     checkpoint: Optional[str] = None

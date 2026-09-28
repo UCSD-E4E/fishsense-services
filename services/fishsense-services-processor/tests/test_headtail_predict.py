@@ -245,6 +245,70 @@ def test_an_unfittable_mask_is_a_headtail_failure_not_an_error(monkeypatch):
     assert result.mask_area_px > 0 and result.head_x is None
 
 
+# -- v2: an abstention names the dot it was made from -------------------------------
+
+
+class TestAnAbstentionNamesItsDot:
+    """v2: v1 left `laser_label_id` NULL on every abstention, so a laser
+    correction never made one stale: the frame kept its "no fish" forever
+    (the cohort and the GPU-less skip both judge staleness by that dot). A
+    kept mask names the dot on it, as a prediction does; with no mask kept,
+    the dot the crop was centred on -- the first -- is the one the answer
+    came from."""
+
+    LASER = (2000.0, 1500.0)
+
+    def _ids(self):
+        return [uuid.uuid4(), uuid.uuid4()]
+
+    def test_no_detections_names_the_crop_centre(self):
+        ids = self._ids()
+        result = _predict(
+            _jpeg(), [self.LASER, (2100.0, 1500.0)], _Stub([]), laser_label_ids=ids
+        )
+        assert (result.status, result.laser_label_id) == ("no_detections", ids[0])
+
+    def test_laser_off_all_fish_names_the_crop_centre(self):
+        ids = self._ids()
+        result = _predict(
+            _jpeg(),
+            [self.LASER, (2100.0, 1500.0)],
+            _Stub([_fish_mask(100, 100, 40, 20)]),
+            laser_label_ids=ids,
+        )
+        assert (result.status, result.laser_label_id) == ("laser_off_all_fish", ids[0])
+
+    def test_headtail_failed_names_the_dot_on_the_mask(self, monkeypatch):
+        class _Exploding:
+            def find_head_tail_img(self, _mask):
+                raise RuntimeError("native detector failed")
+
+        monkeypatch.setitem(
+            sys.modules,
+            "fishsense_core.fish",
+            types.SimpleNamespace(FishHeadTailDetector=_Exploding),
+        )
+        miss, hit = (1800.0, 1500.0), (2300.0, 1500.0)
+        ox, oy = crop_origin(*miss, FRAME_W, FRAME_H, CROP_W, CROP_H)
+        mask = _fish_mask(int(hit[0] - ox), int(hit[1] - oy), 120, 50)
+        ids = self._ids()
+
+        result = _predict(_jpeg(), [miss, hit], _Stub([mask]), laser_label_ids=ids)
+
+        assert (result.status, result.laser_label_id) == ("headtail_failed", ids[1])
+
+    def test_with_no_dot_or_no_frame_there_is_none_to_name(self):
+        assert (
+            _predict(_jpeg(), [], _Stub([]), laser_label_ids=[]).laser_label_id is None
+        )
+        assert (
+            _predict(
+                b"not a jpeg", [self.LASER], _Stub([]), laser_label_ids=self._ids()[:1]
+            ).laser_label_id
+            is None
+        ), "an undecodable JPEG is the file's fault, not the dot's"
+
+
 # -- mask conversion ---------------------------------------------------------------
 
 

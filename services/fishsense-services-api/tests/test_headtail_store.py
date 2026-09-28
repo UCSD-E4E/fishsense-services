@@ -993,13 +993,19 @@ async def test_stale_or_null_predictor_version_re_enters_the_cohort(
     assert await _next_predict(app_engine, lab) == dive
 
 
-async def test_prediction_from_a_superseded_laser_is_stale(owner_engine, app_engine):
+@pytest.mark.parametrize(
+    "status", ["predicted", "no_detections", "laser_off_all_fish", "headtail_failed"]
+)
+async def test_prediction_from_a_superseded_laser_is_stale(
+    owner_engine, app_engine, status
+):
     """The dot that chose the fish was later dead-lettered, so the mask may be
-    of the wrong thing entirely."""
+    of the wrong thing entirely. v2: an abstention names its dot too (the
+    processor's), so a corrected dot re-opens a "no fish" as well."""
     lab = await _tenant(owner_engine)
     dive, capture, _ = await _predict_seed(owner_engine, lab)
     dead = await _laser(owner_engine, lab, capture, superseded=True)
-    await _prediction(owner_engine, lab, capture, laser=dead)
+    await _prediction(owner_engine, lab, capture, laser=dead, status=status)
     assert await _next_predict(app_engine, lab) == dive
 
 
