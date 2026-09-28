@@ -237,6 +237,8 @@ class HeadTailPredictionRow:
     predictor_version: int | None = None
     checkpoint: str | None = None
     core_version: str | None = None
+    #: v2 (migration 0033): the kept mask's box, which the species stage crops.
+    mask_bbox: list[int] | None = None
 
 
 @dataclass(frozen=True)
@@ -656,12 +658,13 @@ async def persist_headtail_predictions(
                 INSERT INTO head_tail_predictions (
                     tenant_id, capture_id, status, head_x, head_y, tail_x, tail_y,
                     width, height, mask_area_px, silhouette_ratio, crop_x, crop_y,
-                    laser_label_id, predictor_version, checkpoint, core_version)
+                    laser_label_id, predictor_version, checkpoint, core_version,
+                    mask_bbox)
                 VALUES (
                     :tenant, :capture_id, :status, :head_x, :head_y, :tail_x,
                     :tail_y, :width, :height, :mask_area_px, :silhouette_ratio,
                     :crop_x, :crop_y, :laser_label_id, :predictor_version,
-                    :checkpoint, :core_version)
+                    :checkpoint, :core_version, :mask_bbox)
                 """),
             {"tenant": tenant_id, **r.__dict__},
         )
