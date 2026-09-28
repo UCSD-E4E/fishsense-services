@@ -20,8 +20,8 @@ v1's rules, kept:
   capture whose live species row is flagged `needs_reprocess`;
 * **the population cohort**: the same without the cluster gate or the flag,
   every matching dive;
-* a sentinel (a species row with no project) is not a label, and a
-  superseded row is not evidence of done work;
+* an incomplete sentinel (a species row with no project) is not a label, and
+  a superseded row is not evidence of done work;
 * raising the flag touches only live, by default incomplete, canonical rows;
   clearing touches every canonical row of the dive (or only the named frames);
 * the unidentified-slate note is written only when the dive has none, and
@@ -30,6 +30,9 @@ v1's rules, kept:
 v2 changes:
 
 * per tenant, ordered by `created_at` (v1: `id`);
+* **a completed sentinel is done work** in both cohorts, as populate has
+  always read it (v1's cohorts ignored it, so its dive was re-staged hourly,
+  forever);
 * **populate's candidates are canonical** (v1 took every laser-valid image of
   the dive): a duplicate frame shares its twin's JPEG and task URL, and would
   have been anchored to the twin's task;
@@ -38,8 +41,10 @@ v2 changes:
   v1's cluster read had no ORDER BY, yet "image i of N" and stage 6.1's
   "Part of previous group" both read it;
 * **stage 6.1 writes all or nothing**, serialised per dive, and refuses a
-  capture that is not a canonical capture of the dive (v1 posted cluster by
-  cluster, so a failure left a partial set that blocked every re-run);
+  capture of another dive (v1 posted cluster by cluster, so a failure left a
+  partial set that blocked every re-run). A duplicate frame of the dive is
+  left out rather than refused: migrated clusters hold some, and v1 grouped
+  them;
 * **writing a link expires a refusal instead of clearing it**: v2's refusal
   is an append-only `laser_calibrations` row, so the write stamps
   `dives.calibration_links_changed_at` (migration 0022) and a refused
@@ -105,13 +110,19 @@ REFUSAL_OUTLIVED_SQL = (
 )
 
 #: The canonical capture `c` has a live species label in a Label Studio
-#: project: populate has seeded (or a labeler holds) its task. Sentinels and
-#: superseded rows don't count.
+#: project -- populate has seeded (or a labeler holds) its task -- or a live
+#: completed one anywhere. Superseded rows and incomplete sentinels don't
+#: count. v2 change: v1 ignored a completed sentinel here, yet populate never
+#: tasks a frame with a completed row (`species.populate.
+#: select_target_captures`), so its dive was re-staged hourly, forever, ahead
+#: of every younger one. The stage-2 resolver (`species.preprocess`) and
+#: populate read "done" the same way.
 _HAS_LIVE_SPECIES_TASK = """
     EXISTS (
         SELECT 1 FROM species_labels s
         WHERE s.tenant_id = c.tenant_id AND s.capture_id = c.id
-          AND s.ls_project_id IS NOT NULL AND NOT s.superseded
+          AND (s.ls_project_id IS NOT NULL OR s.completed)
+          AND NOT s.superseded
     )
 """
 
@@ -487,22 +498,36 @@ async def record_species_label(
     ls_project_id: int,
     ls_task_id: int,
     image_url: str,
-) -> None:
+) -> bool:
     """Anchor the (capture, task, project) triple: populate's row for a task.
+    False if nothing was written.
 
     v1's natural-key upsert on (image, project): a row the project already
     holds -- only a superseded one can reach here -- is re-anchored and
     revived with the fields v1's populate sent, and nothing else, so its
     `needs_reprocess` survives. `source` is `human`: a row seeded for a
     labeler (docs/port-plan.md).
+
+    v2 change: a task another capture's row already holds is skipped. v1
+    anchored a duplicate frame and its twin to the one task their shared
+    JPEG URL dedupes to; the migration kept one row per task (task ids are
+    unique per tenant here), so a migrated duplicate can hold the task
+    populate finds for its canonical twin, and writing it raised every hour.
+    That row is left as it is -- moving the task would rewrite a migrated
+    row that may carry a labeler's answer -- and the caller logs the skip.
     """
-    await conn.execute(
+    written = await conn.execute(
         text("""
             INSERT INTO species_labels
                 (tenant_id, capture_id, source, ls_project_id, ls_task_id,
                  image_url, completed, superseded, ls_payload)
-            VALUES (:tenant, :capture, 'human', :project, :task, :url, false,
-                    false, '{}'::jsonb)
+            SELECT :tenant, :capture, 'human', :project, :task, :url, false,
+                   false, '{}'::jsonb
+            WHERE NOT EXISTS (
+                SELECT 1 FROM species_labels held
+                WHERE held.tenant_id = :tenant AND held.ls_task_id = :task
+                  AND held.capture_id <> :capture
+            )
             ON CONFLICT (tenant_id, capture_id, ls_project_id) DO UPDATE SET
                 ls_task_id = excluded.ls_task_id,
                 image_url = excluded.image_url,
@@ -517,10 +542,12 @@ async def record_species_label(
                 fish_measurable_category = NULL,
                 fish_angle_category = NULL,
                 fish_curved_category = NULL
+            RETURNING id
             """),
         {"tenant": tenant_id, "capture": capture_id, "project": ls_project_id,
          "task": ls_task_id, "url": image_url},
     )  # fmt: skip
+    return written.first() is not None
 
 
 async def supersede_species_labels(
@@ -547,7 +574,17 @@ async def persist_label_studio_clusters(
 ) -> int | None:
     """Write stage 6.1's label-studio clusters, all or nothing, in the
     caller's transaction. The number written; None if the dive already has
-    label-studio clusters (v1 refused to re-run: it had no delete)."""
+    label-studio clusters (v1 refused to re-run: it had no delete).
+
+    A duplicate frame of the dive (not canonical) is dropped from its group,
+    and a group left empty is not written. A migrated dive's prediction
+    clusters can hold one with a live species row, and v1 grouped it; it is
+    measured under its canonical copy's dive, so it has no place in these
+    clusters, and refusing it would fail stage 6.1 for the dive forever. The
+    groups are formed before the drop, so a duplicate's "Not part of current
+    group" still splits them where v1 did. A capture of another dive is
+    still refused (`ForeignCapture`).
+    """
     await conn.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": f"label-studio-clusters:{dive_id}"},
@@ -555,24 +592,22 @@ async def persist_label_studio_clusters(
     if (await species_grouping_facts(conn, tenant_id, dive_id)).already_grouped:
         return None
 
-    groups = [group for group in groups if group]
     members = {capture for group in groups for capture in group}
-    canonical = set(
-        (
-            await conn.execute(
-                text("""
-                    SELECT id FROM captures
-                    WHERE tenant_id = :tenant AND dive_id = :dive
-                      AND is_canonical AND id = ANY(:ids)
-                    """),
-                {"tenant": tenant_id, "dive": dive_id, "ids": list(members)},
-            )
-        ).scalars()
-    )
-    if foreign := members - canonical:
-        raise ForeignCapture(
-            f"not canonical captures of dive {dive_id}: {sorted(map(str, foreign))}"
+    of_dive = {
+        r.id: r.is_canonical
+        for r in await conn.execute(
+            text("""
+                SELECT id, is_canonical FROM captures
+                WHERE tenant_id = :tenant AND dive_id = :dive AND id = ANY(:ids)
+                """),
+            {"tenant": tenant_id, "dive": dive_id, "ids": list(members)},
         )
+    }
+    if foreign := members - of_dive.keys():
+        raise ForeignCapture(
+            f"not captures of dive {dive_id}: {sorted(map(str, foreign))}"
+        )
+    groups = [kept for group in groups if (kept := [c for c in group if of_dive[c]])]
     for group in groups:
         if len(set(group)) != len(group):
             raise InvalidClusters(f"a capture repeats within a group of {dive_id}")
@@ -760,9 +795,9 @@ class SpeciesCatalog(ServicePrincipal):
         ls_project_id: int,
         ls_task_id: int,
         image_url: str,
-    ) -> None:
+    ) -> bool:
         async with self._tenant(tenant_id) as conn:
-            await record_species_label(
+            return await record_species_label(
                 conn,
                 tenant_id,
                 capture_id=capture_id,

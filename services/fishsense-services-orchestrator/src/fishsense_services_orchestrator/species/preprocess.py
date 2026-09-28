@@ -17,8 +17,10 @@ selector promised re-stages a dive hourly forever):
   stage 1 is one-shot per dive, so nothing else would ever draw it, and one
   undrawn frame keeps its dive's whole project an unpublished draft.
 
-v2 change: the order of clusters and members is the catalog's stated one
-(earliest capture first), where v1's was the database's incidental order.
+v2 changes: the order of clusters and members is the catalog's stated one
+(earliest capture first), where v1's was the database's incidental order; and
+a completed sentinel is done work, as in the cohort and populate (v1 drew its
+frame and re-selected its dive every hour, though populate never tasks it).
 """
 
 from __future__ import annotations
@@ -44,10 +46,12 @@ class PlannedMember:
 def plan_species_preprocess(facts: SpeciesPreprocessFacts) -> list[list[PlannedMember]]:
     """The frames to draw, grouped by cluster, orphans last as singletons."""
     by_id = {c.capture_id: c for c in facts.captures}
+    # Done work: a task in a project, or a completed row anywhere (a
+    # completed sentinel -- populate never tasks its frame).
     labeled = {
         label.capture_id
         for label in facts.species_labels
-        if label.ls_project_id is not None
+        if label.ls_project_id is not None or label.completed
     }
     flagged = {
         label.capture_id for label in facts.species_labels if label.needs_reprocess

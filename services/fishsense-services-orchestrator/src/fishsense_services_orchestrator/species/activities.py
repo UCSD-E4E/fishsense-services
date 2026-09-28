@@ -28,7 +28,8 @@ v2 changes:
   store's `locate_processed_jpeg`, whose answer is also the task's URL;
 * the sync applies each task through a column-scoped update, and a dive-link
   write expires a standing calibration refusal (see species_store);
-* stage 6.1 persists all or nothing.
+* stage 6.1 persists all or nothing, and the catalog's refusal of a group
+  set is final (non-retryable).
 """
 
 from __future__ import annotations
@@ -39,7 +40,9 @@ from datetime import datetime
 from typing import Any, List, Optional, Protocol
 
 from temporalio import activity
+from temporalio.exceptions import ApplicationError
 
+from fishsense_services_api.clustering_store import InvalidClusters
 from fishsense_services_api.label_sync_store import SpeciesSync, SyncedLabel
 from fishsense_services_api.species_store import (
     SpeciesCandidate,
@@ -149,7 +152,7 @@ class SpeciesCatalog(Protocol):
         ls_project_id: int,
         ls_task_id: int,
         image_url: str,
-    ) -> None: ...
+    ) -> bool: ...
 
     async def supersede_species_labels(
         self, tenant_id: uuid.UUID, label_ids: list[uuid.UUID]
@@ -415,13 +418,22 @@ class SpeciesActivities:
 
             async def record(item, task_id: int) -> None:
                 capture, task_image = item
-                await self._catalog.record_species_label(
+                if not await self._catalog.record_species_label(
                     target.tenant_id,
                     capture_id=capture.capture_id,
                     ls_project_id=ls_project_id,
                     ls_task_id=task_id,
                     image_url=task_image.image.uri,
-                )
+                ):
+                    # A migrated duplicate holds the task (species_store).
+                    activity.logger.warning(
+                        "species task %d in project %d is already anchored to "
+                        "another capture's label; left it there and wrote no "
+                        "row for capture %s",
+                        task_id,
+                        ls_project_id,
+                        capture.capture_id,
+                    )
 
             import_result = await import_tasks_and_record_labels(
                 ls,
@@ -608,9 +620,18 @@ class SpeciesActivities:
             )
             return UpdateDiveImageGroupsResult(False, 0, seen)
 
-        created = await self._catalog.persist_label_studio_clusters(
-            target.tenant_id, target.dive_id, groups
-        )
+        try:
+            created = await self._catalog.persist_label_studio_clusters(
+                target.tenant_id, target.dive_id, groups
+            )
+        except InvalidClusters as exc:
+            # Final (ForeignCapture included): a retry re-reads the same labels
+            # and regroups them into the same refused set.
+            raise ApplicationError(
+                f"refusing the label-studio groups for dive {target.dive_id}: {exc}",
+                type="InvalidClusters",
+                non_retryable=True,
+            ) from exc
         if created is None:
             return skipped
         activity.logger.info(
