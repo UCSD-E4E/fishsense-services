@@ -27,7 +27,9 @@ v2 changes:
   ``processed_jpeg_candidates`` is the legacy key resolver: a frame migrated
   from v1 resolves to its new key, then v1's; a frame v2 ingested never
   resolves to a v1 key, because v1's keys carry no tenant;
-* a slate PDF is keyed by its template's uuid (v1: the integer id).
+* a slate PDF is keyed by its template's uuid (v1: the integer id). The PDFs
+  v1 staged stay where they are, and a migrated template's is read from
+  there (``legacy_slate_pdf``) instead of being fetched from the NAS again.
 """
 
 from __future__ import annotations
@@ -87,6 +89,14 @@ class ObjectLayout:
         """A staged slate template PDF (scratch)."""
         slate = uuid.UUID(str(slate_template_id))
         return self._place(tenant_id, self._scratch, f"{SLATE_PDF_PREFIX}/{slate}.pdf")
+
+    def legacy_slate_pdf(self, v1_id: int) -> ObjectRef:
+        """Where v1 staged a migrated template's PDF: v1's `slate_pdf_key`, in
+        the scratch bucket by v1's integer id, with no prefix (v1's scratch
+        keys never took one). Read-only, like every v1 key."""
+        return ObjectRef(
+            bucket=self._scratch, key=f"{SLATE_PDF_PREFIX}/{int(v1_id)}.pdf"
+        )
 
     def processed_jpeg(
         self, tenant_id: uuid.UUID, folder: str, checksum: str

@@ -120,6 +120,8 @@ class SlateTemplate:
     reference_points: list[tuple[float, float]]
     #: Share-relative NAS path of the template PDF (v1's `DiveSlate.path`).
     source_path: str | None
+    #: v1's id for a migrated template: v1 staged its PDF under it.
+    v1_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -257,6 +259,7 @@ def _template(row) -> SlateTemplate:
         dpi=row.dpi,
         reference_points=[tuple(p) for p in (row.reference_points or [])],
         source_path=row.source_path,
+        v1_id=row.v1_id,
     )
 
 
@@ -267,7 +270,7 @@ async def slate_template(
     row = (
         await conn.execute(
             text("""
-                SELECT id, name, dpi, reference_points, source_path
+                SELECT id, name, dpi, reference_points, source_path, v1_id
                 FROM slate_templates WHERE id = :id
                 """),
             {"id": slate_template_id},

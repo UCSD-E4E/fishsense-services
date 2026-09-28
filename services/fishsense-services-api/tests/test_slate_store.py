@@ -68,6 +68,7 @@ from fishsense_services_api.slate_store import (
     slate_template_for_task,
     supersede_stale_slate_labels,
 )
+from fishsense_services_api.slate_store import slate_template as stored_template
 
 ORCHESTRATOR = "service:fishsense-orchestrator"
 
@@ -961,6 +962,25 @@ async def test_a_task_resolves_to_its_dives_slate_template(owner_engine, app_eng
     assert (found.capture_id, found.slate_template_id) == (frame, slate)
     assert unresolvable.slate_template_id is None
     assert missing is None
+
+
+async def test_a_template_says_whether_it_came_from_v1(owner_engine, app_engine):
+    """A migrated template's PDF may already be staged where v1 put it
+    (`slate_pdf/{v1 id}.pdf`), so the stager needs v1's id to look there."""
+    lab = await tenant(owner_engine)
+    migrated, fresh = await slate_template(owner_engine), await slate_template(
+        owner_engine
+    )
+    v1_id = uuid.uuid4().int % 2**31
+    async with owner_engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE slate_templates SET v1_id = :v WHERE id = :i"),
+            {"v": v1_id, "i": migrated},
+        )
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        assert (await stored_template(conn, migrated)).v1_id == v1_id
+        assert (await stored_template(conn, fresh)).v1_id is None
 
 
 # ---------- the catalog, as the orchestrator's principal ----------

@@ -105,6 +105,15 @@ class OrchestratorObjectStore:
         the template's aspect ratio (v1)."""
         return await self._get(self.layout.slate_pdf(tenant_id, slate_template_id))
 
+    async def download_legacy_slate_pdf(self, v1_id: int) -> bytes | None:
+        """The PDF v1 staged for a migrated template, or None if it is gone."""
+        try:
+            return await self._get(self.layout.legacy_slate_pdf(v1_id))
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code", "") in NOT_FOUND_CODES:
+                return None
+            raise
+
     # -- the processor's JPEGs (read-only) -----------------------------------
 
     async def locate_processed_jpeg(
