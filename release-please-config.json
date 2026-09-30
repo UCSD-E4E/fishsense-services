@@ -33,6 +33,16 @@
           "type": "json",
           "path": "apps/web/package.json",
           "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "apps/web/package-lock.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "apps/web/package-lock.json",
+          "jsonpath": "$.packages[''].version"
         }
       ]
     }

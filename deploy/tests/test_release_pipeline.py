@@ -147,6 +147,30 @@ def test_the_compose_pins_are_a_released_or_the_bootstrap_version():
     assert tuple(map(int, pin[1:].split("."))) <= tuple(map(int, manifest.split(".")))
 
 
+def test_every_versioned_file_release_please_bumps_exists_and_has_a_version():
+    """A package whose version release-please doesn't move ships the old
+    version string beside the new image tag; one it can't find fails the
+    release PR. The web's lock carries the version twice (npm ci compares)."""
+    import tomllib
+
+    config = json.loads((REPO / "release-please-config.json").read_text())
+    extra = config["packages"]["."]["extra-files"]
+    for entry in extra:
+        path = REPO / entry["path"]
+        assert path.is_file(), entry["path"]
+        if entry["type"] == "toml":
+            assert tomllib.loads(path.read_text())["project"]["version"]
+        elif entry["jsonpath"] == "$.version":
+            assert json.loads(path.read_text())["version"]
+        else:
+            assert entry["jsonpath"] == "$.packages[''].version"
+            assert json.loads(path.read_text())["packages"][""]["version"]
+    bumped = {e["path"] for e in extra}
+    for service in (REPO / "services").iterdir():
+        if (service / "pyproject.toml").is_file():
+            assert f"services/{service.name}/pyproject.toml" in bumped, service.name
+
+
 def test_deploy_converges_only_on_a_merged_auto_deploy_pr_or_by_hand():
     """v1's gate (fishsense-lite deploy.yml): a human reviews the pin diff. A
     push trigger would converge on the branch push that opens the PR."""
