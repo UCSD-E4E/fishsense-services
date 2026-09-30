@@ -259,9 +259,19 @@ $R down -v                                      # the rehearsal's volumes only
 ```
 
 `rehearsal.toml` may carry **read-only** Garage keys (`[object_store]`) and a
-throwaway Label Studio token; never production write keys. A rehearsal passes
+throwaway Label Studio token; never production write keys. A service given no
+credential is pointed at an `.invalid` host, so a rehearsal without values
+never calls app.heartex.com, s3.e4e.ucsd.edu or the NAS. A rehearsal passes
 when: bootstrap and migrate exit 0 twice in a row (idempotence), migrate-v1
 prints GO, and the smoke test passes every check it has credentials for.
+
+First run (2026-09-30, local images, v1's committed schema, no credentials):
+bootstrap, migrate and the cert sync exit 0 on the first and second converge;
+migrate-v1 GO; the smoke test PASSes api, openapi, head, audit, lab, research,
+and all 22 schedules, and FAILs label studio, object store (`.invalid`) and the
+web — whose landing page 500s when the Authentik issuer is unreachable (it
+mints its service token per request). That last one holds in production too:
+an Authentik outage takes the public landing page down, not just sign-in.
 
 ## 2. Stop v1 (T-0, Friday evening)
 

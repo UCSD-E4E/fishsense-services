@@ -13,6 +13,10 @@
 #   * NRP: off (no kubeconfig), and the processor runs here instead;
 #   * the NAS backup folder: a rehearsal's own;
 #   * nothing is published: no :443, no traefik (the edge isn't rehearsed).
+# stage.py adds two more, in the staged compose itself: a production host whose
+# credential the rehearsal wasn't given (Label Studio, Garage, the NAS) becomes
+# an `.invalid` one, and the compose's fixed container names get the
+# rehearsal's prefix (they are global to the docker host).
 # Everything else -- the bootstrap, migrate, the renders' shape, the roles, the
 # pg_hba lines, the service graph -- is production's, which is the point.
 

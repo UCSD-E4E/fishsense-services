@@ -105,18 +105,43 @@ def _lookup(values: dict[str, dict[str, str]], path: str, field: str) -> str:
     return f"unset-in-rehearsal-{path.replace('/', '-')}-{field}"
 
 
+#: Each production host a rehearsal may reach, the OpenBao path whose
+#: credential opens it, and where the rehearsal points instead without one.
+#: Placeholder keys against the real host still make a (failing) call to it --
+#: the first rehearsal did, to Label Studio and Garage -- so a service with no
+#: credential given reaches an `.invalid` host, which fails without leaving the
+#: box. PLAN.md §6.5: what a rehearsal may be given is read-only.
+PRODUCTION_HOSTS = (
+    ("https://app.heartex.com", "label_studio", "https://label-studio.example.invalid"),
+    ("https://s3.e4e.ucsd.edu", "object_store", "https://s3.example.invalid"),
+    ("https://e4e-nas.ucsd.edu:6021", "nas", "https://nas.example.invalid:6021"),
+)
+
+
+def _offline(text: str, values: dict[str, dict[str, str]]) -> str:
+    for host, path, instead in PRODUCTION_HOSTS:
+        if path not in values:
+            text = text.replace(host, instead)
+    return text
+
+
 def _processor_env(values: dict[str, dict[str, str]]) -> str:
     """The processor's k8s Secret (docs/cutover.md), as an env file."""
     store = values.get("object_store", {})
     weights = values.get("model_weights", {})
+    s3 = "https://s3.e4e.ucsd.edu"
     env = {
-        "FISHSENSE_OBJECT_STORE_ENDPOINT_URL": "https://s3.e4e.ucsd.edu",
+        "FISHSENSE_OBJECT_STORE_ENDPOINT_URL": (
+            s3 if store else "https://s3.example.invalid"
+        ),
         "FISHSENSE_OBJECT_STORE_REGION": "garage",
         "FISHSENSE_OBJECT_STORE_BUCKET": "labels-fishsense-lite",
         "FISHSENSE_OBJECT_STORE_LEGACY_LABELS_PREFIX": "fishsense-lite",
         "FISHSENSE_OBJECT_STORE_ACCESS_KEY_ID": store.get("access_key", "unset"),
         "FISHSENSE_OBJECT_STORE_SECRET_ACCESS_KEY": store.get("secret_key", "unset"),
-        "FISHSENSE_MODEL_WEIGHTS_ENDPOINT_URL": "https://s3.e4e.ucsd.edu",
+        "FISHSENSE_MODEL_WEIGHTS_ENDPOINT_URL": (
+            s3 if weights else "https://s3.example.invalid"
+        ),
         "FISHSENSE_MODEL_WEIGHTS_ACCESS_KEY_ID": weights.get("access_key", "unset"),
         "FISHSENSE_MODEL_WEIGHTS_SECRET_ACCESS_KEY": weights.get("secret_key", "unset"),
     }
@@ -148,6 +173,7 @@ def stage(
 ) -> Path:
     """Stage under ``out``; returns the `dc` wrapper's path."""
     values = {k: dict(v) for k, v in (values or {}).items()}
+    given = set(values)  # before rendering generates the rehearsal's own
     out = out.resolve()
     run = out / "run-tenant"
     if out.exists():
@@ -168,6 +194,9 @@ def stage(
     (project / ".env").write_text(f"COMPOSE_PROFILES={profiles}\n")
 
     compose = (INCUS / "compose.yml").read_text().replace(TENANT_RUN, str(run))
+    # Fixed container names are global to the docker host: the rehearsal's own.
+    compose = re.sub(r"(container_name:\s*)(\S+)", rf"\g<1>{PROJECT}-\g<2>", compose)
+    compose = _offline(compose, {k: {} for k in given})
     (out / "compose.yml").write_text(_images(compose, version, local_images))
 
     pins = re.search(r"fishsense-services-orchestrator:(v\d+\.\d+\.\d+)", compose)

@@ -117,6 +117,61 @@ def test_the_staged_stack_is_the_rehearsals_own(tmp_path):
     )
 
 
+PRODUCTION_HOSTS = ("app.heartex.com", "s3.e4e.ucsd.edu", "e4e-nas.ucsd.edu")
+
+
+def _everything(out) -> str:
+    """The composed model and every rendered env file: all a container sees."""
+    rendered = "".join(p.read_text() for p in (out / "run-tenant").rglob("*.env"))
+    return yaml.safe_dump(_config(out / "dc")) + rendered
+
+
+@needs_compose
+def test_without_credentials_nothing_points_at_a_production_host(tmp_path):
+    """Found by the first rehearsal: with placeholder keys, the smoke test and
+    the web still called app.heartex.com and s3.e4e.ucsd.edu (and failed
+    authentication there). A rehearsal given no credential for a service
+    reaches an `.invalid` host instead, which fails without leaving the box."""
+    sut.stage(tmp_path / "rehearsal", local_images=True)
+
+    text = _everything(tmp_path / "rehearsal")
+
+    for host in PRODUCTION_HOSTS:
+        assert host not in text, host
+    assert "example.invalid" in text
+
+
+@needs_compose
+def test_a_credential_given_opens_exactly_its_own_host(tmp_path):
+    """PLAN.md §6.5: a rehearsal may read v1's buckets with read-only keys."""
+    sut.stage(
+        tmp_path / "rehearsal",
+        local_images=True,
+        values={"object_store": {"access_key": "ro", "secret_key": "ro"}},
+    )
+
+    text = _everything(tmp_path / "rehearsal")
+
+    assert "s3.e4e.ucsd.edu" in text
+    assert "app.heartex.com" not in text
+    assert "e4e-nas.ucsd.edu" not in text
+
+
+@needs_compose
+def test_fixed_container_names_are_the_rehearsals_own(tmp_path):
+    """compose.yml names a few containers (the cert sync's, v1's Superset
+    ones). Those names are global to the docker host, so the rehearsal's must
+    not be production's."""
+    dc = sut.stage(tmp_path / "rehearsal", local_images=True, profiles="superset")
+
+    names = [
+        s["container_name"]
+        for s in _config(dc)["services"].values()
+        if "container_name" in s
+    ]
+    assert names and all(n.startswith("fishsense-rehearsal-") for n in names), names
+
+
 @needs_compose
 def test_a_release_can_be_rehearsed_as_released(tmp_path):
     dc = sut.stage(tmp_path / "rehearsal", version="v9.8.7")
