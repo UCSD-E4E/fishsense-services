@@ -755,7 +755,9 @@ richer):
 - The data migration job and its validation report (§6.4), rehearsed early and often.
 - The web portal port (§6.1).
 - The production deploy: a `flake.nix` with the fishsense `mkTenant`, a production compose
-  (inner Traefik, vault-agent secrets), and the promote → converge workflow.
+  (inner Traefik, vault-agent secrets), and the promote → converge workflow — **built**
+  (`flake.nix`, `deploy/incus/`, `.github/workflows/`); the runbook, the OpenBao seeds and the
+  admin steps are `docs/cutover.md`.
 
 ## 8. Extension seams for future devices
 - New device = new `DeviceKind` + a `CaptureExtension` table + processor algorithm(s)/

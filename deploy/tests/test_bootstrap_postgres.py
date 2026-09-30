@@ -351,3 +351,40 @@ def test_the_smoke_login_reads_the_research_views(with_lab):
         dive=490,
     )
     assert count == 0
+
+
+def test_the_runbooks_membership_grant_is_idempotent(with_lab):
+    """docs/cutover.md step 4d's SQL, verbatim with the subs filled in: the
+    orchestrator and the web's service account as members, an admin as admin.
+    Run twice (a re-run on the night must not fail or duplicate)."""
+    import re
+
+    cluster, lab = with_lab
+    runbook = (REPO / "docs" / "cutover.md").read_text()
+    sql = re.search(
+        r"psql -U postgres -d fishsense_services -v ON_ERROR_STOP=1 <<'SQL'\n(.*?)\nSQL\n",
+        runbook,
+        re.S,
+    ).group(1)
+    sql = sql.replace("<web service account sub>", "sub-web-sa").replace(
+        "<lab admin sub>", "sub-admin"
+    )
+    admin = _admin(cluster, V2)
+    try:
+        for _ in range(2):
+            with admin.connect() as conn:
+                conn.execute(text(sql))
+        with admin.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT u.sub, m.role, m.tenant_id FROM memberships m "
+                    "JOIN users u ON u.id = m.user_id ORDER BY u.sub"
+                )
+            ).all()
+    finally:
+        admin.dispose()
+    assert rows == [
+        ("service:fishsense-orchestrator", "member", lab),
+        ("sub-admin", "admin", lab),
+        ("sub-web-sa", "member", lab),
+    ]

@@ -1,0 +1,103 @@
+# Rehearsal override for the PRODUCTION compose (docs/cutover.md, "Rehearsal").
+#
+# Layered on deploy/incus/compose.yml as deploy/rehearsal/stage.py stages it
+# (/run/tenant rewritten to the rehearsal's own directory), under the project
+# name `fishsense-rehearsal`: every container, volume and network is the
+# rehearsal's own, never the slot's and never the dev box's other stacks
+# (fishsense-local-*, fishsense-v1-rehearsal).
+#
+# It changes only what must not reach production (PLAN.md §6.5):
+#   * Temporal: a local dev server, no TLS -- never krg-prod's shared
+#     `fishsense` namespace, where a rehearsal's schedules would collide with
+#     v1's (same workflow class names, same minutes);
+#   * NRP: off (no kubeconfig), and the processor runs here instead;
+#   * the NAS backup folder: a rehearsal's own;
+#   * nothing is published: no :443, no traefik (the edge isn't rehearsed).
+# Everything else -- the bootstrap, migrate, the renders' shape, the roles, the
+# pg_hba lines, the service graph -- is production's, which is the point.
+
+services:
+  traefik:
+    profiles: [not-rehearsed]
+    ports: !reset []
+
+  temporal:
+    image: temporalio/temporal:1.9.1
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--namespace", "fishsense"]
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "namespace", "describe",
+             "--namespace", "fishsense", "--address", "127.0.0.1:7233"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [interior]
+
+  orchestrator:
+    environment:
+      FISHSENSE_TEMPORAL_ADDRESS: temporal:7233
+      FISHSENSE_TEMPORAL_DOMAIN: !reset null
+      FISHSENSE_TEMPORAL_CLIENT_CERT: !reset null
+      FISHSENSE_TEMPORAL_CLIENT_PRIVATE_KEY: !reset null
+      FISHSENSE_TEMPORAL_SERVER_ROOT_CA_CERT: !reset null
+      # NRP off: wakes are no-ops, and the processor service below serves.
+      FISHSENSE_NRP_KUBECONFIG_PATH: !reset null
+      FISHSENSE_NRP_NAMESPACE: !reset null
+      FISHSENSE_NRP_IMAGE_TAG: !reset null
+    depends_on:
+      temporal:
+        condition: service_healthy
+
+  backup:
+    environment:
+      FISHSENSE_BACKUP_NAS_ROOT_PATH: /fishsense_backups_rehearsal
+      FISHSENSE_TEMPORAL_ADDRESS: temporal:7233
+      FISHSENSE_TEMPORAL_DOMAIN: !reset null
+      FISHSENSE_TEMPORAL_CLIENT_CERT: !reset null
+      FISHSENSE_TEMPORAL_CLIENT_PRIVATE_KEY: !reset null
+      FISHSENSE_TEMPORAL_SERVER_ROOT_CA_CERT: !reset null
+    depends_on:
+      temporal:
+        condition: service_healthy
+
+  nrp-temporal-cert-sync:
+    # No kubeconfig: a clean no-op (ops/cert_sync.py), as on a slot without NRP.
+    environment:
+      FISHSENSE_NRP_KUBECONFIG_PATH: !reset null
+
+  smoke:
+    environment:
+      FISHSENSE_TEMPORAL_ADDRESS: temporal:7233
+      FISHSENSE_TEMPORAL_DOMAIN: !reset null
+      FISHSENSE_TEMPORAL_CLIENT_CERT: !reset null
+      FISHSENSE_TEMPORAL_CLIENT_PRIVATE_KEY: !reset null
+      FISHSENSE_TEMPORAL_SERVER_ROOT_CA_CERT: !reset null
+
+  # The processor, as the local stack runs it (compose.yml at the repo root):
+  # on NRP each role is a Deployment the orchestrator stands up; here the light
+  # and per-image roles simply run. The GPU role is not rehearsed.
+  processor-light:
+    image: ghcr.io/ucsd-e4e/fishsense-services-processor:REHEARSAL_VERSION
+    environment:
+      FISHSENSE_PROCESSOR_ROLE: light
+      FISHSENSE_TEMPORAL_ADDRESS: temporal:7233
+      FISHSENSE_TEMPORAL_NAMESPACE: fishsense
+    env_file:
+      - REHEARSAL_RUN/secrets/processor.env
+    depends_on:
+      temporal:
+        condition: service_healthy
+    networks: [interior]
+
+  processor-per-image:
+    image: ghcr.io/ucsd-e4e/fishsense-services-processor:REHEARSAL_VERSION
+    environment:
+      FISHSENSE_PROCESSOR_ROLE: per_image
+      FISHSENSE_TEMPORAL_ADDRESS: temporal:7233
+      FISHSENSE_TEMPORAL_NAMESPACE: fishsense
+      FISHSENSE_MODEL_WEIGHTS_CACHE_DIR: /tmp/models
+    env_file:
+      - REHEARSAL_RUN/secrets/processor.env
+    depends_on:
+      temporal:
+        condition: service_healthy
+    networks: [interior]
