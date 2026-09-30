@@ -26,7 +26,8 @@ skipped: it is stood up on demand, and its next wake's pods mount the new
 Secret.
 
 v1's rules, kept: an absent NRP kubeconfig (a soft render: not seeded yet, or a
-slot without NRP) is a clean no-op, exit 0; a missing cert render is a hard
+slot without NRP) is a clean no-op, exit 0 -- and so is an empty one, which is
+what an unseeded soft render actually leaves on the slot; a missing cert render is a hard
 error, exit 1; the Secret is upserted (created when missing, e.g. wiped with
 the namespace) under the keys the processor mounts: ``client.pem``,
 ``client.key``, ``root-ca.pem``.
@@ -270,6 +271,15 @@ def _roll(apps: Any, namespace: str, names: list[str], fingerprint: str) -> None
         )
 
 
+def _has_kubeconfig(path: str | None) -> bool:
+    """A kubeconfig to use: set, a file, and not blank. Blank is what an unseeded
+    soft render leaves on the slot (vault-agent writes the file, empty, when a
+    `{{ with secret }}` finds nothing), so it means "not seeded", like absent."""
+    if not path or not Path(path).is_file():
+        return False
+    return bool(Path(path).read_text().strip())
+
+
 def sync(
     settings: CertSyncSettings,
     *,
@@ -278,7 +288,7 @@ def sync(
     """Push the leaf to the Secret if it isn't already there, then roll every
     processor Deployment whose pods don't have it."""
     kubeconfig = settings.kubeconfig_path
-    if not kubeconfig or not Path(kubeconfig).is_file():
+    if not _has_kubeconfig(kubeconfig):
         log.info("no kubeconfig at %s - nothing to sync", kubeconfig)
         return Outcome.NO_CLUSTER
     if not settings.namespace:

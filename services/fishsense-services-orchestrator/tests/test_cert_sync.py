@@ -205,6 +205,26 @@ def test_1b_no_kubeconfig_configured_is_a_clean_no_op_too(certs):
     assert _sync(settings, FakeCore()) == sut.Outcome.NO_CLUSTER
 
 
+def test_1c_an_empty_kubeconfig_is_the_unseeded_soft_render_a_clean_no_op(
+    certs, tmp_path, caplog
+):
+    """What the slot actually holds before `nrp_orchestrator.kubeconfig` is
+    seeded. vault-agent renders a soft template whose secret is missing as an
+    EMPTY file, not no file (`{{ with secret }}` emits nothing), so "absent"
+    must include it. Otherwise this one-shot fails on every converge and every
+    rotation until NRP is seeded -- and deploy/incus/cert-sync-timer.nix
+    re-runs it every six hours, failing each time."""
+    caplog.set_level("INFO")
+    empty = tmp_path / "kubeconfig"
+    empty.write_text("\n")
+
+    assert (
+        sut.main(_settings(certs, empty), kubernetes=lambda _p: pytest.fail("no"))
+        == 0
+    )
+    assert "nothing to sync" in caplog.text
+
+
 def test_2_a_missing_cert_render_is_a_hard_error(certs, kubeconfig):
     (certs / "tls.crt").unlink()
 
