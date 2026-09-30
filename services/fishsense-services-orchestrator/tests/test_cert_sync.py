@@ -219,8 +219,7 @@ def test_1c_an_empty_kubeconfig_is_the_unseeded_soft_render_a_clean_no_op(
     empty.write_text("\n")
 
     assert (
-        sut.main(_settings(certs, empty), kubernetes=lambda _p: pytest.fail("no"))
-        == 0
+        sut.main(_settings(certs, empty), kubernetes=lambda _p: pytest.fail("no")) == 0
     )
     assert "nothing to sync" in caplog.text
 
