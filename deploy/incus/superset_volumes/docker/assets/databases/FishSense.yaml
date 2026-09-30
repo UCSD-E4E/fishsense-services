@@ -1,0 +1,23 @@
+# __ANALYTICS_DB_PASSWORD__ is replaced with $ANALYTICS_DATABASE_PASSWORD by
+# docker-init.sh at import time -- the secret is never committed.
+#
+# fishsense-services: v2's database, as `fishsense_superset` -- a login in
+# `fishsense_analytics` (migration 0030), bound to the lab tenant by
+# db_bootstrap/bootstrap.sh once migrate-v1 has made the lab. It reads the lab's
+# rows of `dive_pipeline_status` and what lies beneath it, and writes nothing.
+# fishsense-lite pointed this same connection (same uuid, so the import
+# repoints it rather than adding a second "FishSense") at v1's `fishsense` as
+# its `superset` role; v1's database is the archive now, reachable with psql.
+database_name: FishSense
+sqlalchemy_uri: postgresql+psycopg2://fishsense_superset:__ANALYTICS_DB_PASSWORD__@postgres:5432/fishsense_services
+cache_timeout: null
+expose_in_sqllab: true
+allow_run_async: true
+allow_ctas: false
+allow_cvas: false
+allow_dml: false
+allow_file_upload: false
+extra:
+  allows_virtual_table_explore: true
+uuid: 11111111-1111-4111-8111-111111111111
+version: 1.0.0

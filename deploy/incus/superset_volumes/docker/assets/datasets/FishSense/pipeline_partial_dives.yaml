@@ -1,0 +1,84 @@
+table_name: pipeline_partial_dives
+main_dttm_col: null
+description: One row per unfinished HIGH-priority dive with its current blocker — the "which dives are partially done" list.
+default_endpoint: null
+offset: 0
+cache_timeout: null
+catalog: null
+schema: null
+sql: |
+  SELECT dive_id, priority,
+    laser_labeling_complete, species_labeling_complete, headtail_labeling_complete,
+    slate_labeling_complete, calibrated, measured,
+    CASE
+      WHEN NOT laser_labeling_complete THEN 'needs laser'
+      WHEN calibrated AND NOT measured THEN 'ready to measure'
+      WHEN species_labeling_complete AND headtail_labeling_complete AND dive_slate_id IS NULL THEN 'blocked: no slate'
+      WHEN NOT species_labeling_complete AND NOT headtail_labeling_complete THEN 'needs species + headtail'
+      WHEN NOT species_labeling_complete THEN 'needs species'
+      WHEN NOT headtail_labeling_complete THEN 'needs headtail'
+      ELSE 'other'
+    END AS blocker
+  FROM dive_pipeline_status
+  WHERE priority = 'HIGH' AND NOT measured
+  ORDER BY dive_id
+params: null
+template_params: null
+filter_select_enabled: true
+fetch_values_predicate: null
+extra: null
+normalize_columns: false
+always_filter_main_dttm: false
+uuid: 44444444-4444-4444-8444-444444444444
+metrics:
+  - metric_name: count
+    verbose_name: Dives
+    metric_type: count
+    expression: COUNT(*)
+    description: null
+    d3format: null
+    extra: {}
+    warning_text: null
+columns:
+  - column_name: dive_id
+    type: INTEGER
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: blocker
+    type: STRING
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: laser_labeling_complete
+    type: BOOLEAN
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: species_labeling_complete
+    type: BOOLEAN
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: headtail_labeling_complete
+    type: BOOLEAN
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: slate_labeling_complete
+    type: BOOLEAN
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: calibrated
+    type: BOOLEAN
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: measured
+    type: BOOLEAN
+    is_dttm: false
+    groupby: true
+    filterable: true
+version: 1.0.0
+database_uuid: 11111111-1111-4111-8111-111111111111

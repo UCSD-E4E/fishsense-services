@@ -28,3 +28,17 @@ dev = [
     # An in-process S3 for the object-store tests (Garage speaks S3).
     "moto[s3]>=5.0.0",
 ]
+
+# The production deploy's invariant tests (deploy/tests): `uv run pytest` from
+# the repo root. Each service keeps its own suite, and its own configuration,
+# under services/*/.
+[tool.pytest.ini_options]
+testpaths = ["deploy/tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "--strict-markers"
+markers = [
+    "integration: real Postgres (Docker, via testcontainers)",
+]
+# The Label Studio SDK's own legacy (pydantic v1) validators; not ours.
+filterwarnings = ["ignore::DeprecationWarning:label_studio_sdk.*"]

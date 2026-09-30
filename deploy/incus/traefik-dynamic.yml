@@ -1,0 +1,67 @@
+# Traefik file-provider dynamic config for the fishsense interior (fishsense-services).
+#
+# Loaded by the inner traefik (compose.yml `--providers.file.filename`). Kept
+# from fishsense-lite deploy/incus/traefik-dynamic.yml, less one concern. Two
+# now: (1) serve the vault-agent `fishsense.vm` cert on :443 for every route —
+# the edge re-encrypts to us and verifies serverName=fishsense.vm regardless of
+# the public Host; (2) route Host → container.
+#
+# Gone: v1's `fishsense-auth` forwardAuth middleware and the co-located
+# Authentik outpost it called. v2's API validates the bearer token on every
+# request itself (auth.TokenValidator, OIDC JWKS) and derives the tenant from
+# its own memberships; a forwardAuth in front of it would answer every API
+# client -- the web's server side, the mobile app, a script -- with a 302 to a
+# login page instead of letting the API say 401.
+
+tls:
+  # Single cert served for all routers. `fishsense.vm.{crt,key}` is rendered by
+  # the in-instance vault-agent to /run/tenant/tls (mounted read-only). It is
+  # the default cert, so the edge's re-encrypt handshake (SNI=fishsense.vm)
+  # always matches.
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /etc/traefik/tls/fishsense.vm.crt
+        keyFile: /etc/traefik/tls/fishsense.vm.key
+  certificates:
+    - certFile: /etc/traefik/tls/fishsense.vm.crt
+      keyFile: /etc/traefik/tls/fishsense.vm.key
+
+http:
+  routers:
+    # Public landing + /portal (auth is in-app OIDC — no edge/traefik gate).
+    web:
+      rule: "Host(`fishsense.e4e.ucsd.edu`)"
+      entryPoints: [websecure]
+      service: web
+      tls: {}
+
+    # The v2 API. Bearer tokens, validated in-app; the tenant is in the path.
+    api:
+      rule: "Host(`api.fishsense.e4e.ucsd.edu`)"
+      entryPoints: [websecure]
+      service: api
+      tls: {}
+
+    # Superset analytics — auth is in-app OIDC (fishsense_analytics provider).
+    # Its backend runs only with the `superset` profile (compose.env); until
+    # then this route answers 502.
+    superset:
+      rule: "Host(`analytics.fishsense.e4e.ucsd.edu`)"
+      entryPoints: [websecure]
+      service: superset
+      tls: {}
+
+  services:
+    web:
+      loadBalancer:
+        servers:
+          - url: "http://web:3000"
+    api:
+      loadBalancer:
+        servers:
+          - url: "http://api:8000"
+    superset:
+      loadBalancer:
+        servers:
+          - url: "http://superset:8088"

@@ -1,0 +1,4 @@
+Authlib==1.6.12
+pillow==12.3.0
+selenium==4.38.0
+psycopg2-binary==2.9.11

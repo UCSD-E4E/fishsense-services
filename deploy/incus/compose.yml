@@ -1,0 +1,466 @@
+# fishsense-services (v2) INTERIOR -- the KRG Incus platform's fishsense tenant
+# (ADR 0017 / 0020), replacing fishsense-lite's on the SAME slot at the cutover
+# (PLAN.md §6). Mirrors fishsense-lite deploy/incus/compose.yml; its comments,
+# and the outages they cite, are kept wherever the reason still holds.
+#
+# Converged by `nixos-rebuild`, never by hand: the repo-root flake.nix hands this
+# file to mkTenant, and krg's composeStack runs
+#   docker compose --project-directory /var/lib/krg/fishsense -f <this> up -d --remove-orphans --force-recreate
+# So the compose PROJECT is `fishsense`, as v1's was, and every named volume and
+# network below is v1's by name: `pgdata` IS v1's `fishsense_pgdata`. Rename one
+# and the converge starts empty. Relative paths (`./x`) resolve against
+# /var/lib/krg/fishsense, where workdir.nix links the committed config.
+#
+# INGRESS CONTRACT (wired admin-side -- unchanged from v1, do not change the shape):
+#   public -> e4e-prod edge (prod LE cert, TLS-terminate)
+#          -> re-encrypt HTTPS, verify serverName=fishsense.vm vs the fleet CA
+#          -> krg-nat:30443 -> incus_network_forward -> 10.100.0.10:443 (traefik below)
+#
+# WHAT CHANGED vs v1's interior (docs/cutover.md has the full map):
+#   * v1's fishsense-api / -api-workflow-worker / -backup-worker / -lite-web are
+#     replaced by api, orchestrator, backup, web. `--remove-orphans` removes v1's
+#     containers on the switch; v1's DATA stays (the same postgres, the same
+#     volume, v1's `fishsense` database untouched).
+#   * v2 lives in its own database, `fishsense_services`, in the same cluster.
+#     db-bootstrap makes it and its roles (initdb never runs on an existing
+#     volume), and migrate brings it to head, both on every converge.
+#   * No authentik-outpost: v2's API validates bearer tokens itself
+#     (auth.TokenValidator), so the API route has no forwardAuth. Nothing else
+#     used the outpost (the NRP processor speaks only to Temporal).
+#   * Secrets render per consumer (secrets.nix), not into one shared app.env:
+#     the API must never hold the owner's DSN, nor the orchestrator the backup
+#     role's (PLAN.md §9.10).
+#   * The processor on NRP is stood up and torn down by the orchestrator from the
+#     manifests its image carries, at FISHSENSE_NRP_IMAGE_TAG -- never a standing
+#     Deployment (PLAN.md §3), and never `kubectl apply` from CI.
+#
+# Every ghcr.io/ucsd-e4e/fishsense-services-* pin and FISHSENSE_NRP_IMAGE_TAG are
+# ONE release version, bumped together by promote.yml (deploy/bump_pins.py).
+
+services:
+  # ── inner edge: TLS on :443 with fishsense.vm, route Host → containers ─────────────────
+  traefik:
+    image: traefik:3.7.8
+    restart: unless-stopped
+    command:
+      - --providers.file.filename=/etc/traefik/dynamic.yml
+      - --providers.file.watch=true
+      - --entrypoints.websecure.address=:443
+      # - --api.dashboard=true   # enable only behind an auth'd route if ever wanted
+    ports:
+      - "0.0.0.0:443:443" # the incus_network_forward targets :443 on the instance NIC
+    volumes:
+      - /run/tenant/tls:/etc/traefik/tls:ro          # fishsense.vm.{crt,key} — vault-agent (#428)
+      - ./traefik-dynamic.yml:/etc/traefik/dynamic.yml:ro
+    # The analytics route's superset is profile-gated and started separately, so
+    # it is not a depends_on here (v1: "so init delay can't block traefik").
+    depends_on: [web, api]
+    networks: [interior]
+
+  # ── in-slot Postgres: v1's container, v1's volume ──────────────────────────────────────
+  # Databases: `fishsense_services` (v2, made by db-bootstrap), `fishsense` (v1's:
+  # the rollback, then the read-only archive and migrate-v1's source), `superset`
+  # (Superset's metadata, v1's and still Superset's). Same image as v1: no major
+  # upgrade rides the cutover.
+  postgres:
+    image: postgres:17.10
+    restart: unless-stopped
+    shm_size: 128mb
+    # POSTGRES_PASSWORD (the admin `postgres` role, v1's) from the vault-agent render.
+    # On an existing volume the image ignores it; it matters only to a fresh one.
+    env_file:
+      - /run/tenant/secrets/postgres.env
+    volumes:
+      - pgdata:/var/lib/postgresql/data:rw       # v1's named volume — see the header
+      - ./pg_volumes/config:/etc/postgresql:ro   # committed postgres.conf + pg_hba.conf (v1's, plus v2's roles)
+    # No /docker-entrypoint-initdb.d: it runs only on an empty data directory,
+    # which production never has. db-bootstrap does v2's part on every converge.
+    command: --config_file=/etc/postgresql/postgres.conf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    expose: ["5432"]
+    networks: [interior]
+
+  # ── v2's database and roles, as the admin role, every converge (idempotent) ────────────
+  # Creates `fishsense_services` and v2's roles if missing, and re-asserts their
+  # attributes and passwords (so an OpenBao rotation reaches Postgres on the next
+  # converge). Binds Superset's login to the lab once migrate-v1 has made it.
+  # Never touches v1's database or roles. See db_bootstrap/bootstrap.sh.
+  db-bootstrap:
+    image: postgres:17.10
+    restart: "no"
+    entrypoint: ["/bin/sh", "/bootstrap/bootstrap.sh"]
+    environment:
+      PGHOST: postgres
+      PGUSER: postgres
+      FISHSENSE_DATABASE: fishsense_services
+    # PGPASSWORD (admin) and the v2 roles' passwords.
+    env_file:
+      - /run/tenant/secrets/db-bootstrap.env
+    volumes:
+      # workdir.nix links this into the project directory. Forgotten, docker
+      # would create an EMPTY directory and the bootstrap would fail on a
+      # missing script (v1's nrp_cert_sync lesson).
+      - ./db_bootstrap:/bootstrap:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [interior]
+
+  # ── schema to head, as the owner, every converge ───────────────────────────────────────
+  # `fishsense-services-api migrate` also runs the tenancy audit and exits non-zero
+  # on a violation, so a bad schema fails the converge before the API starts on it.
+  # migrate-v1 is NOT run here -- it is a one-shot operator command during the
+  # cutover (docs/cutover.md):  run --rm migrate fishsense-services-api migrate-v1
+  migrate:
+    image: ghcr.io/ucsd-e4e/fishsense-services-api:v0.0.0
+    restart: "no"
+    command: ["fishsense-services-api", "migrate"]
+    environment:
+      FISHSENSE_APP_ROLE: fishsense_app
+    # FISHSENSE_MIGRATION_DATABASE_URL (owner) and FISHSENSE_V1_DATABASE_URL
+    # (v1's database, read-only, for migrate-v1).
+    env_file:
+      - /run/tenant/secrets/migrate.env
+    depends_on:
+      db-bootstrap:
+        condition: service_completed_successfully
+    networks: [interior]
+
+  # ── API → api.fishsense.e4e.ucsd.edu (bearer tokens, validated in-app) ─────────────────
+  api:
+    image: ghcr.io/ucsd-e4e/fishsense-services-api:v0.0.0
+    restart: unless-stopped
+    # FISHSENSE_DATABASE_URL (app role), FISHSENSE_OIDC_ISSUER / _AUDIENCES (the
+    # web's Authentik client: its tokens are the ones the API accepts).
+    env_file:
+      - /run/tenant/secrets/api.env
+    expose: ["8000"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [interior]
+    # NOTE (v1): plain `docker compose up` ignores `deploy.replicas` (swarm-only).
+    # Traefik points at the service DNS name `api:8000`.
+
+  # ── web portal → fishsense.e4e.ucsd.edu (in-app OIDC) ──────────────────────────────────
+  web:
+    image: ghcr.io/ucsd-e4e/fishsense-services-web:v0.0.0
+    restart: unless-stopped
+    # Non-secret config inline; secrets (AUTH_SECRET, AUTH_AUTHENTIK_*, the web's
+    # service account, LABEL_STUDIO_API_KEY) from web.env. FISHSENSE_API_URL is the
+    # interior host, so server-side calls bypass our traefik.
+    environment:
+      FISHSENSE_API_URL: http://api:8000
+      # The one tenant at cutover (PLAN.md §9.11): every API path names it.
+      FISHSENSE_TENANT: lab
+      AUTH_URL: https://fishsense.e4e.ucsd.edu
+      LABEL_STUDIO_URL: https://app.heartex.com   # hosted Label Studio (v1's)
+      # v1 turned this on with v0.7.4, the release that exchanges the key (a
+      # refresh token) for an access JWT and drops unresolvable projects rather
+      # than 500ing the landing page. v2's web carries both (lib/env.ts).
+      LABEL_STUDIO_ENABLED: "true"
+      # Triage frames are presigned by Garage: the object store's host is allowed.
+      FISHSENSE_OBJECT_STORE_ENDPOINT_URL: https://s3.e4e.ucsd.edu
+      # v1's PORTAL_ALLOWED_GROUPS is gone: the portal's gate is the user's `admin`
+      # role in the tenant, as the API reports it (apps/web README).
+    env_file:
+      - /run/tenant/secrets/web.env
+    expose: ["3000"]
+    depends_on:
+      api:
+        condition: service_started
+    networks: [interior]
+
+  # ── the orchestrator: every schedule, every stage's parent, NRP stand-up/tear-down ──────
+  # v1's fishsense-api-workflow-worker, plus the api's database side (PLAN.md §3).
+  orchestrator:
+    image: ghcr.io/ucsd-e4e/fishsense-services-orchestrator:v0.0.0
+    restart: unless-stopped
+    environment:
+      # Acts for a tenant only through a membership granted to this principal
+      # (PLAN.md §9.11) -- docs/cutover.md grants it in `lab`.
+      FISHSENSE_ORCHESTRATOR_SUB: service:fishsense-orchestrator
+      # krg-prod shared Temporal (ADR 0023): v1's settings.toml [temporal], as
+      # env. mTLS-only; the gRPC TLS server-name is overridden to
+      # workflows.krg.ucsd.edu although we dial krg-prod.ucsd.edu. OSS mTLS does
+      # NOT pin a client to a namespace, so it is named (v2 requires it).
+      FISHSENSE_TEMPORAL_ADDRESS: krg-prod.ucsd.edu:7233
+      FISHSENSE_TEMPORAL_NAMESPACE: fishsense
+      FISHSENSE_TEMPORAL_DOMAIN: workflows.krg.ucsd.edu
+      FISHSENSE_TEMPORAL_CLIENT_CERT: /run/tenant/temporal/tls.crt
+      FISHSENSE_TEMPORAL_CLIENT_PRIVATE_KEY: /run/tenant/temporal/tls.key
+      FISHSENSE_TEMPORAL_SERVER_ROOT_CA_CERT: /run/tenant/temporal/ca.crt
+      # The e4e NAS: ingest and raw staging read it (read-only, by policy).
+      FISHSENSE_NAS_URL: https://e4e-nas.ucsd.edu:6021
+      FISHSENSE_NAS_RAW_ROOT_PATH: /fishsense_data/REEF/data
+      # One serial .ORF download at a time — FileStation's download backend falls
+      # over under concurrent large transfers (v1). Ramp up only while watching.
+      FISHSENSE_NAS_STAGE_CONCURRENCY: "1"
+      # Hosted Label Studio, v1's workspace and service account. The bot's user
+      # id is not a secret (any org member sees it); without it imported
+      # annotations are attributed to the project OWNER (v1, 2026-09-04).
+      FISHSENSE_LABEL_STUDIO_URL: https://app.heartex.com
+      FISHSENSE_LABEL_STUDIO_WORKSPACE: FishSense
+      FISHSENSE_LABEL_STUDIO_BOT_USER_ID: "215238"
+      # Where Label Studio presigns the processed JPEGs: v1's labels bucket with
+      # NO prefix, so one storage presigns both v1's keys and the tenants'
+      # (docs/port-plan.md). Migrated projects keep their v1 storages.
+      FISHSENSE_LABEL_STUDIO_S3_BUCKET: labels-fishsense-lite
+      FISHSENSE_LABEL_STUDIO_S3_PREFIX: ""
+      FISHSENSE_LABEL_STUDIO_S3_ENDPOINT_URL: https://s3.e4e.ucsd.edu
+      FISHSENSE_LABEL_STUDIO_S3_REGION: garage
+      # Garage: ONE bucket, every v2 key under tenants/{tenant_id}/ (PLAN.md
+      # §9.11). It is v1's labels bucket, where v1's JPEGs already are, under
+      # v1's prefix -- read in place, never moved (§6.4).
+      FISHSENSE_OBJECT_STORE_ENDPOINT_URL: https://s3.e4e.ucsd.edu
+      FISHSENSE_OBJECT_STORE_REGION: garage
+      FISHSENSE_OBJECT_STORE_BUCKET: labels-fishsense-lite
+      FISHSENSE_OBJECT_STORE_LEGACY_LABELS_PREFIX: fishsense-lite
+      # NRP: the processor is stood up per wake and deleted when idle, from the
+      # manifests this image carries (/app/deploy/nrp), at this tag -- the
+      # release's, bumped with the pins above. The kubeconfig is a SOFT render.
+      FISHSENSE_NRP_KUBECONFIG_PATH: /run/tenant/nrp/kubeconfig
+      FISHSENSE_NRP_NAMESPACE: e4e-fishsense
+      FISHSENSE_NRP_IMAGE_TAG: v0.0.0
+      # BioCLIP species pre-annotation ships OFF until the FishSense-frame
+      # evaluation (species_predict/settings.py). Explicit, so turning it on is
+      # a reviewed diff here.
+      FISHSENSE_SPECIES_PREDICTION_ENABLED: "false"
+    # FISHSENSE_DATABASE_URL (app role), the NAS, Label Studio and Garage keys.
+    env_file:
+      - /run/tenant/secrets/orchestrator.env
+    volumes:
+      # krg-prod Temporal mTLS client identity — vault-agent render (temporal opt-in
+      # in flake.nix; krg-infra #435). In `temporal.reload`.
+      - /run/tenant/temporal:/run/tenant/temporal:ro
+      # NRP kubeconfig (vault-agent SOFT render — secrets.nix).
+      - /run/tenant/nrp:/run/tenant/nrp:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [interior]
+
+  # ── nightly Postgres → NAS backups (v1's backup-worker's job) ───────────────────────────
+  # Its own process and queue with the backup role, which the orchestrator never
+  # holds. Dumps v2's database, v1's archive and Superset's.
+  backup:
+    image: ghcr.io/ucsd-e4e/fishsense-services-backup:v0.0.0
+    restart: unless-stopped
+    environment:
+      FISHSENSE_BACKUP_DATABASE_HOST: postgres
+      FISHSENSE_BACKUP_DATABASE_USER: fishsense_backup
+      FISHSENSE_BACKUP_DATABASES: '["fishsense_services", "fishsense", "superset"]'
+      # NOT v1's /fishsense_process_work/database_backups: both keep 14 dumps per
+      # {root}/{database}/ folder, and v2 also dumps `fishsense`. Under v1's root
+      # its prune would delete v1's last pre-cutover dumps -- the rollback's
+      # insurance. v1's stay where they are, untouched.
+      FISHSENSE_BACKUP_NAS_ROOT_PATH: /fishsense_process_work/database_backups_v2
+      FISHSENSE_NAS_URL: https://e4e-nas.ucsd.edu:6021
+      FISHSENSE_TEMPORAL_ADDRESS: krg-prod.ucsd.edu:7233
+      FISHSENSE_TEMPORAL_NAMESPACE: fishsense
+      FISHSENSE_TEMPORAL_DOMAIN: workflows.krg.ucsd.edu
+      FISHSENSE_TEMPORAL_CLIENT_CERT: /run/tenant/temporal/tls.crt
+      FISHSENSE_TEMPORAL_CLIENT_PRIVATE_KEY: /run/tenant/temporal/tls.key
+      FISHSENSE_TEMPORAL_SERVER_ROOT_CA_CERT: /run/tenant/temporal/ca.crt
+    # FISHSENSE_BACKUP_DATABASE_PASSWORD (backup role) and the NAS login.
+    env_file:
+      - /run/tenant/secrets/backup.env
+    volumes:
+      - /run/tenant/temporal:/run/tenant/temporal:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [interior]
+
+  # ── push the rotated Temporal leaf out to the NRP processor ─────────────────────────────
+  # One-shot. v1's nrp-temporal-cert-sync (an alpine/kubectl shell script), now
+  # ops.cert_sync on the orchestrator's image, with the orchestrator's own NRP
+  # and Temporal settings: the same cluster and the same leaf.
+  #
+  # The krg-prod leaf is a 7-day cert. vault-agent re-renders it before expiry and
+  # `temporal.reload` restarts the services that mount it. The processor is on
+  # NRP, out of vault-agent's reach, and its copy of the SAME identity
+  # (CN=fishsense-worker) is a k8s Secret: v1's expired 2026-08-14 and crash-looped
+  # every pod on `CertificateExpired`. The slot is where the renewed leaf lands,
+  # so the slot forwards it, and rolls every processor Deployment that is up onto
+  # it; one stood up later mounts the current Secret.
+  #
+  # `restart: "no"` + listed in `temporal.reload`: the hook is
+  # `docker compose ... restart <svc>`, which starts an exited container again, so
+  # every rotation re-runs this. It also runs on each converge, and every six
+  # hours from cert-sync-timer.nix (by this container_name), so a rotation whose
+  # run failed (NRP's apiserver down) is retried long before the 2-day margin
+  # runs out. A no-op when the leaf is unchanged and every pod is on it.
+  nrp-temporal-cert-sync:
+    image: ghcr.io/ucsd-e4e/fishsense-services-orchestrator:v0.0.0
+    container_name: fishsense-nrp-temporal-cert-sync
+    restart: "no"
+    command: ["python", "-m", "fishsense_services_orchestrator.ops.cert_sync"]
+    environment:
+      FISHSENSE_TEMPORAL_CLIENT_CERT: /run/tenant/temporal/tls.crt
+      FISHSENSE_TEMPORAL_CLIENT_PRIVATE_KEY: /run/tenant/temporal/tls.key
+      FISHSENSE_TEMPORAL_SERVER_ROOT_CA_CERT: /run/tenant/temporal/ca.crt
+      FISHSENSE_NRP_KUBECONFIG_PATH: /run/tenant/nrp/kubeconfig
+      FISHSENSE_NRP_NAMESPACE: e4e-fishsense
+    volumes:
+      # The leaf to forward — the same render the orchestrator and backup mount.
+      - /run/tenant/temporal:/run/tenant/temporal:ro
+      # NRP kubeconfig (SOFT render): absent or empty is a clean exit 0.
+      - /run/tenant/nrp:/run/tenant/nrp:ro
+    networks: [interior]
+
+  # ── the post-converge smoke test: GO / NO-GO (profile `ops`, run by hand) ───────────────
+  #   docker compose ... run --rm smoke --dive <n>        (docs/cutover.md)
+  # The orchestrator's configuration plus the owner's DSN (it reads the schema
+  # as migrate does) and the smoke research login's. Never part of a converge.
+  smoke:
+    image: ghcr.io/ucsd-e4e/fishsense-services-orchestrator:v0.0.0
+    profiles: [ops]
+    restart: "no"
+    entrypoint: ["python", "-m", "fishsense_services_orchestrator.ops.smoke"]
+    environment:
+      FISHSENSE_APP_ROLE: fishsense_app
+      FISHSENSE_SMOKE_API_URL: http://api:8000
+      FISHSENSE_SMOKE_WEB_URL: http://web:3000
+      FISHSENSE_TEMPORAL_ADDRESS: krg-prod.ucsd.edu:7233
+      FISHSENSE_TEMPORAL_NAMESPACE: fishsense
+      FISHSENSE_TEMPORAL_DOMAIN: workflows.krg.ucsd.edu
+      FISHSENSE_TEMPORAL_CLIENT_CERT: /run/tenant/temporal/tls.crt
+      FISHSENSE_TEMPORAL_CLIENT_PRIVATE_KEY: /run/tenant/temporal/tls.key
+      FISHSENSE_TEMPORAL_SERVER_ROOT_CA_CERT: /run/tenant/temporal/ca.crt
+      FISHSENSE_LABEL_STUDIO_URL: https://app.heartex.com
+      FISHSENSE_LABEL_STUDIO_WORKSPACE: FishSense
+      FISHSENSE_OBJECT_STORE_ENDPOINT_URL: https://s3.e4e.ucsd.edu
+      FISHSENSE_OBJECT_STORE_REGION: garage
+      FISHSENSE_OBJECT_STORE_BUCKET: labels-fishsense-lite
+      FISHSENSE_OBJECT_STORE_LEGACY_LABELS_PREFIX: fishsense-lite
+    env_file:
+      - /run/tenant/secrets/migrate.env
+      - /run/tenant/secrets/orchestrator.env
+      - /run/tenant/secrets/smoke.env
+    volumes:
+      # Read at each run, so a rotation needs no reload (not in temporal.reload).
+      - /run/tenant/temporal:/run/tenant/temporal:ro
+    networks: [interior]
+
+  # ── analytics → analytics.fishsense.e4e.ucsd.edu (in-app OIDC) — profile `superset` ─────
+  # Kept from v1 (image, bootstrap scripts, the `superset` metadata DB and its
+  # role), behind the `superset` profile: OFF until docs/cutover.md's "Superset"
+  # step (the analytics login is bound to the lab only after migrate-v1), then
+  # on by `COMPOSE_PROFILES=superset` in compose.env. The dashboards' database
+  # connection is v2's, as `fishsense_superset` (assets/databases/FishSense.yaml);
+  # the metadata DB is still reached as v1's `superset` role. `superset-init`
+  # runs `db upgrade` + creates the local `admin` user + imports the committed
+  # dashboards on startup; the `superset` DB must be OWNED BY the `superset` role
+  # (v1's init failure).
+  superset:
+    image: &superset-image apache/superset:6.0.0
+    profiles: [superset]
+    container_name: fishsense_superset
+    command: ["/app/docker/docker-bootstrap.sh", "app-gunicorn"]
+    user: "root"
+    restart: unless-stopped
+    env_file:
+      - path: ./superset_volumes/docker/.env   # committed non-secret superset config (repo IaC)
+        required: true
+      - path: /run/tenant/secrets/superset.env # vault-agent render (secrets.nix)
+        required: true
+    volumes: &superset-volumes
+      - ./superset_volumes/docker:/app/docker   # committed bootstrap scripts/config (repo IaC)
+      - superset_home:/app/superset_home        # v1's named volume — persistent, docker-owned
+    expose: ["8088"]
+    depends_on:
+      superset-init:
+        condition: service_completed_successfully
+    networks: [interior]
+
+  superset-init:
+    image: *superset-image
+    profiles: [superset]
+    container_name: superset_init
+    command: ["/app/docker/docker-init.sh"]
+    user: "root"
+    env_file:
+      - path: ./superset_volumes/docker/.env
+        required: true
+      - path: /run/tenant/secrets/superset.env
+        required: true
+    volumes: *superset-volumes
+    depends_on:
+      postgres:
+        condition: service_started
+      valkey:
+        condition: service_started
+    healthcheck:
+      disable: true
+    networks: [interior]
+
+  superset-worker:
+    image: *superset-image
+    profiles: [superset]
+    container_name: superset_worker
+    command: ["/app/docker/docker-bootstrap.sh", "worker"]
+    user: "root"
+    restart: unless-stopped
+    env_file:
+      - path: ./superset_volumes/docker/.env
+        required: true
+      - path: /run/tenant/secrets/superset.env
+        required: true
+    volumes: *superset-volumes
+    depends_on:
+      superset-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "celery -A superset.tasks.celery_app:app inspect ping -d celery@$$HOSTNAME",
+        ]
+    networks: [interior]
+
+  superset-worker-beat:
+    image: *superset-image
+    profiles: [superset]
+    container_name: superset_worker_beat
+    command: ["/app/docker/docker-bootstrap.sh", "beat"]
+    user: "root"
+    restart: unless-stopped
+    env_file:
+      - path: ./superset_volumes/docker/.env
+        required: true
+      - path: /run/tenant/secrets/superset.env
+        required: true
+    volumes: *superset-volumes
+    depends_on:
+      superset-init:
+        condition: service_completed_successfully
+    healthcheck:
+      disable: true
+    networks: [interior]
+
+  # Valkey — the BSD-licensed OSS fork of Redis (post-2024 relicense); a drop-in,
+  # protocol-compatible replacement for superset's cache + celery broker.
+  valkey:
+    image: valkey/valkey:9.1.0
+    profiles: [superset]
+    container_name: superset_cache   # only superset uses it (cache + celery broker)
+    restart: unless-stopped
+    volumes:
+      - valkey_data:/data   # v1's named volume — persistent, docker-owned
+    networks: [interior]
+
+# v1's named volumes, by v1's names (see the header): data survives the switch
+# because the project and these keys are the same.
+volumes:
+  pgdata:
+  superset_home:
+  valkey_data:
+
+networks:
+  interior:
+    driver: bridge

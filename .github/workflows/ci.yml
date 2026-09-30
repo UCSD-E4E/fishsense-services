@@ -21,7 +21,14 @@ jobs:
       - name: Install
         run: uv sync --all-packages --frozen
       - name: Format
-        run: uv run black --check services
+        run: uv run black --check services deploy
+      # The production deploy's invariants (deploy/tests; docs/cutover.md):
+      # the compose, its renders, the flake, the release pipeline. Parses only
+      # -- `docker compose config` needs the CLI, not the daemon.
+      - name: Deploy invariants (no Docker)
+        env:
+          DOCKER_HOST: unix:///nonexistent/docker.sock
+        run: uv run pytest -q -m "not integration"
       # Proves the unit tier is in-process: it must pass with Docker unreachable.
       - name: Unit tests (no Docker)
         working-directory: services/fishsense-services-api
@@ -59,6 +66,10 @@ jobs:
           test "$(/usr/lib/postgresql/17/bin/pg_dump --version | grep -oE '[0-9]+' | head -n1)" -ge 17
       - name: Orchestrator integration tests
         working-directory: services/fishsense-services-orchestrator
+        run: uv run pytest -q -m integration
+      # db-bootstrap then `migrate` as the non-superuser owner, on a cluster
+      # shaped like the slot's (v1's database and roles, the committed config).
+      - name: Deploy integration tests
         run: uv run pytest -q -m integration
 
   image:

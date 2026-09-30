@@ -1,0 +1,39 @@
+# `params` must be a YAML MAPPING (v1 importer rejects a JSON string).
+# Reshaped from the old "Lengths" chart: query_mode raw (was aggregate with a
+# GROUP BY on every column — an accidental DISTINCT), leads with "Image Path"
+# (the NAS key rows are joined to the stereo measurements on) and sorts by it
+# so same-image rows sit together, search + paging on, and a wider row_limit
+# (the old 1000 truncated a season of fish).
+slice_name: Fish measurements (detail)
+viz_type: table
+params:
+  datasource: 55555555-5555-4555-8555-555555555555__table
+  viz_type: table
+  query_mode: raw
+  all_columns:
+    - Image Path
+    - Fish ID
+    - Dive Name
+    - Taken Date
+    - Species Name
+    - Scientific Name
+    - Length (mm)
+  order_by_cols:
+    - '["Image Path", true]'
+  temporal_columns_lookup:
+    Taken Date: true
+  adhoc_filters:
+    - clause: WHERE
+      subject: Taken Date
+      operator: TEMPORAL_RANGE
+      comparator: No filter
+      expressionType: SIMPLE
+  row_limit: 10000
+  server_page_length: 25
+  include_search: true
+  show_cell_bars: true
+  table_timestamp_format: smart_date
+cache_timeout: null
+uuid: 99999999-9999-4999-8999-999999999999
+version: 1.0.0
+dataset_uuid: 55555555-5555-4555-8555-555555555555
