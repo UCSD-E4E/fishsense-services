@@ -66,9 +66,10 @@ V2_SCHEDULES="cluster-dive-frames compute-laser-depths evaluate-laser-auto-accep
 | Secrets | one `app.env` | one render per consumer (`deploy/incus/secrets.nix`) |
 
 The compose project stays `fishsense` (the composeStack's working directory), so
-the switch's `up -d --remove-orphans` removes v1's containers and keeps
-`postgres`, its volume and the network; v1's Superset containers are recreated
-from v2's definition when the profile is turned on.
+the switch's `up -d --remove-orphans` removes v1's app containers and keeps
+`postgres`, its volume and the network. v1's Superset containers are not
+orphans (their services exist in v2's file, behind a profile), so they keep
+running until the profile is turned on and recreates them (§4).
 
 ## 1. Before the weekend
 
@@ -432,10 +433,14 @@ cycle in the Temporal UI (`https://workflows.krg.ucsd.edu/namespaces/fishsense`)
   `GRANT fishsense_research TO fishsense_superset`, it errors with "permission
   denied" (pinned by `deploy/tests/test_bootstrap_postgres.py`). The **Pipeline
   Status** dashboard and its three datasets work (same SQL as v1, tested on v2).
-- **Superset is off at the switch** until step 5c (its login must be bound to
-  the lab, which exists only after migrate-v1). *Note:* v1's compose runs
-  Superset unconditionally (since 2026-07-15), although v1's README still says
-  "off by default"; v2 gates it for real.
+- **Superset is v2's only from step 5c** (its login must be bound to the lab,
+  which exists only after migrate-v1). Until then v1's Superset containers keep
+  running: compose's `--remove-orphans` leaves a profile-disabled service's
+  containers alone (checked with compose 5.5), and traefik still reaches them
+  as `superset`. So analytics.fishsense stays up across the switch, showing v1's
+  frozen data, until step 5c recreates the containers from v2's definition.
+  *Note:* v1's compose runs Superset unconditionally (since 2026-07-15), although
+  v1's README still says "off by default"; v2 gates it for real.
 - **v1's Superset connection** is repointed (same uuid) at v2 by the first
   import; the v1 archive is reachable with `psql` only.
 - **No forwardAuth on the API.** Any client that relied on the outpost's
