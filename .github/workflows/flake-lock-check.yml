@@ -1,0 +1,53 @@
+name: Flake lock check
+
+# Fails when `flake.lock` disagrees with `flake.nix` inputs.
+#
+# fishsense-services: fishsense-lite's workflow, verbatim.
+#
+# The repo-root flake is what the slot builds every converge, from the
+# committed `flake.lock` — `--refresh` only re-fetches the top-level repo
+# ref, never re-resolves transitive inputs. So a `flake.nix` that names an
+# input the lock doesn't match would silently build the wrong thing.
+#
+# `nix flake lock --no-update-lock-file` re-resolves every input against
+# flake.nix and exits non-zero if the lock would have to change. It never
+# writes and never advances an already-locked input.
+#
+# NOT an updater. flake.nix tracks krg-infra `main`; the rev is pinned in
+# flake.lock and advanced deliberately — weekly by update-flake.yml, or by
+# hand with `nix flake update krg-infra`. This check just guards that a
+# hand-edit to a `flake.nix` input is accompanied by a matching re-lock.
+
+on:
+  pull_request:
+    paths:
+      - flake.nix
+      - flake.lock
+      - .github/workflows/flake-lock-check.yml
+  push:
+    branches: [main]
+    paths:
+      - flake.nix
+      - flake.lock
+      - .github/workflows/flake-lock-check.yml
+
+permissions:
+  contents: read # actions/checkout
+
+jobs:
+  flake-lock-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@v22
+
+      # krg-infra is public, so no token is needed to resolve it.
+      - name: flake.lock is in sync with flake.nix
+        run: |
+          if ! nix flake lock --no-update-lock-file; then
+            echo "::error::flake.lock is out of sync with flake.nix."
+            echo "Re-lock in this PR, then commit flake.lock:"
+            echo "  nix flake update krg-infra"
+            exit 1
+          fi

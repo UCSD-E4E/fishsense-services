@@ -1,0 +1,40 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "python",
+  "include-component-in-tag": false,
+  "include-v-in-tag": true,
+  "separate-pull-requests": false,
+  "packages": {
+    ".": {
+      "package-name": "fishsense-services",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "services/fishsense-services-api/pyproject.toml",
+          "jsonpath": "$.project.version"
+        },
+        {
+          "type": "toml",
+          "path": "services/fishsense-services-contracts/pyproject.toml",
+          "jsonpath": "$.project.version"
+        },
+        {
+          "type": "toml",
+          "path": "services/fishsense-services-orchestrator/pyproject.toml",
+          "jsonpath": "$.project.version"
+        },
+        {
+          "type": "toml",
+          "path": "services/fishsense-services-processor/pyproject.toml",
+          "jsonpath": "$.project.version"
+        },
+        {
+          "type": "json",
+          "path": "apps/web/package.json",
+          "jsonpath": "$.version"
+        }
+      ]
+    }
+  }
+}

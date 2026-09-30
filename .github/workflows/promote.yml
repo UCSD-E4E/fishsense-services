@@ -1,0 +1,150 @@
+name: Promote
+
+# Fires when release-please publishes a release (`vX.Y.Z` — one version for the
+# monorepo). Two side effects, as fishsense-lite's promote.yml:
+#
+# 1. Promotes EVERY image's SHA-tagged build (build.yml) to `:vX.Y.Z` + `:latest`.
+#    Manifest-only retag — no rebuild — so the images bound to the release tag
+#    are exactly the ones built from the release commit, regardless of any newer
+#    commits that landed. All six, or none: a release with one image missing
+#    would pin the compose at a tag that doesn't exist, and the converge fails
+#    on the pull.
+#
+# 2. Opens a deploy PR bumping every pin in deploy/incus/compose.yml AND
+#    FISHSENSE_NRP_IMAGE_TAG — the tag the orchestrator stands the NRP processor
+#    up at (deploy/bump_pins.py). Merging it triggers deploy.yml, which converges
+#    the slot. The deploy is intentional — humans review the diff before prod
+#    changes. v1 had a second target here (the data-worker's kustomization,
+#    `kubectl apply -k` from CI); v2 has none: the processor is not a standing
+#    Deployment, and its next wake applies the new tag.
+#
+#    The pin bump is what makes the converge meaningful: `fishsense-selfupdate`
+#    builds the flake from main, so the version a release actually deploys is
+#    whatever deploy/incus/compose.yml says on main at converge time.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write       # peter-evans/create-pull-request: push branch
+  pull-requests: write  # peter-evans/create-pull-request: open PR
+  packages: write       # promote image manifests in GHCR
+
+env:
+  REGISTRY: ghcr.io
+  # The six images one release versions. Kept in step with build.yml's matrix
+  # and rebuild-from-main.yml's (deploy/tests/test_release_pipeline.py).
+  IMAGES: >-
+    fishsense-services-api
+    fishsense-services-orchestrator
+    fishsense-services-backup
+    fishsense-services-processor
+    fishsense-services-processor-gpu
+    fishsense-services-web
+
+jobs:
+  promote-and-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse version + SHA from the release tag
+        id: parse
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          FULL_SHA: ${{ github.event.release.target_commitish }}
+        run: |
+          # One component, so the tag is the bare version: v1.2.3.
+          if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::release tag $TAG is not vX.Y.Z"
+            exit 1
+          fi
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$(echo "$FULL_SHA" | cut -c1-7)" >> "$GITHUB_OUTPUT"
+          echo "owner_lc=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Wait for build.yml's SHA-tagged images (race guard)
+        env:
+          BASE: ${{ env.REGISTRY }}/${{ steps.parse.outputs.owner_lc }}
+          SHA: sha-${{ steps.parse.outputs.short_sha }}
+        run: |
+          # build.yml is triggered by the same merge commit's push event and runs
+          # in parallel with release-please. Poll up to 40 min for EVERY image
+          # (the GPU image is the slow one) before promoting any.
+          for image in $IMAGES; do
+            src="$BASE/$image:$SHA"
+            for i in $(seq 1 80); do
+              if docker buildx imagetools inspect "$src" >/dev/null 2>&1; then
+                echo "found: $src"
+                continue 2
+              fi
+              echo "[$i/80] $src not ready yet; sleeping 30s"
+              sleep 30
+            done
+            echo "::error::source image $src never appeared. build.yml probably failed for this commit; rerun build, then rerun this Promote."
+            exit 1
+          done
+
+      - name: Promote every SHA-tagged image to the version + latest
+        env:
+          BASE: ${{ env.REGISTRY }}/${{ steps.parse.outputs.owner_lc }}
+          SHA: sha-${{ steps.parse.outputs.short_sha }}
+          VERSION: ${{ steps.parse.outputs.version }}
+        run: |
+          for image in $IMAGES; do
+            docker buildx imagetools create \
+              -t "$BASE/$image:$VERSION" \
+              -t "$BASE/$image:latest" \
+              "$BASE/$image:$SHA"
+            echo "promoted $image:$SHA -> $VERSION and latest"
+          done
+
+      - name: Bump every pin and the processor tag in the production compose
+        id: bump
+        env:
+          VERSION: ${{ steps.parse.outputs.version }}
+        run: |
+          python3 deploy/bump_pins.py "$VERSION" deploy/incus/compose.yml
+          if git diff --quiet -- deploy/incus/compose.yml; then
+            echo "::notice::deploy/incus/compose.yml already pinned to $VERSION; no PR"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open deploy PR
+        if: steps.bump.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          # deploy.yml keys off this branch prefix to know it's an auto-deploy
+          # PR vs. an unrelated edit to the compose file.
+          branch: auto-deploy/fishsense-services-${{ steps.parse.outputs.version }}
+          base: main
+          delete-branch: true
+          title: "chore(deploy): bump fishsense-services to ${{ steps.parse.outputs.version }}"
+          body: |
+            Auto-generated by `.github/workflows/promote.yml` on
+            release ${{ github.event.release.html_url }}.
+
+            - **Version**: `${{ steps.parse.outputs.version }}` — every
+              `ghcr.io/${{ steps.parse.outputs.owner_lc }}/fishsense-services-*`
+              pin in `deploy/incus/compose.yml`, and `FISHSENSE_NRP_IMAGE_TAG`
+              (the processor's tag on NRP)
+            - **Source SHA**: `${{ steps.parse.outputs.short_sha }}`
+
+            Merging this PR triggers `.github/workflows/deploy.yml` —
+            `systemctl start fishsense-selfupdate` on the Incus slot's
+            self-hosted runner (`nixos-rebuild switch` onto this commit). The
+            processor on NRP picks the new tag up at its next wake.
+          commit-message: "chore(deploy): bump fishsense-services to ${{ steps.parse.outputs.version }}"
+          labels: |
+            deploy
+            auto
