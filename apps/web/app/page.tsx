@@ -56,6 +56,7 @@ export default async function HomePage() {
           Sign in
         </a>
       </header>
+      {active.unavailable.length > 0 && <UnavailableNotice />}
       {active.degraded > 0 && <DegradedNotice count={active.degraded} />}
       <div className="space-y-10">
         {sections.map((section) => (
@@ -85,6 +86,27 @@ function DegradedNotice({ count }: { count: number }) {
       Label Studio did not answer for {count} labeling{" "}
       {count === 1 ? "project" : "projects"}, so this list is incomplete.
       Reload in a moment to see the rest.
+    </div>
+  );
+}
+
+/**
+ * Says the labeling sections could not be listed at all.
+ *
+ * v2: the web asks the API with its own Authentik service token, so an
+ * Authentik or API outage leaves some kinds unknown. Their sections are
+ * missing because nothing could be asked, not because nothing is
+ * outstanding -- the same lie DegradedNotice exists to prevent.
+ */
+function UnavailableNotice() {
+  return (
+    <div
+      role="status"
+      className="mb-8 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-200"
+    >
+      <span className="font-medium">Labeling work could not be listed.</span>{" "}
+      FishSense did not answer, so some labeling sections are missing below.
+      Reload in a moment to see them.
     </div>
   );
 }

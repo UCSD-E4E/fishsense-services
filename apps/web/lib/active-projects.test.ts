@@ -63,6 +63,7 @@ describe("getActiveProjects", () => {
       headtail: [{ id: 44, title: "p-44", isPublished: true }],
       slate: [{ id: 66, title: "p-66", isPublished: true }],
       degraded: 0,
+      unavailable: [],
     });
   });
 
@@ -107,7 +108,7 @@ describe("getActiveProjects", () => {
 
     const result = await getActiveProjects(60);
 
-    expect(result).toEqual({ laser: [], species: [], headtail: [], slate: [], degraded: 0 });
+    expect(result).toEqual({ laser: [], species: [], headtail: [], slate: [], degraded: 0, unavailable: [] });
   });
 });
 
@@ -124,7 +125,7 @@ describe("getActiveProjects (Label Studio disabled)", () => {
   it("returns an empty four-bucket map", async () => {
     const result = await getActiveProjects(60);
 
-    expect(result).toEqual({ laser: [], species: [], headtail: [], slate: [], degraded: 0 });
+    expect(result).toEqual({ laser: [], species: [], headtail: [], slate: [], degraded: 0, unavailable: [] });
   });
 
   it("does not call Label Studio", async () => {
@@ -150,6 +151,7 @@ describe("getActiveProjects (Label Studio disabled)", () => {
       headtail: [],
       slate: [],
       degraded: 0,
+      unavailable: [],
     });
   });
 
@@ -197,7 +199,7 @@ describe("getActiveProjects — publish filtering", () => {
 
     const result = await getActiveProjects(60);
 
-    expect(result).toEqual({ laser: [], species: [], headtail: [], slate: [], degraded: 0 });
+    expect(result).toEqual({ laser: [], species: [], headtail: [], slate: [], degraded: 0, unavailable: [] });
   });
 
   it("keeps drafts out while a project is still being populated", async () => {
@@ -262,7 +264,7 @@ describe("getActiveProjects — completion filtering", () => {
 
     const result = await getActiveProjects(60);
 
-    expect(result).toEqual({ laser: [], species: [], headtail: [], slate: [], degraded: 0 });
+    expect(result).toEqual({ laser: [], species: [], headtail: [], slate: [], degraded: 0, unavailable: [] });
   });
 
   // Fails open: a Label Studio that stops returning counts must not blank the
@@ -279,5 +281,58 @@ describe("getActiveProjects — completion filtering", () => {
     const result = await getActiveProjects(60);
 
     expect(result.species.map((p) => p.id)).toEqual([1, 2]);
+  });
+});
+
+// v2: the web asks the API with its own Authentik service token, so an
+// Authentik or API outage fails the ID fetch itself. The public landing page
+// must stay up (its Results and Administration links need neither), say what
+// it could not list, and never present an empty labeling list as the answer.
+describe("getActiveProjects — when the API cannot be asked", () => {
+  it("drops only the kind it could not ask about, and says so", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    idsMock.mockImplementation(async (kind) => {
+      if (kind === "species") throw new Error("fishsense-api species project IDs failed");
+      return ({ "laser": [42], "headtail": [], "dive-slate": [] } as Record<string, number[]>)[kind] ?? [];
+    });
+    projectsMock.mockImplementation(async (ids) => ({
+      projects: ids.map((id) => ({ id, title: `p-${id}`, isPublished: true })),
+      degraded: 0,
+    }));
+
+    const result = await getActiveProjects(60);
+
+    expect(result.laser).toEqual([{ id: 42, title: "p-42", isPublished: true }]);
+    expect(result.species).toEqual([]);
+    expect(result.unavailable).toEqual(["species"]);
+    expect(projectsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders no labeling work, rather than throwing, when Authentik is down", async () => {
+    // Every ID fetch starts by minting the web's service token; with the
+    // issuer unreachable every one of them throws.
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    idsMock.mockRejectedValue(new TypeError("fetch failed"));
+
+    const result = await getActiveProjects(60);
+
+    expect(result).toEqual({
+      laser: [],
+      species: [],
+      headtail: [],
+      slate: [],
+      degraded: 0,
+      unavailable: ["laser", "species", "headtail", "dive-slate"],
+    });
+    expect(projectsMock).not.toHaveBeenCalled();
+  });
+
+  it("logs the failure it swallowed, so an outage is not silent", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    idsMock.mockRejectedValue(new TypeError("fetch failed"));
+
+    await getActiveProjects(60);
+
+    expect(logged).toHaveBeenCalled();
   });
 });

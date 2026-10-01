@@ -270,9 +270,10 @@ First run (2026-09-30, local images, v1's committed schema, no credentials):
 bootstrap, migrate and the cert sync exit 0 on the first and second converge;
 migrate-v1 GO; the smoke test PASSes api, openapi, head, audit, lab, research,
 and all 22 schedules, and FAILs label studio, object store (`.invalid`) and the
-web — whose landing page 500s when the Authentik issuer is unreachable (it
-mints its service token per request). That last one holds in production too:
-an Authentik outage takes the public landing page down, not just sign-in.
+web — whose landing page 500'd when the Authentik issuer was unreachable (it
+mints its service token per request). Fixed since: a kind the web cannot ask
+about is left out and the page says so (`lib/active-projects.ts`), so an
+Authentik outage costs the labeling cards and sign-in, not the public page.
 
 ## 2. Stop v1 (T-0, Friday evening)
 
