@@ -17,6 +17,9 @@ compares the policy's expressions to the canonical one exactly, and flags every
 other permissive policy. Restrictive policies are always fine: they can only
 narrow what is visible.
 
+Every view must be ``security_invoker``: by default a view runs with its
+*owner's* rights, which bypasses RLS and would show every tenant's rows.
+
 And on every table: the app role is not the owner. A new table that fits no
 class is a violation, so isolation can't be forgotten -- only opted out of,
 explicitly, by naming the table a global reference table.
@@ -84,6 +87,35 @@ _PERMISSIVE_POLICIES = text("""
     """)
 
 
+_VIEWS_RUNNING_AS_OWNER = text("""
+    SELECT c.relname AS name
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relkind IN ('v', 'm')
+      AND NOT coalesce('security_invoker=true' = ANY (c.reloptions), false)
+    ORDER BY c.relname
+    """)
+
+_FOREIGN_KEYS = text("""
+    SELECT con.conname AS name, src.relname AS table, dst.relname AS referenced,
+           (SELECT array_agg(a.attname ORDER BY k.ord)
+              FROM unnest(con.conkey) WITH ORDINALITY k (attnum, ord)
+              JOIN pg_attribute a
+                ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS columns,
+           (SELECT array_agg(a.attname ORDER BY k.ord)
+              FROM unnest(con.confkey) WITH ORDINALITY k (attnum, ord)
+              JOIN pg_attribute a
+                ON a.attrelid = con.confrelid AND a.attnum = k.attnum)
+               AS referenced_columns
+    FROM pg_constraint con
+    JOIN pg_class src ON src.oid = con.conrelid
+    JOIN pg_class dst ON dst.oid = con.confrelid
+    JOIN pg_namespace n ON n.oid = src.relnamespace
+    WHERE con.contype = 'f' AND n.nspname = 'public'
+    ORDER BY src.relname, con.conname
+    """)
+
+
 async def tenancy_violations(
     conn: AsyncConnection,
     *,
@@ -115,7 +147,30 @@ async def tenancy_violations(
             if not (t.rls and t.forced):
                 violations.append(f"{t.name}: RLS not enabled and forced")
             violations += _tenant_policy_violations(t.name, policies[t.name])
+
+    for view in await conn.execute(_VIEWS_RUNNING_AS_OWNER):
+        violations.append(
+            f"{view.name}: view must be WITH (security_invoker = true) -- by"
+            " default a view runs as its owner, which bypasses RLS"
+        )
+
+    not_tenant_scoped = set(global_tables) | set(caller_scoped)
+    for fk in await conn.execute(_FOREIGN_KEYS):
+        between_tenant_tables = (
+            fk.table not in not_tenant_scoped and fk.referenced not in not_tenant_scoped
+        )
+        if between_tenant_tables and not _carries_tenant_id(fk):
+            violations.append(
+                f"{fk.table}: reference {fk.name} to {fk.referenced} lacks tenant_id"
+                " -- use a composite key (tenant_id, ...) so it can't cross tenants"
+            )
     return violations
+
+
+def _carries_tenant_id(fk) -> bool:
+    """Both sides hold tenant_id at the same position of the key."""
+    pairs = zip(fk.columns, fk.referenced_columns, strict=True)
+    return ("tenant_id", "tenant_id") in pairs
 
 
 def _is_canonical_tenant_policy(policy) -> bool:

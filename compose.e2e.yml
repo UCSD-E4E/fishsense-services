@@ -1,0 +1,28 @@
+# e2e override for compose.yml -- used by the `e2e` test tier only:
+#
+#   cd services/fishsense-services-api && uv run pytest -m e2e
+#
+# Adds a stand-in for Authentik's key endpoint (a static server publishing a
+# JWKS the tests write, whose private key they hold) and publishes the API and
+# Postgres on random local ports so the tests can find them.
+
+services:
+  fake-idp:
+    image: python:3.13-slim
+    command: ["python", "-m", "http.server", "8080", "--directory", "/srv"]
+    volumes:
+      - ${E2E_JWKS_DIR:?set by the e2e tests}:/srv:ro
+
+  postgres:
+    ports: !override
+      - "127.0.0.1::5432"
+
+  api:
+    environment:
+      FISHSENSE_OIDC_ISSUER: http://fake-idp:8080/application/o/fishsense/
+      FISHSENSE_OIDC_AUDIENCES: fishsense-web,fishsense-mobile
+    ports: !override
+      - "127.0.0.1::8000"
+    depends_on:
+      fake-idp:
+        condition: service_started

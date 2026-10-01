@@ -847,7 +847,13 @@ decided; role revised 2026-09-23 for the big-bang cutover*
 - *Either way:* one scheme for every model, including the laser detector, loaded through
   `fishsense-core`.
 
-**9.13 — What "current" means for a measurement** — *open*
+**9.13 — What "current" means for a measurement** — *open; proposal adopted for calibrations
+(2026-09-24, overridable)*
+- *Adopted for calibrations:* append-only rows; **current = the latest row per dive**; a
+  refusal is itself a row (outcome `refused`), replacing v1's refusal columns on `dive`.
+- *Proposed for measurements (decide when that table lands):* append-only; current = the
+  latest row per `(capture, fish, source)` whose inputs (laser calibration, labels) still
+  match the current ones -- v1's mismatch model, plus history.
 - Candidates: latest per `(capture, fish, source)`, explicit promotion of a run, or the
   latest whose inputs match the current calibration and labels (v1's mismatch model extended
   with history).
@@ -946,7 +952,12 @@ token storage; fix the per-row file-delete leak.
   appends), so a re-run never makes a measured capture look unmeasured; the server can't
   observe "uploading" (clients PUT straight to Garage), so it goes from reserved to committed.
 
-**9.17 — Cross-tenant references** — *open*
+**9.17 — Cross-tenant references** — *borrowing decided 2026-09-24 (proposal adopted,
+overridable)*
+- ***Decided:*** a dive may **borrow another dive's calibration within the same tenant only**,
+  as an explicit fallback (v1 parity). The database enforces the same-tenant rule (composite
+  FK) and forbids self-borrowing; the effective-calibration view follows the borrow.
+  Cross-tenant borrowing is not allowed.
 - Note the research premise that **laser extrinsics move every dive** (wuwnet; v1's own
   `dive_laser_line` docstring agrees), which argues against borrowing at all except as an
   explicit, flagged fallback.

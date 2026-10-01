@@ -19,6 +19,30 @@ from testcontainers.community.postgres import PostgresContainer
 
 from fishsense_services_api.migrations import upgrade
 
+TIERS = {"unit", "integration", "e2e"}
+
+
+@pytest.hookimpl(tryfirst=True)  # before `-m` deselects anything
+def pytest_collection_modifyitems(config, items):
+    """Assign each test its tier from what it actually touches.
+
+    A test whose fixtures reach the Postgres container is ``integration``; one
+    marked ``integration``/``e2e`` explicitly keeps that; everything else is
+    ``unit``. A test marked ``unit`` that reaches Postgres is an error, so the
+    unit tier can't quietly start needing Docker.
+    """
+    for item in items:
+        declared = {mark.name for mark in item.iter_markers()} & TIERS
+        if "postgres" in item.fixturenames:
+            if "unit" in declared:
+                raise pytest.UsageError(
+                    f"{item.nodeid} is marked unit but uses Postgres"
+                )
+            item.add_marker(pytest.mark.integration)
+        elif not declared:
+            item.add_marker(pytest.mark.unit)
+
+
 POSTGRES_IMAGE = "postgres:17.10"
 APP_ROLE = "fishsense_app"
 APP_PASSWORD = "fishsense_app"
