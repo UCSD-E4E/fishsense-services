@@ -11,8 +11,9 @@
 #
 # Real tokens need a real issuer: set FISHSENSE_OIDC_ISSUER (and, if needed,
 # FISHSENSE_OIDC_AUDIENCES) in your shell or a .env file before `up`. Ingest
-# needs the NAS: set FISHSENSE_NAS_* the same way. Without them the
-# orchestrator still starts and serves its queue; only NAS calls fail.
+# needs the NAS, and label sync needs Label Studio: set FISHSENSE_NAS_* and
+# FISHSENSE_LABEL_STUDIO_* the same way. Without them the orchestrator still
+# starts and serves its queue; only the calls out to them fail.
 #
 # The orchestrator acts for a tenant only as a member of it: grant
 # `service:fishsense-orchestrator` a membership, as an admin, before ingesting.
@@ -85,6 +86,8 @@ services:
       FISHSENSE_NAS_USERNAME: ${FISHSENSE_NAS_USERNAME:-}
       FISHSENSE_NAS_PASSWORD: ${FISHSENSE_NAS_PASSWORD:-}
       FISHSENSE_NAS_RAW_ROOT_PATH: ${FISHSENSE_NAS_RAW_ROOT_PATH:-/fishsense_data/REEF/data}
+      FISHSENSE_LABEL_STUDIO_URL: ${FISHSENSE_LABEL_STUDIO_URL:-https://label-studio.example.invalid}
+      FISHSENSE_LABEL_STUDIO_API_KEY: ${FISHSENSE_LABEL_STUDIO_API_KEY:-}
     depends_on:
       migrate:
         condition: service_completed_successfully

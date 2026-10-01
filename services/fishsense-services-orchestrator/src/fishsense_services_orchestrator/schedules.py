@@ -10,7 +10,7 @@ Ported from fishsense-lite@a8b2c3bc: `schedule_workflow`
 * a selector's schedule **skips on overlap**, so two firings never pick the
   same dive;
 * hourly schedules are **offset** across the hour, so their selectors don't all
-  hit the database at once. Stage 1 keeps v1's :05.
+  hit the database at once. Each keeps v1's minute.
 """
 
 import logging
@@ -31,6 +31,9 @@ from temporalio.client import (
 
 from fishsense_services_orchestrator.clustering.workflow import (
     ClusterDiveFramesParentWorkflow,
+)
+from fishsense_services_orchestrator.labels.workflow import (
+    SyncLabelStudioLaserLabelsWorkflow,
 )
 
 __all__ = ["SCHEDULES", "ScheduledWorkflow", "ensure_schedules"]
@@ -56,6 +59,17 @@ SCHEDULES = (
         offset=timedelta(minutes=5),
         run_timeout=timedelta(minutes=30),
         overlap=ScheduleOverlapPolicy.SKIP,
+    ),
+    # v1's: hourly on the hour, sized for a first run over a backlog project.
+    # Overlap is allowed (as in v1): a sync cursor only moves forward, so two
+    # runs can't rewind each other.
+    ScheduledWorkflow(
+        schedule_id="sync-label-studio-laser-labels",
+        workflow=SyncLabelStudioLaserLabelsWorkflow,
+        every=timedelta(hours=1),
+        offset=timedelta(0),
+        run_timeout=timedelta(hours=3),
+        overlap=ScheduleOverlapPolicy.ALLOW_ALL,
     ),
 )
 

@@ -14,6 +14,9 @@ dependencies = [
     "temporalio>=1.15.0",
     "pydantic>=2.11",
     "pydantic-settings>=2.10.0",
+    # Pinned to v1's lock (fishsense-lite@a8b2c3bc): the sync reads its task
+    # shapes -- annotations as dicts, the lazy pager -- as v1 does.
+    "label-studio-sdk==2.0.19",
 ]
 
 [project.scripts]
@@ -41,3 +44,5 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 addopts = "--strict-markers"
+# The Label Studio SDK's own legacy (pydantic v1) validators; not ours.
+filterwarnings = ["ignore::DeprecationWarning:label_studio_sdk.*"]

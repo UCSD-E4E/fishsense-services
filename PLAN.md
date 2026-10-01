@@ -568,7 +568,23 @@ Everything except the reference tables above carries `tenant_id`.
   (6 vCPU, 12 GiB, a 20 GB root disk), which v2's compose has to respect.
 - **Processor** → **Kubernetes**, kustomize: **NRP `amd64`** today (v1 has four Deployments —
   cpu / light / gpu / gpu-cpu-fallback — scaled 0↔N by the orchestrator), →
-  junkyard/Pixel-Fold **ARM64** later. **Multi-arch images**; ARM64/Knative
+  junkyard/Pixel-Fold **ARM64** later.
+  - **v2 stands the processor up and tears it down; it does not keep it scaled to zero.**
+    *(Decided 2026-09-27.)*
+    - **Why:** NRP deletes Deployments older than two weeks. v1's were `kubectl apply`'d
+      once and only had their replica counts changed, so an idle one sat at zero replicas
+      until the rule took it. That happened around 09-21, and five days of stages silently
+      didn't run.
+    - **The design:** when work arrives, the orchestrator applies the Deployment (a
+      server-side apply, so it's idempotent). When the queue is idle, it deletes the
+      Deployment. The manifests live in this repo, and the orchestrator applies them with
+      the release's image tag. No NRP exception is needed.
+    - **Costs to design for:**
+      - a cold start (image pull and weight download) on every wake, so the weights cache
+        from `fishsense-core`'s loader matters;
+      - the kubeconfig's role needs create and delete on Deployments, not just `scale`;
+      - the GPU fallback's "wedged" check has to tolerate a Deployment that doesn't exist
+        yet. **Multi-arch images**; ARM64/Knative
   are **processor-only, future** — not near-term control-plane concerns.
 - **Garage** (external, `s3.e4e.ucsd.edu`) and **Temporal** (shared krg-prod cluster,
   **mTLS**, **single `fishsense` namespace** — tenant scoping is in-workflow, not per-namespace;
@@ -609,6 +625,7 @@ rehearsed here, then replaces v1 on the fishsense Incus slot in one planned wind
 | **Code home** | **This repo becomes the monorepo.** v1's pipeline code is **ported in**, not rewritten (all Python, §3.1). At cutover an admin repoints the slot's `fishsense-selfupdate` flake and runner scope from `fishsense-lite` to `fishsense-services` (§9.9). |
 | **Web portal** | **Ported to the v2 API** before cutover (generated `openapi-typescript` client, tenant-scoped paths). No v1-compatible endpoints. |
 | **v1 freeze** | **~2 weeks** of v1 feature freeze before cutover. Until then v1 keeps changing, and each change is ported as it lands. |
+| **Timeline** | *(Decided 2026-09-27.)* Cut over in **about two weeks**, with **full §6.2 parity**, so the v1 freeze starts now. v1 gets no more infrastructure fixes: its NRP Deployments are not being rescued. The remaining pipeline is **ported in parallel**: slices on separate branches, each test-first against v1's tests (§6.3). |
 | **Downtime** | **A weekend** for the cutover window. |
 | **Data** | A **one-shot** migration, v1 `fishsense` DB → a new v2 database **in the same Postgres instance**. v1's database is never modified, which is what makes rollback possible. |
 
@@ -848,7 +865,8 @@ Grouped by when they need answering. Each has: **the decision**, *what it blocks
   client ids, expiry, JWKS signature). Trust the proxy's `X-authentik-jwt` only if nothing
   can reach the API without going through Traefik.
 
-**9.11 — Cross-tenant principals: processor & object store** — *open*
+**9.11 — Cross-tenant principals: processor & object store** — *object store decided 2026-09-27 for cutover; the processor question is still open*
+- **Decided for cutover:** one shared bucket, with isolation enforced in the app. Every key is under the tenant's prefix, and only the orchestrator issues keys. At cutover there is one tenant (`lab`). **Bucket-per-tenant is due before the first partner upload**, and the prefix layout is chosen so it moves bucket-for-prefix.
 - The processor holds one service identity, handles every tenant's payloads, and runs on
   infrastructure we don't own (NRP, later phones). What stops it writing tenant B's
   measurements from a tenant-A payload? *Lean:* the API accepts a processor write only when
@@ -857,7 +875,8 @@ Grouped by when they need answering. Each has: **the decision**, *what it blocks
   shared-bucket + app-enforced isolation (and say so), or **bucket-per-tenant** (v1 already
   runs three buckets with per-worker grants — §2.6). Decide before the first partner upload.
 
-**9.12 — Model registry: MLflow vs Garage `model-weights`** — *reopened (was part of 9.2)*
+**9.12 — Model registry: MLflow vs Garage `model-weights`** — *decided 2026-09-27: Garage for now*
+- **Decided:** Garage `model-weights`, as v1 uses it, behind `fishsense-core`'s `WeightStore`: a small `GarageWeightStore` adapter in the worker, with the core manifest's sha256 gating what loads. MLflow can replace the adapter later, without touching core or the stages.
 - §3 and §4.7 chose MLflow, but v1 has shipped without it: SAM 3.1 is versioned at
   `model-weights/{name}/{version}/{filename}`, and the laser detector is baked in from
   Hugging Face.
