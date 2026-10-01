@@ -16,7 +16,7 @@ from sqlalchemy.engine import make_url
 
 from fishsense_services_api.cli import main
 from fishsense_services_api.migrations import upgrade
-from fishsense_services_api.v1_migration import migrate_v1
+from fishsense_services_api.v1_migration import measurement_parity, migrate_v1
 
 V1_SCHEMA = (Path(__file__).parent / "fixtures" / "v1_schema.sql").read_text()
 APP_ROLE = "fishsense_app"
@@ -893,3 +893,100 @@ def test_label_studio_projects_are_recorded_from_v1s_labels(v1, v2):
         "SELECT p.kind, p.ls_project_id, d.v1_id FROM label_studio_projects p "
         "JOIN dives d ON d.id = p.dive_id ORDER BY p.ls_project_id",
     ) == [("laser", 7, 10), ("head_tail", 8, 10), ("slate", 9, 11)]
+
+
+# -- depth-measure: the parity gate reads v1 the way v2 reads its copy ---------------
+#
+# `measurement_parity` compares v2's `current_measurements` with v1's own rule
+# for a fresh measurement. Both sides must mean the same thing, or the
+# rehearsal reports a gap that is really a difference of definition:
+#
+# * the calibration is v1's read rule (fishsense-lite@77e8f8e5
+#   dive_controller.get_laser_extrinsics_for_dive, and v2's 0018): the dive's
+#   own plausible fit, else its link's. `_V1_FRESH` followed the link first
+#   and applied no plausibility test;
+# * a measurement bound to a fish the frame's subject no longer names (#527,
+#   #905) is one v1 deletes on its next measure run and v2 no longer counts
+#   (0026). It is reported beside the refused ones, not as a gap.
+
+
+def _parity(v1: Engine, v2: Engine):
+    return measurement_parity(
+        v1.url.render_as_string(hide_password=False),
+        v2.url.render_as_string(hide_password=False),
+    )
+
+
+def test_a_binding_the_label_no_longer_names_is_stale_on_both_sides(v1, v2):
+    """Frame 103 is labelled Grouper but measured as the Snook (a relabel
+    after the measurement): v1 would delete it on its next run."""
+    _seed_everything(v1)
+    with v1.begin() as conn:
+        conn.execute(text(f"""
+                INSERT INTO fish (id, name, species_id) VALUES (3, 'Snook', NULL);
+                INSERT INTO image (id, path, taken_datetime, checksum, is_canonical,
+                                   dive_id, camera_id)
+                VALUES (103, 'dives/d10/P2.ORF', now(), '{"e" * 32}', true, 10, 1);
+                INSERT INTO specieslabel (id, image_id, content_of_image,
+                    top_three_photos_of_group, label_studio_project_id, superseded,
+                    needs_reprocess)
+                VALUES (2, 103, 'Fish Model, Grouper', true, 70, false, false);
+                INSERT INTO measurement (id, length_m, image_id, fish_id,
+                                         laser_extrinsics_id)
+                VALUES (3, 0.44, 103, 3, 1);
+                """))
+
+    _run(v1, v2)
+
+    assert _parity(v1, v2) == (1, 1, 1, 1)
+    assert _rows(v2, "SELECT v1_id FROM current_measurements") == [(1,)]
+
+
+def test_a_real_fish_bound_off_its_cluster_is_stale_on_both_sides(v1, v2):
+    """Frame 100's Label Studio cluster now points at fish 4, while its
+    measurement is bound to fish 1 (dives 341/383's shape)."""
+    _seed_everything(v1)
+    with v1.begin() as conn:
+        conn.execute(text("""
+            UPDATE specieslabel SET label_studio_project_id = 70 WHERE id = 1;
+            INSERT INTO fish (id, name, species_id) VALUES (4, NULL, 1);
+            UPDATE diveframecluster SET fish_id = 4 WHERE id = 2;
+            """))
+
+    _run(v1, v2)
+
+    assert _parity(v1, v2) == (0, 0, 1, 1)
+
+
+def test_a_dives_own_calibration_wins_over_its_link_on_both_sides(v1, v2):
+    """d11 borrows d10's calibration and has a fit of its own: its own wins,
+    in v1's read rule and in v2's effective calibration."""
+    _seed_everything(v1)
+    with v1.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO laserextrinsics (id, laser_position, laser_axis,
+                                         created_at, dive_id, camera_id)
+            VALUES (3, '[0.1, 0, 0]', '[0, 0, 1]', '2026-08-05', 11, 1);
+            INSERT INTO measurement (id, length_m, image_id, fish_id,
+                                     laser_extrinsics_id)
+            VALUES (3, 0.3, 102, 1, 3);
+            """))
+
+    _run(v1, v2)
+
+    assert _parity(v1, v2) == (2, 2, 1, 0)
+
+
+def test_an_implausible_calibration_counts_as_none_on_both_sides(v1, v2):
+    """v1's read endpoint treated a 2.35 cm baseline as no calibration (its
+    `_plausible_extrinsics`), and so does v2's effective calibration."""
+    _seed_everything(v1)
+    with v1.begin() as conn:
+        conn.execute(text("""
+            UPDATE laserextrinsics SET laser_position = '[0.0141, 0.0188, 0]'
+            WHERE id = 1;
+            """))
+
+    _run(v1, v2)
+
+    assert _parity(v1, v2) == (0, 0, 1, 0)

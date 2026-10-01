@@ -40,11 +40,25 @@ jobs:
         working-directory: services/fishsense-services-orchestrator
         env:
           DOCKER_HOST: unix:///nonexistent/docker.sock
-        run: uv run pytest -q
+        run: uv run pytest -q -m "not integration"
       # Tests run against real Postgres in Docker (testcontainers); the
       # hosted runner provides the daemon.
       - name: Integration tests
         working-directory: services/fishsense-services-api
+        run: uv run pytest -q -m integration
+      # The backup tests run pg_dump against Postgres 17, and pg_dump refuses a
+      # newer server. The runner ships an older client; the backup image
+      # insists on >= 17 too (Dockerfile).
+      - name: pg_dump 17
+        run: |
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-17
+          # pg_wrapper would pick the runner's own cluster's (older) client.
+          echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
+          test "$(/usr/lib/postgresql/17/bin/pg_dump --version | grep -oE '[0-9]+' | head -n1)" -ge 17
+      - name: Orchestrator integration tests
+        working-directory: services/fishsense-services-orchestrator
         run: uv run pytest -q -m integration
 
   image:
@@ -71,6 +85,49 @@ jobs:
           done
           docker logs api
           exit 1
+
+  web:
+    name: web portal (types, lint, tests, build, image)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      # The API's unit tier pins apps/web/openapi.json to the live spec; this
+      # pins the generated client types to that document (PLAN.md §3).
+      - name: Generated API types are current
+        run: npm run api:check
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Image
+        working-directory: .
+        run: docker build -f apps/web/Dockerfile -t fishsense-web:ci .
+      - name: Integration tests (against the built image)
+        env:
+          AUTH_SECRET: fishsense-web-ci-only-auth-secret
+          FISHSENSE_WEB_URL: http://127.0.0.1:3000
+        run: |
+          docker run -d --name web -p 127.0.0.1:3000:3000 \
+            -e AUTH_SECRET -e AUTH_URL=http://127.0.0.1:3000 \
+            -e AUTH_AUTHENTIK_ID=fishsense-web -e AUTH_AUTHENTIK_SECRET=unused \
+            -e AUTH_AUTHENTIK_ISSUER=https://auth.example.invalid/application/o/fishsense-web \
+            -e FISHSENSE_API_URL=http://api.example.invalid:8000 \
+            fishsense-web:ci
+          npm run test:integration || { docker logs web; exit 1; }
 
   e2e:
     name: end to end (built image under compose)

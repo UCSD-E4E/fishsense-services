@@ -792,33 +792,95 @@ def preflight(target_url: str, head: str) -> list[str]:
     return []
 
 
-# v1's rule for a fresh measurement: measured with its dive's current
-# extrinsics (own, or the source's when borrowing). ``refused`` marks dives
-# whose effective calibration is currently refused -- v1 still shows those
-# measurements, v2 intentionally doesn't (PLAN.md §9.13).
+# v1's rule for a fresh measurement: measured with the extrinsics its dive
+# resolves to -- v1's read rule (fishsense-lite@77e8f8e5
+# dive_controller.get_laser_extrinsics_for_dive, `_plausible_extrinsics`): the
+# dive's own fit if its baseline is 0.097-0.145 m, else its source's under the
+# same test (v2's 0018). ``refused`` marks dives whose effective calibration
+# is currently refused -- v1 still shows those measurements, v2 intentionally
+# doesn't (PLAN.md §9.13). ``stale`` marks a binding the frame's subject no
+# longer names -- a model label naming another model, or a real fish whose
+# Label Studio cluster points at another fish -- which v1's measure run
+# deletes (#527, #905) and v2's current_measurements no longer counts
+# (0026); read the way v2 reads its copy: the frame's live,
+# non-sentinel, highest-id species label, its highest-id Label Studio cluster.
 _V1_FRESH = """
-    SELECT count(*) FILTER (WHERE NOT refused), count(*) FILTER (WHERE refused)
-    FROM (
-        SELECT CASE WHEN d.calibration_dive_id IS NOT NULL
-                    THEN src.calibration_refused_at IS NOT NULL
-                    ELSE d.calibration_refused_at IS NOT NULL END AS refused
+    WITH plausible AS (
+        SELECT e.id, e.dive_id FROM laserextrinsics e
+        WHERE CASE
+            WHEN json_typeof(e.laser_position) = 'array'
+             AND json_array_length(e.laser_position) >= 2
+             AND json_typeof(e.laser_position -> 0) = 'number'
+             AND json_typeof(e.laser_position -> 1) = 'number'
+            THEN sqrt(power((e.laser_position ->> 0)::double precision, 2)
+                    + power((e.laser_position ->> 1)::double precision, 2))
+                 BETWEEN 0.097 AND 0.145
+            ELSE false END
+    ),
+    effective AS (
+        SELECT d.id AS dive_id,
+               coalesce(own.id, link.id) AS extrinsics_id,
+               CASE WHEN own.id IS NOT NULL
+                    THEN d.calibration_refused_at IS NOT NULL
+                    ELSE src.calibration_refused_at IS NOT NULL END AS refused
+        FROM dive d
+        LEFT JOIN plausible own ON own.dive_id = d.id
+        LEFT JOIN dive src ON src.id = d.calibration_dive_id
+        LEFT JOIN plausible link ON link.dive_id = d.calibration_dive_id
+    ),
+    subject AS (
+        SELECT DISTINCT ON (s.image_id)
+               s.image_id,
+               s.content_of_image AS content,
+               coalesce(s.top_three_photos_of_group, false) AS top_three,
+               coalesce(s.content_of_image LIKE '%(%)', false) AS real_fish,
+               CASE
+                   WHEN s.content_of_image = 'Calibration Targets, Ruler' THEN 'Ruler'
+                   WHEN s.content_of_image = 'Calibration Targets, Box' THEN 'Box'
+                   WHEN s.content_of_image LIKE 'Fish Model,%'
+                       THEN NULLIF(btrim(substr(s.content_of_image, 12), ' '), '')
+               END AS model_name
+        FROM specieslabel s
+        WHERE NOT coalesce(s.superseded, false)
+          AND s.label_studio_project_id IS NOT NULL
+        ORDER BY s.image_id, s.id DESC
+    ),
+    cluster AS (
+        SELECT DISTINCT ON (mp.image_id) mp.image_id, k.fish_id
+        FROM diveframeclusterimagemapping mp
+        JOIN diveframecluster k ON k.id = mp.dive_frame_cluster_id
+        WHERE k.data_source = 'LABEL_STUDIO'
+        ORDER BY mp.image_id, k.id DESC
+    ),
+    classified AS (
+        SELECT eff.refused,
+               coalesce(s.top_three AND m.fish_id IS NOT NULL AND (
+                   (s.real_fish AND k.fish_id IS NOT NULL AND k.fish_id <> m.fish_id)
+                   OR (NOT s.real_fish AND s.model_name IS NOT NULL
+                       AND f.name IS DISTINCT FROM s.model_name)
+               ), false) AS stale
         FROM measurement m
         JOIN image i ON i.id = m.image_id
-        JOIN dive d ON d.id = i.dive_id
-        LEFT JOIN dive src ON src.id = d.calibration_dive_id
-        JOIN laserextrinsics e
-          ON e.dive_id = coalesce(d.calibration_dive_id, d.id)
-         AND e.id = m.laser_extrinsics_id
-    ) fresh
+        JOIN effective eff
+          ON eff.dive_id = i.dive_id AND eff.extrinsics_id = m.laser_extrinsics_id
+        LEFT JOIN subject s ON s.image_id = m.image_id
+        LEFT JOIN cluster k ON k.image_id = m.image_id
+        LEFT JOIN fish f ON f.id = m.fish_id
+    )
+    SELECT count(*) FILTER (WHERE NOT refused AND NOT stale),
+           count(*) FILTER (WHERE refused),
+           count(*) FILTER (WHERE NOT refused AND stale)
+    FROM classified
 """
 
 
-def measurement_parity(source_url: str, target_url: str) -> tuple[int, int, int]:
-    """(current in v2, fresh in v1 excluding refused dives, on refused dives)."""
+def measurement_parity(source_url: str, target_url: str) -> tuple[int, int, int, int]:
+    """(current in v2, fresh in v1 excluding refused dives and stale
+    bindings, on refused dives, stale bindings)."""
     source, target = create_engine(source_url), create_engine(target_url)
     try:
         with source.connect() as v1, target.connect() as v2:
-            fresh, refused = v1.execute(text(_V1_FRESH)).one()
+            fresh, refused, stale = v1.execute(text(_V1_FRESH)).one()
             current = v2.execute(
                 text(
                     "SELECT count(*) FROM current_measurements WHERE v1_id IS NOT NULL"
@@ -827,4 +889,4 @@ def measurement_parity(source_url: str, target_url: str) -> tuple[int, int, int]
     finally:
         source.dispose()
         target.dispose()
-    return current, fresh, refused
+    return current, fresh, refused, stale

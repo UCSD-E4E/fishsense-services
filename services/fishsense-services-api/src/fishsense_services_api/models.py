@@ -227,6 +227,11 @@ class Dive(Base):
         Uuid, ForeignKey("calibration_targets.id")
     )
     calibration_source_dive_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    #: When the species sync last wrote the slate template or calibration
+    #: target: a calibration refusal older than this has expired (0022).
+    calibration_links_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     created_at: Mapped[datetime] = _created_at()
 
 
@@ -349,6 +354,10 @@ class LaserCalibration(Base):
             "outcome IN ('accepted', 'refused')",
             name="laser_calibrations_outcome_check",
         ),
+        CheckConstraint(
+            "slate_template_id IS NULL OR calibration_target_id IS NULL",
+            name="laser_calibrations_one_target_check",
+        ),
     )
 
     id: Mapped[uuid.UUID] = _id()
@@ -372,6 +381,40 @@ class LaserCalibration(Base):
     observation_count: Mapped[int | None] = mapped_column(Integer)
     residual_m: Mapped[float | None] = mapped_column(Double)
     core_version: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+    #: The target the fit (or refusal) used; at most one (0024).
+    slate_template_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("slate_templates.id")
+    )
+    calibration_target_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("calibration_targets.id")
+    )
+
+
+class LaserCalibrationRefusalClear(Base):
+    """An operator's clear of a refusal, appended (0024): v1
+    nulled the dive's refusal columns; v2's refusals are append-only rows."""
+
+    __tablename__ = "laser_calibration_refusal_clears"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        # Named: the default names pass Postgres's 63-character limit.
+        UniqueConstraint(
+            "tenant_id",
+            "laser_calibration_id",
+            name="laser_calibration_refusal_clears_refusal_key",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "laser_calibration_id"],
+            ["laser_calibrations.tenant_id", "laser_calibrations.id"],
+            name="laser_calibration_refusal_clears_refusal_fkey",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    laser_calibration_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    reason: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
 
 
@@ -557,6 +600,46 @@ class LaserPrediction(_PredictionCore, Base):
     gate_verdict: Mapped[str | None] = mapped_column(Text)
     line_offset_px: Mapped[float | None] = mapped_column(Double)
     line_position_z: Mapped[float | None] = mapped_column(Double)
+
+
+class LaserPredictionVerdict(Base):
+    """The auto-accept gate's verdict on one laser prediction; append-only
+    (migration 0021). The latest per prediction is its verdict; a new
+    prediction has none, so it reads as unjudged."""
+
+    __tablename__ = "laser_prediction_verdicts"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "prediction_id"],
+            ["laser_predictions.tenant_id", "laser_predictions.id"],
+        ),
+        CheckConstraint(
+            "gate_verdict IN ('auto_accepted', 'off_line', 'along_line_outlier', "
+            "'audit_sample', 'dive_ineligible', 'no_prediction')",
+            name="laser_prediction_verdicts_gate_verdict_check",
+        ),
+        CheckConstraint(
+            "NOT auto_accept OR gate_verdict = 'auto_accepted'",
+            name="laser_prediction_verdicts_accept_is_a_verdict_check",
+        ),
+        Index(
+            "laser_prediction_verdicts_prediction_idx",
+            "tenant_id",
+            "prediction_id",
+            "seq",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    prediction_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    auto_accept: Mapped[bool] = mapped_column(Boolean)
+    gate_verdict: Mapped[str] = mapped_column(Text)
+    line_offset_px: Mapped[float | None] = mapped_column(Double)
+    line_position_z: Mapped[float | None] = mapped_column(Double)
+    created_at: Mapped[datetime] = _created_at()
 
 
 class SlatePrediction(_PredictionCore, Base):
@@ -755,6 +838,109 @@ class Measurement(Base):
     run_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     core_version: Mapped[str | None] = mapped_column(Text)
     model_version: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class LaserDepthRefusal(Base):
+    """A laser label tried under a calibration that gave no depth in front of
+    the camera (migration 0025): "tried, made no progress"."""
+
+    __tablename__ = "laser_depth_refusals"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "capture_id"], ["captures.tenant_id", "captures.id"]
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "laser_label_id"],
+            ["laser_labels.tenant_id", "laser_labels.id"],
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "laser_calibration_id"],
+            ["laser_calibrations.tenant_id", "laser_calibrations.id"],
+        ),
+        CheckConstraint(
+            "reason IN ('non_finite_depth', 'non_positive_depth')",
+            name="laser_depth_refusals_reason_check",
+        ),
+        CheckConstraint("depth_m <= 0", name="laser_depth_refusals_depth_m_check"),
+        Index(
+            "laser_depth_refusals_tenant_id_capture_id_idx", "tenant_id", "capture_id"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    laser_label_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    laser_x: Mapped[float] = mapped_column(Double)
+    laser_y: Mapped[float] = mapped_column(Double)
+    laser_calibration_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    reason: Mapped[str] = mapped_column(Text)
+    depth_m: Mapped[float | None] = mapped_column(Double)
+    core_version: Mapped[str] = mapped_column(Text)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class MeasurementRefusal(Base):
+    """A capture's measurement inputs that gave no usable length, or a real
+    fish no name could be read from (migration 0025)."""
+
+    __tablename__ = "measurement_refusals"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "capture_id"], ["captures.tenant_id", "captures.id"]
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "laser_calibration_id"],
+            ["laser_calibrations.tenant_id", "laser_calibrations.id"],
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "species_label_id"],
+            ["species_labels.tenant_id", "species_labels.id"],
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "laser_label_id"],
+            ["laser_labels.tenant_id", "laser_labels.id"],
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "head_tail_label_id"],
+            ["head_tail_labels.tenant_id", "head_tail_labels.id"],
+        ),
+        CheckConstraint(
+            "reason IN ('non_finite_length', 'zero_length', 'unparseable_species')",
+            name="measurement_refusals_reason_check",
+        ),
+        Index(
+            "measurement_refusals_tenant_id_capture_id_idx", "tenant_id", "capture_id"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    laser_calibration_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    reason: Mapped[str] = mapped_column(Text)
+    species_label_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    content_of_image: Mapped[str | None] = mapped_column(Text)
+    laser_label_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    laser_x: Mapped[float] = mapped_column(Double)
+    laser_y: Mapped[float] = mapped_column(Double)
+    head_tail_label_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    head_x: Mapped[float] = mapped_column(Double)
+    head_y: Mapped[float] = mapped_column(Double)
+    tail_x: Mapped[float] = mapped_column(Double)
+    tail_y: Mapped[float] = mapped_column(Double)
+    length_m: Mapped[float | None] = mapped_column(Double)
+    depth_m: Mapped[float | None] = mapped_column(Double)
+    algorithm: Mapped[str] = mapped_column(Text)
+    algorithm_version: Mapped[str] = mapped_column(Text)
+    core_version: Mapped[str] = mapped_column(Text)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     created_at: Mapped[datetime] = _created_at()
 
 

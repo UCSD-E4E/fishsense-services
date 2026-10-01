@@ -89,3 +89,42 @@ def test_a_naive_timestamp_is_refused():
     exactly the camera's UTC offset. Every stored capture time is aware."""
     with pytest.raises(ValidationError):
         ClusterDiveFrameImage(capture_id=uuid4(), taken_datetime=datetime(2024, 8, 21))
+
+
+def test_every_payload_model_in_the_package_is_in_the_contract():
+    """A payload model defined here *is* contract: seven slices added ~50 of
+    them in parallel, and a hand-kept list is exactly what one would forget.
+    Settings (how each side connects) are not payloads."""
+    import importlib
+    import inspect
+    import pkgutil
+
+    from pydantic import BaseModel
+    from pydantic_settings import BaseSettings
+
+    import fishsense_services_contracts as root
+    from fishsense_services_contracts import MODELS
+
+    defined = {
+        obj
+        for module in pkgutil.iter_modules(root.__path__)
+        if not module.name.startswith("_")
+        for obj in vars(
+            importlib.import_module(f"{root.__name__}.{module.name}")
+        ).values()
+        if inspect.isclass(obj)
+        and issubclass(obj, BaseModel)
+        and not issubclass(obj, BaseSettings)
+        and obj.__module__.startswith(root.__name__)
+    }
+
+    assert defined <= set(MODELS), sorted(m.__name__ for m in defined - set(MODELS))
+
+
+def test_contract_model_names_are_unique():
+    """The published schema is keyed by name, so two modules may not reuse one."""
+    from fishsense_services_contracts import MODELS
+
+    names = [model.__name__ for model in MODELS]
+
+    assert len(names) == len(set(names)), sorted(n for n in names if names.count(n) > 1)

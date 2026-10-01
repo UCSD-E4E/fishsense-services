@@ -11,11 +11,21 @@ from dataclasses import dataclass
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+#: The role that may make the edits PLAN.md §4.1 reserves to admins: a dive's
+#: calibration source, and Label Studio triage (what v1's portal group,
+#: `FishSense-Prod-Admins`, can do today). ``memberships.role`` is free text;
+#: only this exact string is an admin, so a near miss fails closed.
+ADMIN_ROLE = "admin"
+
 
 @dataclass(frozen=True)
 class Membership:
     tenant_id: uuid.UUID
     role: str
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == ADMIN_ROLE
 
 
 async def resolve_membership(

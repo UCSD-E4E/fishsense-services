@@ -28,6 +28,7 @@ from fishsense_services_api.auth import (
 )
 from fishsense_services_api.db import principal_transaction, tenant_transaction
 from fishsense_services_api.memberships import Membership, resolve_membership
+from fishsense_services_api.portal_api import add_portal_routes
 from fishsense_services_api.users import provision_user
 
 UNIQUE_VIOLATION = "23505"  # Postgres SQLSTATE
@@ -130,6 +131,7 @@ def create_app(*, engine: AsyncEngine, validator: TokenValidator) -> FastAPI:
             raise
         return Device(**row._mapping)
 
+    add_portal_routes(app, engine=engine, membership=membership)
     return app
 
 

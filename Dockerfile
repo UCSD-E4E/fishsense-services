@@ -7,6 +7,9 @@
 #     migrations:  `fishsense-services-api migrate`, runs as the schema owner
 #   orchestrator (`--target orchestrator`):
 #     the Temporal worker, also as the app role
+#   backup (`--target backup`):
+#     the nightly pg_dump to the NAS, as the backup role (reads every tenant,
+#     writes nothing); its own process and queue
 #   processor (`--target processor`):
 #     the compute worker; no database or NAS access, only Temporal. Serves the
 #     role FISHSENSE_PROCESSOR_ROLE names (per_image, light)
@@ -79,6 +82,19 @@ COPY --from=build-orchestrator /app/.venv /app/.venv
 COPY deploy/nrp /app/deploy/nrp
 USER app
 CMD ["fishsense-services-orchestrator"]
+
+# The nightly backup (`fishsense_services_orchestrator.ops.backup`): the
+# orchestrator's code plus pg_dump, run as its own process with the backup
+# role's credential, which the orchestrator never holds. pg_dump must be at
+# least the server's major version (postgres:17), so the build checks it.
+FROM runtime AS backup
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client \
+    && rm -rf /var/lib/apt/lists/* \
+    && test "$(pg_dump --version | grep -oE '[0-9]+' | head -n1)" -ge 17
+COPY --from=build-orchestrator /app/.venv /app/.venv
+USER app
+CMD ["python", "-m", "fishsense_services_orchestrator.ops.backup"]
 
 FROM runtime AS processor
 COPY --from=build-processor /app/.venv /app/.venv
