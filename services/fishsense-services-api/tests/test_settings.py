@@ -4,14 +4,19 @@ A deployment that is missing a setting must fail to start, loudly -- never
 boot and then fail on the first request.
 """
 
+import secrets
+
 import pytest
 from pydantic import ValidationError
 
 from fishsense_services_api.settings import Settings
 
 ISSUER = "https://auth.example.test/application/o/fishsense/"
+# Generated per run, never written in the source: a password-shaped literal
+# trips secret scanners even when it is fake.
+DB_PASSWORD = secrets.token_hex(8)
 REQUIRED = {
-    "FISHSENSE_DATABASE_URL": "postgresql+asyncpg://app:s3cret-pw@db/fishsense",
+    "FISHSENSE_DATABASE_URL": f"postgresql+asyncpg://app:{DB_PASSWORD}@db/fishsense",
     "FISHSENSE_OIDC_ISSUER": ISSUER,
     "FISHSENSE_OIDC_AUDIENCES": "fishsense-web,fishsense-mobile",
 }
@@ -71,4 +76,4 @@ def test_an_empty_audience_list_is_refused(env):
 def test_the_database_password_never_appears_in_the_settings_repr(env):
     env(**REQUIRED)
 
-    assert "s3cret-pw" not in repr(Settings())
+    assert DB_PASSWORD not in repr(Settings())

@@ -36,6 +36,7 @@ OWNER = "fishsense_owner:owner-dev-only"  # compose.yml's dev-only owner
 @dataclass
 class Stack:
     api_url: str
+    temporal_address: str
     owner_engine: Engine
     # Kept out of repr: a failing test must never print the environment.
     signing_key: rsa.RSAPrivateKey = field(repr=False)
@@ -122,7 +123,13 @@ def stack(tmp_path_factory) -> Iterator[Stack]:
         owner = create_engine(
             f"postgresql+psycopg://{OWNER}@{_published('postgres', 5432, env)}/fishsense"
         )
-        yield Stack(api_url=api_url, owner_engine=owner, signing_key=key, env=env)
+        yield Stack(
+            api_url=api_url,
+            temporal_address=_published("temporal", 7233, env),
+            owner_engine=owner,
+            signing_key=key,
+            env=env,
+        )
         owner.dispose()
     finally:
         compose("down", "-v", "--remove-orphans", env=env, check=False)

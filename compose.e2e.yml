@@ -3,8 +3,8 @@
 #   cd services/fishsense-services-api && uv run pytest -m e2e
 #
 # Adds a stand-in for Authentik's key endpoint (a static server publishing a
-# JWKS the tests write, whose private key they hold) and publishes the API and
-# Postgres on random local ports so the tests can find them.
+# JWKS the tests write, whose private key they hold) and publishes the API,
+# Postgres and Temporal on random local ports so the tests can find them.
 
 services:
   fake-idp:
@@ -16,6 +16,10 @@ services:
   postgres:
     ports: !override
       - "127.0.0.1::5432"
+
+  temporal:
+    ports: !override
+      - "127.0.0.1::7233"
 
   api:
     environment:
