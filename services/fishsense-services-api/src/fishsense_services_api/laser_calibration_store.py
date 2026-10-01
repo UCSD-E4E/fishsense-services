@@ -38,6 +38,13 @@ v2 changes:
 
 * per tenant; candidates oldest first (`created_at`), re-entry last, so the
   orchestrator can take the oldest across the tenants it serves;
+* **a cohort offers only a dive its resolver can resolve**: the dive's
+  device has a camera calibration, and (stage 13) its template has a dpi and
+  reference points. v1 offered them and its resolver raised, every hour,
+  ahead of every younger dive; across tenants that wedges every tenant. None
+  of these is fixed by a refit, so no refusal is recorded: the dive leaves
+  the cohort until the reference data is fixed, then comes back by itself.
+  The stage-13/board partition is v1's and ignores them;
 * **a refusal is a row**: the dive's current `laser_calibrations` row is
   `refused`, so it stands only while nothing newer was appended. v1's
   `_clear_refusal` ran on a successful fit (here an accepted row simply
@@ -52,7 +59,9 @@ v2 changes:
   the fit saw, and now expires the refusal (v1 snapshotted at refusal time
   and missed it);
 * **no upsert**: a refit is appended, so it is visible to every
-  provenance-mismatch cohort (v1's PUT kept the row id);
+  provenance-mismatch cohort (v1's PUT kept the row id). A *retried* record
+  of one attempt is not a refit: the caller names the attempt, and a repeat
+  of the name appends nothing (v1's PUT was idempotent by the dive);
 * stage 13's observations take each frame's lowest live laser label (v1:
   `get_laser_label(image_id).first()`, no ordering), and the board's geometry
   is read through `current_calibration_targets` by name -- per axis -- so a
@@ -71,8 +80,11 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from fishsense_services_api.service_principal import ServicePrincipal
+from fishsense_services_api.species_store import REFUSAL_OUTLIVED_SQL
 
 __all__ = [
+    "CHECKERBOARD_CALIBRATION_COHORT",
+    "LASER_CALIBRATION_COHORT",
     "MIN_SLATE_LASER_POINTS",
     "BoardFrame",
     "CalibrationCandidate",
@@ -177,6 +189,10 @@ class CalibrationRecord:
     slate_template_id: uuid.UUID | None
     calibration_target_id: uuid.UUID | None
     inputs_as_of: datetime | None
+    #: The attempt's id, named by the caller so that recording it again (a
+    #: retry after a lost reply) is the row already written, not a second
+    #: one. None: a fresh id.
+    id: uuid.UUID | None = None
 
 
 # --- the SQL both cohorts share (each over a dive aliased `d`) -----------------
@@ -233,6 +249,26 @@ _EFFECTIVE_TARGET = """
      WHERE t.id = d.calibration_target_id)
 """
 
+#: The dive's device has a current camera calibration: without one both
+#: resolvers refuse (`_require_camera`).
+_HAS_CAMERA = """
+    EXISTS (
+        SELECT 1 FROM current_camera_calibrations cc
+        WHERE cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
+    )
+"""
+
+#: The dive's slate template can scale a fit: a dpi and reference points,
+#: which `slate_calibration_inputs` refuses without.
+_TEMPLATE_CAN_SCALE = """
+    EXISTS (
+        SELECT 1 FROM slate_templates st
+        WHERE st.id = d.slate_template_id AND st.dpi IS NOT NULL
+          AND jsonb_typeof(st.reference_points) = 'array'
+          AND st.reference_points <> '[]'::jsonb
+    )
+"""
+
 #: A label on the dive (any state) newer than refusal `r`'s inputs.
 _NEWER_LABEL = """
     EXISTS (
@@ -267,19 +303,48 @@ _REFUSAL_STANDS = f"""
           ))
           AND NOT {_NEWER_LABEL.format(table="laser_labels")}
           AND NOT {_NEWER_LABEL.format(table="slate_labels")}
+          -- v1's `_clear_refusal` on every set_dive_slate/set_calibration_target,
+          -- same value or not; the species sync stamps the write (0022).
+          AND NOT {REFUSAL_OUTLIVED_SQL}
     )
 """
 
 
-async def _next(conn, tenant_id, where: str) -> CalibrationCandidate | None:
+def _cohort(where: str) -> str:
+    """A calibration cohort over dive `d`, but for the tenant and priority
+    terms the selector adds: no usable calibration of its own, `where`, and
+    no refusal standing."""
+    return f"""
+        NOT {_HAS_OWN_CALIBRATION}
+        AND {where}
+        AND NOT {_REFUSAL_STANDS}
+    """
+
+
+#: The stage-13 (slate) and checkerboard cohorts over dive `d`, but for the
+#: tenant and priority terms the selector adds. Named so
+#: `dive_pipeline_status` reads the same predicates (migration
+#: 0029).
+LASER_CALIBRATION_COHORT = _cohort(
+    f"{_STAGE_13_CAN_CALIBRATE} AND {_HAS_CAMERA} AND {_TEMPLATE_CAN_SCALE}"
+)
+CHECKERBOARD_CALIBRATION_COHORT = _cohort(f"""
+    d.calibration_target_id IS NOT NULL
+    AND {_HAS_CAMERA}
+    AND NOT {_STAGE_13_CAN_CALIBRATE}
+    AND (SELECT count(*) FROM captures c
+         WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+           AND c.is_canonical AND {_LIVE_DOT}) >= {MIN_SLATE_LASER_POINTS}
+""")
+
+
+async def _next(conn, tenant_id, cohort: str) -> CalibrationCandidate | None:
     row = (
         await conn.execute(
             text(f"""
                 SELECT d.id, d.created_at, {_REENTRY} AS reentry FROM dives d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
-                  AND NOT {_HAS_OWN_CALIBRATION}
-                  AND {where}
-                  AND NOT {_REFUSAL_STANDS}
+                  AND {cohort}
                 ORDER BY reentry, d.created_at, d.id
                 LIMIT 1
                 """),
@@ -297,24 +362,14 @@ async def next_dive_for_laser_calibration(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> CalibrationCandidate | None:
     """The tenant's next dive in the stage-13 (slate) cohort."""
-    return await _next(conn, tenant_id, _STAGE_13_CAN_CALIBRATE)
+    return await _next(conn, tenant_id, LASER_CALIBRATION_COHORT)
 
 
 async def next_dive_for_checkerboard_calibration(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> CalibrationCandidate | None:
     """The tenant's next dive in the checkerboard cohort."""
-    return await _next(
-        conn,
-        tenant_id,
-        f"""
-        d.calibration_target_id IS NOT NULL
-        AND NOT {_STAGE_13_CAN_CALIBRATE}
-        AND (SELECT count(*) FROM captures c
-             WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
-               AND c.is_canonical AND {_LIVE_DOT}) >= {MIN_SLATE_LASER_POINTS}
-        """,
-    )
+    return await _next(conn, tenant_id, CHECKERBOARD_CALIBRATION_COHORT)
 
 
 # --- inputs ---------------------------------------------------------------------
@@ -529,22 +584,29 @@ async def record_laser_calibration(
     dive_id: uuid.UUID,
     record: CalibrationRecord,
 ) -> uuid.UUID:
-    """Append one attempt to the dive's calibrations. Returns its id."""
-    return (
+    """Append one attempt to the dive's calibrations. Returns its id.
+
+    Idempotent in `record.id`: an attempt already recorded under that id is
+    left as it is (append-only) and its id returned, so a retried record
+    cannot append the attempt twice."""
+    attempt = record.id or uuid.uuid4()
+    written = (
         await conn.execute(
             text("""
                 INSERT INTO laser_calibrations
-                    (tenant_id, dive_id, camera_calibration_id, producer, outcome,
-                     laser_position, laser_axis, refusal_reason, inputs_as_of,
-                     gate_verdicts, lever_arm_m, observation_count, core_version,
-                     slate_template_id, calibration_target_id)
-                VALUES (:tenant, :dive, :camera, :producer, :outcome,
+                    (id, tenant_id, dive_id, camera_calibration_id, producer,
+                     outcome, laser_position, laser_axis, refusal_reason,
+                     inputs_as_of, gate_verdicts, lever_arm_m, observation_count,
+                     core_version, slate_template_id, calibration_target_id)
+                VALUES (:id, :tenant, :dive, :camera, :producer, :outcome,
                         CAST(:position AS jsonb), CAST(:axis AS jsonb), :reason,
                         :inputs_as_of, CAST(:verdicts AS jsonb), :lever, :count,
                         :core, :slate, :target)
+                ON CONFLICT (id) DO NOTHING
                 RETURNING id
                 """),
             {
+                "id": attempt,
                 "tenant": tenant_id,
                 "dive": dive_id,
                 "camera": record.camera_calibration_id,
@@ -562,7 +624,8 @@ async def record_laser_calibration(
                 "target": record.calibration_target_id,
             },
         )
-    ).scalar_one()
+    ).scalar_one_or_none()
+    return attempt if written is None else written
 
 
 def _json(value) -> str | None:

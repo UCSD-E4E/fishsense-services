@@ -1,0 +1,20 @@
+# New summary tile: distinct fish measured. The old dashboard was a bare table
+# with no headline number.
+slice_name: Fish measured
+viz_type: big_number_total
+params:
+  datasource: 55555555-5555-4555-8555-555555555555__table
+  viz_type: big_number_total
+  metric: fish_measured
+  subheader: distinct fish with a length
+  adhoc_filters:
+    - clause: WHERE
+      subject: Taken Date
+      operator: TEMPORAL_RANGE
+      comparator: No filter
+      expressionType: SIMPLE
+  y_axis_format: SMART_NUMBER
+cache_timeout: null
+uuid: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+version: 1.0.0
+dataset_uuid: 55555555-5555-4555-8555-555555555555

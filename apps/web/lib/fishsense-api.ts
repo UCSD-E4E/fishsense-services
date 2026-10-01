@@ -49,11 +49,34 @@ export async function getProjectIds(kind: LabelKind, revalidate: number): Promis
   // done the work twice. The API's predicate is "the gate is done here", not
   // "the gate has run here" — a half-swept dive still holds frames it is
   // about to take.
-  const query = {
-    kind: API_KIND[kind],
+  return askProjectIds(kind, revalidate, {
     incomplete: true,
     ...(GATED_KINDS.has(kind) ? { gated: true } : {}),
-  };
+  });
+}
+
+/**
+ * Every Label Studio project of `kind` the tenant has, finished or not.
+ *
+ * v2: what `lib/tenant-tasks.ts` checks a caller's task id against. Every
+ * tenant's projects share one Label Studio workspace, so "Label Studio has
+ * this task" says nothing about whose it is. Not `getProjectIds`: a project
+ * a labeler has just finished, or one the gate still holds, is the tenant's
+ * all the same.
+ */
+export async function getTenantProjectIds(
+  kind: LabelKind,
+  revalidate: number,
+): Promise<number[]> {
+  return askProjectIds(kind, revalidate, {});
+}
+
+async function askProjectIds(
+  kind: LabelKind,
+  revalidate: number,
+  filters: { incomplete?: boolean; gated?: boolean },
+): Promise<number[]> {
+  const query = { kind: API_KIND[kind], ...filters };
   const ask = async (token: string) =>
     apiClient(token, { revalidate }).GET("/tenants/{slug}/label-studio-projects", {
       params: { path: { slug: tenantSlug() }, query },

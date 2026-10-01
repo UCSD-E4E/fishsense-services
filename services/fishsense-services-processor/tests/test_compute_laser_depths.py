@@ -225,6 +225,9 @@ async def test_falls_back_to_another_valid_label_when_the_first_is_degenerate():
     (outcome,) = result.captures
     assert outcome.depth.laser_label_id == good, "the image has a usable label"
     assert outcome.depth.depth_m > 0.0
+    # The dot it was computed at travels back, so the persist can tell it
+    # from a dot a labeler moved in the meantime (same label id).
+    assert (outcome.depth.x, outcome.depth.y) == (good_x, good_y)
     # v2: the degenerate one is recorded too, so it is not retried for nothing.
     assert [r.laser_label_id for r in outcome.refusals] == [bad]
 

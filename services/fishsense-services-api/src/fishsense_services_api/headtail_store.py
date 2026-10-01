@@ -37,7 +37,8 @@ v2 changes:
 * **predictions are appended** (migration 0011): v1's upsert on the image is
   an INSERT, and every reader judges the current one;
 * intrinsics are the dive's device's current camera calibration, and a
-  non-pinhole one is refused rather than rectified as a pinhole;
+  non-pinhole one is refused rather than rectified as a pinhole; stage 5.1's
+  and predict's cohorts leave out a dive the resolver would refuse;
 * **the processor's output is checked** (PLAN.md §9.11): predictions for
   another dive's captures, or naming another capture's laser label, are
   refused, and nothing is written;
@@ -54,10 +55,13 @@ from typing import Sequence
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api.camera_sql import RECTIFIABLE_CAMERA_MODEL, RECTIFIABLE_DIVE
 from fishsense_services_api.clustering_store import VALID_LASER
 from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
+    "HEADTAIL_PREPROCESS_COHORT",
+    "HEADTAIL_PREPROCESS_WORK",
     "CurrentHeadTailPrediction",
     "ForeignCapture",
     "ForeignLaserLabel",
@@ -78,6 +82,7 @@ __all__ = [
     "dives_needing_headtail_population",
     "headtail_populate_state",
     "headtail_predict_captures",
+    "headtail_prediction_cohort",
     "headtail_preprocess_inputs",
     "next_dive_for_headtail_prediction",
     "next_dive_for_headtail_preprocessing",
@@ -105,6 +110,47 @@ _ANY_PREDICTION = """EXISTS (
     SELECT 1 FROM head_tail_predictions p
     WHERE p.tenant_id = c.tenant_id AND p.capture_id = c.id
 )"""
+
+_RENDERABLE_CAMERA_MODEL = RECTIFIABLE_CAMERA_MODEL
+
+#: Dive `d` can be rendered by stage 5.1: its device's current calibration is
+#: a pinhole. The resolver refuses everything else (no device, no calibration,
+#: an axial camera), so both cohorts carry this, or a refused dive is
+#: re-selected every hour and -- oldest first, across tenants -- blocks every
+#: dive behind it. v1 had no such term (and no axial camera); a dive with no
+#: intrinsics wedged its stage 5.1 the same way.
+_RENDERABLE = RECTIFIABLE_DIVE
+
+
+#: Dive `d` has stage-5.1 work: a canonical capture with a valid laser and no
+#: live head/tail row in a project, or a canonical capture whose live row is
+#: flagged for a redraw. Named, with the cohorts below, so
+#: `dive_pipeline_status` reads the same predicates (migration
+#: 0029).
+HEADTAIL_PREPROCESS_WORK = f"""EXISTS (
+    SELECT 1 FROM captures c
+    WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+      AND c.is_canonical
+      AND (
+          ({_LIVE_LASER} AND NOT EXISTS (
+              SELECT 1 FROM head_tail_labels h
+              WHERE h.tenant_id = c.tenant_id
+                AND h.capture_id = c.id
+                AND h.ls_project_id IS NOT NULL
+                AND NOT h.superseded
+          ))
+          OR EXISTS (
+              SELECT 1 FROM head_tail_labels h
+              WHERE h.tenant_id = c.tenant_id
+                AND h.capture_id = c.id
+                AND h.needs_reprocess AND NOT h.superseded
+          )
+      )
+)"""
+
+#: The stage-5.1 cohort over dive `d`, but for the tenant and priority terms
+#: the selector adds.
+HEADTAIL_PREPROCESS_COHORT = f"{_RENDERABLE} AND {HEADTAIL_PREPROCESS_WORK}"
 
 
 class UnsupportedCameraModel(ValueError):
@@ -191,6 +237,8 @@ class HeadTailPredictionRow:
     predictor_version: int | None = None
     checkpoint: str | None = None
     core_version: str | None = None
+    #: v2 (migration 0033): the kept mask's box, which the species stage crops.
+    mask_bbox: list[int] | None = None
 
 
 @dataclass(frozen=True)
@@ -250,32 +298,14 @@ async def next_dive_for_headtail_preprocessing(
 ) -> HeadtailCandidate | None:
     """The tenant's oldest dive in the stage-5.1 cohort: a canonical capture
     with a valid laser and no live head/tail row in a project, or a canonical
-    capture whose live row is flagged for a redraw."""
+    capture whose live row is flagged for a redraw. Only a dive the resolver
+    can render (`_RENDERABLE`)."""
     row = (
         await conn.execute(
             text(f"""
                 SELECT d.id, d.created_at FROM dives d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
-                  AND EXISTS (
-                      SELECT 1 FROM captures c
-                      WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
-                        AND c.is_canonical
-                        AND (
-                            ({_LIVE_LASER} AND NOT EXISTS (
-                                SELECT 1 FROM head_tail_labels h
-                                WHERE h.tenant_id = c.tenant_id
-                                  AND h.capture_id = c.id
-                                  AND h.ls_project_id IS NOT NULL
-                                  AND NOT h.superseded
-                            ))
-                            OR EXISTS (
-                                SELECT 1 FROM head_tail_labels h
-                                WHERE h.tenant_id = c.tenant_id
-                                  AND h.capture_id = c.id
-                                  AND h.needs_reprocess AND NOT h.superseded
-                            )
-                        )
-                  )
+                  AND {HEADTAIL_PREPROCESS_COHORT}
                 ORDER BY d.created_at, d.id
                 LIMIT 1
                 """),
@@ -301,34 +331,36 @@ async def headtail_preprocess_inputs(
     Mirrors the cohort: canonical captures with a valid laser and no live row
     in a project, in laser-label order, then flagged frames (no laser gate) in
     capture order. Raises if the dive, its device or its calibration is
-    missing, as v1 did for the dive, its camera and its intrinsics.
+    missing, as v1 did for the dive, its camera and its intrinsics, or if the
+    calibration is not a pinhole; the cohorts' `_RENDERABLE` is the same test,
+    so a dive refused here is never selected.
     """
-    dive = (
+    calibration = (
         await conn.execute(
-            text("SELECT device_id FROM dives WHERE tenant_id = :t AND id = :d"),
+            text(f"""
+                SELECT d.device_id, cc.camera_model, cc.camera_matrix,
+                       cc.distortion_coefficients, {_RENDERABLE} AS renderable
+                FROM dives d
+                LEFT JOIN current_camera_calibrations cc
+                  ON cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
+                WHERE d.tenant_id = :t AND d.id = :d
+                """),
             {"t": tenant_id, "d": dive_id},
         )
     ).one_or_none()
-    if dive is None:
-        raise ValueError(f"dive {dive_id} not found")
-    if dive.device_id is None:
-        raise ValueError(f"dive {dive_id} has no device")
-    calibration = (
-        await conn.execute(
-            text("""
-                SELECT camera_model, camera_matrix, distortion_coefficients
-                FROM current_camera_calibrations
-                WHERE tenant_id = :t AND device_id = :device
-                """),
-            {"t": tenant_id, "device": dive.device_id},
-        )
-    ).one_or_none()
     if calibration is None:
-        raise ValueError(f"device {dive.device_id} has no camera calibration")
-    if calibration.camera_model != "pinhole":
+        raise ValueError(f"dive {dive_id} not found")
+    if not calibration.renderable:
+        if calibration.device_id is None:
+            raise ValueError(f"dive {dive_id} has no device")
+        if calibration.camera_model is None:
+            raise ValueError(
+                f"device {calibration.device_id} has no camera calibration"
+            )
         raise UnsupportedCameraModel(
-            f"device {dive.device_id}'s camera is {calibration.camera_model!r}; "
-            "stage 5.1 rectifies only a pinhole camera"
+            f"device {calibration.device_id}'s camera is "
+            f"{calibration.camera_model!r}; stage 5.1 rectifies only a "
+            f"{_RENDERABLE_CAMERA_MODEL} camera"
         )
 
     rows = (
@@ -459,11 +491,28 @@ def _needs_prediction(version_param: str) -> str:
         )"""
 
 
+def headtail_prediction_cohort(version: str) -> str:
+    """The head/tail-prediction cohort over dive `d`, but for the tenant and
+    priority terms the selector adds; `version` is SQL for the stage's current
+    version (a bind parameter, or a literal in a view)."""
+    return f"""{_RENDERABLE}
+        AND EXISTS (
+            SELECT 1 FROM captures c
+            WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+              AND c.is_canonical AND {_needs_prediction(version)}
+        )"""
+
+
 async def next_dive_for_headtail_prediction(
     conn: AsyncConnection, tenant_id: uuid.UUID, *, predictor_version: int
 ) -> PredictionCandidate | None:
     """The tenant's next dive for the detector: never-predicted work first,
-    then the oldest. `predictor_version` is the stage's current version."""
+    then the oldest. `predictor_version` is the stage's current version.
+
+    Only a dive stage 5.1 can render (`_RENDERABLE`): predict reads its JPEG,
+    and a refused dive, never predicted, would otherwise head the cohort with
+    every image deferred, every hour.
+    """
     row = (
         await conn.execute(
             text(f"""
@@ -475,11 +524,7 @@ async def next_dive_for_headtail_prediction(
                 ) AS never_predicted
                 FROM dives d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
-                  AND EXISTS (
-                      SELECT 1 FROM captures c
-                      WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
-                        AND c.is_canonical AND {_needs_prediction(":version")}
-                  )
+                  AND {headtail_prediction_cohort(":version")}
                 ORDER BY never_predicted DESC, d.created_at, d.id
                 LIMIT 1
                 """),
@@ -613,12 +658,13 @@ async def persist_headtail_predictions(
                 INSERT INTO head_tail_predictions (
                     tenant_id, capture_id, status, head_x, head_y, tail_x, tail_y,
                     width, height, mask_area_px, silhouette_ratio, crop_x, crop_y,
-                    laser_label_id, predictor_version, checkpoint, core_version)
+                    laser_label_id, predictor_version, checkpoint, core_version,
+                    mask_bbox)
                 VALUES (
                     :tenant, :capture_id, :status, :head_x, :head_y, :tail_x,
                     :tail_y, :width, :height, :mask_area_px, :silhouette_ratio,
                     :crop_x, :crop_y, :laser_label_id, :predictor_version,
-                    :checkpoint, :core_version)
+                    :checkpoint, :core_version, :mask_bbox)
                 """),
             {"tenant": tenant_id, **r.__dict__},
         )

@@ -24,7 +24,8 @@ v2 changes, each pinned here:
   `GET clusters` had no ORDER BY, and both "image i of N" and stage 6.1's
   "Part of previous group" read the order;
 * **stage 6.1 persists all or nothing**, serialised per dive (v1 posted one
-  cluster at a time, so a failure left a partial set that blocked every re-run);
+  cluster at a time, so a failure left a partial set that blocked every re-run),
+  leaving out the dive's duplicate frames and refusing another dive's;
 * **a refusal expires by comparison, not by clearing**: the sync stamps
   `dives.calibration_links_changed_at` when it writes a link, and a refused
   calibration row older than that stamp no longer stands (migration
@@ -37,7 +38,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import text
 
-from fishsense_services_api.clustering_store import InvalidClusters
+from fishsense_services_api.clustering_store import ForeignCapture, InvalidClusters
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.ingest_store import (
     create_dive,
@@ -77,7 +78,49 @@ async def _tenant(owner_engine, slug="lab") -> uuid.UUID:
         ).scalar_one()
 
 
-async def _dive(app_engine, tenant, path, *, priority="high", device=None):
+#: `_dive`'s default: the tenant's one device with a pinhole calibration, which
+#: the stage-2 cohort requires (`camera_sql`). `device=None` has none.
+_PINHOLE = object()
+_OWNER = None
+_PINHOLE_DEVICES: dict[uuid.UUID, uuid.UUID] = {}
+
+
+@pytest.fixture(autouse=True)
+def _seed_as_owner(owner_engine):
+    global _OWNER  # pylint: disable=global-statement
+    _OWNER = owner_engine
+    _PINHOLE_DEVICES.clear()
+
+
+async def _pinhole_device(tenant, model="pinhole"):
+    async with _OWNER.begin() as conn:
+        device = (
+            await conn.execute(
+                text(
+                    "INSERT INTO devices (tenant_id, kind, serial) "
+                    "VALUES (:t, 'lite', :s) RETURNING id"
+                ),
+                {"t": tenant, "s": uuid.uuid4().hex},
+            )
+        ).scalar_one()
+        await conn.execute(
+            text(
+                "INSERT INTO camera_calibrations (tenant_id, device_id, camera_model, "
+                "port_model, camera_matrix, distortion_coefficients) VALUES (:t, :d, "
+                ":m, :port, CAST(:k AS jsonb), CAST(:dist AS jsonb))"
+            ),
+            {"t": tenant, "d": device, "m": model,
+             "port": None if model == "pinhole" else "flat",
+             "k": K1, "dist": "[-0.1, 0.05, 0, 0, 0]"},
+        )  # fmt: skip
+    return device
+
+
+async def _dive(app_engine, tenant, path, *, priority="high", device=_PINHOLE):
+    if device is _PINHOLE:
+        if tenant not in _PINHOLE_DEVICES:
+            _PINHOLE_DEVICES[tenant] = await _pinhole_device(tenant)
+        device = _PINHOLE_DEVICES[tenant]
     async with tenant_transaction(app_engine, tenant) as conn:
         dive = await create_dive(
             conn, tenant, source_path=path, name=path, dived_at=T0, device_id=device
@@ -240,6 +283,41 @@ async def test_species_preprocessing_ignores_null_project_species_sentinels(
     await _species(owner_engine, lab, capture, project=None)
 
     assert await _next(app_engine, lab) == dive
+
+
+async def test_a_completed_sentinel_takes_its_frame_out_of_both_cohorts(
+    owner_engine, app_engine
+):
+    """v2 change (v1 wedged here): populate never tasks a frame with a
+    completed row, a completed sentinel included, so a cohort that still
+    counted that frame as work re-staged its dive every hour, forever, ahead
+    of every younger dive. A completed sentinel is done work."""
+    lab = await _tenant(owner_engine)
+    dive = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, dive, "a")
+    await _cluster(owner_engine, lab, dive, "prediction", [capture])
+    await _laser(owner_engine, lab, capture)
+    await _species(owner_engine, lab, capture, project=None, completed=True)
+
+    assert await _next(app_engine, lab) is None
+    assert await _population(app_engine, lab) == []
+
+
+async def test_a_superseded_completed_sentinel_is_not_done_work(
+    owner_engine, app_engine
+):
+    """Populate reads live rows only, so a superseded one -- completed or
+    not -- leaves its frame in both cohorts."""
+    lab = await _tenant(owner_engine)
+    dive = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, dive, "a")
+    await _cluster(owner_engine, lab, dive, "prediction", [capture])
+    await _laser(owner_engine, lab, capture)
+    await _species(owner_engine, lab, capture, project=None, completed=True,
+                   superseded=True)  # fmt: skip
+
+    assert await _next(app_engine, lab) == dive
+    assert await _population(app_engine, lab) == [dive]
 
 
 async def test_species_preprocessing_excludes_incomplete_or_superseded_or_null_xy_lasers(
@@ -524,7 +602,7 @@ async def test_preprocess_facts_without_a_device_or_intrinsics(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    bare = await _dive(app_engine, lab, "d1")
+    bare = await _dive(app_engine, lab, "d1", device=None)
     device = await _device_with_intrinsics(owner_engine, lab)
     uncalibrated = await _dive(app_engine, lab, "d2", device=device)
 
@@ -533,6 +611,40 @@ async def test_preprocess_facts_without_a_device_or_intrinsics(
         facts = await species_preprocess_facts(conn, lab, uncalibrated)
         assert facts.device_id == device and facts.intrinsics is None
         assert await species_preprocess_facts(conn, lab, uuid.uuid4()) is None
+
+
+async def test_an_axial_camera_gives_no_intrinsics(owner_engine, app_engine):
+    """PLAN.md §8: stage 2 rectifies with pinhole maths, so an axial (flat
+    port) calibration is not intrinsics it may use (`camera_sql`)."""
+    lab = await _tenant(owner_engine)
+    device = await _pinhole_device(lab, model="axial_refractive")
+    dive = await _dive(app_engine, lab, "d1", device=device)
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        facts = await species_preprocess_facts(conn, lab, dive)
+
+    assert facts.device_id == device and facts.intrinsics is None
+
+
+@pytest.mark.parametrize("setup", ["no-device", "no-calibration", "axial"])
+async def test_a_dive_stage_2_cannot_rectify_is_not_a_candidate(
+    owner_engine, app_engine, setup
+):
+    """v2: the resolver fails a dive without pinhole intrinsics, and the
+    selector takes the oldest candidate across every tenant, so such a dive
+    must not be one -- or it is re-staged every hour ahead of them all."""
+    lab = await _tenant(owner_engine)
+    device = {
+        "no-device": None,
+        "no-calibration": await _device_with_intrinsics(owner_engine, lab),
+        "axial": await _pinhole_device(lab, model="axial_refractive"),
+    }[setup]
+    dive = await _dive(app_engine, lab, "d1", device=device)
+    capture = await _capture(app_engine, lab, dive, "a.ORF")
+    await _laser(owner_engine, lab, capture)
+    await _cluster(owner_engine, lab, dive, "prediction", [capture])
+
+    assert await _next(app_engine, lab) is None
 
 
 async def test_preprocess_facts_order_clusters_and_members_by_capture_time(
@@ -770,6 +882,60 @@ async def test_recording_revives_the_projects_superseded_row_and_keeps_its_flag(
     assert row.grouping is None
 
 
+async def test_a_task_held_by_a_migrated_duplicate_is_skipped_not_raised(
+    owner_engine, app_engine
+):
+    """v2 change: v1 anchored a duplicate frame and its twin to the one task
+    their shared JPEG URL dedupes to; the migration kept whichever row came
+    first, so a migrated duplicate can hold the task populate now finds for
+    its canonical twin. Task ids are unique per tenant, so recording it raised
+    every hour. The duplicate's row is left as it is (it may carry a
+    labeler's answer) and nothing is written for the twin."""
+    lab = await _tenant(owner_engine)
+    dive = await _dive(app_engine, lab, "d1")
+    twin = await _capture(app_engine, lab, dive, "a", checksum="7" * 32)
+    duplicate = await _capture(app_engine, lab, dive, "a2", checksum="7" * 32)
+    held = await _species(owner_engine, lab, duplicate, project=70, task=5001,
+                          completed=True, grouping="x")  # fmt: skip
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        recorded = await record_species_label(
+            conn, lab, capture_id=twin, ls_project_id=70, ls_task_id=5001,
+            image_url="s3://b/7.JPG",
+        )  # fmt: skip
+
+    assert recorded is False
+    async with owner_engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                text("SELECT capture_id FROM species_labels WHERE tenant_id = :t"),
+                {"t": lab},
+            )
+        ).all()
+    assert [r.capture_id for r in rows] == [duplicate]
+    row = await _row(owner_engine, "species_labels", held)
+    assert (row.ls_task_id, row.completed, row.grouping) == (5001, True, "x")
+
+
+async def test_recording_says_it_recorded(owner_engine, app_engine):
+    lab = await _tenant(owner_engine)
+    dive = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, dive, "a")
+    await _species(owner_engine, lab, capture, project=70, task=11, superseded=True)
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        fresh = await record_species_label(
+            conn, lab, capture_id=capture, ls_project_id=71, ls_task_id=21,
+            image_url="s3://b/k.JPG",
+        )  # fmt: skip
+        revived = await record_species_label(
+            conn, lab, capture_id=capture, ls_project_id=70, ls_task_id=12,
+            image_url="s3://b/k.JPG",
+        )  # fmt: skip
+
+    assert (fresh, revived) == (True, True)
+
+
 async def test_superseding_retires_only_the_named_open_rows(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
     dive = await _dive(app_engine, lab, "d1")
@@ -856,6 +1022,66 @@ async def test_a_foreign_capture_writes_nothing(owner_engine, app_engine):
 
     async with tenant_transaction(app_engine, lab) as conn:
         assert (await species_grouping_facts(conn, lab, dive)).already_grouped is False
+
+
+async def _label_studio_members(owner_engine, dive) -> list[set[uuid.UUID]]:
+    async with owner_engine.connect() as conn:
+        rows = await conn.execute(
+            text(
+                "SELECT array_agg(m.capture_id) AS m FROM dive_frame_clusters k "
+                "JOIN dive_frame_cluster_captures m ON m.cluster_id = k.id "
+                "WHERE k.dive_id = :d AND k.formed_by = 'label_studio' "
+                "GROUP BY k.id"
+            ),
+            {"d": dive},
+        )
+        return sorted((set(r.m) for r in rows), key=len)
+
+
+async def test_a_migrated_duplicate_in_the_dive_is_dropped_not_refused(
+    owner_engine, app_engine
+):
+    """A migrated dive's prediction clusters can hold a duplicate frame (its
+    canonical copy is under another dive) with a live species row, and v1
+    grouped it. Refusing it fails stage 6.1 for that dive forever; the
+    duplicate is left out of the label-studio clusters instead (it is measured
+    under its canonical copy's dive), and a group left empty is not written."""
+    lab = await _tenant(owner_engine)
+    original = await _dive(app_engine, lab, "orig", priority="low")
+    await _capture(app_engine, lab, original, "a", checksum="f" * 32)
+    await _capture(app_engine, lab, original, "b", checksum="9" * 32)
+    dive = await _dive(app_engine, lab, "d1")
+    mine = await _capture(app_engine, lab, dive, "m")
+    duplicate = await _capture(app_engine, lab, dive, "a", checksum="f" * 32)
+    lonely = await _capture(app_engine, lab, dive, "b", checksum="9" * 32)
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        written = await persist_label_studio_clusters(
+            conn, lab, dive, [[mine, duplicate], [lonely]]
+        )
+
+    assert written == 1
+    assert await _label_studio_members(owner_engine, dive) == [{mine}]
+
+
+async def test_a_duplicate_under_another_dive_is_still_foreign(
+    owner_engine, app_engine
+):
+    """Only the dive's own duplicates are dropped: a capture of another dive,
+    canonical or not, is still refused and nothing is written."""
+    lab = await _tenant(owner_engine)
+    original = await _dive(app_engine, lab, "orig", priority="low")
+    await _capture(app_engine, lab, original, "a", checksum="8" * 32)
+    other = await _dive(app_engine, lab, "d2")
+    theirs = await _capture(app_engine, lab, other, "a", checksum="8" * 32)
+    dive = await _dive(app_engine, lab, "d1")
+    mine = await _capture(app_engine, lab, dive, "m")
+
+    with pytest.raises(ForeignCapture):
+        async with tenant_transaction(app_engine, lab) as conn:
+            await persist_label_studio_clusters(conn, lab, dive, [[mine], [theirs]])
+
+    assert await _label_studio_members(owner_engine, dive) == []
 
 
 # -- the dive links the species sync writes -------------------------------------------

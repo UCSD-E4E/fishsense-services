@@ -26,8 +26,9 @@ v2 changes:
   processor's decision, because the processor never touches the database. A
   write the store refuses (a row outside the dive) is final, not retried;
 * populate records each row's `source` (`human`, or `auto_accept` for a frame
-  imported already annotated), and the auto-accept apply marks the rows it
-  annotated `auto_accept`: the gate confirmed them (docs/port-plan.md);
+  imported already annotated), and the auto-accept apply marks each row it
+  annotates `auto_accept`, as soon as it does: the gate confirmed them
+  (docs/port-plan.md);
 * remediation's apply refuses, writing nothing, if the dive's labels changed
   since the plan it applies was made.
 """
@@ -203,6 +204,9 @@ class LaserActivities:
     # -- stage 0.1 ---------------------------------------------------------------
 
     async def _camera(self, target: LaserTarget):
+        # The cohorts select only dives with a camera (laser_store
+        # `_HAS_CAMERA`), so this fails only on a calibration removed between
+        # the select and the resolve: a one-off, not a dive re-selected hourly.
         camera = await self._catalog.dive_camera(target.tenant_id, target.dive_id)
         if camera is None:
             raise ApplicationError(
@@ -548,7 +552,12 @@ class LaserActivities:
         """Annotate the dive's open tasks whose predictions the gate cleared --
         only a task Label Studio says nobody started (no annotation, no
         draft): never overwrite a human, never discard work in progress, and
-        a second pass finds nothing. Returns the annotations created."""
+        a second pass finds nothing. Returns the annotations created.
+
+        v2: each task is marked `auto_accept` as soon as its annotation
+        exists, not after the loop. A retry sees an annotated task as started
+        and skips it, and the mark no longer applies once the sync completes
+        the row, so a mark deferred past a failure would be lost for good."""
         found = await self._catalog.laser_task_targets(
             target.tenant_id, target.dive_id, auto_accepted_only=True
         )
@@ -578,12 +587,11 @@ class LaserActivities:
                 wrapper[0]["result"],
                 wrapper[0]["ground_truth"],
             )
+            await self._catalog.mark_laser_labels_auto_accepted(
+                target.tenant_id, [t.ls_task_id]
+            )
             applied.append(t.ls_task_id)
             heartbeat_again()
-        if applied:
-            await self._catalog.mark_laser_labels_auto_accepted(
-                target.tenant_id, applied
-            )
         activity.logger.info(
             "dive %s: auto-accepted %d/%d open tasks (%d were already started)",
             target.dive_id,

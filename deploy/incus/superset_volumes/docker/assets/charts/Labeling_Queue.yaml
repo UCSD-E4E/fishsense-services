@@ -1,0 +1,20 @@
+# `params` must be a YAML MAPPING — the v1 importer's chart schema rejects a
+# JSON string ("params: Not a valid mapping type").
+slice_name: Labeling queue (HIGH priority)
+viz_type: table
+params:
+  datasource: 33333333-3333-4333-8333-333333333333__table
+  viz_type: table
+  query_mode: raw
+  all_columns:
+    - stage
+    - cnt
+  order_by_cols:
+    - '["stage", true]'
+  row_limit: 100
+  server_page_length: 10
+  include_search: false
+cache_timeout: null
+uuid: 66666666-6666-4666-8666-666666666666
+version: 1.0.0
+dataset_uuid: 33333333-3333-4333-8333-333333333333

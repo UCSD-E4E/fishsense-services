@@ -449,6 +449,25 @@ Everything except the reference tables above carries `tenant_id`.
   measurement.
 
 ### 4.5 Processing pipeline
+- **Database ownership** *(decided 2026-09-30)*: **one package owns the database**:
+  `fishsense-services-api`. Every table, migration and SQL statement lives there, and so
+  does the RLS that keeps tenants apart. The orchestrator runs that package's **catalogs**
+  (14 of them, ~105 methods: selectors, resolvers, persists) as a member of the tenants it
+  serves (`ServicePrincipal`). It may open the connection they run on, but writes no SQL.
+  The processor and the contracts never touch the database; the processor talks only to
+  Temporal. Enforced by `tests/test_database_ownership.py` (repo root): outside the API
+  package, no database driver, no SQLAlchemy beyond `create_async_engine`, and no SQL in
+  string literals. A query needed elsewhere is added to the API package and called.
+  - *Why not HTTP between orchestrator and API:* the catalogs are already the right
+    boundary (each method is one transaction). Putting HTTP in between would mean about
+    105 internal endpoints, service auth, paging for bulk label syncs, and an internal
+    client to keep in step — v1's SDK, and its version skew (fishsense-lite #931/#937) —
+    for no tenancy gain, since RLS and the membership re-check already bound the
+    orchestrator. The cost is that the two deploy in lockstep, which is why the monorepo
+    releases one version.
+  - *When to switch to HTTP:* the orchestrator moves off the slot, a second team writes
+    workers, or the API needs its own release cadence. Then the catalogs become the
+    internal API one-for-one.
 - **Orchestrator** (Temporal **workflow** worker, Python) — durable coordination; lives
   with the API. Owns the schedule chain. Runs in the **single `fishsense` namespace** with
   **in-workflow tenant scoping** (§9.4): `tenant_id` in every payload, **tenant-scoped
@@ -755,7 +774,9 @@ richer):
 - The data migration job and its validation report (§6.4), rehearsed early and often.
 - The web portal port (§6.1).
 - The production deploy: a `flake.nix` with the fishsense `mkTenant`, a production compose
-  (inner Traefik, vault-agent secrets), and the promote → converge workflow.
+  (inner Traefik, vault-agent secrets), and the promote → converge workflow — **built**
+  (`flake.nix`, `deploy/incus/`, `.github/workflows/`); the runbook, the OpenBao seeds and the
+  admin steps are `docs/cutover.md`.
 
 ## 8. Extension seams for future devices
 - New device = new `DeviceKind` + a `CaptureExtension` table + processor algorithm(s)/

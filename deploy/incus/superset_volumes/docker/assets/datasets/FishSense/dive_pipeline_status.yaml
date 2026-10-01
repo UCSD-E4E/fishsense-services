@@ -1,0 +1,120 @@
+table_name: dive_pipeline_status
+main_dttm_col: null
+description: One row per dive with a boolean per pipeline stage (see fishsense_api.views). Backs the pipeline-status dashboard.
+default_endpoint: null
+offset: 0
+cache_timeout: null
+catalog: null
+schema: public
+sql: null
+params: null
+template_params: null
+filter_select_enabled: true
+fetch_values_predicate: null
+extra: null
+normalize_columns: false
+always_filter_main_dttm: false
+uuid: 22222222-2222-4222-8222-222222222222
+metrics:
+  - metric_name: count
+    verbose_name: Dives
+    metric_type: count
+    expression: COUNT(*)
+    description: null
+    d3format: null
+    extra: {}
+    warning_text: null
+  - metric_name: unfinished
+    verbose_name: Unfinished
+    metric_type: null
+    expression: COUNT(*) FILTER (WHERE NOT measured)
+    description: Dives not yet measured (terminal stage)
+    d3format: null
+    extra: {}
+    warning_text: null
+  - metric_name: ready_to_measure
+    verbose_name: Ready to measure
+    metric_type: null
+    expression: COUNT(*) FILTER (WHERE calibrated AND NOT measured)
+    description: Calibrated but not yet measured (stage 14 is operator-triggered)
+    d3format: null
+    extra: {}
+    warning_text: null
+columns:
+  - column_name: dive_id
+    type: INTEGER
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: priority
+    type: VARCHAR
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: dive_slate_id
+    type: INTEGER
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: laser_preprocessed
+    type: BOOLEAN
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: laser_labeling_complete
+    type: BOOLEAN
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: has_prediction_clusters
+    type: BOOLEAN
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: dive_images_preprocessed
+    type: BOOLEAN
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: species_labeling_complete
+    type: BOOLEAN
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: headtail_preprocessed
+    type: BOOLEAN
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: headtail_labeling_complete
+    type: BOOLEAN
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: slate_applicable
+    type: BOOLEAN
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: slate_preprocessed
+    type: BOOLEAN
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: slate_labeling_complete
+    type: BOOLEAN
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: calibrated
+    type: BOOLEAN
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: measured
+    type: BOOLEAN
+    is_dttm: false
+    groupby: true
+    filterable: true
+version: 1.0.0
+database_uuid: 11111111-1111-4111-8111-111111111111

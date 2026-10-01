@@ -28,7 +28,7 @@ from sqlalchemy import (
     Uuid,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, declared_attr, mapped_column
 
 NAMING_CONVENTION = {
@@ -266,6 +266,8 @@ class Capture(Base):
             unique=True,
             postgresql_where=text("is_canonical"),
         ),
+        # A dive's captures, per dive (0029).
+        Index("captures_tenant_id_dive_id_idx", "tenant_id", "dive_id"),
     )
 
     id: Mapped[uuid.UUID] = _id()
@@ -665,6 +667,8 @@ class HeadTailPrediction(_PredictionCore, Base):
     rejected_low_confidence: Mapped[bool] = mapped_column(
         Boolean, server_default=text("false")
     )
+    #: The kept mask's box, [x_min, y_min, x_max, y_max) (migration 0033).
+    mask_bbox: Mapped[list[int] | None] = mapped_column(ARRAY(Integer))
 
     @classmethod
     def _extra_table_args(cls) -> tuple:
@@ -674,6 +678,47 @@ class HeadTailPrediction(_PredictionCore, Base):
                 ["laser_labels.tenant_id", "laser_labels.id"],
             ),
         )
+
+
+class SpeciesPrediction(Base):
+    """A BioCLIP species pre-annotation, appended (migration 0034; new in v2).
+    Shown to a labeler as a suggestion; never a species label."""
+
+    __tablename__ = "species_predictions"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "capture_id"], ["captures.tenant_id", "captures.id"]
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "headtail_prediction_id"],
+            ["head_tail_predictions.tenant_id", "head_tail_predictions.id"],
+        ),
+        CheckConstraint(
+            "status IN ('predicted', 'decode_failed')",
+            name="species_predictions_status_check",
+        ),
+        Index(
+            "species_predictions_tenant_id_capture_id_seq_idx",
+            "tenant_id",
+            "capture_id",
+            "seq",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    headtail_prediction_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    status: Mapped[str] = mapped_column(Text)
+    predictor_version: Mapped[int] = mapped_column(Integer)
+    model_id: Mapped[str] = mapped_column(Text)
+    predicted_choice: Mapped[str | None] = mapped_column(Text)
+    top1_probability: Mapped[float | None] = mapped_column(Double)
+    margin: Mapped[float | None] = mapped_column(Double)
+    top5: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    created_at: Mapped[datetime] = _created_at()
 
 
 class FishModel(Base):
@@ -747,6 +792,12 @@ class DiveFrameClusterCapture(Base):
         ForeignKeyConstraint(
             ["tenant_id", "capture_id"], ["captures.tenant_id", "captures.id"]
         ),
+        # A capture's clusters, for measurement_subjects (0028).
+        Index(
+            "dive_frame_cluster_captures_tenant_id_capture_id_idx",
+            "tenant_id",
+            "capture_id",
+        ),
     )
 
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
@@ -772,6 +823,8 @@ class LaserDepth(Base):
             ["tenant_id", "laser_calibration_id"],
             ["laser_calibrations.tenant_id", "laser_calibrations.id"],
         ),
+        # A capture's depths, per capture (0029).
+        Index("laser_depths_tenant_id_capture_id_idx", "tenant_id", "capture_id"),
     )
 
     id: Mapped[uuid.UUID] = _id()
@@ -818,6 +871,8 @@ class Measurement(Base):
         CheckConstraint(
             "source IN ('server', 'device')", name="measurements_source_check"
         ),
+        # A capture's measurements, per capture (0028).
+        Index("measurements_tenant_id_capture_id_idx", "tenant_id", "capture_id"),
     )
 
     id: Mapped[uuid.UUID] = _id()

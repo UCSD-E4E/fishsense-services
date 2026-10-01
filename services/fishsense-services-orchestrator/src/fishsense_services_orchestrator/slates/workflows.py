@@ -52,6 +52,10 @@ from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
 from temporalio.exceptions import ApplicationError, WorkflowAlreadyStartedError
 
 with workflow.unsafe.imports_passed_through():
+    from fishsense_services_orchestrator.labels.populate_policy import (
+        CREATE_PROJECT_RETRY,
+        POPULATE_RETRY,
+    )
     import annotated_types  # noqa: F401  pylint: disable=unused-import
     import pydantic  # noqa: F401  pylint: disable=unused-import
 
@@ -93,17 +97,6 @@ _DB_FAIL_FAST = RetryPolicy(
     initial_interval=timedelta(seconds=1),
     maximum_attempts=2,
     non_retryable_error_types=["NotAMember", "SlateInputsUnavailable"],
-)
-
-#: v1's `_POPULATE_RETRY`: bounded, because unlimited let dive 424 reach
-#: attempt 10 and leave 23 copies of three frames; and starting at 30 s, so a
-#: half-minute Label Studio blip does not fail the child.
-POPULATE_RETRY = RetryPolicy(
-    initial_interval=timedelta(seconds=30),
-    backoff_coefficient=2.0,
-    maximum_interval=timedelta(minutes=5),
-    maximum_attempts=5,
-    non_retryable_error_types=["NotAMember"],
 )
 
 #: Per-project syncs in flight at once (v1's).
@@ -232,7 +225,7 @@ class CreateDiveSlateLabelStudioProjectWorkflow:
             "create_dive_slate_label_studio_project",
             target,
             schedule_to_close_timeout=timedelta(minutes=5),
-            retry_policy=RetryPolicy(non_retryable_error_types=["NotAMember"]),
+            retry_policy=CREATE_PROJECT_RETRY,
             result_type=int,
         )
 

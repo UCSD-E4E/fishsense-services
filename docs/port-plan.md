@@ -184,3 +184,23 @@ integration changed a foundation, what's written here is what's true.
   concurrent activities, a memory ceiling), `light` (8) or `gpu` (2).
 - A workflow must call its activities by **string name**, so the registration
   check can see them.
+
+## v1's operator tools and scripts
+
+Checked against fishsense-lite@77e8f8e5, v1's final main. Every v1 workflow has
+a v2 counterpart except three:
+- `ScaleDownIdleDataWorker` is replaced by NRP stand-up/tear-down and its hourly
+  sweeper.
+- `PredictSlateImages*` and `BackfillSlatePredictions` were retired in v1 on
+  2026-08-03. v1's slate predictions migrate, and nothing seeds from them.
+
+The standalone scripts:
+
+| v1 | v2 |
+| --- | --- |
+| `range_trend.py` + `scripts/audit_length_range_trend.py` | Ported: `fishsense_services_api.range_trend`, `fishsense-services-api audit-range-trend`. |
+| `scripts/audit_scale_against_checkerboard.py` | Not ported. A research audit; it can read the `v1` research views (0031). |
+| `scripts/dry_run_stage13.py`, `scripts/validate_stage13_refactor.py` | Not ported. One-off checks of v1's 2026-04 stage-13 refactor. |
+| `tools/scan_image_path_rollover.py`, `tools/apply_image_path_patch.py` | Not ported. A one-off repair of v1's Olympus file-number rollover (2026-05). The repaired paths migrate. v2 keys captures by checksum. |
+| `tools/validate_headtail_predictions.py`, `tools/detect_angle_sweep_runs.py` | Not ported. Head/tail research tools that read labels and predictions; they can run on the `v1` research views. |
+| `tools/generate_sdk_models.py` | Not needed. v2's web client is generated from the OpenAPI spec (`apps/web`, `npm run api:generate`). |

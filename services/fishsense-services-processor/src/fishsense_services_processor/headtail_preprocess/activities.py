@@ -27,25 +27,17 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import cv2
 import numpy as np
 from temporalio import activity
 
 from fishsense_services_contracts.headtail import PreprocessHeadtailImageInput
+from fishsense_services_processor.jpeg import encode_jpeg as encode_rectified_jpeg
 
 __all__ = [
     "HeadtailPreprocessActivities",
     "encode_rectified_jpeg",
     "rectify_and_encode_jpeg",
 ]
-
-
-def encode_rectified_jpeg(rectified_bgr: np.ndarray) -> bytes:
-    """Encode a rectified BGR frame as JPEG bytes. Does not mutate it."""
-    success, encoded = cv2.imencode(".jpg", rectified_bgr)
-    if not success:
-        raise RuntimeError("cv2.imencode failed")
-    return encoded.tobytes()
 
 
 def rectify_and_encode_jpeg(

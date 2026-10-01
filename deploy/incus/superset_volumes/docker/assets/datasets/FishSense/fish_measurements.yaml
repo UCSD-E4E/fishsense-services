@@ -1,0 +1,115 @@
+# Virtual dataset: one row per stage-14 fish measurement, joined out to
+# dive / image / species. Built for cross-run analysis — "Image Path" is the
+# NAS key rows are joined to the stereo-camera measurements on, so it leads the
+# SELECT and is never dropped. Reshaped from the retired hosted-Superset dataset
+# "REEF SMILE Project Lengths":
+#   - FROM measurement (the real grain) instead of FROM fish;
+#   - LEFT JOIN species so measurements on not-yet-species-labeled fish are
+#     still shown (the old INNER JOIN silently dropped them);
+#   - WHERE length_m IS NOT NULL so failed/blank measurements don't render as
+#     empty cells.
+# Length is reported to the nearest mm (ROUND(length_m*1000)) — the measurement
+# precision doesn't warrant sub-mm.
+#
+# fishsense-services: v1's SQL, over v2's `v1` research views (migration 0031),
+# which keep v1's table names, columns and ids, and v1's "one measurement per
+# image" (v1.measurement). Schema-qualified, so no search_path is needed.
+# NOTE: `fishsense_analytics` cannot read the `v1` schema -- only
+# `fishsense_research` can (0032). Until the Superset login is also granted
+# `fishsense_research` (the owner's call, PLAN.md §9.18; docs/cutover.md), this
+# dataset and the Fish Measurements dashboard fail with "permission denied".
+# deploy/tests/test_bootstrap_postgres.py pins both sides.
+table_name: fish_measurements
+main_dttm_col: Taken Date
+description: One row per fish measurement (stage 14), keyed on the NAS Image Path for comparison against stereo.
+default_endpoint: null
+offset: 0
+cache_timeout: null
+catalog: null
+schema: null
+sql: |
+  SELECT
+      image.path                         AS "Image Path",
+      fish.id                            AS "Fish ID",
+      dive.name                          AS "Dive Name",
+      image.taken_datetime               AS "Taken Date",
+      species.common_name                AS "Species Name",
+      species.scientific_name            AS "Scientific Name",
+      ROUND(measurement.length_m * 1000) AS "Length (mm)"
+  FROM v1.measurement measurement
+  JOIN v1.fish fish   ON fish.id   = measurement.fish_id
+  JOIN v1.image image ON image.id  = measurement.image_id
+  JOIN v1.dive dive   ON dive.id   = image.dive_id
+  LEFT JOIN v1.species species ON species.id = fish.species_id
+  WHERE measurement.length_m IS NOT NULL
+params: null
+template_params: null
+filter_select_enabled: true
+fetch_values_predicate: null
+extra: null
+normalize_columns: false
+always_filter_main_dttm: false
+uuid: 55555555-5555-4555-8555-555555555555
+metrics:
+  - metric_name: measurements
+    verbose_name: Measurements
+    metric_type: null
+    expression: COUNT(*)
+    description: Number of individual length measurements.
+    d3format: null
+    extra: {}
+    warning_text: null
+  - metric_name: fish_measured
+    verbose_name: Fish measured
+    metric_type: null
+    expression: COUNT(DISTINCT "Fish ID")
+    description: Distinct fish that have at least one length measurement.
+    d3format: null
+    extra: {}
+    warning_text: null
+  - metric_name: avg_length_mm
+    verbose_name: Avg length (mm)
+    metric_type: null
+    expression: ROUND(AVG("Length (mm)"))
+    description: Mean measured length in millimetres.
+    d3format: null
+    extra: {}
+    warning_text: null
+columns:
+  - column_name: Image Path
+    type: STRING
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: Fish ID
+    type: INTEGER
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: Dive Name
+    type: STRING
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: Taken Date
+    type: DATETIMETZ
+    is_dttm: true
+    groupby: true
+    filterable: true
+  - column_name: Species Name
+    type: STRING
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: Scientific Name
+    type: STRING
+    is_dttm: false
+    groupby: true
+    filterable: true
+  - column_name: Length (mm)
+    type: FLOAT
+    is_dttm: false
+    groupby: true
+    filterable: true
+version: 1.0.0
+database_uuid: 11111111-1111-4111-8111-111111111111

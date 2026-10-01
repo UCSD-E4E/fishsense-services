@@ -72,6 +72,15 @@ def test_a_slate_pdf_is_staged_under_its_tenant_by_template_uuid(layout):
     )
 
 
+def test_v1s_slate_pdf_is_where_v1_staged_it(layout):
+    """v1's `slate_pdf_key(slate_id)`: in the scratch bucket, by v1's integer
+    id, with no tenant and no prefix (v1's scratch keys never took one). A
+    migrated template's PDF is already there; v2 only reads it."""
+    assert layout.legacy_slate_pdf(12) == ObjectRef(
+        bucket="fishsense-lite", key="slate_pdf/12.pdf"
+    )
+
+
 @pytest.mark.parametrize(
     "folder",
     [

@@ -6,7 +6,8 @@ label PUT the sync used. v1's semantics, kept:
 
 * the projects are the distinct Label Studio projects of live (not superseded)
   laser labels;
-* a label is found by its Label Studio task; a task with no label is skipped;
+* a label is found by its Label Studio task among live rows (a superseded one
+  is frozen); a task with no live label is skipped;
 * the cursor is per (kind, project).
 
 v2 changes, each pinned here:
@@ -165,20 +166,40 @@ async def test_another_tenants_task_is_never_updated(owner_engine, app_engine):
     assert (await _label(owner_engine, 7)).completed is False
 
 
-async def test_the_sync_never_clears_a_reprocess_flag_or_a_supersession(
-    owner_engine, app_engine
-):
+async def test_the_sync_never_clears_a_reprocess_flag(owner_engine, app_engine):
     """v1's documented race, closed: the flag belongs to the cohort, not to
-    Label Studio, so the sync has no column list that could carry it."""
+    Label Studio, so the sync has no column list that could carry it. (A
+    superseded row it never touches at all: below.)"""
     lab = await _tenant(owner_engine)
     await _laser(owner_engine, lab, await _capture(app_engine, lab), project=43,
-                 task=7, needs_reprocess=True, superseded=True)  # fmt: skip
+                 task=7, needs_reprocess=True)  # fmt: skip
 
     async with tenant_transaction(app_engine, lab) as conn:
-        await apply_laser_sync(conn, lab, 7, SYNCED)
+        assert await apply_laser_sync(conn, lab, 7, SYNCED) is True
 
     label = await _label(owner_engine, 7)
-    assert (label.needs_reprocess, label.superseded) == (True, True)
+    assert (label.completed, label.needs_reprocess, label.superseded) == (
+        True, True, False,
+    )  # fmt: skip
+
+
+async def test_a_superseded_label_is_frozen_against_its_task(owner_engine, app_engine):
+    """v1 found a task's label with `get_laser_label_by_label_studio_id`, which
+    filters `superseded == False`: a labeler re-saving a dead-lettered task
+    changed nothing (fishsense-lite@77e8f8e5 validate_laser_labels_for_dive_
+    activity.py says so). The validator judges the full population, superseded
+    included (#927), and relies on superseded rows staying as it judged them."""
+    lab = await _tenant(owner_engine)
+    await _laser(owner_engine, lab, await _capture(app_engine, lab), project=43,
+                 task=7, superseded=True)  # fmt: skip
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        assert await apply_laser_sync(conn, lab, 7, SYNCED) is False
+
+    label = await _label(owner_engine, 7)
+    assert (label.completed, label.x, label.y, label.ls_payload) == (
+        False, None, None, None,
+    )  # fmt: skip
 
 
 async def test_a_task_without_a_keypoint_keeps_the_last_one(owner_engine, app_engine):

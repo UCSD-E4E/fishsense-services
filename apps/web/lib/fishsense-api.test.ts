@@ -14,7 +14,12 @@ const { getServiceToken } = vi.hoisted(() => ({
 }));
 vi.mock("./service-token", () => ({ getServiceToken }));
 
-import { ApiError, getMyMembership, getProjectIds } from "./fishsense-api";
+import {
+  ApiError,
+  getMyMembership,
+  getProjectIds,
+  getTenantProjectIds,
+} from "./fishsense-api";
 
 const KINDS = ["laser", "species", "headtail", "dive-slate"] as const;
 
@@ -218,6 +223,33 @@ describe("the auto-accept gate filter", () => {
     for (const [request] of fetchMock.mock.calls) {
       expect(urlOf(request).searchParams.get("incomplete")).toBe("true");
     }
+  });
+});
+
+describe("getTenantProjectIds", () => {
+  // v2: which projects are the tenant's at all, for the triage writes' check
+  // (lib/tenant-tasks.ts). Not the queue's list: a project the labeler just
+  // finished, or one the gate still holds, is still the tenant's to undo in.
+  it.each(KINDS)("asks for every %s project the tenant has, unfiltered", async (kind) => {
+    const fetchMock = vi.fn<FetchSig>(async () => jsonResponse([5, 6]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await getTenantProjectIds(kind, 30)).toEqual([5, 6]);
+
+    const [[request, init]] = fetchMock.mock.calls;
+    const url = urlOf(request);
+    expect(url.pathname).toBe("/tenants/lab/label-studio-projects");
+    expect([...url.searchParams.keys()]).toEqual(["kind"]);
+    expect(init?.next?.revalidate).toBe(30);
+  });
+
+  it("throws rather than answering with nothing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<FetchSig>(async () => new Response("", { status: 503, statusText: "Down" })),
+    );
+
+    await expect(getTenantProjectIds("laser", 30)).rejects.toThrow(/503/);
   });
 });
 

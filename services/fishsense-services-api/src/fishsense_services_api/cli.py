@@ -2,19 +2,40 @@
 
 fishsense-services-api migrate      # bring the schema to head, as the owner
 fishsense-services-api migrate-v1   # one-shot v1 data migration, with go/no-go
+fishsense-services-api audit-range-trend --tenant lab 490 491
+                                    # read-only calibration audit (range_trend)
 """
 
 import argparse
 import asyncio
 import sys
-from collections.abc import Sequence
+import uuid
+from collections.abc import Mapping, Sequence
 
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.migrations import head_revision, upgrade
+from fishsense_services_api.range_trend import (
+    DEFAULT_MIN_DEPTH_M,
+    DEFAULT_MIN_FRAMES,
+    DEFAULT_MIN_RANGE_RATIO,
+    RangeTrend,
+    group_by_object,
+    range_trend,
+)
+from fishsense_services_api.range_trend_store import (
+    RangeTrendInputs,
+    range_trend_inputs,
+)
 from fishsense_services_api.schema_audit import tenancy_violations
-from fishsense_services_api.settings import MigrationSettings, V1MigrationSettings
+from fishsense_services_api.settings import (
+    AuditSettings,
+    MigrationSettings,
+    V1MigrationSettings,
+)
 from fishsense_services_api.v1_migration import (
     measurement_parity,
     migrate_v1,
@@ -24,19 +45,34 @@ from fishsense_services_api.v1_migration import (
 ENV_PREFIX = "FISHSENSE_"
 
 
-async def main(argv: Sequence[str]) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="fishsense-services-api")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("migrate", help="migrate the schema to head, as its owner")
     commands.add_parser(
         "migrate-v1", help="migrate v1's data into the lab tenant, then validate"
     )
-    args = parser.parse_args(argv)
+    audit = commands.add_parser(
+        "audit-range-trend",
+        help="audit dives' laser calibrations by their rigid objects' range "
+        "trend (read-only)",
+    )
+    audit.add_argument("--tenant", required=True, help="the tenant's slug, or its id")
+    audit.add_argument("dive_numbers", type=int, nargs="+", metavar="dive_number")
+    audit.add_argument("--min-frames", type=int, default=DEFAULT_MIN_FRAMES)
+    audit.add_argument("--min-range-ratio", type=float, default=DEFAULT_MIN_RANGE_RATIO)
+    return parser
+
+
+async def main(argv: Sequence[str]) -> int:
+    args = build_parser().parse_args(argv)
 
     if args.command == "migrate":
         return await _migrate()
     if args.command == "migrate-v1":
         return await _migrate_v1()
+    if args.command == "audit-range-trend":
+        return await _audit_range_trend(args)
     return 2  # unreachable: argparse rejects unknown commands
 
 
@@ -99,6 +135,9 @@ async def _migrate_v1() -> int:
     for table, (in_v1, in_v2) in report.items():
         flag = "" if in_v1 == in_v2 else "   <-- MISMATCH"
         print(f"  {table:30} {in_v1:>8} {in_v2:>10}{flag}")
+    for table, reasons in report.skipped.items():
+        for reason, n in reasons.items():
+            print(f"skipped {table}: {n} {reason} (v2 refuses it; not migrated)")
 
     no_go = [
         f"{table}: {in_v1} in v1, {in_v2} migrated"
@@ -124,6 +163,126 @@ async def _migrate_v1() -> int:
         return 1
     print("GO: every v1 row accounted for, tenancy audit passed, parity holds")
     return 0
+
+
+async def _audit_range_trend(args: argparse.Namespace) -> int:
+    """v1's scripts/audit_length_range_trend.py (fishsense-lite@77e8f8e5).
+
+    Read-only. Exits 0 when every dive was found, whatever it reports: a
+    flag is a finding for a person to read, not a failure of the command.
+    """
+    settings = _settings(AuditSettings)
+    if settings is None:
+        return 2
+    engine = create_async_engine(settings.database_url.get_secret_value())
+    try:
+        tenant_id = await _tenant_id(engine, args.tenant)
+        if tenant_id is None:
+            print(
+                f"unknown tenant {args.tenant!r} (a role under RLS sees a tenant "
+                "only by its id: pass --tenant <id>)",
+                file=sys.stderr,
+            )
+            return 1
+        missing = False
+        for number in args.dive_numbers:
+            async with tenant_transaction(engine, tenant_id) as conn:
+                inputs = await range_trend_inputs(conn, tenant_id, number)
+            if inputs is None:
+                print(f"dive {number}: no such dive in the tenant", file=sys.stderr)
+                missing = True
+                continue
+            if inputs.baseline_m is None:
+                print(f"dive {number}: no resolvable laser extrinsics", file=sys.stderr)
+            print(
+                format_range_trend_report(
+                    number,
+                    _range_trends(inputs, args.min_frames, args.min_range_ratio),
+                    min_frames=args.min_frames,
+                    min_range_ratio=args.min_range_ratio,
+                )
+            )
+        return 1 if missing else 0
+    finally:
+        await engine.dispose()
+
+
+async def _tenant_id(engine: AsyncEngine, tenant: str) -> uuid.UUID | None:
+    """The tenant by id or slug. RLS shows the app role a tenant only inside
+    that tenant's scope, so an id is checked there; a slug resolves only for
+    a role that can read `tenants` (the owner)."""
+    try:
+        tenant_id = uuid.UUID(tenant)
+    except ValueError:
+        async with engine.connect() as conn:
+            return (
+                await conn.execute(
+                    text("SELECT id FROM tenants WHERE slug = :slug"),
+                    {"slug": tenant},
+                )
+            ).scalar_one_or_none()
+    async with tenant_transaction(engine, tenant_id) as conn:
+        return (
+            await conn.execute(
+                text("SELECT id FROM tenants WHERE id = :id"), {"id": tenant_id}
+            )
+        ).scalar_one_or_none()
+
+
+def _range_trends(
+    inputs: RangeTrendInputs, min_frames: int, min_range_ratio: float
+) -> dict[str, RangeTrend | None]:
+    """v1's `audit_dive`: the range trend per object; None where the data
+    cannot support a slope, and nothing without a resolvable calibration."""
+    if inputs.baseline_m is None:
+        return {}
+    groups = group_by_object(
+        inputs.measurements, inputs.depth_by_capture, inputs.name_by_capture
+    )
+    return {
+        name: range_trend(
+            zs,
+            ls,
+            inputs.baseline_m,
+            min_frames=min_frames,
+            min_range_ratio=min_range_ratio,
+        )
+        for name, (zs, ls) in sorted(groups.items())
+    }
+
+
+def format_range_trend_report(
+    dive_number: int,
+    trends: Mapping[str, RangeTrend | None],
+    *,
+    min_frames: int,
+    min_range_ratio: float,
+) -> str:
+    """v1's report: one line per object; the note carries the interpretation."""
+    lines = ["", f"=== dive {dive_number} ==="]
+    if not trends:
+        lines.append("  no measured rigid objects")
+        return "\n".join(lines)
+    lines.append(
+        f"  {'object':<16} {'n':>3} {'range (m)':>11} {'slope %/m':>10} "
+        f"{'95% CI':>17} {'angle':>8}  note"
+    )
+    for name, t in trends.items():
+        if t is None:
+            lines.append(
+                f"  {name:<16} insufficient (need >= {min_frames} frames "
+                f"beyond {DEFAULT_MIN_DEPTH_M} m spanning >= {min_range_ratio}x)"
+            )
+            continue
+        flag = "FLAG " if t.flagged else "     "
+        zlo, zhi = t.depth_range_m
+        lo, hi = t.ci_pct_per_m
+        lines.append(
+            f"  {name:<16} {t.n:>3} {zlo:4.2f}-{zhi:4.2f} "
+            f"{t.slope_pct_per_m:>+10.2f} [{lo:+6.2f},{hi:+6.2f}] "
+            f"{t.eps_deg:>+7.3f}d  {flag}{t.note}"
+        )
+    return "\n".join(lines)
 
 
 def run() -> None:

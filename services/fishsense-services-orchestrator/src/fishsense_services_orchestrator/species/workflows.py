@@ -44,6 +44,11 @@ from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
 from temporalio.exceptions import ApplicationError, WorkflowAlreadyStartedError
 
 with workflow.unsafe.imports_passed_through():
+    from fishsense_services_orchestrator.labels.populate_policy import (
+        CREATE_PROJECT_RETRY,
+        POPULATE_MAX_ATTEMPTS,
+        POPULATE_RETRY,
+    )
     import annotated_types  # noqa: F401  pylint: disable=unused-import
     import pydantic  # noqa: F401  pylint: disable=unused-import
 
@@ -88,21 +93,6 @@ _DB_FAIL_FAST = RetryPolicy(
     maximum_attempts=2,
     non_retryable_error_types=["NotAMember"],
 )
-
-#: Bounded on purpose: unlimited retries let dive 424 reach attempt 10 and
-#: leave 23 copies of three frames. The intervals matter as much as the cap:
-#: from 30 s, doubling to 5 min, five attempts ride out an ordinary Label
-#: Studio blip. A retry reconciles the import (`labels.populate.IMPORT_ISSUED`)
-#: rather than re-importing (v1's `_populate._POPULATE_RETRY`).
-POPULATE_MAX_ATTEMPTS = 5
-_POPULATE_RETRY = RetryPolicy(
-    initial_interval=timedelta(seconds=30),
-    backoff_coefficient=2.0,
-    maximum_interval=timedelta(minutes=5),
-    maximum_attempts=POPULATE_MAX_ATTEMPTS,
-    non_retryable_error_types=["NotAMember"],
-)
-_NOT_A_MEMBER_IS_FINAL = RetryPolicy(non_retryable_error_types=["NotAMember"])
 
 #: Concurrent per-dive populate children: a large backlog must not hammer the
 #: hosted Label Studio import endpoint (v1's).
@@ -207,7 +197,7 @@ async def _create_project(target: SpeciesTarget) -> int:
         "create_species_label_studio_project",
         target,
         schedule_to_close_timeout=timedelta(minutes=5),
-        retry_policy=_NOT_A_MEMBER_IS_FINAL,
+        retry_policy=CREATE_PROJECT_RETRY,
         result_type=int,
     )
 
@@ -221,7 +211,7 @@ async def create_then_populate(target: SpeciesTarget) -> int:
         args=(target, project_id),
         schedule_to_close_timeout=timedelta(minutes=30),
         heartbeat_timeout=timedelta(minutes=2),
-        retry_policy=_POPULATE_RETRY,
+        retry_policy=POPULATE_RETRY,
         result_type=int,
     )
 
@@ -356,6 +346,6 @@ class UpdateDiveImageGroupsWorkflow:
             target,
             schedule_to_close_timeout=timedelta(minutes=15),
             heartbeat_timeout=timedelta(minutes=2),
-            retry_policy=_NOT_A_MEMBER_IS_FINAL,
+            retry_policy=CREATE_PROJECT_RETRY,
             result_type=UpdateDiveImageGroupsResult,
         )

@@ -22,8 +22,10 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 __all__ = [
+    "GPU_WAKE_TIMEOUT",
     "SCALING_RETRY_POLICY",
     "TearDownIdleProcessorsWorkflow",
+    "WAKE_TIMEOUT",
     "wake_gpu_processor",
     "wake_light_processor",
     "wake_per_image_processor",
@@ -37,6 +39,17 @@ SCALING_RETRY_POLICY = RetryPolicy(
     maximum_attempts=3,
 )
 
+#: The per-image and light wakes' whole budget (schedule-to-close). A parent
+#: whose schedule caps its run sums this in its worst case, so it is named
+#: once, here, rather than repeated as a literal.
+WAKE_TIMEOUT = timedelta(minutes=5)
+
+#: The most `wake_gpu_processor` can take, retries included. Longer than the
+#: other wakes' 5 minutes because this one waits for a pod (10 minutes by
+#: default) and may then wait for a second one after flipping to the CPU
+#: fallback. A parent's run timeout must cover it and its child.
+GPU_WAKE_TIMEOUT = timedelta(minutes=30)
+
 
 async def wake_per_image_processor() -> None:
     """Stand the per-image processor up before its child lands on the queue.
@@ -47,7 +60,7 @@ async def wake_per_image_processor() -> None:
     """
     await workflow.execute_activity(
         "ensure_per_image_processor_running",
-        schedule_to_close_timeout=timedelta(minutes=5),
+        schedule_to_close_timeout=WAKE_TIMEOUT,
         retry_policy=SCALING_RETRY_POLICY,
     )
 
@@ -62,7 +75,7 @@ async def wake_light_processor() -> None:
     """
     await workflow.execute_activity(
         "ensure_light_processor_running",
-        schedule_to_close_timeout=timedelta(minutes=5),
+        schedule_to_close_timeout=WAKE_TIMEOUT,
         retry_policy=SCALING_RETRY_POLICY,
     )
 
@@ -82,10 +95,7 @@ async def wake_gpu_processor() -> str:
     """
     return await workflow.execute_activity(
         "ensure_gpu_processor_running",
-        # Longer than the other wakes' 5 minutes because this one waits for a
-        # pod (10 minutes by default) and may then wait for a second one after
-        # flipping to the CPU fallback.
-        schedule_to_close_timeout=timedelta(minutes=30),
+        schedule_to_close_timeout=GPU_WAKE_TIMEOUT,
         heartbeat_timeout=timedelta(minutes=5),
         retry_policy=SCALING_RETRY_POLICY,
         result_type=str,

@@ -8,7 +8,13 @@ called on v1's fishsense-api:
 * `GET /api/v1/dives/` -> `GET /tenants/{slug}/dives`;
 * `PUT /api/v1/dives/{id}/calibration-source/{source_id}` and
   `DELETE /api/v1/dives/{id}/calibration-source/` -> the same under the
-  tenant, by dive `number`.
+  tenant, by dive `number`;
+* `PUT /api/v1/dives/{id}/calibration-target/{calibration_target_id}`,
+  `DELETE /api/v1/dives/{id}/calibration-target/` and
+  `DELETE /api/v1/dives/{id}/calibration-refused/` -> `.../calibration-target`
+  (by the target's `number`) and `.../calibration-refusal` under the tenant:
+  the levers a calibration refusal's recorded remedy names (v1's web had no
+  page for them; only the SDK's `DiveClient` called them).
 
 v1's API enforced nothing (the web called it as one Basic-auth service
 account, and gated only its own pages on an Authentik group). Here every route
@@ -26,15 +32,20 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.memberships import Membership
 from fishsense_services_api.portal_store import (
+    CalibrationTargetNotFound,
     DiveNotFound,
     DiveSummary,
     GateNotApplicable,
     LabelKind,
     SelfLink,
+    clear_calibration_refusal,
     clear_calibration_source,
+    clear_calibration_target,
     label_studio_project_ids,
     list_dives,
     set_calibration_source,
+    set_calibration_target,
+    set_needs_reprocess,
 )
 
 
@@ -43,12 +54,21 @@ class MyMembership(BaseModel):
     is_admin: bool
 
 
+class Flagged(BaseModel):
+    flagged: int
+
+
+class Cleared(BaseModel):
+    cleared: int
+
+
 class Dive(BaseModel):
     number: int
     name: str | None
     dived_at: datetime
     priority: Literal["low", "high", "none"]
     slate_template_number: int | None
+    calibration_target_number: int | None
     calibration_source_number: int | None
 
 
@@ -151,6 +171,111 @@ def add_portal_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
                 await clear_calibration_source(conn, member.tenant_id, number)
         except DiveNotFound as error:
             raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from None
+
+    @app.put(
+        "/tenants/{slug}/dives/{number}/calibration-target/{target_number}",
+        operation_id="set_dive_calibration_target",
+        response_model=Dive,
+    )
+    async def set_dive_calibration_target(
+        member: Admin, number: DiveNumber, target_number: DiveNumber
+    ) -> Dive:
+        """Dive ``number`` was shot against calibration target
+        ``target_number``: it enters the checkerboard cohort, and a standing
+        calibration refusal expires.
+
+        404 if the dive is missing from the tenant or no target has that
+        number.
+        """
+        try:
+            async with tenant_transaction(engine, member.tenant_id) as conn:
+                summary = await set_calibration_target(
+                    conn, member.tenant_id, number, target_number
+                )
+        except (DiveNotFound, CalibrationTargetNotFound) as error:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from None
+        return _dive(summary)
+
+    @app.delete(
+        "/tenants/{slug}/dives/{number}/calibration-target",
+        operation_id="clear_dive_calibration_target",
+        status_code=status.HTTP_204_NO_CONTENT,
+        response_class=Response,
+    )
+    async def clear_dive_calibration_target(member: Admin, number: DiveNumber) -> None:
+        """Unlink dive ``number`` from any calibration target (idempotent): it
+        leaves the checkerboard cohort. A standing refusal is left as it is."""
+        try:
+            async with tenant_transaction(engine, member.tenant_id) as conn:
+                await clear_calibration_target(conn, member.tenant_id, number)
+        except DiveNotFound as error:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from None
+
+    @app.delete(
+        "/tenants/{slug}/dives/{number}/calibration-refusal",
+        operation_id="clear_dive_calibration_refusal",
+        status_code=status.HTTP_204_NO_CONTENT,
+        response_class=Response,
+    )
+    async def clear_dive_calibration_refusal(
+        member: Admin,
+        number: DiveNumber,
+        reason: Annotated[
+            str | None, Query(description="why, kept with the clear")
+        ] = None,
+    ) -> None:
+        """Clear dive ``number``'s standing calibration refusal, so it is
+        fitted again (idempotent): for a change its labels don't show."""
+        try:
+            async with tenant_transaction(engine, member.tenant_id) as conn:
+                await clear_calibration_refusal(
+                    conn, member.tenant_id, number, reason=reason
+                )
+        except DiveNotFound as error:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from None
+
+    @app.put(
+        "/tenants/{slug}/dives/{number}/labels/{kind}/needs-reprocess",
+        operation_id="raise_needs_reprocess",
+        response_model=Flagged,
+    )
+    async def raise_needs_reprocess(
+        member: Admin,
+        number: DiveNumber,
+        kind: LabelKind,
+        only_incomplete: bool = True,
+    ) -> Flagged:
+        """Redraw dive ``number``'s ``kind`` frames: the dive re-enters that
+        kind's preprocessing, and the JPEGs are redrawn where they are.
+        Incomplete labels only unless ``only_incomplete=false``."""
+        try:
+            async with tenant_transaction(engine, member.tenant_id) as conn:
+                flagged = await set_needs_reprocess(
+                    conn, member.tenant_id, number, kind,
+                    raised=True, only_incomplete=only_incomplete,
+                )  # fmt: skip
+        except DiveNotFound as error:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from None
+        return Flagged(flagged=flagged)
+
+    @app.delete(
+        "/tenants/{slug}/dives/{number}/labels/{kind}/needs-reprocess",
+        operation_id="clear_needs_reprocess",
+        response_model=Cleared,
+    )
+    async def clear_needs_reprocess(
+        member: Admin, number: DiveNumber, kind: LabelKind
+    ) -> Cleared:
+        """Withdraw a redraw of dive ``number``'s ``kind`` frames (idempotent:
+        0 when none was asked for)."""
+        try:
+            async with tenant_transaction(engine, member.tenant_id) as conn:
+                cleared = await set_needs_reprocess(
+                    conn, member.tenant_id, number, kind, raised=False
+                )
+        except DiveNotFound as error:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from None
+        return Cleared(cleared=cleared)
 
 
 def _dive(summary: DiveSummary) -> Dive:

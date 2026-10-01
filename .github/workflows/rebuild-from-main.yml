@@ -1,0 +1,98 @@
+name: Rebuild images from main
+
+# Manual recovery workflow (fishsense-lite's, one version for all six). Builds
+# every image at current main HEAD and pushes it tagged with the version in
+# .release-please-manifest.json plus :latest, :main and :sha-<short>. Use when
+# GHCR packages have been deleted/relinked and need to be repopulated without a
+# full release-please cycle.
+#
+# Additive to build.yml + promote.yml — it doesn't replace them. Note it
+# rebuilds, so the result is main's code under the manifest's version, not
+# necessarily the release commit's: prefer re-running promote.yml when the
+# release's :sha- images still exist.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: fishsense-services-api
+            dockerfile: Dockerfile
+            target: api
+          - image: fishsense-services-orchestrator
+            dockerfile: Dockerfile
+            target: orchestrator
+          - image: fishsense-services-backup
+            dockerfile: Dockerfile
+            target: backup
+          - image: fishsense-services-processor
+            dockerfile: Dockerfile
+            target: processor
+          - image: fishsense-services-processor-gpu
+            dockerfile: Dockerfile
+            target: processor-gpu
+          - image: fishsense-services-web
+            dockerfile: apps/web/Dockerfile
+            target: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space (GPU image)
+        if: matrix.image == 'fishsense-services-processor-gpu'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          docker system prune -af
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Read the version from the release-please manifest
+        id: ver
+        run: |
+          v="$(jq -r '."."' .release-please-manifest.json)"
+          if [ -z "$v" ] || [ "$v" = "null" ]; then
+            echo "::error::no \".\" entry in .release-please-manifest.json"
+            exit 1
+          fi
+          echo "version=v${v}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute lowercased image name
+        id: img
+        run: |
+          owner_lc="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "name=${{ env.REGISTRY }}/${owner_lc}/${{ matrix.image }}" >> "$GITHUB_OUTPUT"
+
+      - name: Compute short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          push: true
+          tags: |
+            ${{ steps.img.outputs.name }}:${{ steps.ver.outputs.version }}
+            ${{ steps.img.outputs.name }}:latest
+            ${{ steps.img.outputs.name }}:main
+            ${{ steps.img.outputs.name }}:sha-${{ steps.sha.outputs.short }}
+          cache-from: type=registry,ref=${{ steps.img.outputs.name }}:buildcache
+          cache-to: type=registry,ref=${{ steps.img.outputs.name }}:buildcache,mode=max

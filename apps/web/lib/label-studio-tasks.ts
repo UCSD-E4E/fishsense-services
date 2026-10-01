@@ -126,6 +126,22 @@ export async function acceptPrediction(
   return data.id ?? 0;
 }
 
+/** One annotation's id and the task it is on; null when there is none. */
+export async function getAnnotation(
+  annotationId: number,
+): Promise<{ id: number; task: number } | null> {
+  const response = await authed(`/api/annotations/${annotationId}/`);
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(
+      `Label Studio annotation ${annotationId} fetch failed: ` +
+        `${response.status} ${response.statusText}`,
+    );
+  }
+  const { id, task } = (await response.json()) as { id: number; task: number };
+  return { id, task };
+}
+
 /** Delete an annotation — used to undo an accept made moments ago. */
 export async function deleteAnnotation(annotationId: number): Promise<void> {
   const response = await authed(`/api/annotations/${annotationId}/`, { method: "DELETE" });
@@ -206,11 +222,24 @@ function allowedImageHosts(): Set<string> {
 export type ResolvedImage =
   | { kind: "response"; response: Response; url: string }
   | { kind: "unresolved"; uri: string }
-  | { kind: "blocked"; uri: string; host: string };
+  | { kind: "blocked"; uri: string; host: string }
+  | { kind: "foreign" };
 
-export async function fetchTaskImage(taskId: number): Promise<ResolvedImage> {
+/**
+ * `ownedProjects` is the tenant's (`lib/tenant-tasks.ts`). v2 change: every
+ * tenant's projects share one Label Studio workspace, so a task outside them
+ * -- or one Label Studio doesn't have -- is `foreign`, decided on the task
+ * this fetches anyway and before any frame is.
+ */
+export async function fetchTaskImage(
+  taskId: number,
+  ownedProjects: ReadonlySet<number>,
+): Promise<ResolvedImage> {
   const task = await getTask(taskId, { resolveUri: true });
-  const uri = typeof task?.data?.image === "string" ? task.data.image : "";
+  if (typeof task?.project !== "number" || !ownedProjects.has(task.project)) {
+    return { kind: "foreign" };
+  }
+  const uri = typeof task.data?.image === "string" ? task.data.image : "";
 
   if (!uri || uri.startsWith("s3://") || uri.startsWith("gs://")) {
     return { kind: "unresolved", uri };

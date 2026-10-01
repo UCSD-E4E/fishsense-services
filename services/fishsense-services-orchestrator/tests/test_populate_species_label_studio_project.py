@@ -17,6 +17,7 @@ and the seeded row's `source` is `human`.
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from typing import List
 from unittest.mock import MagicMock
@@ -105,6 +106,18 @@ def test_select_targets_filters_by_valid_laser_and_drops_completed():
     """The candidates are the laser-valid frames (v1's matrix: 1 and 3)."""
     candidates = [_image(1, "a"), _image(3, "c")]
     existing = [_species_label(1, completed=True)]
+
+    selected = sut.select_target_captures(candidates, existing, 70)
+
+    assert [c.capture_id for c in selected] == [capture(3)]
+
+
+def test_select_targets_drops_a_frame_with_a_completed_sentinel():
+    """v1's rule, now shared with both cohorts and the stage-2 resolver: a
+    completed sentinel is done work, so its frame is never tasked (and so the
+    cohorts must not keep selecting its dive)."""
+    candidates = [_image(1, "a"), _image(3, "c")]
+    existing = [_species_label(1, completed=True, project=None)]
 
     selected = sut.select_target_captures(candidates, existing, 70)
 
@@ -382,3 +395,31 @@ async def test_a_migrated_frames_task_points_at_v1s_jpeg():
     assert n == 1
     assert catalog.recorded == [(capture(1), 70, 777, legacy.uri)]
     assert store.located == [(TENANT, "preprocess_groups_jpeg", checksum_of("a"), True)]
+
+
+async def test_a_task_a_migrated_duplicate_holds_is_logged_and_skipped(caplog):
+    """The catalog skips a task another capture's row already holds (a
+    migrated duplicate anchored to its twin's task); the run carries on with
+    the other frames and says which frame and task it left alone."""
+    legacy = LAYOUT.legacy_processed_jpeg("preprocess_groups_jpeg", checksum_of("a"))
+    store = FakeStore({checksum_of("a"): legacy, checksum_of("b"): jpeg_ref("b")})
+    sdk = FakeSdk([3002], existing=[(777, {"image": legacy.uri})])
+    catalog = FakeSpeciesCatalog(
+        population=SpeciesPopulationFacts(
+            candidates=[_image(1, "a", from_v1=True), _image(2, "b")],
+            species_labels=[],
+        ),
+        held_tasks={777},
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await ActivityEnvironment().run(
+            _activities(catalog, sdk, store).populate_species_label_studio_project,
+            TARGET,
+            70,
+        )
+
+    assert [r[:3] for r in catalog.recorded] == [(capture(2), 70, 3002)]
+    (warning,) = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert str(capture(1)) in warning.getMessage()
+    assert "777" in warning.getMessage()

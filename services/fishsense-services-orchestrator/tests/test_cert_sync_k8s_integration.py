@@ -3,9 +3,9 @@
 Ported from fishsense-lite@77e8f8e5 deploy/incus/nrp_cert_sync/test_sync.sh,
 which v1 ran against kind in CI. Covers what test_cert_sync.py fakes: the
 kubeconfig and its TLS, the strategic-merge patch of a real Secret, the 404 that
-turns into a create, and the annotation round trip. v1's check that every
-Deployment was rolled is gone with the rollout (see `ops.cert_sync`); in its
-place, a Deployment's pod template is left exactly as it was.
+turns into a create, and the annotation round trip. The processor
+Deployments aren't stood up here, so the roll only skips them (a missing one
+is never created); what it patches is pinned in test_cert_sync.py.
 
 Marked ``k8s`` and skipped unless ``FISHSENSE_K8S_ITEST_KUBECONFIG`` names a
 disposable cluster (see test_nrp_k8s_integration.py for how to start one).
@@ -70,6 +70,7 @@ def _settings(kubeconfig, namespace, secret_name, certs):
         client_cert=certs / "tls.crt",
         client_private_key=certs / "tls.key",
         server_root_ca_cert=certs / "ca.crt",
+        manifest_dir=Path(__file__).resolve().parents[3] / "deploy" / "nrp",
     )
 
 

@@ -10,6 +10,7 @@ from temporalio.client import ScheduleOverlapPolicy
 
 from fishsense_services_api.label_project_store import LabelProjectCatalog
 from fishsense_services_api.label_sync_store import LabelSyncCatalog
+from fishsense_services_api.species_prediction_store import SpeciesPredictionCatalog
 from fishsense_services_api.species_store import SpeciesCatalog
 from fishsense_services_contracts.object_store import ObjectStoreConnection
 from fishsense_services_orchestrator.labels.label_studio import (
@@ -33,6 +34,9 @@ from fishsense_services_orchestrator.species.workflows import (
     SyncLabelStudioSpeciesLabelsWorkflow,
     UpdateDiveImageGroupsWorkflow,
 )
+from fishsense_services_orchestrator.species_predict.settings import (
+    SpeciesPredictionSettings,
+)
 
 
 def _activities(deps: Deps):
@@ -50,6 +54,10 @@ def _activities(deps: Deps):
             storage=storage,
         ),
         label_studio_factory=lambda: LabelStudioClient.from_settings(settings),
+        # v2: BioCLIP's suggestions, seeded only while the pre-annotation
+        # stage is enabled (off by default; see species_predict.settings).
+        predictions=SpeciesPredictionCatalog(deps.engine, sub=deps.sub),
+        prediction_settings=SpeciesPredictionSettings(),
     )
     return [
         species.select_next_dive_for_species_preprocessing,

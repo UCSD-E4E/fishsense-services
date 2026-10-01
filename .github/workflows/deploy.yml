@@ -1,0 +1,187 @@
+name: Deploy
+
+# Rolls out a release after a promote.yml-generated PR is merged. fishsense-lite's
+# deploy.yml, slot path only: v2 has no data-worker route (the orchestrator stands
+# the NRP processor up at the release's tag on its next wake; nothing here applies
+# manifests). Intentional gate: a human reviews the version-pin diff and merges,
+# then this fires.
+#
+#   auto-deploy/*  -> `deploy-incus`: the fishsense Incus slot's own self-hosted
+#   runner starts `fishsense-selfupdate`, which runs
+#     nixos-rebuild switch --flake github:UCSD-E4E/fishsense-services#fishsense --refresh
+#   converging the slot onto the committed root flake.nix + deploy/incus/ interior —
+#   including the `image:` pins (and the processor tag) the merged PR just bumped.
+#
+# BEFORE THE CUTOVER THIS HAS NO RUNNER. The `[self-hosted, fishsense]` runner is
+# scoped to fishsense-lite until the admin re-scopes it to this repo
+# (docs/cutover.md); a job here sits queued until then. That is the point: nothing
+# in this repo can converge the production slot before the switch.
+#
+# WHY THE PIN-BUMP PR MERGE IS THE TRIGGER, and not the release-please merge
+# (v1's reasoning): `fishsense-selfupdate` converges the slot to whatever is on
+# main. When the release PR merges, main's compose still pins the previous
+# version and the new tag doesn't exist yet — promote.yml retags minutes later on
+# `release: published`, and only then opens the pin-bump PR.
+#
+#   release-please PR merged to main
+#     -> release.yml cuts the GitHub release (vX.Y.Z)
+#     -> promote.yml retags every :sha-<short> to :vX.Y.Z + :latest, then
+#        opens auto-deploy/fishsense-services-vX.Y.Z bumping the pins
+#     -> a human merges that PR
+#     -> this workflow converges the slot
+#
+# The converge is a TRIGGER, not a clean CI gate. `fishsense-selfupdate` stops the
+# GitHub runner mid-switch and restarts it after, so the job starts the unit with
+# `--no-block` and reports success as soon as the converge is *enqueued*. The
+# `verify-incus` job is the deploy gate: it asserts the pins the slot actually
+# deployed match main's. Then run the smoke test (docs/cutover.md) for GO/NO-GO:
+# a converge can land the right pins with a wrong secret.
+#
+# Do NOT "verify" a deploy with `systemctl status fishsense-selfupdate` — its exit
+# code is not a deploy signal: `switch-to-configuration` exits 4 if any unit is
+# `failed`, including one it never touched (v1, 2026-07-17).
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  # Manual re-converge without a pin bump — after a crash-loop, a kubeconfig
+  # rotation, or to apply a config-only change under deploy/incus/ that
+  # promote.yml never touches (e.g. COMPOSE_PROFILES=superset).
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Which target to redeploy"
+        required: true
+        type: choice
+        default: incus
+        options:
+          - incus
+
+# Least privilege, granted per job (CodeQL actions/missing-workflow-permissions).
+permissions: {}
+
+jobs:
+  deploy-incus:
+    if: |
+      (github.event_name == 'workflow_dispatch' && inputs.target == 'incus') ||
+      (github.event.pull_request.merged == true &&
+       startsWith(github.head_ref, 'auto-deploy/'))
+    runs-on: [self-hosted, fishsense] # the label the platform sets on our runner
+    permissions: {}
+    # Queue, don't cancel: a cancelled converge would leave the slot on the older
+    # main (v1's reasoning; one release now opens one PR, but a manual dispatch
+    # can still overlap one).
+    concurrency:
+      group: deploy-incus
+      cancel-in-progress: false
+    steps:
+      - name: Converge the instance
+        # --no-block: enqueue the converge and return 0 immediately.
+        # `fishsense-selfupdate`'s first action is `systemctl stop
+        # github-runner-fishsense` — it restarts the very runner executing this
+        # job, so a blocking start is SIGINT'd (exit 130, false red) whenever
+        # `nixos-rebuild` outlives the runner's graceful-stop window (v1: PR #238
+        # red at ~6 min, #240 green at 34 s, same code).
+        run: systemctl start --no-block fishsense-selfupdate # polkit-authorized on the slot
+
+  verify-incus:
+    # The deploy gate, as v1's: assert the converge landed the versions main asked
+    # for. Reads the compose spec the stack unit actually deployed (its ExecStart
+    # names the store path; /nix/store is world-readable) — not `docker ps`
+    # (the runner isn't in the docker group, by design) and not the public
+    # endpoints (they stay up on the OLD containers when a converge fails).
+    #
+    # Runs on the slot's own runner on purpose: the converge stops it and starts
+    # it again on the way out, so this job can't be dispatched until the converge
+    # is done — and if the converge leaves the runner dead, this times out red.
+    needs: deploy-incus
+    if: needs.deploy-incus.result == 'success'
+    runs-on: [self-hosted, fishsense]
+    permissions: {}
+    timeout-minutes: 25
+    concurrency:
+      group: verify-incus
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assert every pin main asked for is the pin that deployed
+        run: |
+          set -euo pipefail
+          SYSTEMCTL=/run/current-system/sw/bin/systemctl
+
+          # The converge may still be running when the runner returns.
+          for i in $(seq 1 40); do
+            state=$("$SYSTEMCTL" is-active fishsense-selfupdate 2>/dev/null || true)
+            [ "$state" != "activating" ] && break
+            echo "[$i/40] converge still running..."
+            sleep 15
+          done
+
+          deployed_compose=$("$SYSTEMCTL" show fishsense.service -p ExecStart --value \
+            | grep -oE '/nix/store/[a-z0-9]{32}-source/deploy/incus/compose.yml' \
+            | head -1)
+          if [ -z "$deployed_compose" ] || [ ! -r "$deployed_compose" ]; then
+            echo "::error title=Deploy verify::could not read the deployed compose spec from fishsense.service ExecStart"
+            "$SYSTEMCTL" show fishsense.service -p ExecStart --value || true
+            exit 1
+          fi
+          echo "deployed compose spec: $deployed_compose"
+
+          # The image pins AND the processor's tag: a converge that landed the
+          # pins but not the tag would stand the processor up at the old release.
+          pins() {
+            grep -oE 'ghcr\.io/ucsd-e4e/[a-z-]+:v[0-9]+\.[0-9]+\.[0-9]+|FISHSENSE_NRP_IMAGE_TAG: *v[0-9]+\.[0-9]+\.[0-9]+' "$1" | sort -u
+          }
+          pins "$deployed_compose" > /tmp/deployed-pins.txt
+          pins deploy/incus/compose.yml   > /tmp/expected-pins.txt
+
+          if [ ! -s /tmp/expected-pins.txt ]; then
+            echo "::error title=Deploy verify::no pins found in deploy/incus/compose.yml — parser is wrong, refusing to pass vacuously"
+            exit 1
+          fi
+
+          echo "--- expected (main) ---"; cat /tmp/expected-pins.txt
+          echo "--- deployed (slot) ---"; cat /tmp/deployed-pins.txt
+
+          # Compared as strings and reported with `comm`: the slot's runner has
+          # NO diffutils (its PATH is bash/coreutils/findutils/git/gnugrep/gnused/
+          # gnutar/gzip/nix/openssh/systemd), so `diff` and `cmp` are absent and
+          # `if ! diff` reds every deploy (v1's first live run). Check anything
+          # added here against that PATH, not against a dev box.
+          if [ "$(cat /tmp/expected-pins.txt)" != "$(cat /tmp/deployed-pins.txt)" ]; then
+            echo "::error title=Deploy verify::the slot is NOT running the versions on main. The converge did not land; check 'journalctl -u fishsense-selfupdate' on the slot."
+            {
+              echo "### ❌ deploy did not land"
+              echo "**On main but not deployed:**"
+              echo '```'
+              comm -23 /tmp/expected-pins.txt /tmp/deployed-pins.txt
+              echo '```'
+              echo "**Deployed but not on main:**"
+              echo '```'
+              comm -13 /tmp/expected-pins.txt /tmp/deployed-pins.txt
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          # Pins match — but the spec is only live if the stack unit brought it
+          # up. `up -d --force-recreate` failing (bad pull, a migration refusing,
+          # a crash-loop) leaves the unit failed with the right spec on disk.
+          stack_result=$("$SYSTEMCTL" show fishsense.service -p Result --value)
+          stack_state=$("$SYSTEMCTL" show fishsense.service -p ActiveState --value)
+          echo "fishsense.service: ActiveState=$stack_state Result=$stack_result"
+          if [ "$stack_result" != "success" ]; then
+            echo "::error title=Deploy verify::pins match but the compose stack unit is $stack_state/$stack_result — containers did not come up (a failed migrate fails the whole up)"
+            exit 1
+          fi
+
+          {
+            echo "### ✅ deploy verified"
+            echo "All $(wc -l < /tmp/expected-pins.txt) pins on the slot match main, and the compose stack is \`$stack_state/$stack_result\`."
+            echo "Run the smoke test for GO/NO-GO (docs/cutover.md)."
+            echo '```'
+            cat /tmp/deployed-pins.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

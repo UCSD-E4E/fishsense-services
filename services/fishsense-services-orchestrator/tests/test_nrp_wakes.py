@@ -18,6 +18,8 @@ from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 from fishsense_services_orchestrator.nrp.workflow import (
+    GPU_WAKE_TIMEOUT,
+    WAKE_TIMEOUT,
     wake_gpu_processor,
     wake_light_processor,
     wake_per_image_processor,
@@ -72,3 +74,44 @@ async def test_each_wake_runs_its_roles_activity_and_the_gpu_mode_comes_back(mod
 
     assert woken == ["per_image", "light", "gpu"]
     assert result == mode
+
+
+async def test_each_wake_budgets_what_its_constant_says():
+    """A parent's run-timeout arithmetic sums these constants (the laser gate
+    drain's, for one), so they must be what the wakes actually schedule."""
+    budgets: dict[str, object] = {}
+
+    def _record(name, result):
+        @activity.defn(name=name)
+        async def wake():
+            budgets[name] = activity.info().schedule_to_close_timeout
+            return result
+
+        return wake
+
+    async with await WorkflowEnvironment.start_time_skipping(
+        data_converter=pydantic_data_converter
+    ) as env:
+        async with Worker(
+            env.client,
+            task_queue="test-wake-budgets",
+            workflows=[_WakeEveryRole],
+            activities=[
+                _record("ensure_per_image_processor_running", 1),
+                _record("ensure_light_processor_running", 1),
+                _record("ensure_gpu_processor_running", "gpu"),
+            ],
+            workflow_runner=UnsandboxedWorkflowRunner(),
+        ):
+            await env.client.execute_workflow(
+                "WakeEveryRole",
+                id=f"test-wake-budgets-{uuid.uuid4()}",
+                task_queue="test-wake-budgets",
+                result_type=str,
+            )
+
+    assert budgets == {
+        "ensure_per_image_processor_running": WAKE_TIMEOUT,
+        "ensure_light_processor_running": WAKE_TIMEOUT,
+        "ensure_gpu_processor_running": GPU_WAKE_TIMEOUT,
+    }

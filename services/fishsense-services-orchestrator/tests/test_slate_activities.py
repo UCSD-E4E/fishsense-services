@@ -335,6 +335,53 @@ async def test_the_pdf_is_staged_per_tenant(s3):
     assert len(nas.calls) == 1
 
 
+async def test_a_migrated_template_is_staged_from_v1s_pdf(s3):
+    """v2: v1 staged each template once, at `slate_pdf/{v1 id}.pdf`, and it is
+    still there. A migrated template is copied from it to the tenant's key
+    rather than fetched from the NAS again -- v1's key is only read."""
+    s3.put_object(Bucket=BUCKET, Key="slate_pdf/12.pdf", Body=b"v1-bytes")
+    nas = FakeNas()
+
+    result = await _run(
+        _activities(s3, FakeCatalog(template=_template(v1_id=12)), nas).stage_slate_pdf,
+        SlatePdfTarget(tenant_id=LAB, slate_template_id=SLATE),
+    )
+
+    assert result is True
+    assert nas.calls == []
+    assert s3.get_object(Bucket=BUCKET, Key=_pdf_key())["Body"].read() == b"v1-bytes"
+    assert s3.get_object(Bucket=BUCKET, Key="slate_pdf/12.pdf")["Body"].read() == (
+        b"v1-bytes"
+    )
+
+
+async def test_a_migrated_template_whose_v1_pdf_is_gone_is_fetched(s3):
+    nas = FakeNas(b"pdf-bytes")
+
+    await _run(
+        _activities(s3, FakeCatalog(template=_template(v1_id=12)), nas).stage_slate_pdf,
+        SlatePdfTarget(tenant_id=LAB, slate_template_id=SLATE),
+    )
+
+    assert len(nas.calls) == 1
+    assert s3.get_object(Bucket=BUCKET, Key=_pdf_key())["Body"].read() == b"pdf-bytes"
+
+
+async def test_only_a_migrated_template_reads_a_v1_key(s3):
+    """v1's keys are by integer id, and a v2 template has none: nothing at a
+    v1 key can be its PDF."""
+    s3.put_object(Bucket=BUCKET, Key="slate_pdf/12.pdf", Body=b"another")
+    nas = FakeNas(b"pdf-bytes")
+
+    await _run(
+        _activities(s3, FakeCatalog(template=_template()), nas).stage_slate_pdf,
+        SlatePdfTarget(tenant_id=LAB, slate_template_id=SLATE),
+    )
+
+    assert len(nas.calls) == 1
+    assert s3.get_object(Bucket=BUCKET, Key=_pdf_key())["Body"].read() == b"pdf-bytes"
+
+
 def _pdf(width: float, height: float) -> bytes:
     import pymupdf
 
@@ -368,6 +415,24 @@ async def test_the_sync_stages_a_pdf_it_needs():
 
     assert aspect == pytest.approx(2.0) and again == pytest.approx(2.0)
     assert len(nas.calls) == 1, "staged once, then read from scratch"
+
+
+async def test_the_sync_reads_a_migrated_templates_pdf_from_v1s_key(s3):
+    """Every carried-over slate project's template is a migrated one, and its
+    PDF is at v1's key: the sync needs neither the NAS nor a NAS path."""
+    s3.put_object(Bucket=BUCKET, Key="slate_pdf/12.pdf", Body=_pdf(216.0, 108.0))
+    nas = FakeNas()
+    pdfs = SlatePdfs(
+        catalog=FakeCatalog(template=_template(v1_id=12, source_path=None)),
+        store=_store(s3),
+        nas_settings=NAS,
+        nas_client_factory=lambda: nas,
+    )
+
+    aspect = await ActivityEnvironment().run(pdfs.aspect, LAB, SLATE)
+
+    assert aspect == pytest.approx(2.0)
+    assert nas.calls == []
 
 
 async def test_the_sync_cannot_stage_an_unknown_template(s3):

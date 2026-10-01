@@ -1,0 +1,92 @@
+name: Update krg-infra pin
+
+# "Axis B" (krg-infra docs/tenant-updates.md): advance the krg-infra pin so new
+# nixpkgs (kernel / bash / openssl / CVE fixes) flow in via
+# `nixpkgs.follows = "krg-infra/nixpkgs"`. flake.nix tracks krg-infra `main`; the
+# exact rev lives in flake.lock, so this job re-locks to current main HEAD.
+#
+# Unlike the upstream template, this commits the updated flake.lock STRAIGHT TO
+# main (no PR) — the deliberate review gate we accept instead is the eval below
+# plus the nightly auto-upgrade's atomic switch (a lock that doesn't build fails
+# the switch and rolls back to the previous generation; the running system is
+# never left broken). The nightly `system.autoUpgrade` (04:00, krg-infra #460)
+# then rolls the new packages out; a new kernel needs a manual `incus restart`.
+#
+# Runs on a GitHub-hosted runner (NOT the in-slot self-hosted runner).
+#
+# fishsense-services: fishsense-lite's workflow, verbatim. Until the cutover the
+# slot converges from fishsense-lite, so a bump here changes nothing running;
+# fishsense-lite's own weekly bump tracks the same krg-infra main on the same
+# schedule, which keeps the two locks together for the switch (docs/cutover.md
+# checks they match, and re-syncs by hand if not).
+#
+# Requires the push to main to be allowed for the GitHub App (APP_ID) — if main
+# is a protected branch, add the app to its bypass list, or this job fails at push.
+
+on:
+  schedule:
+    - cron: "0 8 * * 1" # Mondays 08:00 UTC
+  workflow_dispatch: {} # out-of-cycle bump (e.g. a named CVE)
+
+permissions: {} # the App token does the write; GITHUB_TOKEN needs nothing
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      # Same GitHub App release.yml uses; a PAT-less GITHUB_TOKEN can't push to a
+      # protected main, and the App can be granted bypass.
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          ref: main
+
+      - uses: DeterminateSystems/nix-installer-action@v22
+
+      # Bump only krg-infra; nixpkgs moves with it via the follows.
+      - name: nix flake update krg-infra
+        run: nix flake update krg-infra
+
+      - name: Stop if nothing changed
+        id: diff
+        run: |
+          if git diff --quiet -- flake.lock; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::krg-infra pin already current; nothing to commit."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Gate before pushing to main: instantiate the tenant system so an eval error
+      # or a failed module assertion (e.g. krg-infra changed a contract) blocks the
+      # commit instead of silently landing a lock the nightly switch would reject.
+      # Eval only — no full build; the nightly switch is the atomic build safety net.
+      - name: Eval-gate the new lock
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          nix eval --raw \
+            .#nixosConfigurations.fishsense.config.system.build.toplevel.drvPath
+
+      - name: Commit flake.lock to main
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          app="${{ steps.app-token.outputs.app-slug }}[bot]"
+          uid="$(gh api "/users/${app}" --jq .id)"
+          git config user.name "$app"
+          git config user.email "${uid}+${app}@users.noreply.github.com"
+          git add flake.lock
+          git commit -m "chore(flake): bump krg-infra pin (system package updates)
+
+          Weekly Axis-B bump (krg-infra docs/tenant-updates.md) — advances the
+          krg-infra input and, via the nixpkgs follows, the kernel/bash/openssl
+          closure. Rolls out on the next converge (nightly system.autoUpgrade or
+          an auto-deploy/** push). Reboot for a new kernel."
+          git push origin HEAD:main

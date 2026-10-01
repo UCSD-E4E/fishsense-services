@@ -19,6 +19,7 @@ v2 changes, each pinned here:
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -380,6 +381,39 @@ async def test_a_refusal_is_appended_with_its_reason_and_type(store):
     assert record.refusal_reason == "fitted laser baseline 2.35 cm is outside"
     assert record.gate_verdicts["refusal_type"] == "CalibrationImplausibleError"
     assert record.slate_template_id == SLATE
+
+
+async def _record_in_run(catalog, store, run_id, producer="slate"):
+    env = ActivityEnvironment()
+    env.info = dataclasses.replace(env.info, workflow_run_id=run_id)
+    await env.run(
+        _activities(catalog, store).record_laser_calibration,
+        RecordCalibration(
+            tenant_id=LAB,
+            dive_id=DIVE,
+            result=_result(),
+            provenance=CalibrationProvenance(
+                producer=producer, camera_calibration_id=CAMERA
+            ),
+        ),
+    )
+    return catalog.recorded[-1][2].id
+
+
+async def test_a_retried_record_names_the_same_attempt(store):
+    """The parent retries the record up to three times; a retry after a lost
+    reply must not append the attempt again (it would move the dive's
+    current calibration). The attempt is named by the parent's run and the
+    producer, so every retry of it carries the one name."""
+    catalog = FakeCatalog()
+
+    first = await _record_in_run(catalog, store, "run-1")
+    again = await _record_in_run(catalog, store, "run-1")
+    other_run = await _record_in_run(catalog, store, "run-2")
+    other_producer = await _record_in_run(catalog, store, "run-1", "checkerboard")
+
+    assert first is not None and first == again
+    assert len({first, other_run, other_producer}) == 3
 
 
 # ---------- the lattice study ----------

@@ -559,7 +559,31 @@ async def test_apply_annotates_only_tasks_nobody_has_started():
     assert [(a[0], a[1], a[3]) for a in ls.annotations] == [
         (1, 500, False), (3, 500, False)]  # fmt: skip
     # The rows the gate confirmed say so.
-    assert [c for c in catalog.calls if c[0] == "mark"] == [("mark", LAB, [1, 3])]
+    assert [c for c in catalog.calls if c[0] == "mark"] == [
+        ("mark", LAB, [1]), ("mark", LAB, [3])]  # fmt: skip
+
+
+async def test_a_failure_mid_apply_keeps_the_provenance_of_what_it_annotated():
+    """v2: a task is marked `auto_accept` as soon as its annotation exists. The
+    retry sees an annotated task as started and skips it, and once the sync
+    completes the row the mark no longer applies, so a mark left for the end
+    of the loop would be lost for good."""
+
+    class FailsOnTask3(FakeLabelStudio):
+        async def create_annotation(self, task_id, project_id, result, ground_truth):
+            if task_id == 3:
+                raise RuntimeError("Label Studio went away")
+            await super().create_annotation(task_id, project_id, result, ground_truth)
+
+    catalog = FakeCatalog(tenants=[LAB], targets={True: _targets(1, 2, 3)})
+    ls = FailsOnTask3(untouched={500: {1, 2, 3}})
+
+    with pytest.raises(RuntimeError, match="went away"):
+        await _run(_activities(catalog, ls=ls).apply_laser_auto_accept_for_dive, TARGET)
+
+    assert [a[0] for a in ls.annotations] == [1, 2]
+    marked = [task for c in catalog.calls if c[0] == "mark" for task in c[2]]
+    assert marked == [1, 2]
 
 
 async def test_an_auto_accepted_annotation_is_not_marked_ground_truth():

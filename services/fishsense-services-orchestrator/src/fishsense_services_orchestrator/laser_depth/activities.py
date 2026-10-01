@@ -95,14 +95,16 @@ class LaserDepthCatalog(Protocol):
 
 async def oldest_candidate(tenants, next_for_tenant) -> DiveTarget | None:
     """The oldest candidate across the tenants: v1's `ORDER BY id LIMIT 1`,
-    kept first in, first out across tenants (the clustering selector's rule)."""
+    kept first in, first out across tenants (the clustering selector's rule).
+    Ties go to the lower dive number, v1's id for a migrated dive: every
+    migrated dive shares one created_at, and their UUIDs are in no order."""
     best: DiveTarget | None = None
     best_key = None
     for tenant_id in tenants:
         candidate = await next_for_tenant(tenant_id)
         if candidate is None:
             continue
-        key = (candidate.created_at, str(candidate.dive_id))
+        key = (candidate.created_at, candidate.number)
         if best_key is None or key < best_key:
             best, best_key = DiveTarget(tenant_id, candidate.dive_id), key
     return best
@@ -210,6 +212,8 @@ class LaserDepthActivities:
                     DepthRecord(
                         capture_id=outcome.capture_id,
                         laser_label_id=outcome.depth.laser_label_id,
+                        x=outcome.depth.x,
+                        y=outcome.depth.y,
                         depth_m=outcome.depth.depth_m,
                         range_m=outcome.depth.range_m,
                         residual_m=outcome.depth.residual_m,

@@ -40,7 +40,8 @@ v2 changes:
   resolver read, to `laser_calibrations`. A refusal is recorded, then raised
   non-retryably under v1's error type so the run still fails loud; a failure
   to record never masks it, and an accepted fit that cannot be recorded
-  fails the run;
+  fails the run. The record is retried, so it is named by the run: a retry
+  after a lost reply appends nothing;
 * stage 13 resolves its inputs before waking anything (v1's child read them),
   so a dive with nothing to fit wakes no pod;
 * targets are (tenant, dive); the children run on the processor's queues,

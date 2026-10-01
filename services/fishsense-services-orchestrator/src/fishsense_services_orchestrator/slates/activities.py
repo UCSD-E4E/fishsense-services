@@ -17,7 +17,11 @@ v2 changes:
   and the tenant's slate PDF key; and it returns the checksums the flags are
   scoped to after the run;
 * a dive that cannot be resolved, or a template that cannot be staged, is a
-  final refusal: retrying reads the same rows to the same answer.
+  final refusal: retrying reads the same rows to the same answer. The cohort
+  no longer offers the ones knowable from the database (no camera
+  calibration; a template with no dpi, reference points or NAS path), so
+  they cannot be the oldest candidate every hour. A PDF the NAS reports
+  missing still fails the run each hour until it is restored.
 """
 
 from __future__ import annotations

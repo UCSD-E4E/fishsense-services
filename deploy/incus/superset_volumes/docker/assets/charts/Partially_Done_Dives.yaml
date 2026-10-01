@@ -1,0 +1,26 @@
+# `params` must be a YAML MAPPING — the v1 importer's chart schema rejects a
+# JSON string ("params: Not a valid mapping type").
+slice_name: Partially-done dives (HIGH priority)
+viz_type: table
+params:
+  datasource: 44444444-4444-4444-8444-444444444444__table
+  viz_type: table
+  query_mode: raw
+  all_columns:
+    - dive_id
+    - blocker
+    - laser_labeling_complete
+    - species_labeling_complete
+    - headtail_labeling_complete
+    - slate_labeling_complete
+    - calibrated
+    - measured
+  order_by_cols:
+    - '["dive_id", true]'
+  row_limit: 500
+  server_page_length: 25
+  include_search: true
+cache_timeout: null
+uuid: 77777777-7777-4777-8777-777777777777
+version: 1.0.0
+dataset_uuid: 44444444-4444-4444-8444-444444444444

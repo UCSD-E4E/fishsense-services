@@ -29,7 +29,9 @@ v2 changes:
   folder (`jpeg_folder`, `output_folder`) and let it build the key; in v2 only
   the orchestrator issues keys (PLAN.md §9.11);
 * the workflow inputs carry their tenant (PLAN.md §9.4);
-* `laser_label_ids` must parallel `laser_points` (v1 assumed it).
+* `laser_label_ids` must parallel `laser_points` (v1 assumed it);
+* a result carries its kept mask's box (`mask_bbox`, contract 5), which the
+  species pre-annotation stage (`species_prediction`) crops by.
 """
 
 from __future__ import annotations
@@ -37,8 +39,9 @@ from __future__ import annotations
 from typing import List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_validator, model_validator
 
+from fishsense_services_contracts._boxes import check_box
 from fishsense_services_contracts.object_store import ObjectRef
 
 __all__ = [
@@ -191,7 +194,19 @@ class HeadtailPredictionResult(BaseModel):
     silhouette_ratio: Optional[float] = None
     crop_x: Optional[int] = None
     crop_y: Optional[int] = None
+    #: The dot the answer came from: the one on the kept mask, or, with no
+    #: mask kept, the first (the crop's centre). None only with no dot or no
+    #: decodable frame. v1 set it on a prediction only.
     laser_label_id: Optional[UUID] = None
     predictor_version: Optional[int] = None
     checkpoint: Optional[str] = None
     core_version: Optional[str] = None
+    #: v2, new (contract 5): the kept mask's box, ``[x_min, y_min, x_max,
+    #: y_max)`` in rectified-frame pixels -- what the species stage crops by.
+    #: None where no mask was kept, and from a processor older than the field.
+    mask_bbox: Optional[List[int]] = None
+
+    @field_validator("mask_bbox")
+    @classmethod
+    def _box(cls, value: Optional[List[int]]) -> Optional[List[int]]:
+        return check_box(value)

@@ -39,6 +39,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{slug}/dives/{number}/calibration-refusal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Clear Dive Calibration Refusal
+         * @description Clear dive ``number``'s standing calibration refusal, so it is
+         *     fitted again (idempotent): for a change its labels don't show.
+         */
+        delete: operations["clear_dive_calibration_refusal"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{slug}/dives/{number}/calibration-source": {
         parameters: {
             query?: never;
@@ -76,6 +97,79 @@ export interface paths {
         put: operations["set_dive_calibration_source"];
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/dives/{number}/calibration-target": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Clear Dive Calibration Target
+         * @description Unlink dive ``number`` from any calibration target (idempotent): it
+         *     leaves the checkerboard cohort. A standing refusal is left as it is.
+         */
+        delete: operations["clear_dive_calibration_target"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/dives/{number}/calibration-target/{target_number}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Dive Calibration Target
+         * @description Dive ``number`` was shot against calibration target
+         *     ``target_number``: it enters the checkerboard cohort, and a standing
+         *     calibration refusal expires.
+         *
+         *     404 if the dive is missing from the tenant or no target has that
+         *     number.
+         */
+        put: operations["set_dive_calibration_target"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/dives/{number}/labels/{kind}/needs-reprocess": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Raise Needs Reprocess
+         * @description Redraw dive ``number``'s ``kind`` frames: the dive re-enters that
+         *     kind's preprocessing, and the JPEGs are redrawn where they are.
+         *     Incomplete labels only unless ``only_incomplete=false``.
+         */
+        put: operations["raise_needs_reprocess"];
+        post?: never;
+        /**
+         * Clear Needs Reprocess
+         * @description Withdraw a redraw of dive ``number``'s ``kind`` frames (idempotent:
+         *     0 when none was asked for).
+         */
+        delete: operations["clear_needs_reprocess"];
         options?: never;
         head?: never;
         patch?: never;
@@ -122,6 +216,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** Cleared */
+        Cleared: {
+            /** Cleared */
+            cleared: number;
+        };
         /** Device */
         Device: {
             /**
@@ -151,6 +250,8 @@ export interface components {
         Dive: {
             /** Calibration Source Number */
             calibration_source_number: number | null;
+            /** Calibration Target Number */
+            calibration_target_number: number | null;
             /**
              * Dived At
              * Format: date-time
@@ -167,6 +268,11 @@ export interface components {
             priority: "low" | "high" | "none";
             /** Slate Template Number */
             slate_template_number: number | null;
+        };
+        /** Flagged */
+        Flagged: {
+            /** Flagged */
+            flagged: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -299,6 +405,39 @@ export interface operations {
             };
         };
     };
+    clear_dive_calibration_refusal: {
+        parameters: {
+            query?: {
+                /** @description why, kept with the clear */
+                reason?: string | null;
+            };
+            header?: never;
+            path: {
+                number: number;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     clear_dive_calibration_source: {
         parameters: {
             query?: never;
@@ -349,6 +488,137 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Dive"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_dive_calibration_target: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                number: number;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_dive_calibration_target: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                number: number;
+                target_number: number;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Dive"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    raise_needs_reprocess: {
+        parameters: {
+            query?: {
+                only_incomplete?: boolean;
+            };
+            header?: never;
+            path: {
+                number: number;
+                kind: "laser" | "head_tail" | "species" | "slate";
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Flagged"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_needs_reprocess: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                number: number;
+                kind: "laser" | "head_tail" | "species" | "slate";
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Cleared"];
                 };
             };
             /** @description Validation Error */

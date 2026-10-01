@@ -11,9 +11,10 @@
 import { apiClient, failure, type Schemas } from "./api/client";
 import { tenantSlug } from "./env";
 
-/** A dive as the portal sees it. v1's `id`, `dive_datetime`, `dive_slate_id`
- *  and `calibration_dive_id` are `number`, `dived_at`,
- *  `slate_template_number` and `calibration_source_number`. */
+/** A dive as the portal sees it. v1's `id`, `dive_datetime`, `dive_slate_id`,
+ *  `calibration_target_id` and `calibration_dive_id` are `number`, `dived_at`,
+ *  `slate_template_number`, `calibration_target_number` and
+ *  `calibration_source_number`. */
 export type Dive = Schemas["Dive"];
 
 /** Validate a dive number before it goes into a request URL.

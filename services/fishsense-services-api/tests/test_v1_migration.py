@@ -413,7 +413,7 @@ def test_labels_keep_their_label_studio_identity_and_state(v1, v2):
         "FROM laser_labels l JOIN captures c ON c.id = l.capture_id ORDER BY l.v1_id",
     ) == [
         (1, 100, 7, 70, 55, True, False, 10.5, "red", '{"id": 70}'),
-        (2, 101, 7, 71, None, True, False, 11.0, "red", None),
+        (2, 101, 7, 71, None, True, True, 11.0, "red", None),  # NULL: not live
     ]
     assert _rows(v2, "SELECT v1_id, superseded, tail_y FROM head_tail_labels") == [
         (1, True, 4.0)
@@ -694,6 +694,34 @@ def test_results_are_accounted_for_and_idempotent(v1, v2):
     assert again.discrepancies() == {}
 
 
+def _zero_length_measurement(v1: Engine) -> None:
+    """v1 stored whatever its activity computed, including a 0 m length (a
+    degenerate head/tail, or a dot on the optical axis). v2's
+    measurements_length_check refuses it; v2's own stage 14 records such a
+    length as a refusal, never a measurement."""
+    with v1.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO measurement (id, length_m, image_id, fish_id,
+                                     laser_extrinsics_id)
+            VALUES (3, 0.0, 100, 2, 1);
+            """))
+
+
+def test_a_zero_length_measurement_is_skipped_and_reported(v1, v2):
+    """One such row must not abort the one-transaction migration. It is not
+    migrated, and the report says so: every v1 row is either migrated or
+    skipped by name, so it is no discrepancy."""
+    _seed_everything(v1)
+    _zero_length_measurement(v1)
+
+    report = _run(v1, v2)
+
+    assert report["measurement"] == (3, 2)
+    assert report.skipped == {"measurement": {"non-positive length": 1}}
+    assert report.discrepancies() == {}
+    assert _rows(v2, "SELECT v1_id FROM measurements ORDER BY v1_id") == [(1,), (2,)]
+
+
 # --- cycle 7: the migrate-v1 command and its go/no-go validation --------------------
 
 
@@ -716,6 +744,22 @@ async def test_migrate_v1_says_go_when_everything_checks_out(
     assert "measurement parity: 1 current in v2 = 1 fresh in v1" in out
     # v1 still shows it; v2 intentionally doesn't (PLAN 9.13) -- reported, not a gap.
     assert "1 on refused dives" in out
+
+
+async def test_migrate_v1_goes_with_a_skipped_zero_length_measurement(
+    v1, v2, monkeypatch, capsys
+):
+    """The skipped row is printed, and parity reads v1 without it: v1 showed
+    a 0 m fish, v2 has no such measurement to count."""
+    _seed_everything(v1)
+    _zero_length_measurement(v1)
+    _cli_env(monkeypatch, v1, v2)
+
+    assert await main(["migrate-v1"]) == 0
+    out = capsys.readouterr().out
+    assert "GO" in out and "NO-GO" not in out
+    assert "skipped measurement: 1 non-positive length" in out
+    assert "measurement parity: 1 current in v2 = 1 fresh in v1" in out
 
 
 async def test_migrate_v1_says_no_go_on_a_schema_not_at_head(
@@ -787,6 +831,47 @@ def test_a_superseded_reason_is_carried_when_v1_records_one(v1, v2):
         v2,
         "SELECT v1_id, superseded, superseded_reason FROM laser_labels ORDER BY v1_id",
     ) == [(1, True, "validator_3sigma"), (2, False, "remediation")]
+
+
+def test_a_legacy_null_superseded_laser_label_arrives_not_live(v1, v2):
+    """v1 added `laserlabel.superseded` nullable with no backfill, and read
+    NULL as not live everywhere: every getter filters `superseded == False`
+    and the validator writes only `superseded is False` rows
+    (fishsense-lite@77e8f8e5 label_controller.py, validate_laser_labels_for_dive_
+    activity.py). v2's column is a boolean, so NULL arrives superseded, and
+    why stays unknown."""
+    _seed_v1(v1)
+    _v1_with_superseded_reason(v1)
+    _seed_labels(v1)
+
+    _run(v1, v2)
+
+    assert _rows(
+        v2,
+        "SELECT v1_id, superseded, superseded_reason FROM laser_labels ORDER BY v1_id",
+    ) == [(1, False, None), (2, True, None)]
+
+
+def test_a_legacy_null_superseded_head_tail_label_arrives_not_live(v1, v2):
+    """`headtaillabel.superseded` was added the same way (nullable, no
+    backfill), and v1 read it the same way: every head/tail getter filters
+    `HeadTailLabel.superseded == False` (fishsense-lite@77e8f8e5
+    label_controller.py:310-383)."""
+    _seed_v1(v1)
+    _seed_labels(v1)
+    with v1.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO headtaillabel (id, label_studio_task_id,
+                label_studio_project_id, head_x, head_y, tail_x, tail_y, image_id,
+                user_id, completed, superseded, needs_reprocess)
+            VALUES (2, 81, 8, 1, 2, 3, 4, 101, 1, true, NULL, false)
+            """))
+
+    _run(v1, v2)
+
+    assert _rows(
+        v2, "SELECT v1_id, superseded FROM head_tail_labels ORDER BY v1_id"
+    ) == [(1, True), (2, True)]
 
 
 def test_a_v1_without_superseded_reasons_leaves_them_unknown(v1, v2):
@@ -940,6 +1025,35 @@ def test_a_binding_the_label_no_longer_names_is_stale_on_both_sides(v1, v2):
 
     assert _parity(v1, v2) == (1, 1, 1, 1)
     assert _rows(v2, "SELECT v1_id FROM current_measurements") == [(1,)]
+
+
+def test_a_stale_binding_on_a_low_priority_dive_is_fresh_on_both_sides(v1, v2):
+    """v1's stage 14, the only thing that deleted a stale binding, never runs
+    on a low-priority dive: v1 keeps showing the Snook, and v2 counts it."""
+    _seed_everything(v1)
+    with v1.begin() as conn:
+        conn.execute(text(f"""
+                UPDATE dive SET priority = 'LOW' WHERE id = 10;
+                INSERT INTO fish (id, name, species_id) VALUES (3, 'Snook', NULL);
+                INSERT INTO image (id, path, taken_datetime, checksum, is_canonical,
+                                   dive_id, camera_id)
+                VALUES (103, 'dives/d10/P2.ORF', now(), '{"e" * 32}', true, 10, 1);
+                INSERT INTO specieslabel (id, image_id, content_of_image,
+                    top_three_photos_of_group, label_studio_project_id, superseded,
+                    needs_reprocess)
+                VALUES (2, 103, 'Fish Model, Grouper', true, 70, false, false);
+                INSERT INTO measurement (id, length_m, image_id, fish_id,
+                                         laser_extrinsics_id)
+                VALUES (3, 0.44, 103, 3, 1);
+                """))
+
+    _run(v1, v2)
+
+    assert _parity(v1, v2) == (2, 2, 1, 0)
+    assert _rows(v2, "SELECT v1_id FROM current_measurements ORDER BY v1_id") == [
+        (1,),
+        (3,),
+    ]
 
 
 def test_a_real_fish_bound_off_its_cluster_is_stale_on_both_sides(v1, v2):

@@ -88,13 +88,21 @@ def sentinel_judgements(
 
 
 def build_species_task(
-    image: TaskImage, judgement: SpeciesLabelRow | None = None
+    image: TaskImage,
+    judgement: SpeciesLabelRow | None = None,
+    suggestion: list[dict] | None = None,
 ) -> dict:
     """A Label Studio task: the image under both `image` and `img` (legacy
-    configs use either), and a judgement, if any, as its prediction."""
+    configs use either), and a judgement, if any, as its prediction.
+
+    v2: with no judgement, a model's `suggestion` (BioCLIP's, already Label
+    Studio `predictions`; `species_predict.labeling`) is the prediction
+    instead. A human's judgement always wins, and neither is ever an
+    annotation."""
     prediction = build_prediction(judgement) if judgement is not None else None
+    predictions = [prediction] if prediction is not None else list(suggestion or [])
     return {
         "data": build_task_data(image),
-        "predictions": [prediction] if prediction is not None else [],
+        "predictions": predictions,
         "annotations": [],
     }

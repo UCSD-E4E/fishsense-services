@@ -88,6 +88,8 @@ async def compute_laser_depths(
             if math.isfinite(point.depth_m) and point.depth_m > 0.0:
                 depth = LaserDepth(
                     laser_label_id=dot.laser_label_id,
+                    x=dot.x,
+                    y=dot.y,
                     depth_m=point.depth_m,
                     range_m=point.range_m,
                     # Recorded, not gated on: it cannot see error along the

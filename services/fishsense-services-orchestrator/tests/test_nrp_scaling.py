@@ -45,6 +45,7 @@ from ._nrp import (
     LIGHT,
     MANIFEST_DIR,
     PER_IMAGE,
+    TEMPORAL_CERTS,
     FakeCluster,
     config,
     settings,
@@ -172,6 +173,34 @@ def test_tearing_down_a_missing_deployment_is_not_an_error():
     assert not scaling.delete_deployment(cluster.kubernetes().apps, "fishsense", LIGHT)
     scaling.set_deployment_replicas(cluster.kubernetes().apps, config(), LIGHT, 0)
     assert not cluster.deletes
+
+
+def test_the_current_leaf_is_read_off_the_temporal_secret():
+    """The fingerprint `ops.cert_sync` records on the Secret it pushes; None
+    before the first sync. The Secret's name is the cert sync's setting
+    (``FISHSENSE_NRP_TEMPORAL_CERT_SECRET``), shared by both."""
+    cluster = FakeCluster()
+    core = cluster.kubernetes().core
+    cfg = config()
+
+    assert cfg.temporal_cert_secret == TEMPORAL_CERTS
+    assert scaling.current_leaf(core, cfg) is None
+    cluster.push_leaf("abc")
+    assert scaling.current_leaf(core, cfg) == "abc"
+
+
+def test_the_temporal_secret_name_comes_from_the_environment(monkeypatch):
+    monkeypatch.setenv("FISHSENSE_NRP_TEMPORAL_CERT_SECRET", "elsewhere")
+    assert NrpSettings().temporal_cert_secret == "elsewhere"
+
+
+def test_a_refused_secret_read_fails_the_wake():
+    """Only "no Secret yet" means "stamp nothing"; a 403 (a Role missing the
+    Secret's `get`) is a broken deployment, loudly."""
+    core = MagicMock()
+    core.read_namespaced_secret.side_effect = ApiException(status=403)
+    with pytest.raises(ApiException):
+        scaling.current_leaf(core, config())
 
 
 def test_other_api_errors_are_not_swallowed():

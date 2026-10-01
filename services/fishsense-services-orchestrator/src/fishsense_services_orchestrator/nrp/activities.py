@@ -44,6 +44,7 @@ from fishsense_services_orchestrator.nrp.gpu_fallback import (
 from fishsense_services_orchestrator.nrp.scaling import (
     Kubernetes,
     ScalingConfig,
+    current_leaf,
     delete_deployment,
     deployment_is_wedged,
     kubernetes_apis,
@@ -121,7 +122,14 @@ class NrpActivities:
 
     async def _stand_up(self, name: str, replicas: int) -> None:
         def _apply() -> None:
-            set_deployment_replicas(self._apis().apps, self.config, name, replicas)
+            apis = self._apis()
+            set_deployment_replicas(
+                apis.apps,
+                self.config,
+                name,
+                replicas,
+                leaf_sha256=current_leaf(apis.core, self.config),
+            )
 
         await asyncio.to_thread(_apply)
         activity.logger.info(
@@ -190,14 +198,20 @@ class NrpActivities:
             policy=config.gpu.policy,
         )
 
+        leaf = current_leaf(apis.core, config)
         set_deployment_replicas(
-            apis.apps, config, config.gpu.deployment_name, decision.gpu_replicas
+            apis.apps,
+            config,
+            config.gpu.deployment_name,
+            decision.gpu_replicas,
+            leaf_sha256=leaf,
         )
         set_deployment_replicas(
             apis.apps,
             config,
             config.gpu.fallback_deployment_name,
             decision.fallback_replicas,
+            leaf_sha256=leaf,
         )
         if decision.state != state:
             write_gpu_state(

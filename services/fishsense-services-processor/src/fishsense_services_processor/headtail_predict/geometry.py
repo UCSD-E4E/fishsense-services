@@ -14,7 +14,13 @@ from typing import Iterable, Optional, Sequence, Tuple
 
 import numpy as np
 
-__all__ = ["crop_origin", "lift_point", "mask_at_point", "silhouette_ratio"]
+__all__ = [
+    "crop_origin",
+    "lift_point",
+    "mask_at_point",
+    "mask_box",
+    "silhouette_ratio",
+]
 
 
 def crop_origin(
@@ -65,3 +71,18 @@ def silhouette_ratio(mask_area_px: int, length_px: float) -> Optional[float]:
     if not length_px:
         return None
     return mask_area_px / (length_px * length_px)
+
+
+def mask_box(binary: np.ndarray, origin_x: int, origin_y: int) -> Optional[list[int]]:
+    """The mask's box, ``[x_min, y_min, x_max, y_max)``, lifted into frame
+    pixels like the keypoints. New in v2 (no v1 counterpart): what the species
+    pre-annotation stage crops by. None for an empty mask."""
+    ys, xs = np.nonzero(binary)
+    if xs.size == 0:
+        return None
+    return [
+        int(xs.min()) + origin_x,
+        int(ys.min()) + origin_y,
+        int(xs.max()) + 1 + origin_x,
+        int(ys.max()) + 1 + origin_y,
+    ]

@@ -228,11 +228,16 @@ async def test_every_operation_has_an_explicit_operation_id(offline_client):
     ids = [op["operationId"] for path in spec["paths"].values() for op in path.values()]
 
     assert sorted(ids) == [
+        "clear_dive_calibration_refusal",
         "clear_dive_calibration_source",
+        "clear_dive_calibration_target",
+        "clear_needs_reprocess",
         "create_device",
         "get_my_membership",
         "list_devices",
         "list_dives",
         "list_label_studio_project_ids",
+        "raise_needs_reprocess",
         "set_dive_calibration_source",
+        "set_dive_calibration_target",
     ]

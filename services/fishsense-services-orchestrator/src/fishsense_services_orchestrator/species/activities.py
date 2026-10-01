@@ -28,7 +28,13 @@ v2 changes:
   store's `locate_processed_jpeg`, whose answer is also the task's URL;
 * the sync applies each task through a column-scoped update, and a dive-link
   write expires a standing calibration refusal (see species_store);
-* stage 6.1 persists all or nothing.
+* stage 6.1 persists all or nothing, and the catalog's refusal of a group
+  set is final (non-retryable);
+* new in v2, **off by default**: with the species pre-annotation stage
+  enabled (`species_predict.settings`), populate seeds a task with the
+  capture's BioCLIP suggestion as its prediction -- never an annotation, and
+  never over a human's imported judgement -- and points the project's
+  `model_version` at the tag most of its tasks carry.
 """
 
 from __future__ import annotations
@@ -39,7 +45,9 @@ from datetime import datetime
 from typing import Any, List, Optional, Protocol
 
 from temporalio import activity
+from temporalio.exceptions import ApplicationError
 
+from fishsense_services_api.clustering_store import InvalidClusters
 from fishsense_services_api.label_sync_store import SpeciesSync, SyncedLabel
 from fishsense_services_api.species_store import (
     SpeciesCandidate,
@@ -53,6 +61,7 @@ from fishsense_services_contracts.species import (
     PreprocessSpeciesImagesInput,
     SpeciesClusterMember,
 )
+from fishsense_services_contracts.species_prediction import SPECIES_PREDICTOR_VERSION
 from fishsense_services_orchestrator.labels.label_studio import (
     LabelStudioTask,
     heartbeat_again,
@@ -60,6 +69,7 @@ from fishsense_services_orchestrator.labels.label_studio import (
 from fishsense_services_orchestrator.labels.populate import (
     ImportResult,
     TaskImage,
+    ensure_project_shows_predictions,
     import_tasks_and_record_labels,
     publish_label_studio_project,
 )
@@ -93,6 +103,14 @@ from fishsense_services_orchestrator.species.populate import (
     sentinel_judgements,
 )
 from fishsense_services_orchestrator.species.preprocess import plan_species_preprocess
+from fishsense_services_orchestrator.species_predict.labeling import (
+    prediction_annotations,
+    project_tags,
+    species_model_version_tag,
+)
+from fishsense_services_orchestrator.species_predict.settings import (
+    SpeciesPredictionSettings,
+)
 
 __all__ = ["KIND", "SpeciesActivities", "SpeciesCatalog", "unidentified_slate_note"]
 
@@ -149,7 +167,7 @@ class SpeciesCatalog(Protocol):
         ls_project_id: int,
         ls_task_id: int,
         image_url: str,
-    ) -> None: ...
+    ) -> bool: ...
 
     async def supersede_species_labels(
         self, tenant_id: uuid.UUID, label_ids: list[uuid.UUID]
@@ -223,12 +241,19 @@ class SpeciesActivities:
         sync_catalog: SpeciesSyncCatalog | None = None,
         label_projects: Any = None,
         label_studio_factory: Callable[[], Any] | None = None,
+        predictions: Any = None,
+        prediction_settings: SpeciesPredictionSettings | None = None,
     ) -> None:
         self._catalog = catalog
         self._store = store
         self._sync_catalog = sync_catalog
         self._label_projects = label_projects
         self._label_studio_factory = label_studio_factory
+        #: `SpeciesPredictionCatalog`: read only while pre-annotation is on.
+        self._predictions = predictions
+        self._prediction_settings = prediction_settings or SpeciesPredictionSettings(
+            enabled=False
+        )
 
     # -- stage 2 -------------------------------------------------------------------
 
@@ -402,26 +427,40 @@ class SpeciesActivities:
         deferred = len(selected) - len(targets)
 
         import_result = ImportResult(recorded=0, deferred=0)
+        judgements = sentinel_judgements(facts.species_labels)
         if targets:
-            judgements = sentinel_judgements(facts.species_labels)
+            suggestions = await self._suggestions(target)
             items = [
                 (capture, TaskImage(capture.number, image, capture.captured_at))
                 for capture, image in targets
             ]
             tasks = [
-                build_species_task(task_image, judgements.get(capture.capture_id))
+                build_species_task(
+                    task_image,
+                    judgements.get(capture.capture_id),
+                    suggestions.get(capture.capture_id),
+                )
                 for capture, task_image in items
             ]
 
             async def record(item, task_id: int) -> None:
                 capture, task_image = item
-                await self._catalog.record_species_label(
+                if not await self._catalog.record_species_label(
                     target.tenant_id,
                     capture_id=capture.capture_id,
                     ls_project_id=ls_project_id,
                     ls_task_id=task_id,
                     image_url=task_image.image.uri,
-                )
+                ):
+                    # A migrated duplicate holds the task (species_store).
+                    activity.logger.warning(
+                        "species task %d in project %d is already anchored to "
+                        "another capture's label; left it there and wrote no "
+                        "row for capture %s",
+                        task_id,
+                        ls_project_id,
+                        capture.capture_id,
+                    )
 
             import_result = await import_tasks_and_record_labels(
                 ls,
@@ -465,7 +504,43 @@ class SpeciesActivities:
             and (import_result.recorded > 0 or already_in_project)
         ):
             await publish_label_studio_project(ls, ls_project_id)
+        await self._show_suggestions(ls, target, set(judgements))
         return import_result.recorded
+
+    async def _suggestions(self, target: SpeciesTarget) -> dict[uuid.UUID, list]:
+        """Capture -> its BioCLIP suggestion as Label Studio `predictions`;
+        nothing while the pre-annotation stage is disabled."""
+        if not self._prediction_settings.enabled:
+            return {}
+        state = await self._predictions.species_prediction_state(
+            target.tenant_id, target.dive_id
+        )
+        threshold = self._prediction_settings.other_threshold
+        return {
+            p.capture_id: body
+            for p in state.predictions
+            if (body := prediction_annotations(p, threshold))
+        }
+
+    async def _show_suggestions(
+        self, ls: Any, target: SpeciesTarget, judged: set[uuid.UUID]
+    ) -> None:
+        """Point the dive's project at the tag most of its tasks carry, read
+        after the import: tasks carrying predictions in a project whose
+        `model_version` names another show none of them
+        (`ensure_project_shows_predictions`). Nothing while disabled."""
+        if not self._prediction_settings.enabled:
+            return
+        state = await self._predictions.species_prediction_state(
+            target.tenant_id, target.dive_id
+        )
+        threshold = self._prediction_settings.other_threshold
+        await ensure_project_shows_predictions(
+            ls,
+            state.dive_number,
+            project_tags(state, judged, threshold),
+            species_model_version_tag(SPECIES_PREDICTOR_VERSION, threshold),
+        )
 
     # -- stage 4.2: the sync ----------------------------------------------------------
 
@@ -608,9 +683,18 @@ class SpeciesActivities:
             )
             return UpdateDiveImageGroupsResult(False, 0, seen)
 
-        created = await self._catalog.persist_label_studio_clusters(
-            target.tenant_id, target.dive_id, groups
-        )
+        try:
+            created = await self._catalog.persist_label_studio_clusters(
+                target.tenant_id, target.dive_id, groups
+            )
+        except InvalidClusters as exc:
+            # Final (ForeignCapture included): a retry re-reads the same labels
+            # and regroups them into the same refused set.
+            raise ApplicationError(
+                f"refusing the label-studio groups for dive {target.dive_id}: {exc}",
+                type="InvalidClusters",
+                non_retryable=True,
+            ) from exc
         if created is None:
             return skipped
         activity.logger.info(

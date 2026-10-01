@@ -20,8 +20,8 @@ v1's rules, kept:
   capture whose live species row is flagged `needs_reprocess`;
 * **the population cohort**: the same without the cluster gate or the flag,
   every matching dive;
-* a sentinel (a species row with no project) is not a label, and a
-  superseded row is not evidence of done work;
+* an incomplete sentinel (a species row with no project) is not a label, and
+  a superseded row is not evidence of done work;
 * raising the flag touches only live, by default incomplete, canonical rows;
   clearing touches every canonical row of the dive (or only the named frames);
 * the unidentified-slate note is written only when the dive has none, and
@@ -30,6 +30,9 @@ v1's rules, kept:
 v2 changes:
 
 * per tenant, ordered by `created_at` (v1: `id`);
+* **a completed sentinel is done work** in both cohorts, as populate has
+  always read it (v1's cohorts ignored it, so its dive was re-staged hourly,
+  forever);
 * **populate's candidates are canonical** (v1 took every laser-valid image of
   the dive): a duplicate frame shares its twin's JPEG and task URL, and would
   have been anchored to the twin's task;
@@ -38,8 +41,10 @@ v2 changes:
   v1's cluster read had no ORDER BY, yet "image i of N" and stage 6.1's
   "Part of previous group" both read it;
 * **stage 6.1 writes all or nothing**, serialised per dive, and refuses a
-  capture that is not a canonical capture of the dive (v1 posted cluster by
-  cluster, so a failure left a partial set that blocked every re-run);
+  capture of another dive (v1 posted cluster by cluster, so a failure left a
+  partial set that blocked every re-run). A duplicate frame of the dive is
+  left out rather than refused: migrated clusters hold some, and v1 grouped
+  them;
 * **writing a link expires a refusal instead of clearing it**: v2's refusal
   is an append-only `laser_calibrations` row, so the write stamps
   `dives.calibration_links_changed_at` (migration 0022) and a refused
@@ -57,6 +62,7 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api.camera_sql import RECTIFIABLE_CAMERA_MODEL, RECTIFIABLE_DIVE
 from fishsense_services_api.clustering_store import (
     VALID_LASER,
     ForeignCapture,
@@ -65,6 +71,9 @@ from fishsense_services_api.clustering_store import (
 from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
+    "HAS_LIVE_SPECIES_TASK",
+    "SPECIES_PREPROCESS_COHORT",
+    "SPECIES_PREPROCESS_WORK",
     "REFUSAL_OUTLIVED_SQL",
     "CameraIntrinsicsRow",
     "SpeciesCandidate",
@@ -75,6 +84,7 @@ __all__ = [
     "SpeciesPopulationFacts",
     "SpeciesPreprocessFacts",
     "calibration_targets_by_name",
+    "clear_dive_calibration_target",
     "dives_needing_species_population",
     "next_dive_for_species_preprocessing",
     "note_unidentified_slate",
@@ -92,9 +102,10 @@ __all__ = [
 ]
 
 #: A refused calibration row `r` of dive `d` that the dive's last link change
-#: has outlived. The species sync is the only writer of the links and stamps
-#: `calibration_links_changed_at` with every write, as v1 cleared the refusal
-#: with every write; both sides are the database's clock. The calibration
+#: has outlived. The link setters below (the species sync's, and an admin's
+#: through the portal) stamp `calibration_links_changed_at` with every write,
+#: as v1 cleared the refusal with every write; both sides are the database's
+#: clock. The calibration
 #: cohorts read a dive's current refused row as standing only while this is
 #: false (and while no label is newer than its `inputs_as_of`).
 REFUSAL_OUTLIVED_SQL = (
@@ -103,15 +114,62 @@ REFUSAL_OUTLIVED_SQL = (
 )
 
 #: The canonical capture `c` has a live species label in a Label Studio
-#: project: populate has seeded (or a labeler holds) its task. Sentinels and
-#: superseded rows don't count.
-_HAS_LIVE_SPECIES_TASK = """
+#: project -- populate has seeded (or a labeler holds) its task -- or a live
+#: completed one anywhere. Superseded rows and incomplete sentinels don't
+#: count. v2 change: v1 ignored a completed sentinel here, yet populate never
+#: tasks a frame with a completed row (`species.populate.
+#: select_target_captures`), so its dive was re-staged hourly, forever, ahead
+#: of every younger one. The stage-2 resolver (`species.preprocess`) and
+#: populate read "done" the same way.
+HAS_LIVE_SPECIES_TASK = """
     EXISTS (
         SELECT 1 FROM species_labels s
         WHERE s.tenant_id = c.tenant_id AND s.capture_id = c.id
-          AND s.ls_project_id IS NOT NULL AND NOT s.superseded
+          AND (s.ls_project_id IS NOT NULL OR s.completed)
+          AND NOT s.superseded
     )
 """
+
+#: Dive `d` has stage-2 work: a canonical capture with a valid laser, no live
+#: species task and a prediction cluster, or a canonical capture whose live
+#: species row is flagged for a redraw. Named, with the cohort below, so
+#: `dive_pipeline_status` reads the same predicates (migration
+#: 0029).
+SPECIES_PREPROCESS_WORK = f"""
+    (
+        EXISTS (
+            SELECT 1 FROM captures c
+            JOIN laser_labels l
+              ON l.tenant_id = c.tenant_id AND l.capture_id = c.id
+            WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+              AND c.is_canonical AND {VALID_LASER}
+              AND NOT {HAS_LIVE_SPECIES_TASK}
+              -- The qualifying capture must itself be clustered:
+              -- the resolver needs its cluster for "i of N".
+              AND EXISTS (
+                  SELECT 1 FROM dive_frame_cluster_captures m
+                  JOIN dive_frame_clusters k
+                    ON k.tenant_id = m.tenant_id
+                   AND k.id = m.cluster_id
+                  WHERE m.tenant_id = c.tenant_id
+                    AND m.capture_id = c.id
+                    AND k.formed_by = 'prediction'
+              )
+        )
+        OR EXISTS (
+            SELECT 1 FROM captures c
+            JOIN species_labels s
+              ON s.tenant_id = c.tenant_id AND s.capture_id = c.id
+            WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+              AND c.is_canonical AND s.needs_reprocess
+              AND NOT s.superseded
+        )
+    )
+"""
+
+#: The stage-2 cohort over dive `d`, but for the tenant and priority terms the
+#: selector adds. v2: only a dive the resolver can rectify (`camera_sql`).
+SPECIES_PREPROCESS_COHORT = f"{RECTIFIABLE_DIVE} AND {SPECIES_PREPROCESS_WORK}"
 
 _LABEL_COLUMNS = """
     s.id, s.number, s.capture_id, s.ls_project_id, s.ls_task_id, s.completed,
@@ -216,35 +274,7 @@ async def next_dive_for_species_preprocessing(
             text(f"""
                 SELECT d.id, d.created_at FROM dives d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
-                  AND (
-                      EXISTS (
-                          SELECT 1 FROM captures c
-                          JOIN laser_labels l
-                            ON l.tenant_id = c.tenant_id AND l.capture_id = c.id
-                          WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
-                            AND c.is_canonical AND {VALID_LASER}
-                            AND NOT {_HAS_LIVE_SPECIES_TASK}
-                            -- The qualifying capture must itself be clustered:
-                            -- the resolver needs its cluster for "i of N".
-                            AND EXISTS (
-                                SELECT 1 FROM dive_frame_cluster_captures m
-                                JOIN dive_frame_clusters k
-                                  ON k.tenant_id = m.tenant_id
-                                 AND k.id = m.cluster_id
-                                WHERE m.tenant_id = c.tenant_id
-                                  AND m.capture_id = c.id
-                                  AND k.formed_by = 'prediction'
-                            )
-                      )
-                      OR EXISTS (
-                          SELECT 1 FROM captures c
-                          JOIN species_labels s
-                            ON s.tenant_id = c.tenant_id AND s.capture_id = c.id
-                          WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
-                            AND c.is_canonical AND s.needs_reprocess
-                            AND NOT s.superseded
-                      )
-                  )
+                  AND {SPECIES_PREPROCESS_COHORT}
                 ORDER BY d.created_at, d.id
                 LIMIT 1
                 """),
@@ -270,7 +300,7 @@ async def dives_needing_species_population(
                     ON l.tenant_id = c.tenant_id AND l.capture_id = c.id
                   WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
                     AND c.is_canonical AND {VALID_LASER}
-                    AND NOT {_HAS_LIVE_SPECIES_TASK}
+                    AND NOT {HAS_LIVE_SPECIES_TASK}
               )
             ORDER BY d.created_at, d.id
             """),
@@ -371,8 +401,13 @@ async def species_preprocess_facts(
                     SELECT camera_matrix, distortion_coefficients
                     FROM current_camera_calibrations
                     WHERE tenant_id = :t AND device_id = :device
+                      AND camera_model = :model
                     """),
-                {"t": tenant_id, "device": dive.device_id},
+                {
+                    "t": tenant_id,
+                    "device": dive.device_id,
+                    "model": RECTIFIABLE_CAMERA_MODEL,
+                },
             )
         ).one_or_none()
         if calibration is not None:
@@ -485,22 +520,36 @@ async def record_species_label(
     ls_project_id: int,
     ls_task_id: int,
     image_url: str,
-) -> None:
+) -> bool:
     """Anchor the (capture, task, project) triple: populate's row for a task.
+    False if nothing was written.
 
     v1's natural-key upsert on (image, project): a row the project already
     holds -- only a superseded one can reach here -- is re-anchored and
     revived with the fields v1's populate sent, and nothing else, so its
     `needs_reprocess` survives. `source` is `human`: a row seeded for a
     labeler (docs/port-plan.md).
+
+    v2 change: a task another capture's row already holds is skipped. v1
+    anchored a duplicate frame and its twin to the one task their shared
+    JPEG URL dedupes to; the migration kept one row per task (task ids are
+    unique per tenant here), so a migrated duplicate can hold the task
+    populate finds for its canonical twin, and writing it raised every hour.
+    That row is left as it is -- moving the task would rewrite a migrated
+    row that may carry a labeler's answer -- and the caller logs the skip.
     """
-    await conn.execute(
+    written = await conn.execute(
         text("""
             INSERT INTO species_labels
                 (tenant_id, capture_id, source, ls_project_id, ls_task_id,
                  image_url, completed, superseded, ls_payload)
-            VALUES (:tenant, :capture, 'human', :project, :task, :url, false,
-                    false, '{}'::jsonb)
+            SELECT :tenant, :capture, 'human', :project, :task, :url, false,
+                   false, '{}'::jsonb
+            WHERE NOT EXISTS (
+                SELECT 1 FROM species_labels held
+                WHERE held.tenant_id = :tenant AND held.ls_task_id = :task
+                  AND held.capture_id <> :capture
+            )
             ON CONFLICT (tenant_id, capture_id, ls_project_id) DO UPDATE SET
                 ls_task_id = excluded.ls_task_id,
                 image_url = excluded.image_url,
@@ -515,10 +564,12 @@ async def record_species_label(
                 fish_measurable_category = NULL,
                 fish_angle_category = NULL,
                 fish_curved_category = NULL
+            RETURNING id
             """),
         {"tenant": tenant_id, "capture": capture_id, "project": ls_project_id,
          "task": ls_task_id, "url": image_url},
     )  # fmt: skip
+    return written.first() is not None
 
 
 async def supersede_species_labels(
@@ -545,7 +596,17 @@ async def persist_label_studio_clusters(
 ) -> int | None:
     """Write stage 6.1's label-studio clusters, all or nothing, in the
     caller's transaction. The number written; None if the dive already has
-    label-studio clusters (v1 refused to re-run: it had no delete)."""
+    label-studio clusters (v1 refused to re-run: it had no delete).
+
+    A duplicate frame of the dive (not canonical) is dropped from its group,
+    and a group left empty is not written. A migrated dive's prediction
+    clusters can hold one with a live species row, and v1 grouped it; it is
+    measured under its canonical copy's dive, so it has no place in these
+    clusters, and refusing it would fail stage 6.1 for the dive forever. The
+    groups are formed before the drop, so a duplicate's "Not part of current
+    group" still splits them where v1 did. A capture of another dive is
+    still refused (`ForeignCapture`).
+    """
     await conn.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": f"label-studio-clusters:{dive_id}"},
@@ -553,24 +614,22 @@ async def persist_label_studio_clusters(
     if (await species_grouping_facts(conn, tenant_id, dive_id)).already_grouped:
         return None
 
-    groups = [group for group in groups if group]
     members = {capture for group in groups for capture in group}
-    canonical = set(
-        (
-            await conn.execute(
-                text("""
-                    SELECT id FROM captures
-                    WHERE tenant_id = :tenant AND dive_id = :dive
-                      AND is_canonical AND id = ANY(:ids)
-                    """),
-                {"tenant": tenant_id, "dive": dive_id, "ids": list(members)},
-            )
-        ).scalars()
-    )
-    if foreign := members - canonical:
-        raise ForeignCapture(
-            f"not canonical captures of dive {dive_id}: {sorted(map(str, foreign))}"
+    of_dive = {
+        r.id: r.is_canonical
+        for r in await conn.execute(
+            text("""
+                SELECT id, is_canonical FROM captures
+                WHERE tenant_id = :tenant AND dive_id = :dive AND id = ANY(:ids)
+                """),
+            {"tenant": tenant_id, "dive": dive_id, "ids": list(members)},
         )
+    }
+    if foreign := members - of_dive.keys():
+        raise ForeignCapture(
+            f"not captures of dive {dive_id}: {sorted(map(str, foreign))}"
+        )
+    groups = [kept for group in groups if (kept := [c for c in group if of_dive[c]])]
     for group in groups:
         if len(set(group)) != len(group):
             raise InvalidClusters(f"a capture repeats within a group of {dive_id}")
@@ -596,7 +655,7 @@ async def persist_label_studio_clusters(
     return len(groups)
 
 
-# -- the dive links (the species sync is their only writer) -----------------------
+# -- the dive links (written by the species sync, and by an admin's portal routes) --
 
 
 async def slate_templates_by_name(conn: AsyncConnection) -> dict[str, uuid.UUID]:
@@ -646,6 +705,23 @@ async def set_dive_calibration_target(
     return await _set_link(
         conn, tenant_id, dive_id, "calibration_target_id", calibration_target_id
     )
+
+
+async def clear_dive_calibration_target(
+    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+) -> bool:
+    """v1's `clear_dive_calibration_target`: unlink the dive from any board
+    (idempotent), so it leaves the checkerboard cohort. Like v1's, it does not
+    touch a refusal -- an unlinked dive has nothing more to fit from the board
+    -- so it does not stamp the link change. False if there is no such dive."""
+    updated = await conn.execute(
+        text("""
+            UPDATE dives SET calibration_target_id = NULL
+            WHERE tenant_id = :tenant AND id = :dive
+            """),
+        {"tenant": tenant_id, "dive": dive_id},
+    )
+    return updated.rowcount > 0
 
 
 async def note_unidentified_slate(
@@ -741,9 +817,9 @@ class SpeciesCatalog(ServicePrincipal):
         ls_project_id: int,
         ls_task_id: int,
         image_url: str,
-    ) -> None:
+    ) -> bool:
         async with self._tenant(tenant_id) as conn:
-            await record_species_label(
+            return await record_species_label(
                 conn,
                 tenant_id,
                 capture_id=capture_id,

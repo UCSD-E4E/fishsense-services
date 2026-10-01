@@ -26,9 +26,14 @@ BATCH = 5_000
 
 @dataclass
 class Report(Mapping):
-    """Per v1 table: (rows in v1, rows migrated into v2)."""
+    """Per v1 table: (rows in v1, rows migrated into v2).
+
+    ``skipped`` names the v1 rows deliberately not migrated, per table and
+    reason: a v1 value v2's constraints refuse outright (not merely one v1
+    never recorded). They are accounted for, so they are no discrepancy."""
 
     counts: dict[str, tuple[int, int]] = field(default_factory=dict)
+    skipped: dict[str, dict[str, int]] = field(default_factory=dict)
 
     def __getitem__(self, table: str) -> tuple[int, int]:
         return self.counts[table]
@@ -40,7 +45,11 @@ class Report(Mapping):
         return len(self.counts)
 
     def discrepancies(self) -> dict[str, tuple[int, int]]:
-        return {t: c for t, c in self.counts.items() if c[0] != c[1]}
+        return {
+            t: c
+            for t, c in self.counts.items()
+            if c[0] - sum(self.skipped.get(t, {}).values()) != c[1]
+        }
 
 
 def migrate_v1(
@@ -475,6 +484,25 @@ LABEL_TABLES = {
 }  # fmt: skip
 
 
+#: v1 tables whose `superseded` was added nullable with no backfill (unlike
+#: specieslabel/diveslatelabel, 7934e62a12c0), and read with `== False`.
+_NULL_SUPERSEDED_IS_DEAD = frozenset({"laserlabel", "headtaillabel"})
+
+
+def _superseded(v1_table: str, superseded: bool | None) -> bool:
+    """A v1 laser or head/tail label whose `superseded` is NULL arrives
+    superseded (its reason stays unknown). v1 read NULL as not live
+    everywhere: every getter filters `superseded == False` and the validator
+    writes only `superseded is False` rows (fishsense-lite@77e8f8e5
+    fishsense-api controllers/label_controller.py,
+    data-processing-workflow-worker activities/validate_laser_labels_for_dive_
+    activity.py). Counting it live would hand the resolvers, gate and
+    validator a label v1 never did."""
+    if v1_table in _NULL_SUPERSEDED_IS_DEAD and superseded is None:
+        return True
+    return bool(superseded)
+
+
 def _labels(v1, v2, tenant, report) -> None:
     """The four label kinds. A source is named only when certain: a sentinel
     (no project) carries an imported judgement; a laser label on a frame whose
@@ -517,7 +545,7 @@ def _labels(v1, v2, tenant, report) -> None:
                     "tenant": tenant,
                     "capture": captures.get(r["image_id"]),
                     "completed": bool(r["completed"]),
-                    "superseded": bool(r["superseded"]),
+                    "superseded": _superseded(v1_table, r["superseded"]),
                 }
                 for r in _rows(
                     v1,
@@ -734,10 +762,27 @@ def _results(v1, v2, tenant, report) -> None:
                 "fish": fish.get(r["fish_id"]),
                 "calibration": calibrations.get(r["laser_extrinsics_id"]),
             }
-            for r in _rows(v1, "SELECT * FROM measurement ORDER BY id")
+            for r in _rows(
+                v1, f"SELECT * FROM measurement WHERE {_V1_POSITIVE} ORDER BY id"
+            )
         ),
     )
     _account(v1, v2, report, "measurement", "measurements")
+    # v1 stored whatever length its activity computed, 0 m included (a
+    # degenerate head/tail); 0013's measurements_length_check refuses a
+    # non-positive length, and one such row would abort the whole
+    # transaction. v2's stage 14 records that outcome as a refusal, which
+    # needs the input labels v1 never kept, so the row is skipped, by name.
+    # The capture is simply unmeasured in v2, and stage 14 may try it again.
+    non_positive = v1.execute(
+        text(f"SELECT count(*) FROM measurement WHERE NOT ({_V1_POSITIVE})")
+    ).scalar_one()
+    if non_positive:
+        report.skipped["measurement"] = {"non-positive length": non_positive}
+
+
+#: A v1 measurement v2 can hold: a positive length, or none recorded.
+_V1_POSITIVE = "coalesce(length_m > 0, true)"
 
 
 STEPS: list[Callable] = [
@@ -804,6 +849,8 @@ def preflight(target_url: str, head: str) -> list[str]:
 # deletes (#527, #905) and v2's current_measurements no longer counts
 # (0026); read the way v2 reads its copy: the frame's live,
 # non-sentinel, highest-id species label, its highest-id Label Studio cluster.
+# Only on a HIGH-priority dive: v1's measure run never visits another, so a
+# stale row there is one v1 keeps and v2 counts (0028).
 _V1_FRESH = """
     WITH plausible AS (
         SELECT e.id, e.dive_id FROM laserextrinsics e
@@ -854,18 +901,23 @@ _V1_FRESH = """
     ),
     classified AS (
         SELECT eff.refused,
-               coalesce(s.top_three AND m.fish_id IS NOT NULL AND (
+               coalesce(dv.priority = 'HIGH' AND s.top_three
+                        AND m.fish_id IS NOT NULL AND (
                    (s.real_fish AND k.fish_id IS NOT NULL AND k.fish_id <> m.fish_id)
                    OR (NOT s.real_fish AND s.model_name IS NOT NULL
                        AND f.name IS DISTINCT FROM s.model_name)
                ), false) AS stale
         FROM measurement m
         JOIN image i ON i.id = m.image_id
+        JOIN dive dv ON dv.id = i.dive_id
         JOIN effective eff
           ON eff.dive_id = i.dive_id AND eff.extrinsics_id = m.laser_extrinsics_id
         LEFT JOIN subject s ON s.image_id = m.image_id
         LEFT JOIN cluster k ON k.image_id = m.image_id
         LEFT JOIN fish f ON f.id = m.fish_id
+        -- A non-positive length is skipped by the migration (the report
+        -- names it), so v2 has nothing to compare it with.
+        WHERE coalesce(m.length_m > 0, true)
     )
     SELECT count(*) FILTER (WHERE NOT refused AND NOT stale),
            count(*) FILTER (WHERE refused),

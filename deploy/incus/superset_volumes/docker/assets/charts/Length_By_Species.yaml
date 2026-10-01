@@ -1,0 +1,32 @@
+# New summary: per-species measurement counts + mean length. Kept as a `table`
+# viz (same shape as the rest of this bundle — a categorical bar would need the
+# UI round-trip pass to validate viz params). Sorted by fish measured.
+slice_name: Length by species
+viz_type: table
+params:
+  datasource: 55555555-5555-4555-8555-555555555555__table
+  viz_type: table
+  query_mode: aggregate
+  groupby:
+    - Species Name
+    - Scientific Name
+  metrics:
+    - fish_measured
+    - avg_length_mm
+  temporal_columns_lookup:
+    Taken Date: true
+  adhoc_filters:
+    - clause: WHERE
+      subject: Taken Date
+      operator: TEMPORAL_RANGE
+      comparator: No filter
+      expressionType: SIMPLE
+  order_desc: true
+  timeseries_limit_metric: fish_measured
+  row_limit: 200
+  server_page_length: 25
+  show_cell_bars: true
+cache_timeout: null
+uuid: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+version: 1.0.0
+dataset_uuid: 55555555-5555-4555-8555-555555555555

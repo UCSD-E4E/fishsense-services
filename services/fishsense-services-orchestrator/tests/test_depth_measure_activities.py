@@ -24,6 +24,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from temporalio.testing import ActivityEnvironment
 
 from fishsense_services_api.laser_depth_store import (
@@ -119,9 +120,9 @@ class FakeCatalog:
 
 def _candidates(kind):
     return {
-        LAB: kind(uuid.UUID(int=1), T0 + timedelta(hours=2)),
-        REEF: kind(uuid.UUID(int=2), T0),
-        PARTNER: kind(uuid.UUID(int=3), T0 + timedelta(hours=1)),
+        LAB: kind(uuid.UUID(int=1), T0 + timedelta(hours=2), 1),
+        REEF: kind(uuid.UUID(int=2), T0, 2),
+        PARTNER: kind(uuid.UUID(int=3), T0 + timedelta(hours=1), 3),
     }
 
 
@@ -150,6 +151,33 @@ async def test_the_measure_selector_takes_the_oldest_candidate_across_tenants():
     picked = await ActivityEnvironment().run(
         activities.select_next_dive_for_measurement
     )
+
+    assert picked == DiveTarget(tenant_id=REEF, dive_id=uuid.UUID(int=2))
+
+
+@pytest.mark.parametrize(
+    "kind, select",
+    [
+        (LaserDepthCandidate, "select_next_dive_for_laser_depth"),
+        (MeasurementCandidate, "select_next_dive_for_measurement"),
+    ],
+)
+async def test_dives_created_together_are_taken_in_v1s_id_order(kind, select):
+    """Every migrated dive shares one created_at (v1 recorded none), so the
+    tiebreak decides v1's order: the dive number (v1's id), not the UUID."""
+    catalog = FakeCatalog(
+        candidates={
+            LAB: kind(uuid.UUID(int=1), T0, 42),
+            REEF: kind(uuid.UUID(int=2), T0, 7),
+        }
+    )
+    activities = (
+        LaserDepthActivities(catalog=catalog)
+        if kind is LaserDepthCandidate
+        else MeasurementActivities(catalog=catalog)
+    )
+
+    picked = await ActivityEnvironment().run(getattr(activities, select))
 
     assert picked == DiveTarget(tenant_id=REEF, dive_id=uuid.UUID(int=2))
 
@@ -295,7 +323,12 @@ async def test_the_depth_persist_hands_over_every_depth_and_refusal():
             LaserDepthOutcome(
                 capture_id=capture,
                 depth=LaserDepth(
-                    laser_label_id=good, depth_m=1.2, range_m=1.25, residual_m=None
+                    laser_label_id=good,
+                    x=1900.0,
+                    y=1400.0,
+                    depth_m=1.2,
+                    range_m=1.25,
+                    residual_m=None,
                 ),
                 refusals=[
                     LaserDepthRefusal(
@@ -335,9 +368,9 @@ async def test_the_depth_persist_hands_over_every_depth_and_refusal():
     assert (tenant_id, dive_id) == (LAB, DIVE)
     assert handed["laser_calibration_id"] == calibration
     assert handed["core_version"] == "4.1.0"
-    assert [(d.capture_id, d.laser_label_id, d.depth_m) for d in handed["depths"]] == [
-        (capture, good, 1.2)
-    ]
+    assert [
+        (d.capture_id, d.laser_label_id, d.x, d.y, d.depth_m) for d in handed["depths"]
+    ] == [(capture, good, 1900.0, 1400.0, 1.2)]
     assert [
         (r.capture_id, r.laser_label_id, r.reason, r.depth_m)
         for r in handed["refusals"]

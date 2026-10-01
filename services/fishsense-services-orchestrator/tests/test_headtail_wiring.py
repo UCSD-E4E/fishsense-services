@@ -300,3 +300,8 @@ async def test_prediction_runs_across_the_orchestrator_and_the_processor(monkeyp
     )
     assert row.predictor_version == -1, "the fallback tier, so it stays stale"
     assert backfilled == [target]
+    # v2 (contract 5): the kept mask's box reaches the row, around the dot --
+    # what the species pre-annotation stage crops by.
+    x_min, y_min, x_max, y_max = row.mask_bbox
+    assert x_min < 2000 < x_max and y_min < 1500 < y_max
+    assert (x_max - x_min, y_max - y_min) == (401, 121), "the 200x60 ellipse"

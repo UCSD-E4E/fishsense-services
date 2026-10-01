@@ -7,19 +7,28 @@ Ported from fishsense-lite@77e8f8e5, services/fishsense-api:
   The landing page and triage both ask this ("one definition, two consumers",
   apps/fishsense-lite-web/lib/label-projects.ts);
 * `dive_controller.py` `get_dives`, `set_dive_calibration_source`,
-  `clear_dive_calibration_source`: the calibration-linking page.
+  `clear_dive_calibration_source`: the calibration-linking page; and
+  `set_dive_calibration_target`, `clear_dive_calibration_target`,
+  `clear_calibration_refused`: the levers a calibration refusal's remedy
+  names.
 
 v2 changes:
 
 * one query serves the four label kinds (v1 had four endpoints), per tenant;
-* the auto-accept gate reads each capture's **current** prediction: v2's
-  predictions are append-only, so v1's "a re-prediction clears the verdict"
-  is a newer row with no verdict;
+* the auto-accept gate reads each capture's **current** prediction and its
+  effective verdict (`current_laser_predictions_gated`): v2's gate appends
+  verdicts to their own table, and v1's "a re-prediction clears the verdict"
+  is a newer prediction with none;
 * `gated` for a kind with no gate is refused (:class:`GateNotApplicable`),
   where v1 simply had no such parameter;
 * dives are addressed by `number` (v1's id for a migrated dive) and the
   calibration source is another dive's `number`; another tenant's dive is not
-  visible, so it can't be borrowed from (PLAN.md §9.17).
+  visible, so it can't be borrowed from (PLAN.md §9.17). A calibration
+  target is its row's `number` (v1's id for a migrated one);
+* a refusal is an append-only row, so clearing one appends a clear
+  (`laser_calibration_store.clear_calibration_refusal`), and setting a target
+  stamps the link change that expires a refusal (`species_store`), where v1
+  nulled the dive's refusal columns.
 """
 
 import uuid
@@ -30,16 +39,29 @@ from typing import Literal, get_args
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api import (
+    headtail_store,
+    laser_calibration_store,
+    laser_store,
+    slate_store,
+    species_store,
+)
+
 __all__ = [
+    "CalibrationTargetNotFound",
     "DiveNotFound",
     "DiveSummary",
     "GateNotApplicable",
     "LabelKind",
     "SelfLink",
+    "clear_calibration_refusal",
     "clear_calibration_source",
+    "clear_calibration_target",
     "label_studio_project_ids",
     "list_dives",
     "set_calibration_source",
+    "set_calibration_target",
+    "set_needs_reprocess",
 ]
 
 #: The label kinds, spelled as `label_studio_projects.kind` spells them.
@@ -66,6 +88,14 @@ class SelfLink(ValueError):
     """A dive cannot be its own calibration source."""
 
 
+class CalibrationTargetNotFound(LookupError):
+    """No calibration target has this number."""
+
+    def __init__(self, number: int) -> None:
+        super().__init__(f"calibration target {number} not found")
+        self.number = number
+
+
 class DiveNotFound(LookupError):
     """No such dive in this tenant; ``which`` says which one was missing."""
 
@@ -86,6 +116,7 @@ class DiveSummary:
     dived_at: datetime
     priority: str
     slate_template_number: int | None
+    calibration_target_number: int | None
     calibration_source_number: int | None
 
 
@@ -103,7 +134,9 @@ def _gate_scan(*, judged: bool) -> str:
     return f"""
         EXISTS (
             SELECT 1 FROM laser_labels g
-            JOIN current_laser_predictions p
+            -- The effective verdict: v2's gate appends to laser_prediction_verdicts
+            -- (migration 0021); only a migrated v1 row carries its own.
+            JOIN current_laser_predictions_gated p
               ON p.tenant_id = g.tenant_id AND p.capture_id = g.capture_id
             WHERE g.tenant_id = l.tenant_id
               AND g.ls_project_id = l.ls_project_id
@@ -159,9 +192,11 @@ async def label_studio_project_ids(
 _DIVE_SUMMARY = """
     SELECT d.number, d.name, d.dived_at, d.priority,
            t.number AS slate_template_number,
+           g.number AS calibration_target_number,
            s.number AS calibration_source_number
     FROM dives d
     LEFT JOIN slate_templates t ON t.id = d.slate_template_id
+    LEFT JOIN calibration_targets g ON g.id = d.calibration_target_id
     LEFT JOIN dives s
       ON s.tenant_id = d.tenant_id AND s.id = d.calibration_source_dive_id
     WHERE d.tenant_id = :tenant_id
@@ -241,4 +276,95 @@ async def clear_calibration_source(
             "WHERE tenant_id = :tenant_id AND id = :dive"
         ),
         {"tenant_id": tenant_id, "dive": dive},
+    )
+
+
+async def set_calibration_target(
+    conn: AsyncConnection, tenant_id: uuid.UUID, number: int, target_number: int
+) -> DiveSummary:
+    """Declare which board dive `number` was shot against: the calibration
+    target numbered `target_number` (v1's id for a migrated one).
+
+    v1's `set_dive_calibration_target`, an operator's counterpart of the
+    species sync's write -- through the same setter, so it expires a standing
+    refusal as v1's `_clear_refusal` did. The board's geometry is read from
+    its current version by name, whichever version is named here.
+    """
+    dive = await _dive_id(conn, tenant_id, number, "dive")
+    target = (
+        await conn.execute(
+            text("SELECT id FROM calibration_targets WHERE number = :n"),
+            {"n": target_number},
+        )
+    ).scalar_one_or_none()
+    if target is None:
+        raise CalibrationTargetNotFound(target_number)
+    await species_store.set_dive_calibration_target(conn, tenant_id, dive, target)
+    return await _summary(conn, tenant_id, number)
+
+
+async def clear_calibration_target(
+    conn: AsyncConnection, tenant_id: uuid.UUID, number: int
+) -> None:
+    """Unlink dive `number` from any board (idempotent): what a refusal's
+    remedy asks of a checkerboard dive that needs other frames."""
+    dive = await _dive_id(conn, tenant_id, number, "dive")
+    await species_store.clear_dive_calibration_target(conn, tenant_id, dive)
+
+
+async def clear_calibration_refusal(
+    conn: AsyncConnection,
+    tenant_id: uuid.UUID,
+    number: int,
+    *,
+    reason: str | None = None,
+) -> bool:
+    """Clear dive `number`'s standing calibration refusal, so the dive is
+    offered again (v1's `DELETE /dives/{id}/calibration-refused/`). An
+    appended clear; idempotent, False when nothing stood."""
+    dive = await _dive_id(conn, tenant_id, number, "dive")
+    return await laser_calibration_store.clear_calibration_refusal(
+        conn, tenant_id, dive, reason=reason
+    )
+
+
+async def set_needs_reprocess(
+    conn: AsyncConnection,
+    tenant_id: uuid.UUID,
+    number: int,
+    kind: LabelKind,
+    *,
+    raised: bool,
+    only_incomplete: bool = True,
+) -> int:
+    """Ask for dive `number`'s `kind` frames to be redrawn, or withdraw that;
+    the rows touched (v1's `PUT`/`DELETE .../labels/{kind}/needs-reprocess`).
+
+    Each kind's store owns its rule -- which rows a raise may touch, and that
+    a withdrawal touches every row -- so this only resolves the dive and
+    dispatches. A withdrawal is the whole dive: an operator has no redraw run
+    to scope it to.
+    """
+    dive = await _dive_id(conn, tenant_id, number, "dive")
+    if kind == "species":
+        return await species_store.set_species_needs_reprocess(
+            conn, tenant_id, dive, raised, only_incomplete=only_incomplete
+        )
+    if raised:
+        raise_flags = {
+            "laser": laser_store.raise_laser_reprocess_flags,
+            "head_tail": headtail_store.set_headtail_needs_reprocess,
+            "slate": slate_store.flag_slate_labels_for_reprocess,
+        }[kind]
+        return await raise_flags(conn, tenant_id, dive, only_incomplete=only_incomplete)
+    if kind == "laser":
+        return await laser_store.clear_laser_reprocess_flags(
+            conn, tenant_id, dive, None
+        )
+    if kind == "head_tail":
+        return await headtail_store.clear_headtail_needs_reprocess(
+            conn, tenant_id, dive, None
+        )
+    return await slate_store.clear_slate_reprocess_flags(
+        conn, tenant_id, dive, checksums=None
     )

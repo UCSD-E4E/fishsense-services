@@ -476,14 +476,12 @@ def test_the_whole_drain_fits_inside_v1s_deployed_run_timeout():
     """v1's drain schedule runs for at most 1 h, and a schedule is never
     updated in place. Worst case -- every step burning its budget -- must fit:
     select, the gate's read, the wake, the child, the gate's write, the apply."""
-    from fishsense_services_orchestrator.nrp.workflow import (  # noqa: F401
-        wake_light_processor,
-    )
+    from fishsense_services_orchestrator.nrp.workflow import WAKE_TIMEOUT
 
     worst = (
         sut.SELECT_TIMEOUT
         + sut.GATE_READ_TIMEOUT
-        + timedelta(minutes=5)  # wake_light_processor
+        + WAKE_TIMEOUT  # wake_light_processor
         + GATE_CHILD_EXECUTION_TIMEOUT
         + sut.GATE_WRITE_TIMEOUT
         + sut.LABEL_STUDIO_TIMEOUT

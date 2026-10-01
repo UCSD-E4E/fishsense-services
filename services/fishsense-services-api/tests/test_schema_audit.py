@@ -227,3 +227,70 @@ async def test_a_table_owned_by_the_app_role_is_flagged(scratch):
     violations = await _audit(scratch, global_tables={"usurped"})
 
     assert any("usurped" in v and "owned" in v for v in violations)
+
+
+# --- the research views and role (0031, 0032) ----------------------
+
+RESEARCH = "fishsense_research"
+
+
+async def test_a_view_outside_public_that_runs_as_its_owner_is_flagged(scratch):
+    """The v1-shaped research views live in schema `v1`: the rule is the same
+    there, or one view would show every tenant's rows to research."""
+    await scratch.execute(text("CREATE VIEW v1.all_dives AS SELECT * FROM dives"))
+
+    assert any(
+        "v1.all_dives" in v and "security_invoker" in v for v in await _audit(scratch)
+    )
+
+
+async def test_a_table_the_research_role_reads_without_the_lab_binding_is_flagged(
+    scratch,
+):
+    """The permissive tenant policy opens a table to anyone who sets
+    `app.tenant_id`; only the restrictive lab policy keeps research in the lab."""
+    await _well_scoped_table(scratch, "exposed", "note text")
+    await scratch.execute(text(f"GRANT SELECT ON exposed TO {RESEARCH}"))
+
+    assert any("exposed" in v and "lab" in v for v in await _audit(scratch))
+
+
+async def test_a_loosened_research_policy_is_flagged(scratch):
+    await scratch.execute(text("DROP POLICY research_reads_lab ON dives"))
+    await scratch.execute(
+        text(
+            f"CREATE POLICY research_reads_lab ON dives FOR SELECT TO {RESEARCH} "
+            "USING (true)"
+        )
+    )
+
+    assert any(
+        "dives" in v and "research_reads_lab" in v for v in await _audit(scratch)
+    )
+
+
+async def test_a_loosened_lab_binding_is_flagged(scratch):
+    await scratch.execute(text("DROP POLICY research_only_lab ON dives"))
+    await scratch.execute(
+        text(
+            "CREATE POLICY research_only_lab ON dives AS RESTRICTIVE FOR SELECT "
+            f"TO {RESEARCH} USING (true)"
+        )
+    )
+
+    assert any("dives" in v and "lab" in v for v in await _audit(scratch))
+
+
+async def test_a_table_the_research_role_can_write_is_flagged(scratch):
+    await scratch.execute(text(f"GRANT INSERT ON species TO {RESEARCH}"))
+
+    assert any(
+        "species" in v and "research" in v and "write" in v
+        for v in await _audit(scratch)
+    )
+
+
+async def test_a_research_role_that_bypasses_rls_is_flagged(scratch):
+    await scratch.execute(text(f"ALTER ROLE {RESEARCH} BYPASSRLS"))
+
+    assert any(RESEARCH in v and "BYPASSRLS" in v for v in await _audit(scratch))

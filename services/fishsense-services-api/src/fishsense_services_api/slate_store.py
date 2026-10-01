@@ -45,6 +45,11 @@ v2 changes:
   did: v1's cohort read every species row while its resolver's getter dropped
   superseded ones, so a dead-lettered marker picked a dive that resolved
   nothing -- hourly, ahead of every newer dive;
+* **the cohort offers only a dive stage 9 can run**: a camera calibration
+  for its device, and a template with a dpi, reference points and a NAS
+  path. v1 offered the rest and its resolver (or `stage_slate_pdf`) raised
+  every hour, ahead of every newer dive -- across tenants, every tenant's.
+  Each is fixed in reference data, so the dive simply comes back then;
 * **populate targets canonical frames only.** v1 took every marked image; a
   duplicate shares its canonical twin's checksum, hence its JPEG and task URL,
   and v2 holds one label per Label Studio task;
@@ -89,7 +94,9 @@ __all__ = [
     "record_slate_label",
     "slate_label_studio_projects",
     "slate_populate_candidates",
+    "slate_preprocess_cohort",
     "slate_preprocess_inputs",
+    "slate_preprocess_work",
     "slate_template",
     "slate_template_for_task",
     "supersede_stale_slate_labels",
@@ -115,6 +122,8 @@ class SlateTemplate:
     reference_points: list[tuple[float, float]]
     #: Share-relative NAS path of the template PDF (v1's `DiveSlate.path`).
     source_path: str | None
+    #: v1's id for a migrated template: v1 staged its PDF under it.
+    v1_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -175,18 +184,41 @@ _CANONICAL_OF_DIVE = """
     c.tenant_id = d.tenant_id AND c.dive_id = d.id AND c.is_canonical
 """
 
-#: A frame still to preprocess: a live slate marker, and no live slate label
-#: in a real project. `c` is the capture.
-_MARKED_AND_UNLABELED = """
+
+def _marked_and_unlabeled(marker: str) -> str:
+    """A frame still to preprocess: a live slate marker, and no live slate
+    label in a real project. `c` is the capture; `marker` is SQL for the
+    stage-9 marker (a bind parameter, or a literal in a view)."""
+    return f"""
     EXISTS (
         SELECT 1 FROM species_labels sp
         WHERE sp.tenant_id = c.tenant_id AND sp.capture_id = c.id
-          AND sp.content_of_image = :marker AND NOT sp.superseded
+          AND sp.content_of_image = {marker} AND NOT sp.superseded
     )
     AND NOT EXISTS (
         SELECT 1 FROM slate_labels s
         WHERE s.tenant_id = c.tenant_id AND s.capture_id = c.id
           AND s.ls_project_id IS NOT NULL AND NOT s.superseded
+    )
+"""
+
+
+_MARKED_AND_UNLABELED = _marked_and_unlabeled(":marker")
+
+#: Dive `d` is one stage 9 can run at all: its device has a current camera
+#: calibration, and its template can be scaled (a dpi, reference points) and
+#: staged (a NAS path). The resolver and `stage_slate_pdf` refuse the rest.
+_RESOLVABLE = """
+    EXISTS (
+        SELECT 1 FROM current_camera_calibrations cc
+        WHERE cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
+    )
+    AND EXISTS (
+        SELECT 1 FROM slate_templates st
+        WHERE st.id = d.slate_template_id AND st.dpi IS NOT NULL
+          AND jsonb_typeof(st.reference_points) = 'array'
+          AND st.reference_points <> '[]'::jsonb
+          AND coalesce(st.source_path, '') <> ''
     )
 """
 
@@ -203,6 +235,28 @@ _FLAGGED = """
 # --- stage 9: the cohort and the resolver -------------------------------------
 
 
+def slate_preprocess_work(marker: str) -> str:
+    """Dive `d` has stage-9 work: a canonical frame marked and unlabeled, or
+    flagged for a redraw. `marker` is SQL for the stage-9 marker. Named, with
+    the cohort, so `dive_pipeline_status` reads the same predicates
+    (migration 0029)."""
+    return f"""EXISTS (
+        SELECT 1 FROM captures c
+        WHERE {_CANONICAL_OF_DIVE}
+          AND (({_marked_and_unlabeled(marker)}) OR {_FLAGGED})
+    )"""
+
+
+def slate_preprocess_cohort(marker: str) -> str:
+    """The stage-9 cohort over dive `d`, but for the tenant and priority terms
+    the selector adds: a slate template, a dive stage 9 can resolve, and
+    work."""
+    return (
+        f"d.slate_template_id IS NOT NULL AND {_RESOLVABLE}"
+        f" AND {slate_preprocess_work(marker)}"
+    )
+
+
 async def next_dive_for_slate_preprocessing(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> SlatePreprocessCandidate | None:
@@ -212,12 +266,7 @@ async def next_dive_for_slate_preprocessing(
             text(f"""
                 SELECT d.id, d.created_at FROM dives d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
-                  AND d.slate_template_id IS NOT NULL
-                  AND EXISTS (
-                      SELECT 1 FROM captures c
-                      WHERE {_CANONICAL_OF_DIVE}
-                        AND (({_MARKED_AND_UNLABELED}) OR {_FLAGGED})
-                  )
+                  AND {slate_preprocess_cohort(":marker")}
                 ORDER BY d.created_at, d.id
                 LIMIT 1
                 """),
@@ -234,6 +283,7 @@ def _template(row) -> SlateTemplate:
         dpi=row.dpi,
         reference_points=[tuple(p) for p in (row.reference_points or [])],
         source_path=row.source_path,
+        v1_id=row.v1_id,
     )
 
 
@@ -244,7 +294,7 @@ async def slate_template(
     row = (
         await conn.execute(
             text("""
-                SELECT id, name, dpi, reference_points, source_path
+                SELECT id, name, dpi, reference_points, source_path, v1_id
                 FROM slate_templates WHERE id = :id
                 """),
             {"id": slate_template_id},
