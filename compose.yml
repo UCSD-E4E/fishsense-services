@@ -1,5 +1,5 @@
 # Local development only: Postgres, a one-shot migration, then the API; and
-# Temporal's dev server with the orchestrator serving it.
+# Temporal's dev server with the orchestrator and the processor serving it.
 #
 #   docker compose up --build
 #   curl localhost:8000/healthz
@@ -88,6 +88,19 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      temporal:
+        condition: service_healthy
+
+  # The processor's light role (stage 1 so far). No database or NAS access:
+  # everything it needs arrives in the workflow payload.
+  processor:
+    build:
+      context: .
+      target: processor
+    environment:
+      FISHSENSE_TEMPORAL_ADDRESS: temporal:7233
+      FISHSENSE_TEMPORAL_NAMESPACE: fishsense
+    depends_on:
       temporal:
         condition: service_healthy
 

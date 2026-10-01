@@ -28,6 +28,14 @@ jobs:
         env:
           DOCKER_HOST: unix:///nonexistent/docker.sock
         run: uv run pytest -q -m unit
+      - name: Contract tests
+        working-directory: services/fishsense-services-contracts
+        run: uv run pytest -q
+      - name: Processor unit tests (no Docker)
+        working-directory: services/fishsense-services-processor
+        env:
+          DOCKER_HOST: unix:///nonexistent/docker.sock
+        run: uv run pytest -q
       - name: Orchestrator unit tests (no Docker)
         working-directory: services/fishsense-services-orchestrator
         env:
@@ -48,6 +56,8 @@ jobs:
         run: docker build -t fishsense-services-api:ci .
       - name: Build the orchestrator
         run: docker build --target orchestrator -t fishsense-services-orchestrator:ci .
+      - name: Build the processor
+        run: docker build --target processor -t fishsense-services-processor:ci .
       - name: Starts and reports healthy
         run: |
           docker run -d --name api -p 8000:8000 \

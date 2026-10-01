@@ -733,7 +733,8 @@ richer):
 - The tenancy foundation — **done** (roles, RLS, in-app OIDC, memberships, first route,
   packaging).
 - The v2 domain schema (§4.3), then the port of v1's pipeline, module by module (§6.3).
-- The processing contract package (§9.1), which the ported workers speak.
+- The processing contract package (§9.1), which the ported workers speak — **built**; stage 1
+  (clustering) runs end to end on it.
 - The data migration job and its validation report (§6.4), rehearsed early and often.
 - The web portal port (§6.1).
 - The production deploy: a `flake.nix` with the fishsense `mkTenant`, a production compose
@@ -761,8 +762,8 @@ Grouped by when they need answering. Each has: **the decision**, *what it blocks
 
 ### A. Decide soon — unblocks v1-now churn (§7) and v2 foundations
 
-**9.1 — Stable processing data-contract** *(what the ported workers speak)* — *approach
-decided; role revised 2026-09-23 for the big-bang cutover*
+**9.1 — Stable processing data-contract** *(what the ported workers speak)* — *built
+2026-09-25; role revised 2026-09-23 for the big-bang cutover*
 - *Decision:* a **v2-owned, versioned contract package that lives here.** Schema-first
   (Pydantic / JSON-Schema, language-neutral), *informed by* v1's `fishsense-api-sdk` +
   `libs/fishsense-shared/preprocess_contracts.py` but **not** a rename of them.
@@ -770,8 +771,13 @@ decided; role revised 2026-09-23 for the big-bang cutover*
   back to the API). v1's worker interfaces are **ported onto it** during the port (§6.3).
   v1 itself never adopts it: v1 is retired at cutover, so there is no convergence period
   to protect.
-- *To close:* author the package here, version it, and contract-test it in CI, starting from
-  the v1 DTOs the first ported workers need.
+- *Built 2026-09-25* (`services/fishsense-services-contracts`):
+  - `CONTRACT_VERSION`, with each version's JSON Schema published under `schemas/`. CI fails
+    when a model changes without a new version, and every published version is kept.
+  - The processor's queues, named so they never collide with v1's.
+  - The shared Temporal connection: the namespace is required.
+  - Stage 1's input, the first DTO carried over from v1.
+  - Later stages add their DTOs as they port.
 
 **9.2 — Model packaging** *(§4.7)* — *resolved (registry choice reopened as §9.12)*
 - MLflow-on-Garage = **canonical versioned registry**, consumed at **build/deploy time**

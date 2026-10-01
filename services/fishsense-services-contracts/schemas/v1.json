@@ -1,0 +1,66 @@
+{
+  "ClusterDiveFrameImage": {
+    "properties": {
+      "capture_id": {
+        "format": "uuid",
+        "title": "Capture Id",
+        "type": "string"
+      },
+      "taken_datetime": {
+        "format": "date-time",
+        "title": "Taken Datetime",
+        "type": "string"
+      }
+    },
+    "required": [
+      "capture_id",
+      "taken_datetime"
+    ],
+    "title": "ClusterDiveFrameImage",
+    "type": "object"
+  },
+  "ClusterDiveFramesInput": {
+    "$defs": {
+      "ClusterDiveFrameImage": {
+        "properties": {
+          "capture_id": {
+            "format": "uuid",
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "taken_datetime": {
+            "format": "date-time",
+            "title": "Taken Datetime",
+            "type": "string"
+          }
+        },
+        "required": [
+          "capture_id",
+          "taken_datetime"
+        ],
+        "title": "ClusterDiveFrameImage",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "dive_id": {
+        "format": "uuid",
+        "title": "Dive Id",
+        "type": "string"
+      },
+      "images": {
+        "items": {
+          "$ref": "#/$defs/ClusterDiveFrameImage"
+        },
+        "title": "Images",
+        "type": "array"
+      }
+    },
+    "required": [
+      "dive_id",
+      "images"
+    ],
+    "title": "ClusterDiveFramesInput",
+    "type": "object"
+  }
+}
