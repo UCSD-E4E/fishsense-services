@@ -9,6 +9,7 @@ dump is `-Fc` (what `pg_restore` expects), and the password goes in
 PGPASSWORD, never argv (argv is visible in `ps`).
 """
 
+import secrets
 import subprocess
 from datetime import datetime, timedelta, timezone
 from subprocess import CompletedProcess
@@ -104,6 +105,10 @@ def test_filenames_to_prune_rejects_zero_or_negative_keep():
 
 # -- the pg_dump command ----------------------------------------------------------
 
+#: Made up per run, so no credential-shaped literal sits in the source for a
+#: secret scanner to flag (GitGuardian did, on a fixed fake one).
+PASSWORD = secrets.token_hex(8)
+
 
 def _cmd(**overrides):
     fields = {
@@ -111,7 +116,7 @@ def _cmd(**overrides):
         "host": "postgres",
         "port": 5432,
         "username": "backup_user",
-        "password": "hunter2",
+        "password": PASSWORD,
         "output_path": "/tmp/out.dump",
         **overrides,
     }
@@ -137,9 +142,10 @@ def test_passes_connection_args():
 
 def test_password_goes_in_env_not_argv():
     """argv is visible in `ps`."""
-    cmd, env = _cmd(password="extremely-secret")
-    assert "extremely-secret" not in cmd
-    assert env.get("PGPASSWORD") == "extremely-secret"
+    other = secrets.token_hex(8)
+    cmd, env = _cmd(password=other)
+    assert other not in cmd
+    assert env.get("PGPASSWORD") == other
 
 
 def test_writes_to_specified_output_path():
@@ -183,7 +189,7 @@ def test_failure_surfaces_stderr_in_exception(monkeypatch, tmp_path):
             host="postgres",
             port=5432,
             username="backup",
-            password="wrong",
+            password=secrets.token_hex(8),
             output_path=str(tmp_path / "out.dump"),
         )
 
