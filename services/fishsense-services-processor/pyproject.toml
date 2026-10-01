@@ -31,7 +31,7 @@ torch = [
     "sam3 @ git+https://github.com/facebookresearch/sam3.git@8e451d5eb43c817b64ae7577fb7b9ae223db88a9",
     # sam3 imports pkg_resources, which setuptools REMOVED in 82.0.0; v1
     # measured 81.0.0 as the last release that ships it (prod, 2026-09-07).
-    "setuptools>=80.9.0,<82",
+    "setuptools>=80.9.0,<84",
     # Imported by sam3's model_builder chain but never declared by it (v1 found
     # them one ModuleNotFoundError at a time).
     "einops>=0.8.0",
