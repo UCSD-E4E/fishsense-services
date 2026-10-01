@@ -16,6 +16,7 @@ interior network's do on the slot.
 
 from __future__ import annotations
 
+import secrets
 import asyncio
 import uuid
 
@@ -28,14 +29,19 @@ from _deploy import INCUS, REPO
 
 pytestmark = pytest.mark.integration
 
-ADMIN_PASSWORD = "admin-test-only"
+#: Made up per run, so no credential-shaped literal sits in the source for a
+#: secret scanner to flag (GitGuardian did, on fixed fake ones).
+ADMIN_PASSWORD = secrets.token_hex(8)
 PASSWORDS = {
-    "FISHSENSE_OWNER_PASSWORD": "0a1b2c3d4e5f",
-    "FISHSENSE_APP_PASSWORD": "1a1b2c3d4e5f",
-    "FISHSENSE_BACKUP_PASSWORD": "2a1b2c3d4e5f",
-    "FISHSENSE_ANALYTICS_PASSWORD": "3a1b2c3d4e5f",
-    "FISHSENSE_SMOKE_PASSWORD": "4a1b2c3d4e5f",
+    "FISHSENSE_OWNER_PASSWORD": secrets.token_hex(8),
+    "FISHSENSE_APP_PASSWORD": secrets.token_hex(8),
+    "FISHSENSE_BACKUP_PASSWORD": secrets.token_hex(8),
+    "FISHSENSE_ANALYTICS_PASSWORD": secrets.token_hex(8),
+    "FISHSENSE_SMOKE_PASSWORD": secrets.token_hex(8),
 }
+#: v1's own login roles on the slot-shaped cluster.
+V1_SUPERSET_PASSWORD = secrets.token_hex(8)
+V1_BACKUP_PASSWORD = secrets.token_hex(8)
 V2 = "fishsense_services"
 
 
@@ -77,8 +83,10 @@ def _v1_as_the_slot_has_it(container) -> None:
     """v1's database with a row, and v1's roles, as the restore left them."""
     admin = _admin(container)
     with admin.connect() as conn:
-        conn.execute(text("CREATE ROLE superset LOGIN PASSWORD 'v1-superset'"))
-        conn.execute(text("CREATE ROLE backup LOGIN PASSWORD 'v1-backup'"))
+        conn.execute(
+            text(f"CREATE ROLE superset LOGIN PASSWORD '{V1_SUPERSET_PASSWORD}'")
+        )
+        conn.execute(text(f"CREATE ROLE backup LOGIN PASSWORD '{V1_BACKUP_PASSWORD}'"))
         conn.execute(text("CREATE DATABASE fishsense"))
         conn.execute(text("CREATE DATABASE superset OWNER superset"))
     admin.dispose()
@@ -185,7 +193,7 @@ def test_the_app_role_connects_under_rls(migrated):
 
 def test_v1s_roles_cannot_connect_to_v2s_database(migrated):
     with pytest.raises(OperationalError, match="permission denied for database"):
-        _scalar(_url(migrated, "superset", "v1-superset", V2), "SELECT 1")
+        _scalar(_url(migrated, "superset", V1_SUPERSET_PASSWORD, V2), "SELECT 1")
 
 
 # --- v1's database: read by the backup, never written ------------------------------------
@@ -227,7 +235,7 @@ def test_a_second_run_changes_nothing_and_succeeds(migrated):
 
 
 def test_a_rotated_password_reaches_postgres_on_the_next_converge(migrated):
-    rotated = "5a1b2c3d4e5f"
+    rotated = secrets.token_hex(8)
     code, output = _bootstrap(migrated, FISHSENSE_APP_PASSWORD=rotated)
     assert code == 0, output
     try:

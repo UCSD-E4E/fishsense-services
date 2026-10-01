@@ -1,0 +1,19 @@
+# GitGuardian / ggshield configuration.
+# https://docs.gitguardian.com/ggshield-docs/reference/configuration
+#
+# Ported from fishsense-lite@77e8f8e5 .gitguardian.yaml: ignore single files
+# proven to hold no secret material, never whole directories, so a real secret
+# anywhere else is still caught. Test fixtures don't belong here: they make up
+# their credentials per run (secrets.token_hex), leaving nothing to flag.
+version: 2
+
+secret:
+  ignored-paths:
+    # False positive: "Generic Password" (GitGuardian incident 37770582) on the
+    # role bootstrap. Its only password-shaped text is psql variable
+    # references (`PASSWORD :'owner_password'`) and the names of the
+    # environment variables they are read from (FISHSENSE_*_PASSWORD).
+    # The values come from vault-agent renders at run time (deploy/incus/
+    # secrets.nix), and the script refuses to start without them, so this
+    # file can never legitimately hold one.
+    - deploy/incus/db_bootstrap/bootstrap.sh
