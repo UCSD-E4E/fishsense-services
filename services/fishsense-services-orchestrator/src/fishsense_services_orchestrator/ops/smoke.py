@@ -343,71 +343,56 @@ class LiveProbes:  # pylint: disable=too-many-instance-attributes
 
         return await asyncio.to_thread(_get)
 
-    async def _owner_scalar(self, sql: str):
+    async def _ask(self, url, question, *args):
+        """Run one of the API package's read-only `deployment_checks` on a
+        connection to `url`. Only that package touches the database (repo-root
+        tests/test_database_ownership.py); this only opens the connection."""
         # pylint: disable=import-outside-toplevel
-        from sqlalchemy import text
         from sqlalchemy.ext.asyncio import create_async_engine
 
-        engine = create_async_engine(
-            self._migration.migration_database_url.get_secret_value()
-        )
+        engine = create_async_engine(url.get_secret_value())
         try:
             async with engine.connect() as conn:
-                return (await conn.execute(text(sql))).scalar_one_or_none()
+                return await question(conn, *args)
         finally:
             await engine.dispose()
 
     async def migration_revision(self) -> str | None:
-        return await self._owner_scalar(
-            "SELECT version_num FROM alembic_version "
-            "WHERE to_regclass('alembic_version') IS NOT NULL"
+        # pylint: disable=import-outside-toplevel
+        from fishsense_services_api.deployment_checks import migration_revision
+
+        return await self._ask(
+            self._migration.migration_database_url, migration_revision
         )
 
     async def tenancy_violations(self) -> list[str]:
         # pylint: disable=import-outside-toplevel
-        from sqlalchemy.ext.asyncio import create_async_engine
-
         from fishsense_services_api.schema_audit import tenancy_violations
 
-        engine = create_async_engine(
-            self._migration.migration_database_url.get_secret_value()
-        )
-        try:
-            async with engine.connect() as conn:
-                return await tenancy_violations(conn, app_role=self._migration.app_role)
-        finally:
-            await engine.dispose()
+        async def audit(conn):
+            return await tenancy_violations(conn, app_role=self._migration.app_role)
+
+        return await self._ask(self._migration.migration_database_url, audit)
 
     async def lab_tenant_id(self) -> uuid.UUID | None:
-        # The owner bypasses RLS (the bootstrap makes it BYPASSRLS, as
-        # migrate-v1 requires), so `tenants` shows it every row.
-        return await self._owner_scalar("SELECT id FROM tenants WHERE slug = 'lab'")
+        # pylint: disable=import-outside-toplevel
+        from fishsense_services_api.deployment_checks import lab_tenant_id
+
+        return await self._ask(self._migration.migration_database_url, lab_tenant_id)
 
     async def research_measurement_count(self, dive_number: int) -> int:
         # pylint: disable=import-outside-toplevel
-        from sqlalchemy import text
-        from sqlalchemy.ext.asyncio import create_async_engine
+        from fishsense_services_api.deployment_checks import (
+            research_measurement_count,
+        )
 
         if self._smoke.research_database_url is None:
             raise NotConfigured("FISHSENSE_SMOKE_RESEARCH_DATABASE_URL is not set")
-        engine = create_async_engine(
-            self._smoke.research_database_url.get_secret_value()
+        return await self._ask(
+            self._smoke.research_database_url,
+            research_measurement_count,
+            dive_number,
         )
-        try:
-            async with engine.connect() as conn:
-                # v1's shape, as imwut's and cscw's extracts join it.
-                return (
-                    await conn.execute(
-                        text(
-                            "SELECT count(*) FROM v1.measurement m "
-                            "JOIN v1.image i ON i.id = m.image_id "
-                            "WHERE i.dive_id = :dive AND m.length_m IS NOT NULL"
-                        ),
-                        {"dive": dive_number},
-                    )
-                ).scalar_one()
-        finally:
-            await engine.dispose()
 
     async def temporal_schedule_ids(self) -> set[str]:
         # pylint: disable=import-outside-toplevel
