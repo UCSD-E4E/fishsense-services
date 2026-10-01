@@ -753,3 +753,143 @@ async def test_migrate_v1_names_missing_configuration(monkeypatch, capsys):
     err = capsys.readouterr().err
     assert "FISHSENSE_V1_DATABASE_URL" in err
     assert "FISHSENSE_MIGRATION_DATABASE_URL" in err
+
+
+# -- laser provenance from fishsense-lite #927/#932 --------------------------------
+
+
+def _v1_with_superseded_reason(v1: Engine) -> None:
+    """v1 at alembic e5a9c3d71b24 (fishsense-lite #932): laserlabel records why
+    a label was superseded. The rehearsal dump predates it."""
+    with v1.begin() as conn:
+        conn.execute(
+            text("ALTER TABLE laserlabel ADD COLUMN superseded_reason varchar(40)")
+        )
+
+
+def test_a_superseded_reason_is_carried_when_v1_records_one(v1, v2):
+    """Including `remediation` on a live row: it means "last changed by the
+    reviewed remediation", not "superseded"."""
+    _seed_v1(v1)
+    _v1_with_superseded_reason(v1)
+    _seed_labels(v1)
+    with v1.begin() as conn:
+        conn.execute(text("""
+            UPDATE laserlabel SET superseded = true,
+                superseded_reason = 'validator_3sigma' WHERE id = 1;
+            UPDATE laserlabel SET superseded = false,
+                superseded_reason = 'remediation' WHERE id = 2;
+            """))
+
+    _run(v1, v2)
+
+    assert _rows(
+        v2,
+        "SELECT v1_id, superseded, superseded_reason FROM laser_labels ORDER BY v1_id",
+    ) == [(1, True, "validator_3sigma"), (2, False, "remediation")]
+
+
+def test_a_v1_without_superseded_reasons_leaves_them_unknown(v1, v2):
+    _seed_v1(v1)
+    _seed_labels(v1)
+
+    _run(v1, v2)
+
+    assert _rows(v2, "SELECT DISTINCT superseded_reason FROM laser_labels") == [(None,)]
+
+
+def test_laser_lines_say_which_noise_estimator_made_them(v1, v2):
+    """fishsense-core 4.1.0 (deployed to v1 at 2026-09-26T22:19:45Z) estimates
+    label noise from *signed* residuals; before it, v1 took the MAD of absolute
+    distances, about 0.59 sigma. v1 keeps one line per dive, rewritten on each
+    run with `fitted_at` stamped, and no validator ran between NRP deleting
+    the workers (09-21) and that deploy -- so `fitted_at` says which."""
+    _seed_v1(v1)
+    _seed_calibrations(v1)
+    with v1.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO divelaserline (id, dive_id, a, b, c, n_points,
+                inlier_count, inlier_fraction, residual_std, label_noise_mad,
+                line_confidence, fitted_at)
+            VALUES (2, 12, 0.6, 0.8, -1200, 40, 38, 0.95, 1.4, 1.85, 30.0,
+                    '2026-09-26T23:00:00Z');
+            """))
+
+    _run(v1, v2)
+
+    assert _rows(
+        v2, "SELECT v1_id, noise_estimator FROM dive_laser_lines ORDER BY v1_id"
+    ) == [(1, "absolute_residual_mad"), (2, "signed_residual_mad")]
+
+
+# -- numbers (migration 0019) ------------------------------------------------------
+
+
+def test_migrated_rows_keep_v1s_ids_as_their_numbers(v1, v2):
+    """Label Studio titles embed v1's dive id, so every existing project is
+    still found by its dive's number."""
+    _seed_v1(v1)
+
+    _run(v1, v2)
+
+    assert all(
+        number == v1_id
+        for number, v1_id in _rows(v2, "SELECT number, v1_id FROM dives")
+        + _rows(v2, "SELECT number, v1_id FROM captures")
+    )
+
+
+def test_rows_the_migration_creates_are_numbered_above_v1s(v1, v2):
+    """A refusal becomes its own laser_calibrations row with no v1 id. Numbered
+    from 1 it would take the number a later v1 fit needs, and that fit's
+    insert would be silently dropped as a conflict."""
+    _seed_v1(v1)
+    _seed_calibrations(v1)
+
+    _run(v1, v2)
+
+    refusals = _rows(
+        v2, "SELECT number FROM laser_calibrations WHERE outcome = 'refused'"
+    )
+    largest_v1 = _rows(v1, "SELECT max(id) FROM laserextrinsics")[0][0]
+    assert refusals and all(number > largest_v1 for (number,) in refusals)
+    assert (
+        _rows(v2, "SELECT count(*) FROM laser_calibrations WHERE v1_id IS NOT NULL")[0][
+            0
+        ]
+        == _rows(v1, "SELECT count(*) FROM laserextrinsics")[0][0]
+    )
+
+
+def test_a_new_row_after_the_migration_is_numbered_above_v1s(v1, v2):
+    _seed_v1(v1)
+
+    _run(v1, v2)
+
+    with v2.begin() as conn:
+        tenant = conn.execute(text("SELECT id FROM tenants")).scalar_one()
+        new = conn.execute(
+            text(
+                "INSERT INTO dives (tenant_id, source_path, dived_at) "
+                "VALUES (:t, 'new', now()) RETURNING number"
+            ),
+            {"t": tenant},
+        ).scalar_one()
+    assert new > _rows(v1, "SELECT max(id) FROM dive")[0][0]
+
+
+def test_label_studio_projects_are_recorded_from_v1s_labels(v1, v2):
+    """v1 found projects by title; v2 records them, from the projects v1's
+    labels point at. A sentinel (no project) records nothing. A project whose
+    labels span dives (project 7: dives 10 and 12) is recorded against the dive
+    holding most of them, ties to the lowest number."""
+    _seed_v1(v1)
+    _seed_labels(v1)
+
+    _run(v1, v2)
+
+    assert _rows(
+        v2,
+        "SELECT p.kind, p.ls_project_id, d.v1_id FROM label_studio_projects p "
+        "JOIN dives d ON d.id = p.dive_id ORDER BY p.ls_project_id",
+    ) == [("laser", 7, 10), ("head_tail", 8, 10), ("slate", 9, 11)]

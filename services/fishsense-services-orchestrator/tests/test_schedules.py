@@ -83,3 +83,21 @@ async def test_the_laser_label_sync_is_scheduled_hourly_and_may_overlap():
     assert schedule.policy.overlap == ScheduleOverlapPolicy.ALLOW_ALL
     assert schedule.action.workflow == "SyncLabelStudioLaserLabelsWorkflow"
     assert schedule.action.run_timeout == timedelta(hours=3)
+
+
+async def test_the_processor_sweeper_is_scheduled_hourly_at_55_and_skips_overlap():
+    """v1's +55 (fishsense-lite@77e8f8e5 worker.py): after the hour's parents
+    have fired, so it doesn't race one still standing a processor up; a
+    10-minute run timeout; and an overlapping firing is skipped."""
+    async with await WorkflowEnvironment.start_local(
+        data_converter=pydantic_data_converter
+    ) as env:
+        await ensure_schedules(env.client, task_queue=QUEUE)
+        schedule = (await _describe(env.client, "tear-down-idle-processors")).schedule
+
+    (interval,) = schedule.spec.intervals
+    assert interval.every == timedelta(hours=1)
+    assert interval.offset == timedelta(minutes=55)
+    assert schedule.policy.overlap == ScheduleOverlapPolicy.SKIP
+    assert schedule.action.workflow == "TearDownIdleProcessorsWorkflow"
+    assert schedule.action.run_timeout == timedelta(minutes=10)

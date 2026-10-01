@@ -23,6 +23,7 @@ FIT = {
     "inlier_fraction": 0.925,
     "residual_std": 1.4,
     "label_noise_mad": 0.9,
+    "noise_estimator": "signed_residual_mad",
     "line_confidence": 0.97,
 }
 
@@ -113,3 +114,17 @@ async def test_line_confidence_is_an_unbounded_stability_signal(owner):
     tenant, dive = await _tenant_and_dive(owner, "lab")
 
     await _fit(owner, tenant, dive, line_confidence=270256.98)
+
+
+@pytest.mark.parametrize(
+    "estimator", [None, "median_absolute_deviation"], ids=["missing", "unknown"]
+)
+async def test_a_fit_says_which_noise_estimator_it_used(owner, estimator):
+    """`label_noise_mad`'s scale changed with fishsense-core 4.1.0 (signed
+    residuals, about 1.0 sigma, against v1's absolute ones, about 0.59), so a
+    fit without its estimator can't be compared with another (migration 0017)."""
+    tenant, dive = await _tenant_and_dive(owner, "lab")
+
+    with pytest.raises(IntegrityError):
+        async with owner.begin_nested():
+            await _fit(owner, tenant, dive, noise_estimator=estimator)

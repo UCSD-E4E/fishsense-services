@@ -92,6 +92,12 @@ class Membership(Base):
 # --- Global reference data: shared by all tenants, read-only to the app role --
 
 
+def _number():
+    """What people and tools call the row by (migration 0019): its v1 id when
+    migrated, else the table's next number above v1's. A trigger fills it."""
+    return mapped_column(BigInteger, unique=True)
+
+
 def _v1_id() -> Mapped[int | None]:
     return mapped_column(BigInteger, unique=True, nullable=True)
 
@@ -103,6 +109,7 @@ class Species(Base):
     scientific_name: Mapped[str | None] = mapped_column(Text, unique=True)
     common_name: Mapped[str | None] = mapped_column(Text)
     v1_id: Mapped[int | None] = _v1_id()
+    number: Mapped[int] = _number()
     created_at: Mapped[datetime] = _created_at()
 
 
@@ -121,6 +128,7 @@ class CalibrationTarget(Base):
     notes: Mapped[str | None] = mapped_column(Text)
     valid_from: Mapped[datetime] = _created_at()
     v1_id: Mapped[int | None] = _v1_id()
+    number: Mapped[int] = _number()
 
 
 class FishModelReference(Base):
@@ -138,6 +146,7 @@ class FishModelReference(Base):
     notes: Mapped[str | None] = mapped_column(Text)
     valid_from: Mapped[datetime] = _created_at()
     v1_id: Mapped[int | None] = _v1_id()
+    number: Mapped[int] = _number()
 
 
 class SlateTemplate(Base):
@@ -149,6 +158,7 @@ class SlateTemplate(Base):
     source_path: Mapped[str | None] = mapped_column(Text)
     reference_points: Mapped[list] = mapped_column(JSONB)
     v1_id: Mapped[int | None] = _v1_id()
+    number: Mapped[int] = _number()
     created_at: Mapped[datetime] = _created_at()
 
 
@@ -174,6 +184,7 @@ class Device(Base):
     name: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
     v1_id: Mapped[int | None] = _v1_id()
+    number: Mapped[int] = _number()
 
 
 class Dive(Base):
@@ -201,6 +212,7 @@ class Dive(Base):
     id: Mapped[uuid.UUID] = _id()
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
     v1_id: Mapped[int | None] = _v1_id()
+    number: Mapped[int] = _number()
     name: Mapped[str | None] = mapped_column(Text)
     source_path: Mapped[str] = mapped_column(Text)
     dived_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -254,6 +266,7 @@ class Capture(Base):
     id: Mapped[uuid.UUID] = _id()
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
     v1_id: Mapped[int | None] = _v1_id()
+    number: Mapped[int] = _number()
     dive_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     device_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     source_path: Mapped[str | None] = mapped_column(Text)
@@ -297,6 +310,7 @@ class CameraCalibration(Base):
     id: Mapped[uuid.UUID] = _id()
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
     v1_id: Mapped[int | None] = _v1_id()
+    number: Mapped[int] = _number()
     seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
     device_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     camera_model: Mapped[str] = mapped_column(
@@ -340,6 +354,7 @@ class LaserCalibration(Base):
     id: Mapped[uuid.UUID] = _id()
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
     v1_id: Mapped[int | None] = _v1_id()
+    number: Mapped[int] = _number()
     v1_refusal_dive_id: Mapped[int | None] = mapped_column(
         BigInteger, unique=True, nullable=True
     )
@@ -376,6 +391,7 @@ class DiveLaserLine(Base):
     id: Mapped[uuid.UUID] = _id()
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
     v1_id: Mapped[int | None] = _v1_id()
+    number: Mapped[int] = _number()
     seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
     dive_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     a: Mapped[float] = mapped_column(Double)
@@ -386,6 +402,9 @@ class DiveLaserLine(Base):
     inlier_fraction: Mapped[float] = mapped_column(Double)
     residual_std: Mapped[float] = mapped_column(Double)
     label_noise_mad: Mapped[float] = mapped_column(Double)
+    #: Which estimator produced `label_noise_mad`; its scale changed with
+    #: fishsense-core 4.1.0 (migration 0017).
+    noise_estimator: Mapped[str] = mapped_column(Text)
     line_confidence: Mapped[float] = mapped_column(Double)
     fitted_at: Mapped[datetime] = _created_at()
 
@@ -401,6 +420,7 @@ class _LabelCore:
     id: Mapped[uuid.UUID] = _id()
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
     v1_id: Mapped[int | None] = _v1_id()
+    number: Mapped[int] = _number()
     capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     source: Mapped[str | None] = mapped_column(Text)
     ls_project_id: Mapped[int | None] = mapped_column(Integer)
@@ -433,6 +453,8 @@ class LaserLabel(_LabelCore, Base):
     x: Mapped[float | None] = mapped_column(Double)
     y: Mapped[float | None] = mapped_column(Double)
     label: Mapped[str | None] = mapped_column(Text)
+    #: Why it was superseded, as v1 records it (migration 0017); NULL unknown.
+    superseded_reason: Mapped[str | None] = mapped_column(Text)
 
 
 class HeadTailLabel(_LabelCore, Base):
@@ -480,6 +502,7 @@ class LabelStudioSyncCursor(Base):
     id: Mapped[uuid.UUID] = _id()
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
     v1_id: Mapped[int | None] = _v1_id()
+    number: Mapped[int] = _number()
     kind: Mapped[str] = mapped_column(Text)
     ls_project_id: Mapped[int] = mapped_column(Integer)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -494,6 +517,7 @@ class _PredictionCore:
     id: Mapped[uuid.UUID] = _id()
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
     v1_id: Mapped[int | None] = _v1_id()
+    number: Mapped[int] = _number()
     seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
     capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     width: Mapped[int | None] = mapped_column(Integer)
@@ -596,6 +620,7 @@ class Fish(Base):
     id: Mapped[uuid.UUID] = _id()
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
     v1_id: Mapped[int | None] = _v1_id()
+    number: Mapped[int] = _number()
     species_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("species.id"))
     fish_model_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("fish_models.id")
@@ -618,6 +643,7 @@ class DiveFrameCluster(Base):
     id: Mapped[uuid.UUID] = _id()
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
     v1_id: Mapped[int | None] = _v1_id()
+    number: Mapped[int] = _number()
     dive_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     formed_by: Mapped[str | None] = mapped_column(Text)
     fish_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
@@ -668,6 +694,7 @@ class LaserDepth(Base):
     id: Mapped[uuid.UUID] = _id()
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
     v1_id: Mapped[int | None] = _v1_id()
+    number: Mapped[int] = _number()
     seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
     capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     laser_label_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
@@ -713,6 +740,7 @@ class Measurement(Base):
     id: Mapped[uuid.UUID] = _id()
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
     v1_id: Mapped[int | None] = _v1_id()
+    number: Mapped[int] = _number()
     seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
     capture_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     fish_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
@@ -727,4 +755,24 @@ class Measurement(Base):
     run_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     core_version: Mapped[str | None] = mapped_column(Text)
     model_version: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class LabelStudioProject(Base):
+    """Which Label Studio project holds which dive's labels of which kind
+    (migration 0020). v1 found them only by title."""
+
+    __tablename__ = "label_studio_projects"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        UniqueConstraint("tenant_id", "kind", "ls_project_id"),
+        ForeignKeyConstraint(["tenant_id", "dive_id"], ["dives.tenant_id", "dives.id"]),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    dive_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    kind: Mapped[str] = mapped_column(Text)
+    ls_project_id: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()

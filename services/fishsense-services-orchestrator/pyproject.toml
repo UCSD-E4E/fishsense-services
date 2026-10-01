@@ -17,6 +17,14 @@ dependencies = [
     # Pinned to v1's lock (fishsense-lite@a8b2c3bc): the sync reads its task
     # shapes -- annotations as dicts, the lazy pager -- as v1 does.
     "label-studio-sdk==2.0.19",
+    # The object store (Garage, S3-compatible): raw staging, processed JPEGs,
+    # model weights.
+    "boto3>=1.35.0",
+    # Stands the processor up and tears it down on NRP (PLAN.md §3).
+    "kubernetes>=31.0.0",
+    "pyyaml>=6.0",
+    # Slate PDFs: their page aspect for Label Studio (v1's populate/sync).
+    "pymupdf>=1.24.0",
 ]
 
 [project.scripts]

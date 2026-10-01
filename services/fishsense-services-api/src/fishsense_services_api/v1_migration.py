@@ -15,8 +15,11 @@ v1's production data is only ever used in local rehearsals, never in tests.
 
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 from sqlalchemy import Connection, create_engine, text
+
+from fishsense_services_api.numbers import advance_numbers_sync
 
 BATCH = 5_000
 
@@ -52,8 +55,10 @@ def migrate_v1(
     try:
         with source.connect() as v1, target.begin() as v2:
             tenant = _ensure_tenant(v2, tenant_slug, tenant_name)
+            _reserve_numbers(v1, v2)
             for step in STEPS:
                 step(v1, v2, tenant, report)
+            advance_numbers_sync(v2)
     finally:
         source.dispose()
         target.dispose()
@@ -61,6 +66,49 @@ def migrate_v1(
 
 
 # --- helpers ---------------------------------------------------------------------
+
+#: v1 table -> the v2 table its rows land in, numbered by their v1 id
+#: (migration 0019). The label tables are added from LABEL_TABLES below.
+NUMBERED_TABLES = {
+    "calibrationtarget": "calibration_targets",
+    "fishmodelreference": "fish_model_references",
+    "species": "species",
+    "diveslate": "slate_templates",
+    "camera": "devices",
+    "dive": "dives",
+    "image": "captures",
+    "cameraintrinsics": "camera_calibrations",
+    "laserextrinsics": "laser_calibrations",
+    "divelaserline": "dive_laser_lines",
+    "labelstudiosynccursor": "label_studio_sync_cursors",
+    "laserprediction": "laser_predictions",
+    "slateprediction": "slate_predictions",
+    "headtailprediction": "head_tail_predictions",
+    "fish": "fish",
+    "diveframecluster": "dive_frame_clusters",
+    "laserdepth": "laser_depths",
+    "measurement": "measurements",
+}
+
+
+def _reserve_numbers(v1: Connection, v2: Connection) -> None:
+    """Move each numbered table's sequence past v1's largest id *before* any
+    row lands. Rows the migration creates without a v1 id -- a refusal, say --
+    would otherwise take a number a later v1 row needs, and that row's insert
+    would be dropped as a conflict. Never moves a sequence backwards."""
+    tables = {**NUMBERED_TABLES, **{v: t for v, (t, *_) in LABEL_TABLES.items()}}
+    for v1_table, v2_table in tables.items():
+        largest = v1.execute(text(f"SELECT max(id) FROM {v1_table}")).scalar_one()
+        if largest is None:
+            continue
+        seq = f"{v2_table}_number_seq"
+        v2.execute(
+            text(
+                f"SELECT setval('{seq}', greatest(:largest, "
+                f"(SELECT last_value FROM {seq})))"
+            ),
+            {"largest": largest},
+        )
 
 
 def _ensure_tenant(v2: Connection, slug: str, name: str):
@@ -332,22 +380,79 @@ def _laser_calibrations(v1, v2, tenant, report) -> None:
     )
 
 
+#: When v1's data-worker began fitting with fishsense-core 4.1.0, whose
+#: label-noise estimate uses signed residuals (see migration 0017).
+SIGNED_MAD_SINCE = datetime(2026, 9, 26, 22, 19, 45, tzinfo=UTC)
+
+
+def _noise_estimator(fitted_at: datetime | None) -> str:
+    """v1 rewrites a dive's line on each run, so `fitted_at` says which
+    estimator produced it; a missing stamp predates the stamping, so the old."""
+    if fitted_at is not None and fitted_at >= SIGNED_MAD_SINCE:
+        return "signed_residual_mad"
+    return "absolute_residual_mad"
+
+
+def _has_column(v1, table: str, column: str) -> bool:
+    """Whether v1's schema has `column`: the dump migrated may predate it."""
+    return v1.execute(
+        text(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = :t "
+            "AND column_name = :c)"
+        ),
+        {"t": table, "c": column},
+    ).scalar_one()
+
+
 def _dive_laser_lines(v1, v2, tenant, report) -> None:
     dives = _ids(v2, "dives")
     _insert(
         v2,
         "INSERT INTO dive_laser_lines (tenant_id, v1_id, dive_id, a, b, c, n_points, "
         "inlier_count, inlier_fraction, residual_std, label_noise_mad, "
-        "line_confidence, fitted_at) VALUES (:tenant, :id, :dive, :a, :b, :c, "
-        ":n_points, :inlier_count, :inlier_fraction, :residual_std, "
-        ":label_noise_mad, :line_confidence, coalesce(:fitted_at, now())) "
-        "ON CONFLICT DO NOTHING",
+        "noise_estimator, line_confidence, fitted_at) VALUES (:tenant, :id, "
+        ":dive, :a, :b, :c, :n_points, :inlier_count, :inlier_fraction, "
+        ":residual_std, :label_noise_mad, :noise_estimator, :line_confidence, "
+        "coalesce(:fitted_at, now())) ON CONFLICT DO NOTHING",
         (
-            {**r, "tenant": tenant, "dive": dives.get(r["dive_id"])}
+            {**r, "tenant": tenant, "dive": dives.get(r["dive_id"]),
+             "noise_estimator": _noise_estimator(r["fitted_at"])}
             for r in _rows(v1, "SELECT * FROM divelaserline ORDER BY fitted_at, id")
         ),
-    )
+    )  # fmt: skip
     _account(v1, v2, report, "divelaserline", "dive_laser_lines")
+
+
+#: v2 label table -> its label_studio_projects kind.
+PROJECT_KINDS = {
+    "laser_labels": "laser",
+    "head_tail_labels": "head_tail",
+    "slate_labels": "slate",
+    "species_labels": "species",
+}
+
+
+def _label_studio_projects(v1, v2, tenant, report) -> None:
+    """Record each Label Studio project v1's labels point at, against the dive
+    holding most of its labels (ties to the lowest number). v1 only ever found
+    them by title."""
+    for table, kind in PROJECT_KINDS.items():
+        v2.execute(
+            text(f"""
+                INSERT INTO label_studio_projects (tenant_id, dive_id, kind,
+                                                   ls_project_id)
+                SELECT DISTINCT ON (l.ls_project_id)
+                       :tenant, c.dive_id, :kind, l.ls_project_id
+                FROM {table} l JOIN captures c ON c.id = l.capture_id
+                JOIN dives d ON d.id = c.dive_id
+                WHERE l.tenant_id = :tenant AND l.ls_project_id IS NOT NULL
+                GROUP BY l.ls_project_id, c.dive_id, d.number
+                ORDER BY l.ls_project_id, count(*) DESC, d.number
+                ON CONFLICT (tenant_id, kind, ls_project_id) DO NOTHING
+                """),
+            {"tenant": tenant, "kind": kind},
+        )
 
 
 # v1 label table -> (v2 table, its kind-specific columns, which of them are JSON)
@@ -377,6 +482,12 @@ def _labels(v1, v2, tenant, report) -> None:
     Label Studio user id -- v1's user emails and names are not copied."""
     captures = _ids(v2, "captures")
     for v1_table, (v2_table, columns, json_columns) in LABEL_TABLES.items():
+        if v1_table == "laserlabel" and _has_column(
+            v1, "laserlabel", "superseded_reason"
+        ):
+            # fishsense-lite #932 on: why a label was superseded. Older v1s
+            # leave it unknown (NULL).
+            columns = [*columns, "superseded_reason"]
         auto_accepted = (
             "WHEN EXISTS (SELECT 1 FROM laserprediction p "
             "WHERE p.image_id = l.image_id AND p.auto_accept) THEN 'auto_accept' "
@@ -638,6 +749,7 @@ STEPS: list[Callable] = [
     _laser_calibrations,
     _dive_laser_lines,
     _labels,
+    _label_studio_projects,
     _sync_cursors,
     _predictions,
     _fish_and_clusters,

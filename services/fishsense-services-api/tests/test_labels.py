@@ -141,3 +141,13 @@ async def test_sync_cursors_are_one_per_kind_and_project(owner):
     with pytest.raises(IntegrityError, match="check"):
         async with owner.begin_nested():
             await owner.execute(text(insert), {"t": tenant, "k": "whale"})
+
+
+async def test_an_unknown_superseded_reason_is_rejected(owner):
+    """v1's four reasons (fishsense-lite #932), or NULL for unknown."""
+    tenant, capture = await _tenant_and_capture(owner, "lab")
+
+    with pytest.raises(IntegrityError, match="check"):
+        async with owner.begin_nested():
+            await _label(owner, "laser_labels", tenant, capture, source="human",
+                         superseded_reason="because")  # fmt: skip

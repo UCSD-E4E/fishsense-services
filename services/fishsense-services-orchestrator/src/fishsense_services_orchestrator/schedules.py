@@ -14,9 +14,6 @@ Ported from fishsense-lite@a8b2c3bc: `schedule_workflow`
 """
 
 import logging
-from dataclasses import dataclass
-from datetime import timedelta
-from typing import Any
 
 from temporalio.client import (
     Client,
@@ -24,54 +21,19 @@ from temporalio.client import (
     ScheduleActionStartWorkflow,
     ScheduleAlreadyRunningError,
     ScheduleIntervalSpec,
-    ScheduleOverlapPolicy,
     SchedulePolicy,
     ScheduleSpec,
 )
 
-from fishsense_services_orchestrator.clustering.workflow import (
-    ClusterDiveFramesParentWorkflow,
-)
-from fishsense_services_orchestrator.labels.workflow import (
-    SyncLabelStudioLaserLabelsWorkflow,
-)
+from fishsense_services_orchestrator.registry import ScheduledWorkflow, stages
 
 __all__ = ["SCHEDULES", "ScheduledWorkflow", "ensure_schedules"]
 
 log = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class ScheduledWorkflow:
-    schedule_id: str
-    workflow: Any
-    every: timedelta
-    offset: timedelta
-    run_timeout: timedelta
-    overlap: ScheduleOverlapPolicy
-
-
-SCHEDULES = (
-    ScheduledWorkflow(
-        schedule_id="cluster-dive-frames",
-        workflow=ClusterDiveFramesParentWorkflow,
-        every=timedelta(hours=1),
-        offset=timedelta(minutes=5),
-        run_timeout=timedelta(minutes=30),
-        overlap=ScheduleOverlapPolicy.SKIP,
-    ),
-    # v1's: hourly on the hour, sized for a first run over a backlog project.
-    # Overlap is allowed (as in v1): a sync cursor only moves forward, so two
-    # runs can't rewind each other.
-    ScheduledWorkflow(
-        schedule_id="sync-label-studio-laser-labels",
-        workflow=SyncLabelStudioLaserLabelsWorkflow,
-        every=timedelta(hours=1),
-        offset=timedelta(0),
-        run_timeout=timedelta(hours=3),
-        overlap=ScheduleOverlapPolicy.ALLOW_ALL,
-    ),
-)
+#: Every stage's schedules (see `registry`).
+SCHEDULES = tuple(schedule for stage in stages() for schedule in stage.schedules)
 
 
 async def ensure_schedules(client: Client, *, task_queue: str) -> None:

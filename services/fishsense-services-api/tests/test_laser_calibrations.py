@@ -42,15 +42,13 @@ async def _dive(conn, tenant, path: str, source=None) -> uuid.UUID:
 
 
 async def _accepted(conn, tenant, dive, **columns) -> uuid.UUID:
-    return await _calibration(
-        conn,
-        tenant,
-        dive,
-        outcome="accepted",
-        producer="slate",
-        laser_position=json.dumps(POSITION),
-        laser_axis=json.dumps(AXIS),
+    columns = {
+        "laser_position": json.dumps(POSITION),
+        "laser_axis": json.dumps(AXIS),
         **columns,
+    }
+    return await _calibration(
+        conn, tenant, dive, outcome="accepted", producer="slate", **columns
     )
 
 
@@ -169,14 +167,103 @@ async def test_a_later_refusal_leaves_the_dive_without_an_effective_calibration(
     )
 
 
-async def test_a_dive_that_borrows_is_measured_with_its_sources_calibration(owner):
+# --- what a dive is measured with: v1's rule ----------------------------------------
+#
+# fishsense-lite@a8b2c3bc dive_controller.get_laser_extrinsics_for_dive: a dive's
+# *own* calibration wins; only if it has none does it borrow its link's. And
+# `_plausible_extrinsics`: a stored fit whose baseline is outside 0.097-0.145 m
+# (norm of laser_position's x and y) counts as no calibration, everywhere --
+# eight of v1's 35 stored fits were 2.35-22.22 cm against a fleet IQR of
+# 9.99-10.45 cm, backing 663 of 3,104 measurements at -75% to +45% error. A
+# borrowed fit gets the same test: dive 518's 2.60 cm fit, borrowed by two
+# others, made three dives of wrong lengths. v2 kept its refusal rule (a later
+# refusal is the dive's current calibration, so it has none of its own).
+
+
+async def _effective_row(conn, dive):
+    return (
+        await conn.execute(
+            text(
+                "SELECT laser_calibration_id, source_dive_id, borrowed "
+                "FROM effective_laser_calibrations WHERE dive_id = :d"
+            ),
+            {"d": dive},
+        )
+    ).one_or_none()
+
+
+async def test_a_dives_own_calibration_wins_over_its_link(owner):
+    """Migration 0008 had this backwards (the link won) while saying it
+    followed v1."""
     lab = await _tenant(owner, "lab")
     source = await _dive(owner, lab, "/source")
-    borrower = await _dive(owner, lab, "/borrower", source=source)
-    sources = await _accepted(owner, lab, source)
-    await _accepted(owner, lab, borrower)  # its own is ignored while it borrows
+    dive = await _dive(owner, lab, "/dive", source=source)
+    await _accepted(owner, lab, source)
+    own = await _accepted(owner, lab, dive)
 
-    assert await _effective(owner, borrower) == sources
+    assert tuple(await _effective_row(owner, dive)) == (own, dive, False)
+
+
+async def test_a_dive_without_its_own_borrows_its_links(owner):
+    lab = await _tenant(owner, "lab")
+    source = await _dive(owner, lab, "/source")
+    dive = await _dive(owner, lab, "/dive", source=source)
+    sources = await _accepted(owner, lab, source)
+
+    assert tuple(await _effective_row(owner, dive)) == (sources, source, True)
+
+
+async def test_a_refused_own_calibration_falls_back_to_the_link(owner):
+    lab = await _tenant(owner, "lab")
+    source = await _dive(owner, lab, "/source")
+    dive = await _dive(owner, lab, "/dive", source=source)
+    sources = await _accepted(owner, lab, source)
+    await _accepted(owner, lab, dive)
+    await _refused(owner, lab, dive)
+
+    assert await _effective(owner, dive) == sources
+
+
+@pytest.mark.parametrize(
+    "position, plausible",
+    [
+        ([0.097, 0.0, 0.0], True),
+        ([0.145, 0.0, 0.0], True),
+        ([0.06, 0.08, 0.0], True),  # the norm of x and y: 0.10
+        ([0.0969, 0.0, 0.0], False),
+        ([0.1451, 0.0, 0.0], False),
+        ([0.0235, 0.0, 0.0], False),
+        ([0.104, 0.0, 5.0], True),  # z carries nothing (both producers pad it)
+    ],
+)
+async def test_an_implausible_baseline_counts_as_no_calibration(
+    owner, position, plausible
+):
+    lab = await _tenant(owner, "lab")
+    dive = await _dive(owner, lab, "/dive")
+    fit = await _accepted(owner, lab, dive, laser_position=json.dumps(position))
+
+    assert (await _effective(owner, dive) == fit) is plausible
+
+
+async def test_an_implausible_own_calibration_falls_back_to_the_link(owner):
+    lab = await _tenant(owner, "lab")
+    source = await _dive(owner, lab, "/source")
+    dive = await _dive(owner, lab, "/dive", source=source)
+    sources = await _accepted(owner, lab, source)
+    await _accepted(owner, lab, dive, laser_position=json.dumps([0.0235, 0, 0]))
+
+    assert await _effective(owner, dive) == sources
+
+
+async def test_an_implausible_borrowed_calibration_is_no_calibration(owner):
+    """Dive 518's case: borrowing a known-wrong fit is the worst case."""
+    lab = await _tenant(owner, "lab")
+    source = await _dive(owner, lab, "/source")
+    dive = await _dive(owner, lab, "/dive", source=source)
+    await _accepted(owner, lab, source, laser_position=json.dumps([0.026, 0, 0]))
+
+    assert await _effective(owner, dive) is None
 
 
 async def test_effective_calibrations_are_visible_only_within_the_tenant(

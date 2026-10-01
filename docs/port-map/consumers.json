@@ -1,0 +1,201 @@
+{
+  "slice": "consumers: v1 SQL views (views.py), the Superset dashboards-as-code, the research repos (imwut, cscw, wuwnet) and the in-repo read-only tools that query v1 tables directly",
+  "workflows": [],
+  "activities": [],
+  "api_endpoints": [
+    {
+      "route": "dive_pipeline_status (view)",
+      "file": "/home/chris/Repos/school/e4e/fishsense/fishsense-lite/services/fishsense-api/src/fishsense_api/views.py:115-417",
+      "semantics": "One row per dive, FROM dive d, with no WHERE clause, so duplicate dives are included too. Columns: dive_id, dive_name, priority, dive_slate_id, then booleans. Every image correlation uses i.dive_id=d.id AND i.is_canonical. laser_preprocessed: at least one canonical image AND no canonical image without a laserlabel row. *_labeling_complete (laser/headtail/species/slate): at least one completed=TRUE non-superseded row AND no non-superseded row with completed FALSE or NULL. headtail_preprocessed: at least one image with a valid laser label (completed, not superseded, x and y set) AND every such image has a headtaillabel with label_studio_project_id NOT NULL. has_prediction_clusters: a diveframecluster exists with data_source='PREDICTION'. dive_images_preprocessed: every image with a valid laser label that is in a PREDICTION cluster has a specieslabel with project NOT NULL AND superseded=FALSE, and at least one such image exists. slate_applicable: dive_slate_id IS NOT NULL. slate_preprocessed: slate applicable AND every image whose specieslabel content_of_image='Slate, Laser on slate' has a diveslatelabel with project NOT NULL. calibrated: a laserextrinsics row exists for d.id OR for d.calibration_dive_id. calibration_source: 'own'/'borrowed'/'none', own taking precedence. measured: at least one measurement AND no measurable image left unmeasured. Measurable: top_three_photos_of_group AND measurable_species_sql AND a valid laser label AND a valid head/tail (both points set) AND (a LABEL_STUDIO cluster OR rigid_target_sql). An image counts as measured only when its measurement.laser_extrinsics_id equals the resolved extrinsics: COALESCE(own, borrowed)."
+    },
+    {
+      "route": "fish_model_measurement_accuracy (view)",
+      "file": "/home/chris/Repos/school/e4e/fishsense/fishsense-lite/services/fishsense-api/src/fishsense_api/views.py:676-693",
+      "semantics": "One row per measurement of a named fish model. measurement JOIN image JOIN fish f JOIN fishmodelreference r ON r.name=f.name, WHERE m.length_m IS NOT NULL. Columns: measurement_id, image_id, dive_id, fish_id, model_name, known_length_m, length_m, error_m=length-known, pct_error=100*(length-known)/known (signed; positive means measured long). Wild fish (name NULL) and models without a reference row drop out through the inner join. It does NOT filter on is_canonical or on calibration freshness, so stale measurements are included."
+    },
+    {
+      "route": "fish_length_estimate (view)",
+      "file": "/home/chris/Repos/school/e4e/fishsense/fishsense-lite/services/fishsense-api/src/fishsense_api/views.py:734-765",
+      "semantics": "One row per (fish_id, dive_id) over measurements with length_m NOT NULL (measurement JOIN image JOIN fish). Columns: fish_id, dive_id, model_name, species_id, n_frames, length_p90_m, length_median_m, length_max_m, length_min_m, length_mean_m. Quantiles are nearest-rank via ROW_NUMBER: p90 rank=(9n+9)/10, median rank=(n+1)/2 (integer division), not percentile_cont. p90 equals max when n<=8. This p90 is per fish, not the paper's per-(dive, model) p90 (PLAN 9.18)."
+    },
+    {
+      "route": "fish_model_species_mislabel_suspects (view)",
+      "file": "/home/chris/Repos/school/e4e/fishsense/fishsense-lite/services/fishsense-api/src/fishsense_api/views.py:828-869",
+      "semantics": "Built on fish_model_measurement_accuracy, so it depends on that view and must be created after it and dropped before it. The frame_fit CTE CROSS JOINs fishmodelreference, excluding is_provisional rows and calibration targets (name IN ('Ruler','Box')), and ranks each frame by |len-known|/known. Returns rows where the best fit (rank 1) is a model other than the labeled one, the labeled model is not a calibration target, |own pct_error|>15 and |best_fit_pct_error|<10. Columns: image_id, dive_id, labeled_model, known_length_m, length_m, pct_error, best_fit_model, best_fit_pct_error, confidence ('high' if pct_error>15, i.e. measured long; else 'medium')."
+    },
+    {
+      "route": "superset dataset: dive_pipeline_status (physical)",
+      "file": "/home/chris/Repos/school/e4e/fishsense/fishsense-lite/deploy/incus/superset_volumes/docker/assets/datasets/FishSense/dive_pipeline_status.yaml",
+      "semantics": "Reads the view from schema public directly. Metrics: count; unfinished = COUNT(*) FILTER (WHERE NOT measured); ready_to_measure = COUNT(*) FILTER (WHERE calibrated AND NOT measured). The declared columns omit dive_name and calibration_source."
+    },
+    {
+      "route": "superset dataset: pipeline_labeling_queue (virtual SQL)",
+      "file": "/home/chris/Repos/school/e4e/fishsense/fishsense-lite/deploy/incus/superset_volumes/docker/assets/datasets/FishSense/pipeline_labeling_queue.yaml",
+      "semantics": "A VALUES table of (stage, cnt), each cnt a count(*) over dive_pipeline_status WHERE priority='HIGH' (uppercase literal) plus the stage predicate: laser, species (has_prediction_clusters AND dive_images_preprocessed AND NOT species complete), headtail, slate, measure (calibrated AND NOT measured)."
+    },
+    {
+      "route": "superset dataset: pipeline_partial_dives (virtual SQL)",
+      "file": "/home/chris/Repos/school/e4e/fishsense/fishsense-lite/deploy/incus/superset_volumes/docker/assets/datasets/FishSense/pipeline_partial_dives.yaml",
+      "semantics": "Selects from dive_pipeline_status WHERE priority='HIGH' AND NOT measured, with a CASE blocker ('needs laser', 'ready to measure', 'blocked: no slate', 'needs species + headtail', ...), ORDER BY dive_id."
+    },
+    {
+      "route": "superset dataset: fish_measurements (virtual SQL)",
+      "file": "/home/chris/Repos/school/e4e/fishsense/fishsense-lite/deploy/incus/superset_volumes/docker/assets/datasets/FishSense/fish_measurements.yaml",
+      "semantics": "measurement JOIN fish JOIN image JOIN dive LEFT JOIN species ON species.id=fish.species_id, WHERE length_m NOT NULL. Columns: \"Image Path\"=image.path (the NAS key used to join to stereo data), \"Fish ID\", \"Dive Name\", \"Taken Date\"=image.taken_datetime (the time column), \"Species Name\", \"Scientific Name\", \"Length (mm)\"=ROUND(length_m*1000). Metrics: COUNT(*), COUNT(DISTINCT \"Fish ID\"), ROUND(AVG(mm)). No freshness or canonical filter."
+    },
+    {
+      "route": "research imwut: sql/extract_corpus.sql",
+      "file": "/home/chris/Repos/school/e4e/fishsense/imwut_2026_fishsense_lite/fish_model_analysis/sql/extract_corpus.sql",
+      "semantics": "DISTINCT ON (m.id) over measurement, image, dive, specieslabel, laserextrinsics (le.id=m.laser_extrinsics_id), laserdepth, laserlabel (not superseded, x/y set; lowest id wins), cameraintrinsics (by d.camera_id), and fishmodelreference, joined by name = split_part(content_of_image, ', ', 2). Emits le.laser_position::text, le.laser_axis::text and ci.camera_matrix::text as pipe-delimited JSON. Rigid-target filter: 'Fish Model,%' with TRIM guard, OR IN ('Calibration Targets, Box','Calibration Targets, Ruler')."
+    },
+    {
+      "route": "research imwut: sql/extract_head_tail.sql",
+      "file": "/home/chris/Repos/school/e4e/fishsense/imwut_2026_fishsense_lite/fish_model_analysis/sql/extract_head_tail.sql",
+      "semantics": "Like the corpus extract, plus headtaillabel head/tail pixels (head_x NOT NULL, with no completed or superseded filter) and ci.distortion_coefficients::text. Hard-coded v1 dive ids (58, 59, 61, 66, 84, 495-507, 519-527)."
+    },
+    {
+      "route": "research imwut: sql/extract_field.sql",
+      "file": "/home/chris/Repos/school/e4e/fishsense/imwut_2026_fishsense_lite/fish_model_analysis/sql/extract_field.sql",
+      "semantics": "Wild-fish measurements (content_of_image LIKE 'Fish,%', sl.completed) for hard-coded dives 279, 341, 347, 349, 383, 465 and 471. Columns: dive_id, camera_id, fish_id, image_id, measurement_id, laser_extrinsics_id (a NULL here is an orphaned row), length_m, laserdepth range_m and depth_m (LEFT JOIN), and species via split_part. Deliberately not filtered on label validity."
+    },
+    {
+      "route": "research imwut: sql/extract_stereo_pairs.sql",
+      "file": "/home/chris/Repos/school/e4e/fishsense/imwut_2026_fishsense_lite/fish_model_analysis/sql/extract_stereo_pairs.sql",
+      "semantics": "Hard-coded dives 5, 8, 16, 20, 25, 28, 35 and 39. Columns: d.name, fish_id, laser_extrinsics_id, length_m, range_m, depth_m, head_tail_px from headtaillabel (completed, not superseded), species, fish_measurable_category and top_three_photos_of_group from specieslabel (project NOT NULL, NOT coalesce(superseded,false))."
+    },
+    {
+      "route": "research imwut: sql/extract_angles.sql",
+      "file": "/home/chris/Repos/school/e4e/fishsense/imwut_2026_fishsense_lite/fish_model_analysis/sql/extract_angles.sql",
+      "semantics": "specieslabel fish_angle_degrees and fish_angle_category, with measurement.length_m and laserdepth.depth_m, for hard-coded dives 87, 94, 103, 107 and 114, content 'Fish Model, Snook%', completed and not superseded."
+    },
+    {
+      "route": "research imwut: sql/extract_calibration_fits.sql",
+      "file": "/home/chris/Repos/school/e4e/fishsense/imwut_2026_fishsense_lite/fish_model_analysis/sql/extract_calibration_fits.sql",
+      "semantics": "laserextrinsics JOIN dive. Columns: le.dive_id, le.camera_id, d.name, standard ('checkerboard' when d.calibration_target_id is set, else 'slate'), to_char(d.dive_datetime), laser_position::text, and baseline sqrt((pos->>0)^2 + (pos->>1)^2). Accepted fits only (in v1 a refusal wrote no row)."
+    },
+    {
+      "route": "research imwut: pubfig.load_measurements (export of fish_model_measurement_accuracy)",
+      "file": "/home/chris/Repos/school/e4e/fishsense/imwut_2026_fishsense_lite/fishsense_imwut/pubfig.py:44-50,202-213",
+      "semantics": "Requires columns dive_id, model_name, known_length_m, length_m and pct_error from the accuracy view, optionally with depth_m or range_m from a laserdepth join. It cites export_fish_model_measurements.sql, which does not exist on disk."
+    },
+    {
+      "route": "research cscw: sql/extract_laser_annotations.sql",
+      "file": "/home/chris/Repos/school/e4e/fishsense/cscw-fishsense2027/sql/extract_laser_annotations.sql",
+      "semantics": "Runs against a restored nightly dump, not prod. laserlabel JOIN image, CROSS JOIN LATERAL jsonb_array_elements((label_studio_json::jsonb)->'annotations'). Reads i.is_canonical, superseded, completed, label_studio_task_id and label_studio_project_id, plus the Label Studio annotation fields (completed_by, was_cancelled, lead_time, created_at, parent_prediction, last_action, and origin from result[] keypointlabels)."
+    },
+    {
+      "route": "research cscw: sql/extract_label_timestamps.sql",
+      "file": "/home/chris/Repos/school/e4e/fishsense/cscw-fishsense2027/sql/extract_label_timestamps.sql",
+      "semantics": "The first annotation created_at per (kind, image), from the label_studio_json annotations of laserlabel, headtaillabel and specieslabel. Aggregates per dive: d.id, d.path, d.dive_datetime, count, min, and percentile_cont(0.9)."
+    },
+    {
+      "route": "research cscw: unscripted extracts (no SQL on disk)",
+      "file": "/home/chris/Repos/school/e4e/fishsense/cscw-fishsense2027/data/ (e1/*.csv, coverage/*.csv, laser_pairs/laserlabel_rows.csv + laserprediction.csv); calibration_analysis/e1j_size_constancy/field_bursts.py:34-44,61-66",
+      "semantics": "Column shapes pulled from v1 by queries that are not on disk: dive(camera_id, dive_slate_id, calibration_target_id, path, dive_datetime); laserextrinsics(laser_position, laser_axis); laserlabel(id, image_id, x, y, label, superseded, completed, label_studio_project_id, updated_at) plus image.path; diveslatelabel(reference_points, skipped_points, superseded, completed, upside_down); diveslate(name, dpi, reference_points); laserprediction(image_id, x, y, confidence, predictor_version, checkpoint, created_at, gate_verdict); divelaserline(a, b, c, n_points, residual); diveframecluster(image_id, cluster id, data_source); and specieslabel (grouping, content, measurable, angle, curved, angle_deg, top3) joined to headtail and laser labels."
+    },
+    {
+      "route": "research wuwnet: no direct DB access",
+      "file": "/home/chris/Repos/school/e4e/fishsense/wuwnet-fishsense2026/fishsense_wuwnet/envelope.py:69,127-130",
+      "semantics": "No SQL and no SDK. It reads committed data/*.npz caches. corpus_length_range.npz holds (length_m, range_m) pairs cached from imwut's corpus, so wuwnet depends on v1 only through imwut's exports."
+    },
+    {
+      "route": "v1 in-repo read-only tools (direct SQL / SDK)",
+      "file": "/home/chris/Repos/school/e4e/fishsense/fishsense-lite/tools/validate_headtail_predictions.py:182-220; tools/detect_angle_sweep_runs.py:150-181; tools/apply_image_path_patch.py:134,220; services/fishsense-data-processing-workflow-worker/scripts/audit_length_range_trend.py:50-64; audit_scale_against_checkerboard.py:302-336",
+      "semantics": "validate_headtail_predictions: headtaillabel DISTINCT ON the latest valid row, laserlabel string_agg of valid dots, image.checksum and path, cameraintrinsics JSON as text, WHERE i.is_canonical. detect_angle_sweep_runs: image(id, checksum, path, taken_datetime) and dive name/path ILIKE lookups. apply_image_path_patch: UPDATE image SET path (a hand-run prod write). The audit scripts go through the SDK: dives.get_laser_extrinsics, fish.get_measurements, images.get_laser_depths, labels.get_species_labels / get_headtail_label / get_laser_label, cameras.get_intrinsics."
+    }
+  ],
+  "tests": [
+    "/home/chris/Repos/school/e4e/fishsense/fishsense-lite/services/fishsense-api/tests/test_dive_pipeline_status_view.py (1517 lines, 60 tests; includes the parity tests: view vs selector, measurable_species_sql vs taxonomy.is_measurable, SQL_BROADER_THAN_PYTHON)",
+    "/home/chris/Repos/school/e4e/fishsense/fishsense-lite/services/fishsense-api/tests/test_fish_model_reference.py (386 lines, 18 tests; reference seed plus the accuracy view)",
+    "/home/chris/Repos/school/e4e/fishsense/fishsense-lite/services/fishsense-api/tests/test_fish_length_estimate_view.py (165 lines, 6 tests)",
+    "/home/chris/Repos/school/e4e/fishsense/fishsense-lite/services/fishsense-api/tests/test_fish_model_mislabel_suspects.py (358 lines, 12 tests)",
+    "/home/chris/Repos/school/e4e/fishsense/fishsense-lite/services/fishsense-api/tests/test_fish_model_provisional_migration.py (268 lines, 8 tests)",
+    "/home/chris/Repos/school/e4e/fishsense/fishsense-lite/services/fishsense-api/tests/test_view_bootstrap_registry.py (137 lines, 6 tests; every view is in ALL_VIEW_DDL, and dependency order holds)",
+    "/home/chris/Repos/school/e4e/fishsense/fishsense-lite/libs/fishsense-shared/tests/test_taxonomy.py (381 lines, 29 tests; the MEASURABILITY_CORPUS that the view parity tests use)",
+    "/home/chris/Repos/school/e4e/fishsense/fishsense-lite/services/fishsense-api/tests_support/stage14_fixtures.py (shared fixtures for the measured flag and the stage-14 selector)",
+    "Research-side pins against frozen CSVs, not the DB: imwut tests over data/corpus_20260912.csv; cscw tests/test_laser_pairs.py (reproduces the 755 images); cscw tests/test_turnaround.py"
+  ],
+  "shared_helpers": [
+    {
+      "name": "taxonomy.measurable_species_sql / rigid_target_sql / calibration_target_name_sql",
+      "file": "/home/chris/Repos/school/e4e/fishsense/fishsense-lite/libs/fishsense-shared/src/fishsense_shared/taxonomy.py:224-284",
+      "used_by_slices": "views (dive_pipeline_status measured, mislabel suspects); stage-14 cohort selector (dive_cohort_controller); measure_fish_activity uses the Python is_measurable. Not yet ported to v2: no taxonomy module in fishsense-services."
+    },
+    {
+      "name": "taxonomy.SLATE_CONTENT_MARKER, MEASURABLE_CALIBRATION_TARGETS, MEASURABILITY_CORPUS, SQL_BROADER_THAN_PYTHON",
+      "file": "/home/chris/Repos/school/e4e/fishsense/fishsense-lite/libs/fishsense-shared/src/fishsense_shared/taxonomy.py:98,150,391,443",
+      "used_by_slices": "views, the stage-9 slate cohort, the stage-14 cohort, species sync, measure_fish"
+    },
+    {
+      "name": "_VALID_LASER_SQL / _VALID_HEADTAIL_SQL / _RESOLVED_EXTRINSICS_SQL",
+      "file": "/home/chris/Repos/school/e4e/fishsense/fishsense-lite/services/fishsense-api/src/fishsense_api/views.py:36-62",
+      "used_by_slices": "dive_pipeline_status only, but each mirrors a cohort predicate (stages 1, 2, 5.1, 14) in dive_cohort_controller"
+    },
+    {
+      "name": "KNOWN_FISH_MODELS / KNOWN_CALIBRATION_TARGETS / FISH_MODEL_NOTES / PROVISIONAL_FISH_MODELS",
+      "file": "/home/chris/Repos/school/e4e/fishsense/fishsense-lite/services/fishsense-api/src/fishsense_api/views.py:473-664",
+      "used_by_slices": "reference-data seed (alembic plus database startup seed); the accuracy and mislabel views. v2 takes live rows through migrate-v1 instead"
+    },
+    {
+      "name": "ALL_VIEW_DDL / ALL_VIEW_NAMES + database._create_all_views",
+      "file": "/home/chris/Repos/school/e4e/fishsense/fishsense-lite/services/fishsense-api/src/fishsense_api/views.py:892-907; database.py:110-135",
+      "used_by_slices": "API bootstrap (the fresh-database stamp path); drops everything in reverse order, then creates in forward order, without CASCADE"
+    },
+    {
+      "name": "v2 effective_laser_calibrations / current_measurements / current_laser_depths / current_fish_model_references",
+      "file": "/home/chris/Repos/school/e4e/fishsense/fishsense-services/services/fishsense-services-api/src/fishsense_services_api/migrations/versions/0008_laser_calibrations.py:117-136; 0013:78-160; 0004:76-82",
+      "used_by_slices": "the building blocks for the v1-shaped views (calibrated/measured, measurement, laserdepth, the fishmodelreference cross join)"
+    }
+  ],
+  "contracts": [
+    "No fishsense_shared DTOs. Consumers read Postgres directly: Superset as the `superset` role (SELECT on all tables plus default privileges: deploy/pg_volumes/scripts/2025-09-02_create_database.sql); research as superuser `psql -U postgres` over SSH into the Incus container, or against a pg_restore of nightly dumps in ~/mnt/fishsense_process_work/database_backups/fishsense/.",
+    "Superset asset bundle (Superset 6.0 native export YAML, re-imported on every converge by docker-init.sh step 5, overwriting by uuid): database uuid 11111111-...; datasets 2222 (dive_pipeline_status), 3333 (pipeline_labeling_queue), 4444 (pipeline_partial_dives), 5555 (fish_measurements); charts 6666, 7777, 9999, aaaa, bbbb; dashboards 8888 (slug fishsense-pipeline-status) and cccc (slug fishsense-fish-measurements). The DB password is sed-injected into a __DB_PASSWORD__ placeholder.",
+    "The web portal deep-links the two dashboard slugs at ANALYTICS_BASE=https://analytics.fishsense.e4e.ucsd.edu/superset/dashboard (apps/fishsense-lite-web/lib/static-links.ts:8-31).",
+    "Research CSV contracts: imwut data/*.csv are pipe-delimited with JSON geometry columns, read by fishsense_imwut.calibration.load_rows (which drops the psql footer); the corpus schema is dive_id|calibration_dive_id|camera_id|model|known_length_m|length_m|depth_m|dot|leid|pos|ax|km. cscw's frozen CSVs are listed with sha256 in data/PROVENANCE.md.",
+    "Object-store keys: none. Superset's \"Image Path\" and the research extracts expose image.path, the NAS-relative raw path (REEF/data/... or __unsorted-data/...), which maps to captures.source_path in v2."
+  ],
+  "v2_schema_gaps": [
+    "None of the four v1 views exist in v2 (dive_pipeline_status, fish_model_measurement_accuracy, fish_length_estimate, fish_model_species_mislabel_suspects). Nor do any v1-named compatibility views (dive, image, measurement, laserlabel, headtaillabel, specieslabel, diveslatelabel, laserextrinsics, laserdepth, cameraintrinsics, fish, species, fishmodelreference, diveframecluster, diveframeclusterimagemapping, laserprediction, divelaserline, diveslate, calibrationtarget, camera).",
+    "Integer ids for rows created after cutover: v1_id bigint is set only on migrated rows. dives, captures, fish, species, labels and dive_frame_clusters have no seq or other integer key, so a v1-shaped view cannot give new rows a dive_id/image_id/fish_id that the research SQL can join. This needs a decision (for example a bigint identity on those tables, or v1_id-else-NULL).",
+    "No research DB role, grants or tenant binding. Every v2 view is security_invoker over RLS keyed on current_setting('app.tenant_id'), so a read role sees nothing unless the setting is set (for example ALTER ROLE ... SET app.tenant_id=<lab>, which is untested). The Superset role has the same problem (PLAN 9.18 and 9.20 are open).",
+    "laser_calibrations has no camera or device column, but v1 laserextrinsics.camera_id is NOT NULL and extract_calibration_fits.sql selects le.camera_id. A view must derive it from dives.device_id \u2192 devices.v1_id. UNCERTAIN whether le.camera_id always equals dive.camera_id in v1 data; check on the dump.",
+    "JSON type change: v1 uses `json` (laser_position, laser_axis, camera_matrix, distortion_coefficients, label_studio_json, reference_points, slate_rectangle, skipped_points) and v2 uses `jsonb`. `::text` then yields normalized spacing and key order, so imwut exports that are pinned byte-identical (pos/ax/km/dist columns) will change text. The values are equal.",
+    "species_labels lacks v1 specieslabel.laser_x, laser_y, laser_label and slate_upside_down. They are not in v1_migration LABEL_TABLES, so they are lost. No research query found uses them.",
+    "Measurement history shape: v1 overwrote one row per (image, fish) and kept stale rows visible, while v2 is append-only. current_measurements hides stale and refused-calibration rows, which v1's accuracy/length views and extract_field.sql include. A v1-shaped `measurement` needs 'latest per (capture, fish), source=server' semantics, not current_measurements, or the counts will differ. This is a decision.",
+    "laserextrinsics semantics: v1 has one row per dive that survives a later refusal (calibrated=true in v1 even when refused), while v2's current_laser_calibrations can be a refused row and effective_laser_calibrations excludes it. A v1-shaped laserextrinsics or calibrated flag needs 'latest accepted per dive'.",
+    "Enum casing: v2 dives.priority is lowercase ('high') and dive_frame_clusters.formed_by is 'prediction'/'label_studio'. The Superset SQL filters priority='HIGH' and the v1 view compares data_source='PREDICTION'/'LABEL_STUDIO', so the views must upper() or map these.",
+    "Renamed columns the views must alias back: image.path=captures.source_path, taken_datetime=captured_at, image.camera_id=device_id\u2192devices.v1_id; dive.path=source_path, dive_datetime=dived_at, dive_slate_id=slate_template_id\u2192slate_templates.v1_id, calibration_dive_id=calibration_source_dive_id, calibration_target_id\u2192calibration_targets.v1_id, calibration_refused_* now live in refused laser_calibrations rows; label_studio_project_id/task_id/json/updated_at are ls_project_id/ls_task_id/ls_payload/ls_updated_at; user_id is ls_labeler_id (a Label Studio id, not a v1 user id); measurement.laser_extrinsics_id=laser_calibration_id\u2192laser_calibrations.v1_id; measurement.image_id=capture_id; fish.name is fish_model_id\u2192fish_models.name; diveslate.path=source_path; calibrationtarget rows/cols/square_size_m are interior_rows/interior_cols/pitch_x_m(=pitch_y_m); camera.serial_number=devices.serial; diveframeclusterimagemapping is dive_frame_cluster_captures(cluster_id, capture_id).",
+    "fish_model_references is versioned by valid_from with no single-row-per-name guarantee. The mislabel view's CROSS JOIN and the research name joins must go through current_fish_model_references, or they multiply rows.",
+    "The taxonomy SQL helpers (measurable_species_sql, rigid_target_sql, calibration_target_name_sql, SLATE_CONTENT_MARKER) are not ported to v2. dive_pipeline_status and the mislabel view need them.",
+    "Not checked here: whether v1 laserprediction allows several rows per image. The v2 current_laser_predictions view takes the latest per capture, while cscw laserprediction.csv reads raw rows."
+  ],
+  "dependencies": [
+    "Depends on migrate-v1 (v1_migration.py) for the v1_id columns and the reference data taken from live rows.",
+    "Depends on the taxonomy port (fishsense_shared.taxonomy) for the measurable, rigid-target and slate predicates.",
+    "dive_pipeline_status mirrors the cohort selectors of stages 0.1, 1, 2, 5.1, 9, 13 and 14 (dive_cohort_controller.py:32-35, 100, 135, 312, 1035-1086). The parity test ties them together, so port each stage's cohort before or with its column.",
+    "The stage-14 measure slice (measurements, laser_extrinsics_id provenance) and the stage-13 calibration slice (borrowed calibration, refusals) set the meaning of measured, calibrated and calibration_source.",
+    "Clustering (already ported) provides has_prediction_clusters and the LABEL_STUDIO cluster test in measured.",
+    "Blocked by open decisions PLAN 9.18 (Superset under RLS), 9.20 (research role, versioned view contract, as-of reads), 9.13 (what 'current' means), and the integer-id question for post-cutover rows.",
+    "Downstream: the Superset dashboards (2), the web portal Results links, the imwut figures and paper numbers, cscw frozen extracts, and wuwnet indirectly through imwut's corpus cache. The v1 tools (validate_headtail_predictions, detect_angle_sweep_runs, audit_* scripts) also depend on these tables or the SDK.",
+    "PLAN 2.7 says cscw only reads imwut CSVs ('Not read in depth'). That is wrong: cscw has its own SQL against restored v1 dumps (sql/extract_laser_annotations.sql, extract_label_timestamps.sql) and unscripted extracts of divelaserline, diveframecluster, laserprediction and diveslatelabel."
+  ],
+  "gotchas": [
+    "Views are raw SQL outside SQLModel.metadata. v1 needed the ALL_VIEW_DDL registry because fresh databases stamp head and would otherwise lose the views (views.py:880-891; database.py:110-135). v2 has hand-written migrations, so create them in a migration and register them in schema_audit.",
+    "Drop and create in dependency order, never CASCADE. mislabel_suspects depends on the accuracy view, and CASCADE would silently destroy Superset-created dependent views (database.py:113-127). Changing a view's columns means drop plus recreate; CREATE OR REPLACE rejects column-shape changes (CLAUDE.md:1133-1138).",
+    "Every v2 view must be `WITH (security_invoker = true)`, or it runs as the owner and bypasses RLS (0006_views_run_as_caller.py). The schema audit enforces this.",
+    "'Complete' is never vacuous: zero rows of a kind reads FALSE, not TRUE (CLAUDE.md:1127-1131). Every *_preprocessed flag also requires at least one qualifying image.",
+    "Every image correlation must gate on is_canonical, the same predicate the cohorts use. Half of v1's image rows are duplicates (207 of 479 dives), and without the gate the dashboard shows dives as forever incomplete (views.py:104-113).",
+    "measured counts an image only when its measurement names the extrinsics that resolve today (own, then borrowed). Rows with NULL laser_extrinsics_id read as unmeasured. After the 2026-08-11 recalibration this is what exposed stale lengths (views.py:358-367).",
+    "The SQL LIKE predicates only approximate taxonomy.is_measurable, which is the definition of record. The TRIM(col) <> 'Fish Model,' guard stops the empty leaf from wedging stage 14, and Calibration Targets is an explicit allowlist (Ruler, Box) that excludes the checkerboard. Keep the parity test over MEASURABILITY_CORPUS (CLAUDE.md:1063-1101).",
+    "The accuracy view INNER JOINs on the fish model name, so a model without a reference row vanishes silently, as happened to Weasly Fish. Seed the reference row before the data arrives (views.py:502-511).",
+    "Mislabel view: exclude is_provisional rows and calibration targets (Ruler, Box) from both sides. Do not reuse is_provisional to suppress noise (views.py:805-823; taxonomy.py:256-279).",
+    "fish_length_estimate uses nearest-rank quantiles (no percentile_cont) so v1 could test on SQLite. v2 tests run on Postgres and could use percentile_disc, but that changes numbers the research compares against, so keep nearest-rank for v1 shape. p90 equals max when n<=8, which is why n_frames is exposed.",
+    "The reference lengths are FORK lengths and are the validation set; never back-solve calibration from them. Ruler is 0.3429 m (0.5 to 14 in), not 14 in (views.py:440-511). Live values have drifted from the seeds (Weasly 0.313, Ruler 0.341, checkerboard pitch 0.04217; PLAN 2.7), and v2 takes live rows.",
+    "The views' p90 is per fish, while the paper's p90 is per (dive, model) cell after the cohort rule. Label dashboards so they are not mistaken for paper numbers (PLAN 9.18).",
+    "The Superset SQL uses Postgres-only COUNT(*) FILTER and a literal priority='HIGH'. The v1-shaped dive_pipeline_status must keep the column names and uppercase enum strings, or the imported datasets break silently. Import failures only WARN (docker-init.sh:121).",
+    "Research SQL hard-codes v1 dive ids (imwut: 5-39, 58-84, 87-114, 279-471, 495-527; cscw filters to the 755 images), and imwut identifies targets by string: fishmodelreference.name = split_part(content_of_image, ', ', 2). A rename must move the specieslabel, reference and fish rows together (imwut calibration.py:238-245).",
+    "Research runs only on prod read replicas or restored dumps, and prod writes belong to the user: the SQL is handed over and verified read-only afterwards (imwut post_labeling_analysis/HANDOFF.md:29; cscw HANDOFF.md:191). PLAN 9.20 wants the SSH superuser path to go away.",
+    "v1-migration parity: dive 509 borrows from 508, which has no extrinsics, so its 162 measurements are stale in v1 and v2 alike (PLAN 6.4). Expect v1-shaped view counts to differ wherever v2's refused or stale semantics hide rows that v1 still shows."
+  ],
+  "size": "Source: views.py has 907 lines (about 300 of view SQL and 4 views; the rest is seed constants and comments). The taxonomy SQL helpers are about 60 of taxonomy.py's 446 lines. The view bootstrap in database.py is about 60 lines. Superset assets are 14 YAML files, 702 lines (4 datasets, 5 charts, 2 dashboards). Research SQL: imwut 6 files, cscw 2 files, plus about 6 unscripted cscw extracts; wuwnet has none. Tests: 6 API test files, 2831 lines, 110 tests, plus test_taxonomy.py (381 lines, 29 tests), all on SQLite in v1; v2 must run them on real Postgres. v2 scope estimate: one migration with about 4 research views plus about 20 v1-named compatibility views, a research role, and a Postgres test suite of roughly the same count."
+}

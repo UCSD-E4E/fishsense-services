@@ -1,0 +1,675 @@
+{
+  "slice": "laser \u2014 stage 0.1 preprocess, GPU laser prediction, auto-accept gate, per-dive laser-label validation (#927 full-population judgement, #932 superseded_reason + remediation tool), laser Label Studio create/populate, BackfillLaserPredictions. SOURCE NOTE: I read v1 at origin/main 77e8f8e5, extracted read-only with `git archive` (I ran one `git fetch`, which updated only the remote refs). The local main is at a8b2c3bc, which predates #927 (3b5ae551) and #932 (b734db93); both change this slice. Paths are relative to /home/chris/Repos/school/e4e/fishsense/fishsense-lite. Abbreviations: A = services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker, D = services/fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker, S = libs/fishsense-shared/src/fishsense_shared, API = services/fishsense-api/src/fishsense_api.",
+  "workflows": [
+    {
+      "name": "PreprocessLaserImagesParentWorkflow",
+      "file": "A/workflows/preprocess_laser_images_parent_workflow.py",
+      "worker": "api-worker (fishsense_api_queue)",
+      "schedule": "preprocess-laser-images-workflow-schedule; hourly, offset +0; overlap SKIP; run_timeout 1h (A/worker.py:509-517)",
+      "calls": [
+        "select_next_high_priority_dive_for_laser_preprocessing_activity (_dispatch.select_dive, 5m, SDK_FAIL_FAST)",
+        "resolve_laser_preprocess_inputs_activity -> PreprocessLaserImagesInput (5m)",
+        "if no checksums: clear_laser_reprocess_flags_activity(dive, checksums=None), then return (:81-98)",
+        "ensure_data_worker_running_activity (wake_data_worker)",
+        "stage_raw_bytes_for_dive_activity (1h, hb 5m, STAGE_RAW_RETRY_POLICY)",
+        "child PreprocessLaserImagesWorkflow, id preprocess-laser-{dive}, CPU queue, exec 1h, ALLOW_DUPLICATE; if CHILD_ALREADY_RUNNING return without cleanup (:102-117)",
+        "cleanup_raw_bytes_for_dive_activity (15m)",
+        "clear_laser_reprocess_flags_activity(dive, checksums=what was redrawn) (:124-127)"
+      ]
+    },
+    {
+      "name": "PreprocessLaserImagesWorkflow",
+      "file": "D/workflows/preprocess_laser_images_workflow.py",
+      "worker": "data-worker, role cpu (fishsense_data_processing_queue)",
+      "schedule": "child of the parent above",
+      "calls": [
+        "preprocess_laser_image per checksum via asyncio.gather (start_to_close 5m, output_folder 'preprocess_jpeg', bbox + region)"
+      ]
+    },
+    {
+      "name": "PredictLaserImagesParentWorkflow",
+      "file": "A/workflows/predict_laser_images_parent_workflow.py",
+      "worker": "api-worker",
+      "schedule": "predict-laser-images-workflow-schedule; hourly, offset +10m; SKIP; run_timeout 2h (A/worker.py:560-569)",
+      "calls": [
+        "select_next_high_priority_dive_for_laser_prediction_activity",
+        "resolve_laser_predict_inputs_activity -> PredictLaserImagesInput; return if no images",
+        "ensure_gpu_worker_running_activity (wake_gpu_worker, 30m, hb 5m) -> 'gpu'|'cpu_fallback'|'unavailable'; on unavailable return None BEFORE staging (:81-92)",
+        "stage_raw_bytes_for_dive_activity",
+        "child PredictLaserImagesWorkflow, id predict-laser-{dive}, GPU queue, exec 6h, result List[LaserPredictionResult]; return on CHILD_ALREADY_RUNNING",
+        "persist_laser_predictions_activity(results) if any (15m)",
+        "cleanup_raw_bytes_for_dive_activity (deliberately before any Label Studio step, :122-127)",
+        "backfill_laser_predictions_for_dive_activity(dive) if results",
+        "ensure_light_worker_running_activity, then child EvaluateLaserAutoAcceptWorkflow, id auto-accept-laser-{dive}, light queue, exec GATE_CHILD_EXECUTION_TIMEOUT (35m); handles CHILD_ALREADY_RUNNING (:159-182)",
+        "apply_laser_auto_accept_for_dive_activity(dive) if summary.auto_accepted (:201-224)"
+      ]
+    },
+    {
+      "name": "PredictLaserImagesWorkflow",
+      "file": "D/workflows/predict_laser_images_workflow.py",
+      "worker": "data-worker, role gpu (fishsense_data_processing_gpu_queue; served by the GPU Deployment or the CPU fallback)",
+      "schedule": "child of PredictLaserImagesParentWorkflow",
+      "calls": [
+        "predict_laser_image per image via gather (start_to_close 10m, result LaserPredictionResult)"
+      ]
+    },
+    {
+      "name": "EvaluateLaserAutoAcceptParentWorkflow (backlog drain)",
+      "file": "A/workflows/evaluate_laser_auto_accept_parent_workflow.py",
+      "worker": "api-worker",
+      "schedule": "evaluate-laser-auto-accept-workflow-schedule; hourly, offset +22m; SKIP; run_timeout 1h (A/worker.py:744-768)",
+      "calls": [
+        "select_next_high_priority_dive_for_laser_auto_accept_activity",
+        "ensure_light_worker_running_activity",
+        "child EvaluateLaserAutoAcceptWorkflow, same id auto-accept-laser-{dive} as the predict path, light queue, exec 35m; handles CHILD_ALREADY_RUNNING",
+        "apply_laser_auto_accept_for_dive_activity if summary.auto_accepted"
+      ]
+    },
+    {
+      "name": "EvaluateLaserAutoAcceptWorkflow",
+      "file": "D/workflows/evaluate_laser_auto_accept_workflow.py",
+      "worker": "data-worker, role light (fishsense_data_processing_light_queue)",
+      "schedule": "child of the two parents above",
+      "calls": [
+        "evaluate_laser_auto_accept_activity(dive_id): schedule_to_start 20m, start_to_close 10m, schedule_to_close 30m, hb 1m (S/auto_accept_timeouts.py)"
+      ]
+    },
+    {
+      "name": "SyncLabelStudioLaserLabelsWorkflow (post-sync validation half; the sync half is already ported to v2)",
+      "file": "A/workflows/sync_label_studio_laser_labels_workflow.py:73-137",
+      "worker": "api-worker",
+      "schedule": "sync-label-studio-laser-labels-workflow-schedule; hourly, +0; ALLOW_ALL; run_timeout 3h (default)",
+      "calls": [
+        "get_dives_with_complete_laser_labeling_activity (10m)",
+        "ensure_light_worker_running_activity, only when that list is non-empty",
+        "child ValidateLaserLabelsForDiveWorkflow per dive, id validate-laser-labels-{dive}, light queue, exec 20m, ALLOW_DUPLICATE, VALIDATION_CONCURRENCY=8, failures suppressed (ExceptionGroupErrorLogging suppress=True)"
+      ]
+    },
+    {
+      "name": "ValidateLaserLabelsForDiveWorkflow",
+      "file": "D/workflows/validate_laser_labels_for_dive_workflow.py",
+      "worker": "data-worker, role light",
+      "schedule": "child of the sync workflow",
+      "calls": [
+        "validate_laser_labels_for_dive_activity(dive_id): s2c 15m, stc 10m, hb 1m; returns the count superseded (its docstring still says 'Phase 1 observe-only', which is stale)"
+      ]
+    },
+    {
+      "name": "CreateLaserLabelStudioProjectWorkflow",
+      "file": "A/workflows/create_laser_label_studio_project_workflow.py",
+      "worker": "api-worker",
+      "schedule": "on-demand (registered, not scheduled)",
+      "calls": [
+        "create_laser_label_studio_project_activity(dive_id) (5m)"
+      ]
+    },
+    {
+      "name": "PopulateLaserLabelStudioProjectWorkflow",
+      "file": "A/workflows/populate_laser_label_studio_project_workflow.py (+ A/workflows/_populate.py create_then_populate)",
+      "worker": "api-worker",
+      "schedule": "child of the populate parent, or on-demand (use a non-colliding id, e.g. populate-laser-393-manual)",
+      "calls": [
+        "create_laser_label_studio_project_activity (5m, default retry)",
+        "populate_laser_label_studio_project_activity(dive, project) (30m, hb 2m, RetryPolicy 30s initial, x2, max 5m, 5 attempts)"
+      ]
+    },
+    {
+      "name": "PopulateLaserLabelStudioProjectParentWorkflow",
+      "file": "A/workflows/populate_laser_label_studio_project_parent_workflow.py",
+      "worker": "api-worker",
+      "schedule": "populate-laser-labels-workflow-schedule; hourly, +12m; SKIP; run_timeout 1h (A/worker.py:586-603)",
+      "calls": [
+        "select_dives_needing_laser_population_activity (returns ALL dives in the cohort)",
+        "child PopulateLaserLabelStudioProjectWorkflow per dive, id populate-laser-{dive}, exec 30m, ALLOW_DUPLICATE, POPULATE_CONCURRENCY=4, failures suppressed"
+      ]
+    },
+    {
+      "name": "BackfillLaserPredictionsWorkflow",
+      "file": "A/workflows/backfill_laser_predictions_workflow.py",
+      "worker": "api-worker",
+      "schedule": "on-demand (temporal workflow start --input <dive_id>)",
+      "calls": [
+        "backfill_laser_predictions_for_dive_activity(dive) (15m, SDK_FAIL_FAST)"
+      ]
+    },
+    {
+      "name": "RemediateLaserSupersedesParentWorkflow (#932)",
+      "file": "A/workflows/remediate_laser_supersedes_parent_workflow.py",
+      "worker": "api-worker",
+      "schedule": "on-demand only, started by the CLI A/remediate_laser_supersedes.py (dry-run / apply)",
+      "calls": [
+        "ensure_light_worker_running_activity",
+        "child RemediateLaserSupersedesWorkflow, id remediate-laser-supersedes-{parent wf id}, light queue, exec 2h"
+      ]
+    },
+    {
+      "name": "RemediateLaserSupersedesWorkflow (#932)",
+      "file": "D/workflows/remediate_laser_supersedes_workflow.py",
+      "worker": "data-worker, role light",
+      "schedule": "child of the remediation parent",
+      "calls": [
+        "plan_laser_supersede_remediation_activity per dive, in batches of 8 (s2c 15m, stc 10m, hb 1m)",
+        "compute revival_digest; if dry run, return the report",
+        "if apply: no-op when nothing to revive; non-retryable RemediationPlanMismatch when the digest differs from expected_plan_sha256",
+        "apply_laser_supersede_remediation_activity per dive with revive_ids, in batches of 8"
+      ]
+    }
+  ],
+  "activities": [
+    {
+      "name": "select_next_high_priority_dive_for_laser_preprocessing_activity",
+      "file": "A/activities/select_next_high_priority_dive_for_laser_preprocessing_activity.py",
+      "purpose": "Stage 0.1 cohort selector (one SDK call through cohort_selection.select_next_dive)",
+      "touches": [
+        "db:dive/image/laserlabel read via GET /api/v1/dives/select-next/laser-preprocessing/"
+      ]
+    },
+    {
+      "name": "resolve_laser_preprocess_inputs_activity",
+      "file": "A/activities/resolve_laser_preprocess_inputs_activity.py",
+      "purpose": "Build PreprocessLaserImagesInput: canonical images with no non-sentinel laser label OR a needs_reprocess flag; camera intrinsics; bbox + LASER_REGION_POLYGON",
+      "touches": [
+        "db:dive (GET dives.get)",
+        "db:cameraintrinsics (cameras.get_intrinsics)",
+        "db:image (images.get)",
+        "db:laserlabel read (GET /dives/{id}/labels/laser, superseded hidden)"
+      ]
+    },
+    {
+      "name": "clear_laser_reprocess_flags_activity",
+      "file": "A/activities/clear_laser_reprocess_flags_activity.py",
+      "purpose": "Lower needs_reprocess, scoped to the redrawn checksums or the whole dive; idempotent",
+      "touches": [
+        "db:laserlabel write via DELETE /api/v1/dives/{id}/labels/laser/needs-reprocess?checksums="
+      ]
+    },
+    {
+      "name": "select_next_high_priority_dive_for_laser_prediction_activity",
+      "file": "A/activities/select_next_high_priority_dive_for_laser_prediction_activity.py",
+      "purpose": "Laser-predict cohort selector",
+      "touches": [
+        "db read via GET /api/v1/dives/select-next/laser-prediction/"
+      ]
+    },
+    {
+      "name": "resolve_laser_predict_inputs_activity",
+      "file": "A/activities/resolve_laser_predict_inputs_activity.py",
+      "purpose": "Build PredictLaserImagesInput: canonical images whose prediction is missing or has predictor_version != 2 (NULL counts as stale) and that have no completed live label; wavelength=None; laser_region=polygon",
+      "touches": [
+        "db:dive/cameraintrinsics/image",
+        "db:laserprediction read (GET /dives/{id}/laser-predictions/)",
+        "db:laserlabel read"
+      ]
+    },
+    {
+      "name": "persist_laser_predictions_activity",
+      "file": "A/activities/persist_laser_predictions_activity.py",
+      "purpose": "Upsert each LaserPredictionResult. The gate fields are omitted, so a re-prediction clears the verdict (intended)",
+      "touches": [
+        "db:laserprediction write via PUT /api/v1/images/{image_id}/laser-prediction/"
+      ]
+    },
+    {
+      "name": "backfill_laser_predictions_for_dive_activity",
+      "file": "A/activities/backfill_laser_predictions_activity.py",
+      "purpose": "Attach placeable predictions to existing incomplete, non-superseded LS tasks. Idempotent by the LS model_version tag laser-detector-v{N}. Then point each per-dive project's model_version at its majority tag",
+      "touches": [
+        "db:laserprediction, laserlabel read",
+        "label-studio: predictions.list per project, predictions.create, projects.get/update(model_version)"
+      ]
+    },
+    {
+      "name": "select_next_high_priority_dive_for_laser_auto_accept_activity",
+      "file": "A/activities/select_next_high_priority_dive_for_laser_auto_accept_activity.py",
+      "purpose": "Auto-accept backlog cohort selector",
+      "touches": [
+        "db read via GET /api/v1/dives/select-next/laser-auto-accept/"
+      ]
+    },
+    {
+      "name": "evaluate_laser_auto_accept_activity",
+      "file": "D/activities/evaluate_laser_auto_accept_activity.py",
+      "purpose": "Fit the dive's WHOLE current prediction set and write per-frame verdicts (only rows that changed, 8 concurrent PUTs). If any prediction is stale, refuse the whole dive and clear standing verdicts. Returns LaserAutoAcceptSummary",
+      "touches": [
+        "db:laserprediction read+write via SDK (GET /dives/{id}/laser-predictions/, PUT /images/{id}/laser-prediction/) -- the DATA-WORKER calls the API directly",
+        "settings: laser_auto_accept.* (D/config.py:133-167)",
+        "fishsense_core.laser.fit_dive_line"
+      ]
+    },
+    {
+      "name": "apply_laser_auto_accept_for_dive_activity",
+      "file": "A/activities/apply_laser_auto_accept_activity.py",
+      "purpose": "Create an annotation (origin=prediction, ground_truth=False) on open tasks whose prediction has auto_accept, a dot, and an LS task that has no annotation and no draft. Does NOT write LaserLabel; the sync does that",
+      "touches": [
+        "db:laserprediction, laserlabel read",
+        "label-studio: tasks.list per project, annotations.create"
+      ]
+    },
+    {
+      "name": "create_laser_label_studio_project_activity",
+      "file": "A/activities/create_laser_label_studio_project_activity.py",
+      "purpose": "Idempotent per-dive project, found by title '{name} #{dive_id} - Laser Calibration Labeling' (50-char cap; the name is truncated, never the id). Heals the labeling config; registers Garage S3 source storage",
+      "touches": [
+        "db:dive read (name)",
+        "label-studio: workspaces.list, projects.list/create/update(label_config), import_storage.s3.list/create"
+      ]
+    },
+    {
+      "name": "populate_laser_label_studio_project_activity",
+      "file": "A/activities/populate_laser_label_studio_project_activity.py",
+      "purpose": "Seed tasks for canonical images with a prediction and no completed label, gated on the JPEG existing in Garage. An auto-accepted prediction is imported as an annotation (with completed_by=bot_user_id); anything else is imported as a pre-annotation. The label colour is the dive-majority vote. Records sentinel-shaped rows (completed=False); publishes only when the import is complete",
+      "touches": [
+        "db:image, laserlabel, laserprediction read",
+        "db:laserlabel write via PUT /api/v1/labels/laser/{image_id}",
+        "object-store: HEAD labels bucket {labels_prefix}/preprocess_jpeg/{checksum}.JPG",
+        "label-studio: import_tasks, tasks.list (dedup), projects.update(is_published)"
+      ]
+    },
+    {
+      "name": "select_dives_needing_laser_population_activity",
+      "file": "A/activities/select_dives_needing_laser_population_activity.py",
+      "purpose": "List every dive in the populate cohort",
+      "touches": [
+        "db read via GET /api/v1/dives/needing-laser-population/"
+      ]
+    },
+    {
+      "name": "preprocess_laser_image",
+      "file": "D/activities/preprocess_laser_image.py",
+      "purpose": "Download raw ORF; RectifiedImage(RawImage) (rawpy, undistort, CLAHE); draw a 2-px green polyline of the region (or a rectangle from bbox when region is None); JPEG-encode; PUT",
+      "touches": [
+        "object-store: GET scratch raw/{checksum}.ORF; PUT labels {prefix}/preprocess_jpeg/{checksum}.JPG",
+        "fishsense_core RawImage/RectifiedImage (still imports fishsense_api_sdk CameraIntrinsics)"
+      ]
+    },
+    {
+      "name": "predict_laser_image",
+      "file": "D/activities/predict_laser_image.py",
+      "purpose": "LinearRawImage -> LaserDetector.predict(rectify_output=True). Read the colour at the dot after rectified_to_sensor_point. Drop x/y when the dot is outside the laser_region (rejected_out_of_region=True). Stamp predictor_version=2, checkpoint basename, core_version",
+      "touches": [
+        "object-store: GET raw/{checksum}.ORF",
+        "model: LaserDetector checkpoint /e4efs/models/run3_epoch_021.pt (env E4EFS_LASER_DETECTOR__CHECKPOINT; baked from HF ucsde4e/fishsense-laser-detector)",
+        "torch GPU if available, else CPU"
+      ]
+    },
+    {
+      "name": "get_dives_with_complete_laser_labeling_activity",
+      "file": "A/activities/get_dives_with_complete_laser_labeling_activity.py",
+      "purpose": "Validation cohort: dives where every live laser label is completed",
+      "touches": [
+        "db read via GET /api/v1/labels/laser/dives-with-complete-labeling"
+      ]
+    },
+    {
+      "name": "validate_laser_labels_for_dive_activity",
+      "file": "D/activities/validate_laser_labels_for_dive_activity.py",
+      "purpose": "Fetch labels including superseded ones plus the dive-slate calibration frames; run judge_dive once; upsert DiveLaserLine every run; on REFLECTION log an error and stand down; on GATE (>50%) refuse; supersede flagged rows that are still live (superseded is False) with superseded_reason validator_3sigma or validator_coarse_calibration; 8 concurrent PUTs",
+      "touches": [
+        "db:laserlabel read (include_superseded=True) + write (PUT /labels/laser/{image_id}) via SDK from the DATA-WORKER",
+        "db:diveslatelabel read (get_dive_slate_labels)",
+        "db:divelaserline write (PUT /api/v1/dives/{id}/laser-line/)"
+      ]
+    },
+    {
+      "name": "plan_laser_supersede_remediation_activity",
+      "file": "D/activities/laser_supersede_remediation.py:64-71",
+      "purpose": "One dive's DivePlan (read-only). Calls plan_dive, which calls judge_dive",
+      "touches": [
+        "db:laserlabel (include_superseded), diveslatelabel read via SDK"
+      ]
+    },
+    {
+      "name": "apply_laser_supersede_remediation_activity",
+      "file": "D/activities/laser_supersede_remediation.py:74-126",
+      "purpose": "Re-plan from current state; refuse (non-retryable, nothing written) if any requested id is not in the fresh plan; revive the ones still superseded with superseded=False and reason=remediation; log REVIVED laser_label_id=...",
+      "touches": [
+        "db:laserlabel write via PUT /labels/laser/{image_id}"
+      ]
+    },
+    {
+      "name": "(scaling, owned by the NRP slice) ensure_data_worker_running / ensure_light_worker_running / ensure_gpu_worker_running_activity",
+      "file": "A/activities/k8s_scaling.py, A/activities/gpu_fallback.py",
+      "purpose": "Wake the processor Deployments; the GPU one returns a mode, with fallback state kept in Deployment annotations",
+      "touches": [
+        "k8s: deployments/scale + annotations on NRP"
+      ]
+    },
+    {
+      "name": "(staging, owned by the staging slice) stage_raw_bytes_for_dive_activity / cleanup_raw_bytes_for_dive_activity",
+      "file": "A/activities/ (stage_raw..., cleanup_raw...)",
+      "purpose": "Stage NAS -> Garage raw scratch, and evict it afterwards",
+      "touches": [
+        "nas (read-only)",
+        "object-store: scratch raw/"
+      ]
+    }
+  ],
+  "api_endpoints": [
+    {
+      "route": "GET /api/v1/dives/select-next/laser-preprocessing/",
+      "file": "API/controllers/dive_cohort_controller.py:403-460",
+      "semantics": "Lowest-id HIGH dive with a canonical image that has NO LaserLabel with label_studio_project_id IS NOT NULL (sentinels ignored; incomplete rows count as labeled), OR a canonical image carrying a label with needs_reprocess=TRUE AND superseded = FALSE (_has_image_flagged_for_reprocess :353). LIMIT 1."
+    },
+    {
+      "route": "GET /api/v1/dives/select-next/laser-prediction/",
+      "file": "API/controllers/dive_prediction_cohort_controller.py:63-163",
+      "semantics": "HIGH AND (a canonical image with no LaserPrediction and no label that is completed=TRUE AND superseded=FALSE) OR (the dive is still being labeled: a canonical image with a completed=FALSE, superseded=FALSE, non-sentinel label AND a canonical image whose prediction's predictor_version IS DISTINCT FROM 2 and has no completed live label). Order by id, LIMIT 1."
+    },
+    {
+      "route": "GET /api/v1/dives/needing-laser-population/",
+      "file": "API/controllers/dive_cohort_controller.py:653-695",
+      "semantics": "All HIGH dives with a canonical image that HAS a LaserPrediction and has no completed=TRUE LaserLabel (superseded not filtered here). Returns a list ordered by id."
+    },
+    {
+      "route": "GET /api/v1/dives/select-next/laser-auto-accept/",
+      "file": "API/controllers/dive_cohort_controller.py:1222-1280",
+      "semantics": "HIGH dive with a canonical image whose LaserPrediction has x,y NOT NULL AND gate_verdict IS NULL AND predictor_version = 2 (= excludes NULL). Abstentions are excluded so the cohort can drain. LIMIT 1."
+    },
+    {
+      "route": "GET /api/v1/labels/laser/dives-with-complete-labeling",
+      "file": "API/controllers/label_controller.py:503-555",
+      "semantics": "Dive ids with at least one completed live (superseded=FALSE) label AND no live label whose completed is FALSE or NULL."
+    },
+    {
+      "route": "GET /api/v1/labels/laser/label-studio-project-ids?incomplete=&gated=",
+      "file": "API/controllers/label_controller.py:396-500",
+      "semantics": "Distinct non-null project ids of live labels. incomplete => completed FALSE/NULL. gated=true => the project has a live-labelled image whose prediction has been judged AND none whose prediction's gate_verdict IS NULL; gated=false is the exact complement. The web landing page uses gated=true; the sync uses neither flag."
+    },
+    {
+      "route": "GET /api/v1/dives/{dive_id}/labels/laser?include_superseded=",
+      "file": "API/controllers/label_controller.py:598-632",
+      "semantics": "The dive's laser labels ORDER BY image_id, id (a total order the validator depends on). The default hides superseded = FALSE-mismatches, which also hides NULLs. 404 when empty (the SDK maps it to None/[])."
+    },
+    {
+      "route": "PUT /api/v1/labels/laser/{image_id}",
+      "file": "API/controllers/label_controller.py:635-643, _upsert_label :29-100",
+      "semantics": "Natural-key upsert on (image_id, project_id), with an IS NULL branch for sentinels. Only fields present in the body are written. 409 when the id belongs to another image or when no project is given and the image has several rows. An unknown superseded_reason returns 422."
+    },
+    {
+      "route": "GET /api/v1/labels/laser/label-studio/{label_studio_id}",
+      "file": "API/controllers/label_controller.py:578-595",
+      "semantics": "The sync's lookup. Filters superseded=FALSE, so corrections to a superseded task never sync back."
+    },
+    {
+      "route": "PUT/DELETE /api/v1/dives/{dive_id}/labels/laser/needs-reprocess",
+      "file": "API/controllers/label_reprocess_controller.py:141-180 (_set_needs_reprocess :35-138)",
+      "semantics": "Raise: canonical, superseded=FALSE, and by default only completed FALSE/NULL rows. Clear: canonical rows, unfiltered by superseded or completed, optionally scoped to ?checksums (None clears the whole dive; [] clears nothing)."
+    },
+    {
+      "route": "PUT /api/v1/images/{image_id}/laser-prediction/",
+      "file": "API/controllers/laser_prediction_controller.py:26-39 (+ controllers/_prediction_upsert.py)",
+      "semantics": "Upsert on image_id by whole-model merge (omitted gate fields reset to their defaults: auto_accept=False, gate_verdict=NULL). created_at is re-stamped server-side on every write."
+    },
+    {
+      "route": "GET /api/v1/dives/{dive_id}/laser-predictions/",
+      "file": "API/controllers/laser_prediction_controller.py:42-58",
+      "semantics": "Every prediction for the dive's images (canonical or not); an empty list, not a 404."
+    },
+    {
+      "route": "PUT/GET /api/v1/dives/{dive_id}/laser-line/",
+      "file": "API/controllers/dive_controller.py:378-419",
+      "semantics": "Upsert one DiveLaserLine per dive and stamp fitted_at; GET returns it or None."
+    },
+    {
+      "route": "(view) dive_pipeline_status: laser_preprocessed, laser_labeling_complete",
+      "file": "API/views.py:123-150 (_VALID_LASER_SQL :36)",
+      "semantics": "Must mirror the cohorts above (test_dive_pipeline_status_view.py). Probably owned by the status-view slice."
+    }
+  ],
+  "tests": [
+    "libs/fishsense-shared/tests/test_laser_region.py (14)",
+    "libs/fishsense-shared/tests/test_auto_accept_timeouts.py (5)",
+    "libs/fishsense-shared/tests/test_laser_predictor_version.py (5)",
+    "libs/fishsense-shared/tests/test_laser_remediation.py (4)",
+    "services/fishsense-api/tests/test_select_next_dive_endpoints.py -- the laser_preprocessing_* (10), laser_prediction_* (6), needing_laser_population_* (2) and auto_accept_* (9) tests only",
+    "services/fishsense-api/tests/test_laser_prediction_reprediction_cohort.py (7)",
+    "services/fishsense-api/tests/test_laser_prediction_endpoint.py (9)",
+    "services/fishsense-api/tests/test_dives_with_complete_laser_labeling_endpoint.py (7)",
+    "services/fishsense-api/tests/test_label_studio_project_ids_gated.py (7)",
+    "services/fishsense-api/tests/test_label_studio_project_ids_superseded.py (4)",
+    "services/fishsense-api/tests/test_laser_labels_include_superseded.py (3)",
+    "services/fishsense-api/tests/test_laser_superseded_reason.py (7)",
+    "services/fishsense-api/tests/test_laser_cohort_needs_reprocess.py (6)",
+    "services/fishsense-api/tests/test_laser_needs_reprocess_endpoints.py (6)",
+    "services/fishsense-api/tests/test_dive_laser_line_endpoint.py (3)",
+    "(shared with other kinds) services/fishsense-api/tests/test_needs_reprocess_{clear_scope,scoping,null_superseded}.py, test_label_needs_reprocess_flag.py, test_canonical_only_pipeline_work.py, test_label_put_preserves_unmentioned_fields.py",
+    "services/fishsense-api-workflow-worker/tests/test_preprocess_laser_images_parent_workflow.py (3)",
+    "services/fishsense-api-workflow-worker/tests/test_resolve_laser_preprocess_inputs_activity.py (12)",
+    "services/fishsense-api-workflow-worker/tests/test_select_next_high_priority_dive_for_laser_preprocessing_activity.py (2)",
+    "services/fishsense-api-workflow-worker/tests/test_predict_laser_images_parent_workflow.py (11)",
+    "services/fishsense-api-workflow-worker/tests/test_resolve_laser_predict_inputs_activity.py (9)",
+    "services/fishsense-api-workflow-worker/tests/test_persist_laser_predictions_activity.py (3)",
+    "services/fishsense-api-workflow-worker/tests/test_backfill_laser_predictions_activity.py (10)",
+    "services/fishsense-api-workflow-worker/tests/test_evaluate_laser_auto_accept_parent_workflow.py (4)",
+    "services/fishsense-api-workflow-worker/tests/test_auto_accept_child_dispatch_budget.py (5)",
+    "services/fishsense-api-workflow-worker/tests/test_apply_laser_auto_accept_activity.py (12)",
+    "services/fishsense-api-workflow-worker/tests/test_create_laser_label_studio_project_activity.py (8)",
+    "services/fishsense-api-workflow-worker/tests/test_populate_laser_label_studio_project_activity.py (28)",
+    "services/fishsense-api-workflow-worker/tests/test_populate_laser_label_studio_project_parent_workflow.py (2)",
+    "services/fishsense-api-workflow-worker/tests/test_select_dives_needing_laser_population_activity.py",
+    "services/fishsense-api-workflow-worker/tests/test_sync_label_studio_laser_labels_workflow.py -- the validation tests only: dispatches_validation_child_per_complete_dive, completes_when_validation_children_fail, wakes_data_worker_before_dispatching_validation, does_not_wake_data_worker_when_no_dives_complete",
+    "services/fishsense-api-workflow-worker/tests/test_remediate_laser_supersedes_cli.py (7)",
+    "services/fishsense-api-workflow-worker/tests/test_remediate_laser_supersedes_parent_workflow.py (1)",
+    "(shared) services/fishsense-api-workflow-worker/tests/test_schedule_registration.py, test_populate_import_retry_dedup.py, test_overlapping_child_is_not_cleaned_up.py, test_reprocess_flag_drains.py, test_populate_label_studio_project_workflows.py",
+    "services/fishsense-data-processing-workflow-worker/tests/test_preprocess_laser_images_workflow.py (3)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_overlay_laser_region_and_encode_jpeg.py (7)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_overlay_laser_bbox_and_encode_jpeg.py (5)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_stage0_1_notebook_parity.py (1; byte-for-byte bbox path)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_stage0_1_integration.py (1)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_predict_laser_image.py (10)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_predict_laser_images_workflow.py (2)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_laser_color.py (11)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_laser_auto_accept.py (18)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_evaluate_laser_auto_accept_activity.py (18)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_evaluate_laser_auto_accept_workflow_timeouts.py (4)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_validate_laser_labels_for_dive_activity.py (19)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_validate_laser_labels_for_dive_workflow.py (1)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_laser_validator_does_not_erode.py (9; #927)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_laser_dive_judgement.py (10; #932)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_coarse_calibration_frame_supersede.py (7)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_reflection_detection.py (4)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_laser_supersede_remediation_plan.py (10)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_laser_supersede_remediation_activities.py (7)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_remediate_laser_supersedes_workflow.py (6)",
+    "(shared) services/fishsense-data-processing-workflow-worker/tests/test_worker_roles.py"
+  ],
+  "shared_helpers": [
+    {
+      "name": "workflows/_dispatch.py (select_dive, resolve_inputs, wake_*_worker, stage_raw, dispatch_child + CHILD_ALREADY_RUNNING, run_sdk_activity, cleanup_raw, dispatch_populate)",
+      "file": "A/workflows/_dispatch.py",
+      "used_by_slices": "laser, species, headtail, slate (every dispatch parent). The v2 clustering port already inlines its own equivalent"
+    },
+    {
+      "name": "workflows/_populate.py create_then_populate + POPULATE_MAX_ATTEMPTS",
+      "file": "A/workflows/_populate.py",
+      "used_by_slices": "laser, species, headtail, dive-slate populate"
+    },
+    {
+      "name": "workflows/_retry_policies.py (SDK_FAIL_FAST, SCALING, STAGE_RAW)",
+      "file": "A/workflows/_retry_policies.py",
+      "used_by_slices": "all parents"
+    },
+    {
+      "name": "activities/cohort_selection.select_next_dive",
+      "file": "A/activities/cohort_selection.py",
+      "used_by_slices": "all 9 selectors"
+    },
+    {
+      "name": "activities/populate_utils.py (build_image_url, build_task_data, ensure_label_studio_s3_storage, heal_labeling_config, create_or_get_label_studio_project, build_per_dive_title, import_tasks_and_record_labels + IMPORT_ISSUED heartbeat, publish_label_studio_project, ensure_project_shows_predictions, _get_ls_client)",
+      "file": "A/activities/populate_utils.py (785 lines)",
+      "used_by_slices": "laser, species, headtail, dive-slate create/populate, and the laser/headtail/slate prediction backfills"
+    },
+    {
+      "name": "activities/reprocess_scope.ClearReprocessFlagsInput",
+      "file": "A/activities/reprocess_scope.py",
+      "used_by_slices": "the four clear_*_reprocess_flags activities"
+    },
+    {
+      "name": "activities/utils.py (get_fs_client, get_ls_client, throttle_wait_seconds)",
+      "file": "A/activities/utils.py",
+      "used_by_slices": "all api-worker activities (v2 already has throttle_wait_seconds in labels/label_studio.py)"
+    },
+    {
+      "name": "gpu_fallback + k8s_scaling",
+      "file": "A/activities/gpu_fallback.py, A/activities/k8s_scaling.py",
+      "used_by_slices": "NRP slice; laser predict (GPU) and every light/cpu dispatch"
+    },
+    {
+      "name": "laser_label_validation.judgement.judge_dive / calibration_image_ids / verdict constants",
+      "file": "D/laser_label_validation/judgement.py",
+      "used_by_slices": "laser validator + remediation. Must stay the single definition"
+    },
+    {
+      "name": "laser_label_validation.reflection.detect_reflection_split",
+      "file": "D/laser_label_validation/reflection.py",
+      "used_by_slices": "laser validator (via judge_dive)"
+    },
+    {
+      "name": "laser_label_validation.auto_accept (evaluate_dive, AutoAcceptConfig, FrameVerdict, DiveIneligibleReason)",
+      "file": "D/laser_label_validation/auto_accept.py",
+      "used_by_slices": "laser only"
+    },
+    {
+      "name": "populate_laser_label_studio_project_activity.dive_laser_label / _prediction_annotations / _auto_accepted_annotations / _keypoint_result",
+      "file": "A/activities/populate_laser_label_studio_project_activity.py:52-177",
+      "used_by_slices": "laser populate, backfill and apply-auto-accept (the single definition of dot, colour and annotation shape)"
+    },
+    {
+      "name": "laser_color (classify_laser_color, rectified_to_sensor_point)",
+      "file": "D/laser_color.py",
+      "used_by_slices": "laser predict only"
+    },
+    {
+      "name": "activities/heartbeat.heartbeat_pump",
+      "file": "D/activities/heartbeat.py",
+      "used_by_slices": "validator, auto-accept, remediation, and other light activities"
+    },
+    {
+      "name": "fishsense_shared.laser_region (LASER_REGION_POLYGON, DEFAULT_LASER_BBOX, WORKING_DEPTH_RANGE_M, point_in_laser_region)",
+      "file": "S/laser_region.py",
+      "used_by_slices": "laser preprocess + predict; calibration (checkerboard_detection, detect_checkerboard_laser_point, render_checkerboard_lattice)"
+    },
+    {
+      "name": "fishsense_shared.auto_accept_timeouts",
+      "file": "S/auto_accept_timeouts.py",
+      "used_by_slices": "laser only (the two parents plus the child)"
+    },
+    {
+      "name": "fishsense_shared.laser_predictor (LASER_PREDICTOR_VERSION=2, laser_model_version_tag)",
+      "file": "S/laser_predictor.py",
+      "used_by_slices": "laser resolver, predict activity, populate, backfill, gate, the API cohorts"
+    },
+    {
+      "name": "fishsense_shared.object_store (raw_key, jpeg_key, LASER_JPEG_FOLDER)",
+      "file": "S/object_store.py",
+      "used_by_slices": "every preprocess/predict slice, staging, populate"
+    },
+    {
+      "name": "fishsense_shared.task_queues + ExceptionGroupErrorLogging",
+      "file": "S/task_queues.py, S/__init__.py",
+      "used_by_slices": "all"
+    },
+    {
+      "name": "API: _upsert_label / _resolve_label_natural_key / _resolve_sole_label_for_image",
+      "file": "API/controllers/label_controller.py:29-170",
+      "used_by_slices": "all four label kinds"
+    },
+    {
+      "name": "API: _prediction_upsert.upsert_prediction",
+      "file": "API/controllers/_prediction_upsert.py",
+      "used_by_slices": "laser, headtail, slate predictions"
+    },
+    {
+      "name": "API: _set_needs_reprocess, _has_image_flagged_for_reprocess, _valid_laser_conditions",
+      "file": "API/controllers/label_reprocess_controller.py:35; API/controllers/dive_cohort_controller.py:90,353",
+      "used_by_slices": "all preprocess cohorts; the valid-laser gate is used by stages 1/2/5.1/14/depth"
+    },
+    {
+      "name": "fishsense_core.laser (fit_dive_line, flag_outliers(calibration_mask), LineFit, MIN_POINTS_FOR_LINE, COARSE_CALIBRATION_TOLERANCE_PX, RANSAC_INLIER_TOL_PX, LINE_CONFIDENCE_THRESHOLD, LABEL_NOISE_MAD_FLOOR_PX, MAD_TO_SIGMA, LaserDetector); fishsense_core.image (RawImage, RectifiedImage, LinearRawImage)",
+      "file": "fishsense-core 4.1.0 wheel, [laser-detector,slate] extras",
+      "used_by_slices": "laser (validation, gate, reflection, detector, preprocess); calibration"
+    }
+  ],
+  "contracts": [
+    "PreprocessLaserImagesInput(dive_id, image_checksums, camera_matrix, distortion_coefficients, bbox: List[int], laser_region: Optional[List[List[int]]]) -- S/preprocess_contracts.py:45-77",
+    "PreprocessLaserImageInput (per-image; data-worker internal; bbox required, region optional) -- D/workflows/preprocess_laser_images_workflow.py:26-41",
+    "PredictLaserImage(image_id, checksum), PredictLaserImagesInput(dive_id, images, camera_matrix, distortion_coefficients, wavelength=None, laser_region=None) -- S/preprocess_contracts.py:272-307",
+    "PredictLaserImageInput (per-image, internal) -- D/workflows/predict_laser_images_workflow.py:103-116",
+    "LaserPredictionResult(image_id, x, y, confidence, width, height, color, color_margin, rejected_out_of_region, predictor_version, checkpoint, core_version) -- S/preprocess_contracts.py:310-352",
+    "LaserAutoAcceptSummary(dive_id, enabled, eligible, reason, n_points, inlier_count, inlier_fraction, line_confidence, auto_accepted, verdicts, written) -- S/preprocess_contracts.py:513-556",
+    "RemediateLaserSupersedesInput(dive_ids, excluded_dive_ids, excluded_label_ids, apply, expected_plan_sha256), RemediationDiveRequest(dive_id, excluded_label_ids, dive_excluded, revive_ids), revival_digest (sha256 of the sorted [(dive_id, sorted ids)] of non-empty rows), PARENT_WORKFLOW/CHILD_WORKFLOW names -- S/laser_remediation.py (dataclasses)",
+    "ClearReprocessFlagsInput(dive_id, checksums: Optional[List[str]]; None=whole dive, []=nothing) -- A/activities/reprocess_scope.py",
+    "Queues: fishsense_data_processing_queue / _light_queue / _gpu_queue -- S/task_queues.py. v2 names: fishsense_processor / _light / _gpu (contracts/task_queues.py)",
+    "Timeouts: GATE_QUEUE_WAIT 20m, GATE_EXECUTION 10m, GATE_ACTIVITY 30m, GATE_CHILD_EXECUTION 35m -- S/auto_accept_timeouts.py",
+    "LASER_PREDICTOR_VERSION=2; LS model_version tag 'laser-detector-v2' -- S/laser_predictor.py",
+    "LASER_REGION_POLYGON (8 vertices, rectified px), DEFAULT_LASER_BBOX [1580,395,2470,1905] -- S/laser_region.py:67-83",
+    "Object-store keys: scratch bucket raw/{checksum}.ORF (api-worker PUT/DELETE, data-worker GET); labels bucket {labels_prefix}/preprocess_jpeg/{checksum}.JPG (data-worker PUT; populate HEADs; LS presigns) -- S/object_store.py:1-135",
+    "LS task data: {image: s3://{labels_bucket}/{labels_prefix}/preprocess_jpeg/{checksum}.JPG, img: same, taken: ISO-8601 text, image_id} -- A/activities/populate_utils.py:38-94",
+    "LS laser config: KeyPointLabels name='laser' toName='img', labels 'Red Laser'/'Green Laser', Image value='$image' -- A/activities/create_laser_label_studio_project_activity.py:377-385. A keypoint result's x/y are percentages; width 0.5",
+    "v2 NEEDS NEW contracts: the processor may not call the API, so validation, auto-accept and remediation need rows-in / verdicts-out DTOs (labels with ids, x, y, image, superseded, completed; calibration capture ids; predictions; AutoAcceptConfig), with the DB writes moved to the orchestrator"
+  ],
+  "v2_schema_gaps": [
+    "laser_predictions is append-only (0011: GRANT SELECT, INSERT; no UPDATE), but v1's gate UPDATEs auto_accept/gate_verdict/line_offset_px/line_position_z in place on the prediction row. v2 needs either a separate append-only gate-verdict table keyed to the prediction id (plus a current view), or a gate that appends a copy of the prediction carrying the verdict. The first matches \u00a74.3 better. Either way, a new prediction must read as unjudged, preserving v1's 'a re-prediction clears the verdict'",
+    "laser_labels.superseded_reason: NOT in 0001-0016. It exists only in the uncommitted, untracked working-tree file migrations/versions/0017_laser_provenance.py (someone's WIP on this branch); check before writing a migration",
+    "dive_laser_lines.noise_estimator: also only in that WIP 0017. The v2 validator must write 'signed_residual_mad' (fishsense-core >= 4.1.0)",
+    "dive_laser_lines is append-only (0009) and the v1 validator rewrites the line on EVERY hourly run for EVERY complete dive, which would append about 270 rows an hour. Append only when the fit changes, or accept the growth",
+    "laser_labels.source (0010) has no write rule for new rows: populate must choose a source at insert (NOT NULL unless v1_id is set); auto-accepted imports and apply_laser_auto_accept should give 'auto_accept', but v1 never writes the label row there (the sync does). Decide who sets source ('auto_accept' vs 'human'); e.g. the sync could compare ls_labeler_id with the LS bot user id",
+    "No v2 store/view equivalents yet for: the laser-preprocessing cohort, laser-prediction cohort (with the stale-version arm), needing-laser-population, laser-auto-accept backlog, dives-with-complete-laser-labeling, label-studio-project-ids?gated, and needs_reprocess raise/clear scoped by checksum",
+    "No 'tried, made no progress' state (PLAN \u00a79.16): in v1 a resolver that raises (dive has no camera, or no intrinsics) re-selects the same dive every hour and blocks every higher-id dive. v2 has dives.device_id -> current_camera_calibrations; which calibration (medium/coordinate_frame) rectifies is unstated -- UNCERTAIN",
+    "No audit record of remediation runs beyond logs and the operator's report JSON (optional)",
+    "Captures carry raw_object_key (0005), so raw may already be in Garage for v2-ingested dives and NAS staging may not be needed -- UNCERTAIN, depends on the ingest/staging slice"
+  ],
+  "dependencies": [
+    "DEPENDS ON: the laser-label LS sync (already ported to v2) -- validation runs off it and the sync is the single writer of label x/y/completed",
+    "DEPENDS ON: an object-store foundation in v2 (none in v2 src yet): scratch raw/, the labels bucket + preprocess_jpeg, has_processed_jpeg HEAD, tenant prefix per PLAN \u00a79.11",
+    "DEPENDS ON: raw staging (NAS -> Garage stage_raw/cleanup_raw) unless captures.raw_object_key makes it moot",
+    "DEPENDS ON: NRP processor stand-up/tear-down for the cpu, light and gpu queues, including the GPU -> CPU-fallback policy (the gpu mode 'unavailable' must stop the predict parent before staging). The v2 memory rule: stand up and tear down, not scale to zero",
+    "DEPENDS ON: a Label Studio client beyond the sync's (v2 labels/label_studio.py has only project_exists/list_tasks): projects create/list/update (label_config, is_published, model_version), workspaces, import_storage.s3, import_tasks, predictions list/create, annotations.create, tasks.list with annotations/drafts",
+    "DEPENDS ON: populate_utils shared with the species/headtail/dive-slate populate slices (dedup-by-URL, the IMPORT_ISSUED heartbeat, publish gating)",
+    "DEPENDS ON: fishsense-core 4.1.0 [laser-detector] in the processor (v2's processor pyproject has no fishsense-core yet) + the laser detector checkpoint (baked from HF in v1; Garage model-weights per PLAN \u00a79.12) + torch/GPU image",
+    "DEPENDS ON: camera calibrations (0007) for intrinsics; dive-slate labels (slate_labels) for the validator's calibration frames",
+    "DEPENDED ON BY: stage 1 clustering (already ported; needs valid laser labels to exist), stage 2 species and 5.1 head/tail preprocess+populate (valid-laser gate), head/tail prediction (crop around laser_label_id), stage 13 slate calibration and checkerboard calibration (live laser labels; checkerboard uses laser_region), laser depth, stage 14 measure, dive_pipeline_status (laser_preprocessed, laser_labeling_complete), the web landing page (gated project ids), research views"
+  ],
+  "gotchas": [
+    "The processor must not read the DB. In v1 the light-queue validator, auto-accept gate and remediation activities call fishsense-api through the SDK from the data-worker (D/activities/*: get_fs_client). v2 must move those reads/writes to orchestrator activities and pass rows through the contract",
+    "#927: each validator run is ONE judgement of the FULL population: fetch include_superseded, sort by (image_id, id) yourself (RANSAC picks pairs by row index), fit and flag once, and supersede only rows flagged AND still live. Re-fitting survivors eroded dives (dive 521 lost 15, then 7, then 1 on consecutive runs; 14,523 of 47,562 labels superseded). CLAUDE.md 'Laser-label validation'; test_laser_validator_does_not_erode.py",
+    "The validator never un-supersedes; revival is only the reviewed remediation tool. judge_dive is the single definition shared with remediation, so a revived label is one the next hourly run keeps (D/laser_label_validation/judgement.py)",
+    "judge_dive verdict order: TOO_FEW (<MIN_POINTS_FOR_LINE) -> NO_FIT -> REFLECTION (checked BEFORE confidence) -> NOT_CONFIDENT -> NO_OUTLIERS -> GATE (>50% flagged, MAX_OUTLIER_FRACTION) -> FLAGGED. Only NO_OUTLIERS and FLAGGED are 'judged'",
+    "Calibration frames (images with a completed, non-superseded dive-slate label) are judged at max(3 sigma, 20 px) via flag_outliers(calibration_mask=...), not at 3 sigma (dives 347/349). Slate labels are fetched BEFORE the fit so a transport failure fails the activity rather than falling back to the tight rule",
+    "A legacy superseded IS NULL row is fitted but never written (`is not False`). v2's migration maps NULL to False (bool(None) in v1_migration.py), so those rows become LIVE in v2, whereas every v1 resolver hid them. CLAUDE.md says prod has none carrying a dot, but verify",
+    "superseded_reason values: validator_3sigma, validator_coarse_calibration, manual (set it in EVERY hand-written UPDATE), remediation (on a live row: the last change was a revival). A plain string, not a native enum",
+    "Remediation apply takes dives, exclusions and digest ONLY from the reviewed dry-run report. The child re-plans and refuses on digest mismatch (non-retryable); the apply activity re-plans per dive and refuses the whole dive if any id is unplanned; ids already live are skipped; an empty plan is a clean no-op. It never revives reflection suspects, excluded ids, or non-completed labels",
+    "v1 sync looks labels up by LS task with superseded=FALSE, so a labeler's correction on a superseded task never reaches the DB. v2 apply_laser_sync updates by ls_task_id whether or not the row is superseded -- an intentional divergence? It changes what validation and remediation see. UNCERTAIN; confirm with the sync port",
+    "Auto-accept gate order: the dive gate fails closed first (min_predictions 20, then inlier_fraction >= 0.75 BEFORE line_confidence), then per frame perpendicular > 10 px -> off_line, along-line robust z > 4 -> along_line_outlier, then a deterministic blake2b(dive:image) audit sample at 10% (after the geometry tests). Detector confidence is deliberately unused",
+    "enabled=False is a dark run: verdicts are still computed and written but auto_accept=False, so gate_verdict='auto_accepted' can sit beside auto_accept=False. Everything downstream keys on the flag; the summary counts the flag",
+    "The gate refuses the WHOLE dive (stale_predictor) if ANY prediction's predictor_version != current, and clears standing auto_accept verdicts. The backlog cohort excludes the same rows (predictor_version = 2), while the predict cohort re-selects them via IS DISTINCT FROM",
+    "The gate writes only rows whose verdict changed (_changed compares margins at 1e-6). The backlog cohort therefore excludes abstentions (x/y NULL), or it would never drain",
+    "Gate timeouts: split queue-wait (schedule_to_start 20m) from execution (start_to_close 10m); schedule_to_close = the sum; both parents pass child exec 35m > 30m so the activity's own timeout fires. Sized to fit the already-deployed 1h run_timeout because ensure_schedule never updates in place (S/auto_accept_timeouts.py)",
+    "The predict parent and the drain share child id auto-accept-laser-{dive}. Both must handle CHILD_ALREADY_RUNNING (reading .eligible off the sentinel wedges the workflow task)",
+    "Replay contract: the predict parent appends persist -> cleanup_raw -> backfill -> gate -> apply in that order. Cleanup comes BEFORE the LS backfill so an LS outage cannot leak raw scratch (1,094 objects leaked once)",
+    "The predict parent must return BEFORE staging raw when the GPU queue is unavailable; a child on an unserved queue hangs until its 6h execution timeout instead of failing",
+    "dispatch_child returns CHILD_ALREADY_RUNNING and the caller must do NOTHING further (no cleanup_raw, no flag clear); prod dive 442 lost 984 raw objects and 515 flags that way (A/workflows/_dispatch.py:345-404)",
+    "Stage 0.1 flag clear is scoped to the redrawn checksums (a flag raised during the up-to-2h child survives). The no-work path clears the whole dive; the flag is the one cohort term that never goes false by itself (dive 60 blocked 84/465/471)",
+    "Resolvers must mirror their selector exactly, canonical images only, or a dive is re-selected hourly with no work, re-staging NAS raw and blocking every higher-id dive",
+    "The preprocess cohort is 'no NON-SENTINEL row' (label_studio_project_id IS NOT NULL), not 'no completed row'. The predict cohort keys on completed AND NOT superseded, NOT on project id, because populate seeds placeholder rows that carry a project id (dive 84 / project 274728)",
+    "Populate is prediction-gated (populating before predict would starve the predict cohort permanently; hence predict +10 / populate +12) and JPEG-gated (a missing preprocess_jpeg means a NoSuchKey task)",
+    "Populate never re-imports: tolerate invisible async LS imports and write rows for what is visible; publish only when ImportResult is complete; bounded retry (30s initial, 5 attempts) plus the IMPORT_ISSUED heartbeat marker. Duplicates split rows from annotations and bypass the auto-accept gate (dive 517). CLAUDE.md 'Populate must never re-import'",
+    "Auto-accepted frames are imported as an annotation with ground_truth=False explicitly (LS defaults it to true; dive 520) and completed_by=bot_user_id (imported annotations are otherwise attributed to the project owner), omitted when unconfigured. A task never carries both an annotation and a prediction",
+    "apply_laser_auto_accept touches a task only when LS reports no annotation AND no draft (idempotency, never overwrite a human, never discard work in progress); unknown tasks are skipped, not raised",
+    "Laser colour is a per-dive majority vote over prediction.color. A tie or no votes falls back to 'Red Laser'. Computed over ALL of the dive's predictions so top-up runs agree",
+    "Backfill idempotency keys on the LS model_version tag; attaching is not showing -- set the project's model_version to the majority tag, and only on per-dive projects (title contains #{dive_id}); never raises",
+    "LS project title '{name} #{dive_id} - Laser Calibration Labeling': names are not unique, so the #id is mandatory; truncate the name, never the id, to fit 50 chars; the lookup is scoped to the configured workspace; the labeling config self-heals",
+    "Predict: the detector's x/y are rectified pixels but LinearRawImage is in sensor coordinates, so convert with rectified_to_sensor_point before reading the colour (up to ~48 px off); the region test is on rectified x/y; a degenerate region admits nothing",
+    "predictor_version is bumped BY HAND whenever the stage output would change for an unchanged image; it versions behaviour, not the checkpoint",
+    "The detector is loaded once per process under a threading.Lock (double-checked); without it a cold pod loads N copies of the checkpoint onto the GPU",
+    "Stage 0.1 keeps both bbox and polygon for rolling-deploy skew; the bbox path must stay cv2.rectangle (notebook byte parity), not a 4-vertex polyline",
+    "Never write other renders into preprocess_jpeg (the lattice renders use their own prefix because checksum keys would overwrite the served laser JPEG)",
+    "LaserPrediction upsert deliberately merges the whole model (re-prediction clears verdicts); do NOT apply the label 'preserve unmentioned fields' fix to predictions (_upsert_label docstring)",
+    "The light queue exists because the per-image worker's max_concurrent_activities=2 is a memory ceiling; the validator, gate and remediation must not share it",
+    "The validation pass must wake the light worker only when there are complete dives, and suppress child failures so a successful sync is not rolled back; ALLOW_DUPLICATE ids",
+    "The DiveLaserLine is a WITHIN-dive fit; never use it as a prior for another dive or to choose a calibration borrow",
+    "Revival downstream needs a human for: refitting existing LaserExtrinsics, clearing a standing calibration refusal, redoing 6.1 groups, and images with two live laser labels (CLAUDE.md 'Reviving eroded labels')",
+    "Duplicate-code rule: keep laser-specific logic parameterised rather than copied per kind (the four put_*_label handlers were textual clones pylint could not see)"
+  ],
+  "size": "About 45 slice source files, ~4.8k lines (api-worker ~2.2k: 8 workflows + 13 activities + remediation CLI; data-worker ~2.2k: 5 workflows, 5 activities, laser_label_validation/{judgement,reflection,remediation,auto_accept}, laser_color; shared ~480: laser_region, auto_accept_timeouts, laser_predictor, laser_remediation). Plus ~600 lines of API endpoint code inside shared controllers (5 cohort endpoints, 6 label/prediction/reprocess endpoints, laser-line). Plus shared helpers the slice leans on (populate_utils 785, _dispatch ~350, gpu_fallback/k8s_scaling ~690) that other slices also own. Tests: 50 dedicated v1 test files, ~9.0k lines, 358 tests; plus 27 laser-cohort tests in test_select_next_dive_endpoints.py and 4 validation tests in test_sync_label_studio_laser_labels_workflow.py. Largest files: test_validate_laser_labels_for_dive_activity (19 tests / 653 lines), test_populate_laser_label_studio_project_activity (28/587), test_predict_laser_images_parent_workflow (11/415)."
+}

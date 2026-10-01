@@ -19,16 +19,17 @@ from fishsense_services_contracts.clustering import (
     ClusterDiveFrameImage,
     ClusterDiveFramesInput,
 )
+from fishsense_services_contracts.object_store import ObjectRef
 from fishsense_services_contracts.task_queues import (
     PROCESSOR_GPU_TASK_QUEUE,
     PROCESSOR_LIGHT_TASK_QUEUE,
     PROCESSOR_TASK_QUEUE,
 )
 
-CONTRACT_VERSION = 1
+CONTRACT_VERSION = 2
 
 #: Every model that crosses the orchestrator/processor boundary.
-MODELS = (ClusterDiveFrameImage, ClusterDiveFramesInput)
+MODELS = (ClusterDiveFrameImage, ClusterDiveFramesInput, ObjectRef)
 
 __all__ = [
     "CONTRACT_VERSION",
@@ -38,6 +39,7 @@ __all__ = [
     "PROCESSOR_TASK_QUEUE",
     "ClusterDiveFrameImage",
     "ClusterDiveFramesInput",
+    "ObjectRef",
     "json_schema",
 ]
 

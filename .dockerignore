@@ -7,3 +7,7 @@ services/*/tests
 *.md
 compose.yml
 deploy
+# The orchestrator image carries the processor's NRP manifests (it applies
+# them); nothing else under deploy/ goes into an image.
+!deploy/nrp
+!deploy/nrp/**

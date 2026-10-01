@@ -1,0 +1,520 @@
+{
+  "slice": "headtail \u2014 stage 5.1 head/tail preprocess, SAM 3.1 head/tail predict (with Mask R-CNN CPU fallback), head/tail Label Studio create/populate, head/tail label sync, BackfillHeadtailPredictions. v1 = fishsense-lite@a8b2c3bc (main). Paths below: AW = services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker, DW = services/fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker, API = services/fishsense-api/src/fishsense_api, SH = libs/fishsense-shared/src/fishsense_shared.",
+  "workflows": [
+    {
+      "name": "PreprocessHeadtailImagesParentWorkflow",
+      "file": "AW/workflows/preprocess_headtail_images_parent_workflow.py",
+      "worker": "api-worker (fishsense_api_queue)",
+      "schedule": "preprocess-headtail-images-workflow-schedule: every 1h, offset +30min, overlap SKIP, run_timeout 1h (AW/worker.py:650-660)",
+      "calls": [
+        "select_next_high_priority_dive_for_headtail_preprocessing_activity (_dispatch.select_dive: 5min, SDK_FAIL_FAST)",
+        "resolve_headtail_preprocess_inputs_activity -> PreprocessHeadtailImagesInput (5min, SDK_FAIL_FAST)",
+        "if no checksums: clear_headtail_reprocess_flags_activity(checksums=None, whole dive) and return",
+        "ensure_data_worker_running_activity (wake_data_worker, CPU Deployment)",
+        "stage_raw_bytes_for_dive_activity (NAS -> Garage raw/, 1h, heartbeat 5min, STAGE_RAW_RETRY_POLICY)",
+        "child PreprocessHeadtailImagesWorkflow id=preprocess-headtail-{dive_id} on fishsense_data_processing_queue, execution_timeout 1h, ALLOW_DUPLICATE; on CHILD_ALREADY_RUNNING return without cleanup/flag-clear",
+        "cleanup_raw_bytes_for_dive_activity (15min, heartbeat 5min)",
+        "clear_headtail_reprocess_flags_activity(checksums=inputs.image_checksums) (15min, SDK_FAIL_FAST)",
+        "NOTE: no longer chains populate (moved to +34 parent)"
+      ]
+    },
+    {
+      "name": "PreprocessHeadtailImagesWorkflow",
+      "file": "DW/workflows/preprocess_headtail_images_workflow.py",
+      "worker": "data-worker role cpu (fishsense_data_processing_queue)",
+      "schedule": "on-demand child of the preprocess parent",
+      "calls": [
+        "asyncio.gather of preprocess_headtail_image per checksum (start_to_close 5min, default unlimited retry), output_folder hard-coded 'preprocess_headtail_jpeg' (line 48)"
+      ]
+    },
+    {
+      "name": "PredictHeadtailImagesParentWorkflow",
+      "file": "AW/workflows/predict_headtail_images_parent_workflow.py",
+      "worker": "api-worker (fishsense_api_queue)",
+      "schedule": "predict-headtail-images-workflow-schedule: every 1h, offset +32min, overlap SKIP, run_timeout 2h (AW/worker.py:528-537)",
+      "calls": [
+        "select_next_high_priority_dive_for_headtail_prediction_activity",
+        "resolve_headtail_predict_inputs_activity -> PredictHeadtailImagesInput",
+        "if no images: return dive_id (no backfill)",
+        "ensure_gpu_worker_running_activity (wake_gpu_worker: 30min, heartbeat 5min) -> 'gpu'|'cpu_fallback'|'unavailable'; unavailable => return None before dispatch",
+        "child PredictHeadtailImagesWorkflow id=predict-headtail-{dive_id} on fishsense_data_processing_gpu_queue, execution_timeout 6h, ALLOW_DUPLICATE, result List[HeadtailPredictionResult]",
+        "drop results with status 'skipped_no_upgrade_available'",
+        "persist_headtail_predictions_activity(persistable) only if non-empty (15min, SDK_FAIL_FAST)",
+        "backfill_headtail_predictions_for_dive_activity(dive_id) UNCONDITIONALLY (replay-contract change 2026-09-10)",
+        "NO wake_data_worker, NO stage_raw, NO cleanup_raw (reads the stage-5.1 JPEG)"
+      ]
+    },
+    {
+      "name": "PredictHeadtailImagesWorkflow",
+      "file": "DW/workflows/predict_headtail_images_workflow.py",
+      "worker": "data-worker role gpu (fishsense_data_processing_gpu_queue; GPU Deployment or CPU-fallback Deployment)",
+      "schedule": "on-demand child of the predict parent",
+      "calls": [
+        "asyncio.gather of predict_headtail_image per image (image.model_copy(update={'jpeg_folder': payload.jpeg_folder})), start_to_close 15min (cold pod pays Garage fetch + SAM3 load), result_type HeadtailPredictionResult; returns list"
+      ]
+    },
+    {
+      "name": "PopulateHeadTailLabelStudioProjectParentWorkflow",
+      "file": "AW/workflows/populate_headtail_label_studio_project_parent_workflow.py",
+      "worker": "api-worker",
+      "schedule": "populate-headtail-labels-workflow-schedule: every 1h, offset +34min, overlap SKIP, run_timeout 1h (AW/worker.py:547-556)",
+      "calls": [
+        "select_dives_needing_headtail_population_activity (5min, SDK_FAIL_FAST) -> list of ALL matching dives",
+        "fan out child PopulateHeadTailLabelStudioProjectWorkflow id=populate-headtail-{dive_id}, execution_timeout 30min, ALLOW_DUPLICATE, Semaphore POPULATE_CONCURRENCY=4, WorkflowAlreadyStartedError swallowed",
+        "ExceptionGroupErrorLogging(suppress=True): one dive's failure does not fail the fan-out"
+      ]
+    },
+    {
+      "name": "PopulateHeadTailLabelStudioProjectWorkflow",
+      "file": "AW/workflows/populate_headtail_label_studio_project_workflow.py (+ AW/workflows/_populate.py create_then_populate)",
+      "worker": "api-worker",
+      "schedule": "on-demand / child of the populate parent",
+      "calls": [
+        "create_headtail_label_studio_project_activity(dive_id) (5min)",
+        "populate_headtail_label_studio_project_activity(dive_id, project_id) (30min, heartbeat 2min, _POPULATE_RETRY: initial 30s, x2, max 5min, max_attempts 5)"
+      ]
+    },
+    {
+      "name": "CreateHeadTailLabelStudioProjectWorkflow",
+      "file": "AW/workflows/create_headtail_label_studio_project_workflow.py",
+      "worker": "api-worker",
+      "schedule": "on-demand only",
+      "calls": [
+        "create_headtail_label_studio_project_activity(dive_id) (5min)"
+      ]
+    },
+    {
+      "name": "SyncLabelStudioHeadTailLabelsWorkflow",
+      "file": "AW/workflows/sync_label_studio_headtail_labels_workflow.py",
+      "worker": "api-worker",
+      "schedule": "sync-label-studio-headtail-labels-workflow-schedule: every 1h, no offset, overlap ALLOW_ALL (default), run_timeout 3h (default) (AW/worker.py:457-463)",
+      "calls": [
+        "sync_users_label_studio_activity (10min) -- v2 laser port dropped this step",
+        "get_headtail_label_studio_project_ids_activity (10min)",
+        "per project sync_headtail_labels_for_label_studio_project_activity (2h, heartbeat 2min), Semaphore PROJECT_CONCURRENCY=4, TaskGroup (first failure cancels the rest; v2 laser port replaced with gather+ApplicationError)"
+      ]
+    },
+    {
+      "name": "BackfillHeadtailPredictionsWorkflow",
+      "file": "AW/workflows/backfill_headtail_predictions_workflow.py",
+      "worker": "api-worker",
+      "schedule": "on-demand (temporal workflow start --type BackfillHeadtailPredictionsWorkflow --workflow-id backfill-headtail-predictions-<dive_id> --input <dive_id>)",
+      "calls": [
+        "backfill_headtail_predictions_for_dive_activity(dive_id) (15min, SDK_FAIL_FAST)"
+      ]
+    }
+  ],
+  "activities": [
+    {
+      "name": "select_next_high_priority_dive_for_headtail_preprocessing_activity",
+      "file": "AW/activities/select_next_high_priority_dive_for_headtail_preprocessing_activity.py",
+      "purpose": "Stage 5.1 cohort selector via cohort_selection.select_next_dive",
+      "touches": [
+        "db:dive/image/laserlabel/headtaillabel read via GET /api/v1/dives/select-next/headtail-preprocessing/"
+      ]
+    },
+    {
+      "name": "resolve_headtail_preprocess_inputs_activity",
+      "file": "AW/activities/resolve_headtail_preprocess_inputs_activity.py",
+      "purpose": "Build PreprocessHeadtailImagesInput: valid-laser images without a project-bearing headtail row, plus needs_reprocess-flagged images (no laser gate on flagged), canonical only, ordered eligible-then-sorted-flagged; camera intrinsics from dive.camera_id; raises if dive/camera/intrinsics missing",
+      "touches": [
+        "db:dive, cameraintrinsics, laserlabel, headtaillabel, image read via SDK (dives.get, cameras.get_intrinsics, labels.get_laser_labels, labels.get_headtail_labels, images.get)"
+      ]
+    },
+    {
+      "name": "clear_headtail_reprocess_flags_activity",
+      "file": "AW/activities/clear_headtail_reprocess_flags_activity.py",
+      "purpose": "Lower needs_reprocess on a dive's canonical headtail labels, scoped by checksums (None = whole dive, [] = nothing)",
+      "touches": [
+        "db:headtaillabel write via DELETE /api/v1/dives/{dive_id}/labels/headtail/needs-reprocess?checksums=..."
+      ]
+    },
+    {
+      "name": "preprocess_headtail_image",
+      "file": "DW/activities/preprocess_headtail_image.py",
+      "purpose": "download raw ORF, RectifiedImage(RawImage, CameraIntrinsics) undistort, cv2.imencode .jpg (no overlay), upload to preprocess_headtail_jpeg/{checksum}.JPG",
+      "touches": [
+        "object-store: bucket raw/{checksum}.ORF (read)",
+        "object-store: labels_bucket {labels_prefix}/preprocess_headtail_jpeg/{checksum}.JPG (write)",
+        "fishsense_core RectifiedImage + fishsense_api_sdk CameraIntrinsics"
+      ]
+    },
+    {
+      "name": "select_next_high_priority_dive_for_headtail_prediction_activity",
+      "file": "AW/activities/select_next_high_priority_dive_for_headtail_prediction_activity.py",
+      "purpose": "Predict cohort selector",
+      "touches": [
+        "db via GET /api/v1/dives/select-next/headtail-prediction/"
+      ]
+    },
+    {
+      "name": "resolve_headtail_predict_inputs_activity",
+      "file": "AW/activities/resolve_headtail_predict_inputs_activity.py",
+      "purpose": "select_images_needing_prediction (canonical, >=1 completed laser with x/y, no completed headtail label, prediction missing or version!=2 or laser_label_id not among live dots) + has_existing_prediction/existing_laser_superseded flags; then _only_with_rendered_jpeg HEAD-checks each JPEG (heartbeats) and defers missing",
+      "touches": [
+        "db:image, laserlabel, headtaillabel, headtailprediction read via SDK",
+        "object-store: HEAD labels_bucket preprocess_headtail_jpeg/{checksum}.JPG"
+      ]
+    },
+    {
+      "name": "predict_headtail_image",
+      "file": "DW/activities/predict_headtail_image.py",
+      "purpose": "If no GPU and row exists and its laser is live -> return status skipped_no_upgrade_available (version -1). GPU: ensure_checkpoint from model-weights, SAM3 Sam3Processor under bfloat16 autocast, prompt 'fish'. No GPU: fishsense_core FishSegmentation (ONNX) fallback, version -1. Download JPEG, crop 1800x1350 centred on FIRST laser point (clamped), segment, laser gate (first mask hit by any dot), FishHeadTailDetector.find_head_tail_img, lift to frame coords, silhouette_ratio",
+      "touches": [
+        "object-store: labels_bucket preprocess_headtail_jpeg/{checksum}.JPG (read)",
+        "object-store: models_bucket 'model-weights' key {models_prefix}/sam3/3.1/sam3.1_multiplex.pt (read, cached to /e4efs/cache/sam3/sam3/3.1/sam3.1_multiplex.pt on PVC)",
+        "model:SAM 3.1 (sam3 git 8e451d5)",
+        "model:fishsense_core.fish.FishSegmentation (fallback)",
+        "model:fishsense_core.fish.FishHeadTailDetector"
+      ]
+    },
+    {
+      "name": "persist_headtail_predictions_activity",
+      "file": "AW/activities/persist_headtail_predictions_activity.py",
+      "purpose": "Upsert each HeadtailPredictionResult (abstentions too) as HeadTailPrediction; rejected_low_confidence never set (defaults False)",
+      "touches": [
+        "db:headtailprediction write via PUT /api/v1/images/{image_id}/headtail-prediction/"
+      ]
+    },
+    {
+      "name": "backfill_headtail_predictions_for_dive_activity",
+      "file": "AW/activities/backfill_headtail_predictions_activity.py",
+      "purpose": "Attach placeable predictions to incomplete non-superseded existing LS tasks via ls.predictions.create; dedupe on (task_id, model_version) listed once per project; then ensure_project_shows_predictions sets project model_version to the majority tag",
+      "touches": [
+        "db:headtailprediction, headtaillabel read via SDK",
+        "label-studio: predictions.list(project), predictions.create(task, model_version, result), projects.get/update(model_version)"
+      ]
+    },
+    {
+      "name": "select_dives_needing_headtail_population_activity",
+      "file": "AW/activities/select_dives_needing_headtail_population_activity.py",
+      "purpose": "List every dive needing populate",
+      "touches": [
+        "db via GET /api/v1/dives/needing-headtail-population/"
+      ]
+    },
+    {
+      "name": "create_headtail_label_studio_project_activity",
+      "file": "AW/activities/create_headtail_label_studio_project_activity.py",
+      "purpose": "Title-match-or-create per-dive project '{dive.name} #{dive_id} - HeadTail Labeling' with HEADTAIL_LABELING_CONFIG_XML (KeyPointLabels kp-1 -> image, labels Snout/Fork)",
+      "touches": [
+        "db:dive read via SDK (build_per_dive_title)",
+        "label-studio: projects list/create, workspace, S3 source storage, labeling-config heal (populate_utils.create_or_get_label_studio_project)"
+      ]
+    },
+    {
+      "name": "populate_headtail_label_studio_project_activity",
+      "file": "AW/activities/populate_headtail_label_studio_project_activity.py",
+      "purpose": "Targets = valid-laser images with no completed headtail row AND a HeadTailPrediction (any status) AND JPEG present; import tasks with inline predictions (prediction_annotations: status=='predicted', silhouette 0.18-0.32 or NULL, not rejected_low_confidence; keypoints in % of width/height; model_version = row's tier tag); record pending rows (completed=False, project set); supersede incomplete rows in other projects or same-project rows whose image is no longer a candidate; publish only if import complete and project has rows",
+      "touches": [
+        "db:laserlabel, headtaillabel, headtailprediction, image read; headtaillabel write via PUT /api/v1/labels/headtail/{image_id}",
+        "object-store: HEAD preprocess_headtail_jpeg/{checksum}.JPG",
+        "label-studio: import tasks, list tasks, publish project"
+      ]
+    },
+    {
+      "name": "get_headtail_label_studio_project_ids_activity",
+      "file": "AW/activities/get_headtail_label_studio_project_ids_activity.py",
+      "purpose": "Distinct projects with non-superseded headtail rows",
+      "touches": [
+        "db via GET /api/v1/labels/headtail/label-studio-project-ids"
+      ]
+    },
+    {
+      "name": "sync_headtail_labels_for_label_studio_project_activity",
+      "file": "AW/activities/sync_headtail_labels_for_label_studio_project_activity.py",
+      "purpose": "Per task: find non-superseded label by LS task id (skip if none); set user_id (best effort), label_studio_json, completed=is_labeled, updated_at; if annotations: first annotation, from_name=='kp-1', Snout->head, Fork->tail (both required), % * original_w/h /100; PUT whole row ONLY when annotations non-empty; cursor kind 'headtail'",
+      "touches": [
+        "db:headtaillabel read/write via GET /api/v1/labels/headtail/label-studio/{id}, PUT /api/v1/labels/headtail/{image_id}",
+        "db:user read (resolve_annotator_user)",
+        "db:labelstudiosynccursor via utils.sync_label_studio_project",
+        "label-studio: tasks list"
+      ]
+    },
+    {
+      "name": "cleanup_raw_bytes_for_dive_activity (shared)",
+      "file": "AW/activities/cleanup_raw_bytes_for_dive_activity.py",
+      "purpose": "raw_scratch_reader_ids includes 'preprocess-headtail-{dive_id}' (line 66); predict-headtail is NOT a raw reader",
+      "touches": [
+        "object-store: bucket raw/ delete",
+        "temporal: describe child ids"
+      ]
+    },
+    {
+      "name": "reconcile_labeling_configs_activity (shared)",
+      "file": "AW/activities/reconcile_labeling_configs_activity.py",
+      "purpose": "Hourly +25 heal of drifted LS configs; maps HEADTAIL_PROJECT_TITLE_SUFFIX -> HEADTAIL_LABELING_CONFIG_XML (lines 34-59)",
+      "touches": [
+        "label-studio: projects list/detail/update"
+      ]
+    },
+    {
+      "name": "ensure_gpu_worker_running_activity (NRP slice)",
+      "file": "AW/activities/gpu_fallback.py",
+      "purpose": "Scale GPU Deployment or CPU-fallback; returns gpu/cpu_fallback/unavailable",
+      "touches": [
+        "k8s: GPU + gpu-cpu-fallback Deployments, annotations"
+      ]
+    }
+  ],
+  "api_endpoints": [
+    {
+      "route": "GET /api/v1/dives/select-next/headtail-preprocessing/",
+      "file": "API/controllers/dive_cohort_controller.py:698-742",
+      "semantics": "Dive.priority=HIGH AND (EXISTS canonical image with valid LaserLabel (completed=TRUE, superseded=FALSE, x/y NOT NULL) and NOT EXISTS HeadTailLabel with label_studio_project_id NOT NULL AND superseded=FALSE  OR  _has_image_flagged_for_reprocess(HeadTailLabel): canonical image with headtail row needs_reprocess=TRUE AND superseded=FALSE) ORDER BY Dive.id LIMIT 1"
+    },
+    {
+      "route": "GET /api/v1/dives/select-next/headtail-prediction/",
+      "file": "API/controllers/dive_prediction_cohort_controller.py:166-301",
+      "semantics": "HIGH AND EXISTS canonical image with live laser (completed, not superseded, x/y set) AND no HeadTailLabel completed=TRUE AND superseded=FALSE AND (no HeadTailPrediction OR prediction with predictor_version IS DISTINCT FROM 2 OR its laser_label_id -> LaserLabel.superseded=TRUE). ORDER BY has_image_never_predicted DESC, Dive.id LIMIT 1 (never-predicted before upgrades, so fallback-tier dives cannot starve new work). All subqueries explicitly .correlate()"
+    },
+    {
+      "route": "GET /api/v1/dives/needing-headtail-population/",
+      "file": "API/controllers/dive_prediction_cohort_controller.py:353-405",
+      "semantics": "HIGH AND EXISTS canonical image with live laser AND a HeadTailPrediction (any status) AND NOT EXISTS HeadTailLabel completed=TRUE (NO superseded filter here). Returns ALL dive ids ORDER BY id (not limit 1)"
+    },
+    {
+      "route": "PUT /api/v1/images/{image_id}/headtail-prediction/",
+      "file": "API/controllers/head_tail_prediction_controller.py:26-39 + _prediction_upsert.py",
+      "semantics": "Upsert on image_id (resolve natural key, then merge); created_at stamped server-side on every write, client value ignored; returns id"
+    },
+    {
+      "route": "GET /api/v1/images/{image_id}/headtail-prediction/",
+      "file": "API/controllers/head_tail_prediction_controller.py:42-56",
+      "semantics": "one row or None (not 404)"
+    },
+    {
+      "route": "GET /api/v1/dives/{dive_id}/headtail-predictions/",
+      "file": "API/controllers/head_tail_prediction_controller.py:59-75",
+      "semantics": "all predictions for dive's images (no canonical filter); [] not 404"
+    },
+    {
+      "route": "GET /api/v1/labels/headtail/label-studio-project-ids?incomplete=",
+      "file": "API/controllers/label_controller.py:272-309",
+      "semantics": "DISTINCT project ids where project NOT NULL AND superseded=FALSE; incomplete=true adds completed=FALSE OR NULL (web landing page). Must be registered before /labels/headtail/{image_id}"
+    },
+    {
+      "route": "GET /api/v1/labels/headtail/{image_id}",
+      "file": "API/controllers/label_controller.py:312-329",
+      "semantics": "first non-superseded row; 404 if none"
+    },
+    {
+      "route": "GET /api/v1/dives/{dive_id}/labels/headtail",
+      "file": "API/controllers/label_controller.py:332-351",
+      "semantics": "all non-superseded rows for dive (no canonical filter), ORDER BY image_id; 404 when empty (SDK maps to None; callers use `or []`)"
+    },
+    {
+      "route": "PUT /api/v1/labels/headtail/{image_id}",
+      "file": "API/controllers/label_controller.py:354-362 + _upsert_label/_resolve_label_natural_key (~100-200)",
+      "semantics": "upsert on (image_id, label_studio_project_id), IS NULL branch for sentinel; body without project -> 409 if image has several rows"
+    },
+    {
+      "route": "GET /api/v1/labels/headtail/label-studio/{label_studio_id}",
+      "file": "API/controllers/label_controller.py:365-380",
+      "semantics": "row by task id with superseded=FALSE; 404 if none"
+    },
+    {
+      "route": "PUT /api/v1/dives/{dive_id}/labels/headtail/needs-reprocess?only_incomplete=true",
+      "file": "API/controllers/label_reprocess_controller.py:225-244 (+_set_needs_reprocess 36-160)",
+      "semantics": "raise flag on canonical, superseded=FALSE (NULL excluded), and (default) incomplete rows; returns count"
+    },
+    {
+      "route": "DELETE /api/v1/dives/{dive_id}/labels/headtail/needs-reprocess?checksums=",
+      "file": "API/controllers/label_reprocess_controller.py:247-264",
+      "semantics": "clear flag on canonical rows regardless of superseded/completed; checksums None=whole dive, []=nothing; returns count, never 404"
+    },
+    {
+      "route": "dive_pipeline_status view: headtail_preprocessed, headtail_labeling_complete",
+      "file": "API/views.py:57-62,151-190",
+      "semantics": "headtail_preprocessed = >=1 canonical valid-laser image AND every such image has a headtaillabel with project NOT NULL (no superseded filter, unlike selector); headtail_labeling_complete = >=1 completed non-superseded AND zero incomplete non-superseded on canonical images; _VALID_HEADTAIL_SQL used by measured"
+    }
+  ],
+  "tests": [
+    "services/fishsense-api/tests/test_headtail_population_cohort.py (8 tests, 127 lines)",
+    "services/fishsense-api/tests/test_headtail_prediction_cohort.py (15, 269)",
+    "services/fishsense-api/tests/test_headtail_prediction_endpoint.py (8, 213)",
+    "services/fishsense-api/tests/test_headtail_prediction_migration.py (3, 103; v1 alembic-specific, likely not portable)",
+    "services/fishsense-api-workflow-worker/tests/test_backfill_headtail_predictions.py (7, 77)",
+    "services/fishsense-api-workflow-worker/tests/test_headtail_populate_predictions.py (10, 112)",
+    "services/fishsense-api-workflow-worker/tests/test_populate_headtail_label_studio_project_activity.py (14, 546)",
+    "services/fishsense-api-workflow-worker/tests/test_predict_headtail_images_parent_workflow.py (3, 189)",
+    "services/fishsense-api-workflow-worker/tests/test_preprocess_headtail_images_parent_workflow.py (5, 343)",
+    "services/fishsense-api-workflow-worker/tests/test_resolve_headtail_predict_inputs.py (14, 179)",
+    "services/fishsense-api-workflow-worker/tests/test_resolve_headtail_preprocess_inputs_activity.py (5, 240)",
+    "services/fishsense-api-workflow-worker/tests/test_select_next_high_priority_dive_for_headtail_preprocessing_activity.py (2, 53)",
+    "services/fishsense-api-workflow-worker/tests/test_sync_headtail_labels_activity.py (4, 229)",
+    "services/fishsense-api-workflow-worker/tests/test_sync_label_studio_headtail_labels_workflow.py (1, 51)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_predict_headtail_image.py (27, 533)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_headtail_geometry.py (11, 100)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_checkpoint_cache.py (6, 127)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_preprocess_headtail_images_workflow.py (3, 133)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_stage5_1_integration.py (1, 94; -m integration, uses tests/fixtures/stage2_sample.ORF)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_stage5_1_notebook_parity.py (1, 69; byte-parity vs notebook)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_encode_rectified_jpeg.py (3, 35)",
+    "libs/fishsense-shared/tests/test_headtail_geometry.py (3, 34; actually tests headtail_model_version_tag idempotency)",
+    "Shared/cross-cutting files with headtail cases (port the headtail parts): api tests test_cohort_needs_reprocess_all_kinds.py, test_label_needs_reprocess_flag.py, test_needs_reprocess_null_superseded.py, test_canonical_only_pipeline_work.py, test_dive_pipeline_status_view.py, test_label_studio_project_ids_superseded.py, test_label_put_row_targeting.py, test_label_upsert_endpoint.py, test_label_route_disambiguation.py, test_dive_route_disambiguation.py, test_select_next_dive_endpoints.py; api-worker tests test_ensure_project_shows_predictions.py, test_populate_label_studio_project_workflows.py, test_populate_workflow_retry_policy.py, test_resolvers_honour_needs_reprocess.py, test_reprocess_flag_drains.py, test_cleanup_raw_respects_other_children.py, test_reconcile_labeling_configs_activity.py, test_schedule_registration.py, test_sync_cursor_behavior.py, test_sync_throttle_handling.py; data-worker tests/test_worker_roles.py"
+  ],
+  "shared_helpers": [
+    {
+      "name": "_dispatch (select_dive, resolve_inputs, wake_data_worker, wake_gpu_worker, stage_raw, dispatch_child/CHILD_ALREADY_RUNNING, run_sdk_activity, cleanup_raw)",
+      "file": "AW/workflows/_dispatch.py",
+      "used_by_slices": "all preprocess/predict parents: laser, species, headtail, slate, clustering"
+    },
+    {
+      "name": "_populate.create_then_populate + _POPULATE_RETRY (POPULATE_MAX_ATTEMPTS=5)",
+      "file": "AW/workflows/_populate.py",
+      "used_by_slices": "laser, species, headtail, dive-slate populate"
+    },
+    {
+      "name": "populate_utils: build_image_url, build_task_data (image/img/taken/image_id), create_or_get_label_studio_project, heal_labeling_config, build_per_dive_title, ensure_label_studio_s3_storage, import_tasks_and_record_labels/ImportResult (IMPORT_ISSUED heartbeat, URL normalisation, batch dedupe, 429 handling), publish_label_studio_project, _get_ls_client, ensure_project_shows_predictions",
+      "file": "AW/activities/populate_utils.py (785 lines)",
+      "used_by_slices": "all four LS populate slices; ensure_project_shows_predictions used by laser + headtail backfill"
+    },
+    {
+      "name": "utils.sync_label_studio_project, resolve_annotator_user, SYNC_CONCURRENCY, throttle_wait_seconds",
+      "file": "AW/activities/utils.py (v2 port exists: fishsense_services_orchestrator/labels/sync.py + label_studio.py)",
+      "used_by_slices": "laser, headtail, species, dive-slate sync"
+    },
+    {
+      "name": "cohort_selection.select_next_dive",
+      "file": "AW/activities/cohort_selection.py",
+      "used_by_slices": "all nine select_next_* activities"
+    },
+    {
+      "name": "ClearReprocessFlagsInput",
+      "file": "AW/activities/reprocess_scope.py",
+      "used_by_slices": "laser, species, headtail, slate preprocess parents"
+    },
+    {
+      "name": "raw_scratch_reader_ids",
+      "file": "AW/activities/cleanup_raw_bytes_for_dive_activity.py:45-70",
+      "used_by_slices": "every raw-reading child (preprocess-headtail-{id} listed)"
+    },
+    {
+      "name": "gpu_fallback (ensure_gpu_worker_running_activity, MODE_UNAVAILABLE)",
+      "file": "AW/activities/gpu_fallback.py",
+      "used_by_slices": "laser predict, slate predict, headtail predict (NRP slice)"
+    },
+    {
+      "name": "_valid_laser_conditions / _valid_headtail_conditions / _has_image_flagged_for_reprocess",
+      "file": "API/controllers/dive_cohort_controller.py:88-183, 353-400 (v2 has VALID_LASER in clustering_store.py:43)",
+      "used_by_slices": "stages 1, 2, 5.1, 14, laser depth; headtail valid gate used by measure/views"
+    },
+    {
+      "name": "_set_needs_reprocess",
+      "file": "API/controllers/label_reprocess_controller.py:36-160",
+      "used_by_slices": "laser, species, headtail, dive-slate reprocess"
+    },
+    {
+      "name": "_upsert_label / _resolve_label_natural_key / _resolve_sole_label_for_image",
+      "file": "API/controllers/label_controller.py:~100-200",
+      "used_by_slices": "all four label kinds"
+    },
+    {
+      "name": "upsert_prediction",
+      "file": "API/controllers/_prediction_upsert.py",
+      "used_by_slices": "laser, slate, headtail predictions (v2 is append-only so this becomes INSERT)"
+    },
+    {
+      "name": "checkpoint_cache.ensure_checkpoint / checkpoint_path",
+      "file": "DW/checkpoint_cache.py",
+      "used_by_slices": "headtail predict only today (laser detector is baked into image); v2 plan \u00a79.12 GarageWeightStore replaces it"
+    },
+    {
+      "name": "headtail_geometry (crop_origin, lift_point, mask_at_point, silhouette_ratio)",
+      "file": "DW/headtail_geometry.py",
+      "used_by_slices": "headtail predict only"
+    },
+    {
+      "name": "encode_rectified_jpeg / RectifiedImage path",
+      "file": "DW/activities/preprocess_headtail_image.py",
+      "used_by_slices": "stage 5.1 (similar code in other preprocess stages)"
+    },
+    {
+      "name": "object_store: jpeg_key, model_key, raw_key, HEADTAIL_JPEG_FOLDER, BaseObjectStoreClient (has_processed_jpeg, download_processed_jpeg, upload_processed_jpeg, download_model, download_raw)",
+      "file": "SH/object_store.py + DW/object_store.py + AW/object_store.py",
+      "used_by_slices": "every JPEG stage + populate gates"
+    },
+    {
+      "name": "ExceptionGroupErrorLogging",
+      "file": "SH/__init__.py",
+      "used_by_slices": "fan-out parents, syncs"
+    }
+  ],
+  "contracts": [
+    "SH/preprocess_contracts.py:122 PreprocessHeadtailImagesInput {dive_id:int, image_checksums:List[str], camera_matrix:List[List[float]], distortion_coefficients:List[float]} (docstring is stale: says species top-3)",
+    "DW/workflows/preprocess_headtail_images_workflow.py:22 PreprocessHeadtailImageInput {checksum, output_folder, camera_matrix, distortion_coefficients} (per-image, data-worker-local)",
+    "SH/preprocess_contracts.py:421 PredictHeadtailImage {image_id, checksum, laser_points:List[List[float]], laser_label_ids:List[int] (parallel), jpeg_folder:str='', has_existing_prediction:bool=False, existing_laser_superseded:bool=False}",
+    "SH/preprocess_contracts.py:472 PredictHeadtailImagesInput {dive_id, images:List[PredictHeadtailImage], jpeg_folder}",
+    "SH/preprocess_contracts.py:486 HeadtailPredictionResult {image_id, status, head_x/y, tail_x/y, width, height, mask_area_px, silhouette_ratio, crop_x, crop_y, laser_label_id, predictor_version, checkpoint, core_version} (all optional except image_id/status)",
+    "SH/preprocess_contracts.py:469 HEADTAIL_STATUS_NO_UPGRADE_AVAILABLE='skipped_no_upgrade_available' (cross-worker: parent must drop these)",
+    "statuses emitted: predicted | no_detections | laser_off_all_fish | headtail_failed | decode_failed | skipped_no_upgrade_available",
+    "SH/headtail_predictor.py: HEADTAIL_PREDICTOR_VERSION=2, HEADTAIL_FALLBACK_PREDICTOR_VERSION=-1, HEADTAIL_CROP_WIDTH=1800, HEADTAIL_CROP_HEIGHT=1350, headtail_model_version_tag(v)=f'v{v} crop=1800x1350' (LS model_version idempotency key)",
+    "AW ClearReprocessFlagsInput {dive_id:int, checksums:Optional[List[str]]=None}",
+    "Task queues: fishsense_api_queue (parents, populate, sync), fishsense_data_processing_queue (cpu: preprocess), fishsense_data_processing_gpu_queue (gpu: predict). v2: fishsense_processor / fishsense_processor_gpu (services/fishsense-services-contracts/src/fishsense_services_contracts/task_queues.py)",
+    "Object key: raw scratch = bucket 'fishsense-lite' raw/{checksum}.ORF",
+    "Object key: head/tail JPEG = labels_bucket 'labels-fishsense-lite' key '{labels_prefix=fishsense-lite}/preprocess_headtail_jpeg/{checksum}.JPG'; LS task data image/img = 's3://labels-fishsense-lite/fishsense-lite/preprocess_headtail_jpeg/{checksum}.JPG'",
+    "Object key: SAM weights = models_bucket 'model-weights' key '{models_prefix}/sam3/3.1/sam3.1_multiplex.pt' ([sam3] model_name/model_version/checkpoint_filename in deploy/k8s/data-worker/settings.toml:98-102); cached at {cache_dir=/e4efs/cache/sam3}/sam3/3.1/sam3.1_multiplex.pt",
+    "LS labeling config: <KeyPointLabels name=\"kp-1\" toName=\"image\"> Snout (#FFA39E), Fork (#26a269); <Image name=\"image\" value=\"$image\" zoom zoomControl>",
+    "LS prediction payload: {model_version: tag, result:[{from_name:'kp-1', to_name:'image', type:'keypointlabels', original_width, original_height, image_rotation:0, value:{x:%, y:%, width:0.5, keypointlabels:['Snout'|'Fork']}}]}",
+    "LS project title: '{dive.name} #{dive_id} - HeadTail Labeling' (name truncated to fit 50 chars; id tail never truncated); legacy shared projects headtail=71, headtail-canonical=76",
+    "Sync cursor kind: v1 'headtail' -> v2 'head_tail' (v1_migration.CURSOR_KINDS)"
+  ],
+  "v2_schema_gaps": [
+    "head_tail_predictions.status CHECK (0011_predictions.py:94-97) omits 'decode_failed', which v1 predict_from_jpeg emits (DW/activities/predict_headtail_image.py:241-242); an undecodable JPEG would fail the insert. Rehearsal passed so prod has none yet.",
+    "No dive_pipeline_status (or equivalent) view in v2: headtail_preprocessed and headtail_labeling_complete (API/views.py:151-190) are missing. Needed for the web dashboard and measured gate; might belong to a views slice.",
+    "No table mapping Label Studio projects to (tenant, dive, kind). v1 finds projects by title and ensure_project_shows_predictions matches '#{dive_id}' in the title. v2 dive ids are UUIDs (only migrated dives have v1_id), so the title/identity scheme for new dives needs a decision (PLAN \u00a79.14).",
+    "head_tail_labels.source is required for new rows (0010 source_known_check). A populate-seeded pending row needs a chosen value ('human' for the eventual labeler vs 'pre_annotation'); undecided.",
+    "Predictions are append-only (0011) and current = current_head_tail_predictions by seq. v1's upsert-in-place becomes INSERT; the cohort/resolver/populate/backfill must read the current_ view. has_existing_prediction means 'a current row exists'. No schema change, but semantics shift.",
+    "No column records that a stage-5.1 JPEG was rendered. v1 HEAD-checks the object store (resolver and populate gates). Fine if v2 keeps HEAD checks, but v2 has no object-store client at all yet.",
+    "head_tail_labels has no user FK. v1 user_id becomes ls_labeler_id (int), matching the laser port. No gap, just a mapping.",
+    "laser_label_id is a uuid FK to laser_labels (tenant, id) in v2 vs an int in v1. The contract's PredictHeadtailImage.laser_label_ids and HeadtailPredictionResult.laser_label_id need UUIDs, and image_id becomes capture_id (UUID).",
+    "camera intrinsics: v1 reads per camera_id; v2 has current_camera_calibrations per device_id (0007). dives.device_id exists, so no gap expected (not verified against an axial camera_model).",
+    "No gap found for needs_reprocess/superseded/completed (0010 NOT NULL defaults). v1's NULL-superseded caveat disappears."
+  ],
+  "dependencies": [
+    "Depends on the object-store foundation (none in v2 yet): raw download, processed-JPEG upload/HEAD/download in labels bucket with labels_prefix, model download from model-weights bucket; plus PLAN \u00a79.12 GarageWeightStore/fishsense-core WeightStore with sha256 manifest replacing checkpoint_cache",
+    "Depends on the NRP slice: wake cpu processor (stand-up/tear-down per memory rule, not scale-to-zero), GPU processor + CPU-fallback selection returning gpu/cpu_fallback/unavailable (v1 gpu_fallback.py)",
+    "Depends on raw staging slice: stage_raw_bytes_for_dive (NAS -> Garage raw/) and cleanup_raw with raw_scratch_reader_ids including the v2 preprocess-headtail child id",
+    "Depends on Label Studio populate foundation (not yet ported): populate_utils (create_or_get project + config heal + S3 storage + import/dedupe/IMPORT_ISSUED + publish + ensure_project_shows_predictions), shared with laser/species/slate populate; and reconcile_labeling_configs",
+    "Depends on already-ported pieces: laser labels + laser label sync (label_sync_store.py, orchestrator labels/sync.py: sync_label_studio_project, LabelStudioClient); the head/tail sync is a new apply function + HeadTailSync dataclass + kind 'head_tail'",
+    "Depends on laser-label validation (RANSAC supersede) slice: supersede drives headtail prediction staleness and cohort drop-out",
+    "Depends on camera calibrations (0007) for stage-5.1 rectification, and on fishsense-core Phase 0 (RectifiedImage still imports fishsense_api_sdk CameraIntrinsics, PLAN \u00a75/\u00a76.3)",
+    "Depends on fishsense-core 4.0.0 wheel (FishHeadTailDetector, FishSegmentation ONNX fallback, RawImage/RectifiedImage) and sam3 git@8e451d5 + torch (cp313) with its extra pkg_resources/etc. deps (DW pyproject.toml:14-60)",
+    "Depended on by: measure fish (stage 14) via valid head/tail labels (API dive_cohort_controller.py:1064-1101, views measured), laser depth indirectly, web landing page (headtail project ids ?incomplete=true), pipeline status view"
+  ],
+  "gotchas": [
+    "Populate is decoupled from preprocess and prediction-gated (+30 preprocess, +32 predict, +34 populate). Populate seeds pending rows and the predict cohort excludes live labels, so populating before prediction starves an image forever (predict parent docstring; populate_headtail_...activity.py:137-149).",
+    "An abstention counts as 'visited' for the populate gate. Abstentions ARE persisted: the cohort selects on absence, so dropping them re-predicts forever (persist_headtail_predictions_activity.py:8-12).",
+    "Two different meanings of 'sentinel': the preprocess cohort treats project_id IS NULL as sentinel (API dive_cohort_controller.py:715-729), while populate's 'sentinel' rows carry a project id and completed=False. The predict cohort keys on completed, NOT project id (resolve_headtail_predict_inputs_activity.py:251-255).",
+    "Resolvers must mirror their selectors exactly, including canonical-only and the needs_reprocess branch (no laser gate for flagged images), or a dive re-fires every hour forever (resolve_headtail_preprocess_inputs_activity.py:112-133).",
+    "needs_reprocess clear is scoped to the checksums actually redrawn. None clears the whole dive and [] clears nothing; don't collapse them with a falsy check. Clearing ignores completed/superseded. Raising requires superseded=FALSE and, by default, incomplete (label_reprocess_controller.py:36-160).",
+    "A child that is already running (CHILD_ALREADY_RUNNING) means do nothing more: no cleanup_raw and no flag clear (dive-442 incident, _dispatch.py:200-275). Child reuse policy is ALLOW_DUPLICATE, never FAILED_ONLY.",
+    "The predict parent's backfill call is unconditional, and changing that altered the command sequence, so it was deployed against a drained queue. Keep the replay order stable (predict_headtail_images_parent_workflow.py:9-15). An all-skip run must still backfill.",
+    "'unavailable' GPU mode means return before dispatch: a child on an unserved queue hangs until its timeout (_dispatch.py:134-158).",
+    "The predictor version is a hand-bumped literal ('version the behaviour, not the model'). Fallback is -1 (negative on purpose, so it is permanently stale and forms the upgrade queue). The cohort uses IS DISTINCT FROM so NULL is stale (headtail_predictor.py).",
+    "The predict cohort orders never-predicted dives before upgrades, so fallback-only dives don't starve new work (dive_prediction_cohort_controller.py:269-296).",
+    "A GPU-less worker must not rewrite an existing row (it would be identical or a downgrade) unless its laser was superseded; it returns skipped_no_upgrade_available and the parent drops it (predict_headtail_image.py:531-553).",
+    "SAM 3.1 cannot be constructed without CUDA (PositionEmbeddingSine hardcodes device='cuda'). It raises a non-retryable ApplicationError type NoGpuForSam3 (dive 94, 356 activities looped).",
+    "SAM3 must run under torch.autocast(device_type, bfloat16) as a context manager, not __enter__, or it hits a BFloat16/Float mismatch. Feed it a PIL image, not the HWC array, or masks come out 3 px wide. Detach tensors and move them to CPU before np.asarray (predict_headtail_image.py:444-499, 360-372).",
+    "The checkpoint loader is strict=False; the expected 4 missing keys (backbone.vision_backbone.convs.3.*) are benign, any other set is a red flag. sam3.pt vs sam3.1_multiplex.pt are not interchangeable (config.py:98-120).",
+    "Fallback FishSegmentation: call load_model() before publishing the singleton, pass BGR, use landscape crops only (returns an empty mask otherwise), and split the instance label map into binary masks.",
+    "Model singletons use double-checked threading.Lock because activities run in a ThreadPoolExecutor. ensure_checkpoint uses a per-key asyncio.Lock, a temp file plus atomic os.replace, the version in the path, and writes off the event loop (checkpoint_cache.py).",
+    "The crop is centred on the FIRST laser point only; the laser gate tries every dot, first hit wins. The crop is clamped, not padded. Coordinates are lifted back to rectified-frame pixels before persisting (headtail_geometry.py).",
+    "The silhouette band 0.18-0.32 is applied at seed time (populate/backfill), not in the predictor; NULL ratio means 'not recorded' and passes (populate_...activity.py:128-181).",
+    "The LS model_version tag must be the ROW's tier (headtail_model_version_tag(row.predictor_version)) and must never include the checkpoint path or core_version; the backfill dedupes on (task_id, model_version).",
+    "The project's model_version must be set or predictions attached after import are invisible (dive 94, 334 invisible predictions). The majority tag wins, ties go to the current one; only per-dive projects ('#{dive_id}' in the title) are touched; this never raises (populate_utils.py:706-785).",
+    "The backfill lists LS predictions once per project, not per task, and attaches only to incomplete, non-superseded tasks.",
+    "The supersede pass in populate exempts rows by (same project AND image in CANDIDATES), not targets. Using targets caused the dive-341 oscillation and hid projects with outstanding work (populate_...activity.py:303-359).",
+    "One image can hold two headtail rows (uq on image_id+project_id). A PUT without a project returns 409 when the image has several rows. v1 duplicate-task history: dive 437 had 7 human labels invisible to the pipeline.",
+    "Publish only if import_result.complete and the project holds rows (never half-populated). Populate retries are bounded at 5 attempts with a 30s initial backoff, and a retry reconciles instead of re-importing (the IMPORT_ISSUED heartbeat marker; a bare heartbeat() would clear it).",
+    "JPEG presence is gated in both the predict resolver and populate. A task pointing at a missing object wedged dive 84.",
+    "The v1 head/tail sync PUTs ONLY when the task has annotations (sync_headtail_...activity.py:194-229), unlike laser sync, which always PUTs. Coordinates update only when both Snout and Fork are present; lookup skips superseded rows. Decide whether v2 keeps this quirk; the v2 laser port writes only its own columns and doesn't clear needs_reprocess.",
+    "The sync cursor advances only when every task succeeds and never moves backwards; the sync schedule is ALLOW_ALL overlap (safe because of the cursor).",
+    "Stage-5.1 rectification must stay byte-identical to the notebook (test_stage5_1_notebook_parity.py); no overlay, plain cv2.imencode default quality.",
+    "Inferred risk (not stated in v1): the preprocess cohort drains only once populate writes project rows, and populate needs predictions. When GPU and fallback are 'unavailable' for long, the lowest-id dive is re-staged from NAS and re-rendered every hour and blocks higher-id dives in stage 5.1 (ORDER BY id LIMIT 1).",
+    "Minor v1 inconsistencies to decide on, not copy blindly: views.headtail_preprocessed has no superseded filter while the selector does; the population cohort's 'no completed label' has no superseded filter; the preprocess parent comments say the child 'can run for two hours' but its execution_timeout is 1h; CLAUDE.md lines 180-197 still say headtail populate is preprocess-chained (stale); core_version is never set on predictions; rejected_low_confidence is never written.",
+    "v2 names must differ from v1's (shared Temporal until cutover): queues fishsense_processor*, and new schedule/child ids. v1 preprocess output_folder is hard-coded in the workflow (line 48), not taken from the shared constant."
+  ],
+  "size": "v1 source ~3,300 lines for this slice. Orchestrator: headtail activities ~1,150 lines across 12 files, workflows 491 lines across 7 files, plus a share of _dispatch.py (345), _populate.py (67) and populate_utils.py (785). Data-worker ~980 lines (predict_headtail_image 604, preprocess 76, 2 workflows 115, headtail_geometry 90, checkpoint_cache 96). Shared: headtail_predictor 147, ~100 lines of contracts. API: ~450 lines (3 cohort endpoints ~250, prediction controller 75, label endpoints ~110, reprocess ~40) plus models 140. Dedicated tests: 22 files, ~3,860 lines, 160 test functions before parametrisation (biggest: test_predict_headtail_image 27 tests / 533 lines, test_populate_headtail_label_studio_project_activity 14 / 546, test_headtail_prediction_cohort 15 / 269). About 20 more cross-cutting test files have headtail cases."
+}

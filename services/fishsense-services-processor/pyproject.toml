@@ -10,6 +10,33 @@ dependencies = [
     # Pinned to v1's lock (fishsense-lite@a8b2c3bc): stage 1's clusters must
     # match v1's for the same timestamps, and HDBSCAN is where they come from.
     "scikit-learn==1.9.0",
+    # The same wheel v1 runs at the freeze (PLAN.md §6.3): the line fit (#82,
+    # #85), CameraIntrinsics without the API SDK (#83), and the model loader
+    # (#84). Base install only -- torch is behind the `torch` extra below.
+    "fishsense-core==4.1.0",
+    "boto3>=1.35.0",
+    "pymupdf>=1.26.6",
+    "pandas>=2.3.3",
+    "platformdirs>=4.3.8",
+]
+
+[project.optional-dependencies]
+# The GPU role (laser prediction, SAM 3.1 head/tail) and the slate board mask.
+# Kept out of the base install so CI and the per-image and light images don't
+# pull torch and its CUDA runtime. The GPU image installs `--extra torch`.
+torch = [
+    "fishsense-core[laser-detector,slate]==4.1.0",
+    # SAM3: Meta publishes no wheel. Pinned to v1's commit so the stage can't
+    # change under HEADTAIL_PREDICTOR_VERSION without a visible diff.
+    "sam3 @ git+https://github.com/facebookresearch/sam3.git@8e451d5eb43c817b64ae7577fb7b9ae223db88a9",
+    # sam3 imports pkg_resources, which setuptools REMOVED in 82.0.0; v1
+    # measured 81.0.0 as the last release that ships it (prod, 2026-09-07).
+    "setuptools>=80.9.0,<82",
+    # Imported by sam3's model_builder chain but never declared by it (v1 found
+    # them one ModuleNotFoundError at a time).
+    "einops>=0.8.0",
+    "psutil>=6.0.0",
+    "pycocotools>=2.0.8",
 ]
 
 [project.scripts]
@@ -17,10 +44,17 @@ fishsense-services-processor = "fishsense_services_processor.worker:run"
 
 [tool.uv.sources]
 fishsense-services-contracts = { workspace = true }
+fishsense-core = [
+    { url = "https://github.com/UCSD-E4E/fishsense-core/releases/download/fishsense-core-v4.1.0/fishsense_core-4.1.0-cp313-cp313-manylinux_2_34_x86_64.whl", marker = "python_version == '3.13'" },
+]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+# SAM3 is a pinned git reference (Meta publishes no wheel).
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/fishsense_services_processor"]

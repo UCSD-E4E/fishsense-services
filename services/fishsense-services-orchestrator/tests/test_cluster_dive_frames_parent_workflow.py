@@ -3,8 +3,9 @@
 Ported from fishsense-lite@a8b2c3bc services/fishsense-api-workflow-worker/tests/
 test_cluster_dive_frames_parent_workflow.py. Test names, bodies and reasons are
 v1's; v2 adaptations: the target is (tenant, dive), ids are UUIDs, the child
-goes to the processor's light queue, and there is no NRP scale-up step yet
-(PLAN.md §6.2's worker duties port separately).
+goes to the processor's light queue, and the NRP wake is
+`ensure_light_processor_running` (v1: `ensure_light_worker_running_activity`),
+which in v2 stands the light processor up rather than scaling it.
 
 v2 fix, pinned last: **a completed child with the same id must not stop the
 persist.** v1 dispatched with ALLOW_DUPLICATE_FAILED_ONLY and returned early on
@@ -58,17 +59,25 @@ class _StubChildWorkflow:
         return [[A, B], [C, D]]
 
 
-def _make_recording_activity(captures: List[tuple]):
+def _make_recording_activity(captures: List[tuple], events: List[str]):
     @activity.defn(name="_record_child_dispatch")
     async def record_child_dispatch(
         workflow_id: str, dive_id: uuid.UUID, capture_ids: List[uuid.UUID]
     ) -> None:
+        events.append("child")
         captures.append((workflow_id, dive_id, capture_ids))
 
     return record_child_dispatch
 
 
-def _make_stubs(selector_result, resolver_result, persist_calls: List[tuple]):
+def _make_stubs(
+    selector_result, resolver_result, persist_calls: List[tuple], events: List[str]
+):
+    @activity.defn(name="ensure_light_processor_running")
+    async def stub_wake() -> int:
+        events.append("wake")
+        return 1
+
     @activity.defn(name="select_next_dive_for_clustering")
     async def stub_select() -> ClusteringTarget | None:
         return selector_result
@@ -82,15 +91,17 @@ def _make_stubs(selector_result, resolver_result, persist_calls: List[tuple]):
     async def stub_persist(
         target: ClusteringTarget, clusters: List[List[uuid.UUID]]
     ) -> int:
+        events.append("persist")
         persist_calls.append((target, clusters))
         return len(clusters)
 
-    return [stub_select, stub_resolve, stub_persist]
+    return [stub_wake, stub_select, stub_resolve, stub_persist]
 
 
-async def _run(selector_result, resolver_result, *, before=None):
+async def _run(selector_result, resolver_result, *, before=None, events=None):
     persist_calls: List[tuple] = []
     child_runs: List[tuple] = []
+    events = [] if events is None else events
     async with await WorkflowEnvironment.start_time_skipping(
         data_converter=pydantic_data_converter
     ) as env:
@@ -99,13 +110,15 @@ async def _run(selector_result, resolver_result, *, before=None):
                 env.client,
                 task_queue="test-stage1-parent",
                 workflows=[ClusterDiveFramesParentWorkflow],
-                activities=_make_stubs(selector_result, resolver_result, persist_calls),
+                activities=_make_stubs(
+                    selector_result, resolver_result, persist_calls, events
+                ),
             ),
             Worker(
                 env.client,
                 task_queue=PROCESSOR_LIGHT_TASK_QUEUE,
                 workflows=[_StubChildWorkflow],
-                activities=[_make_recording_activity(child_runs)],
+                activities=[_make_recording_activity(child_runs, events)],
             ),
         ):
             if before:
@@ -187,3 +200,22 @@ async def test_a_completed_child_with_the_same_id_does_not_stop_the_persist():
     assert result == TARGET
     assert len(child_runs) == 2  # the prior one, then this firing's
     assert persist_calls == [(TARGET, [[A, B], [C, D]])]
+
+
+async def test_wakes_the_light_processor_before_dispatching():
+    """v1's order: the light worker is woken once the parent knows there is
+    work, and before the child lands on its queue -- on NRP nothing polls the
+    light queue until the wake stands the processor up."""
+    events: List[str] = []
+    await _run(TARGET, _inputs(), events=events)
+
+    assert events == ["wake", "child", "persist"]
+
+
+async def test_a_quiet_firing_wakes_nothing():
+    """No dive, or a dive with no captures: no pod is stood up for nothing
+    (NRP asks us to hold as little as possible)."""
+    for selector, resolver in ((None, None), (TARGET, _inputs(images=False))):
+        events: List[str] = []
+        await _run(selector, resolver, events=events)
+        assert "wake" not in events

@@ -25,7 +25,6 @@ from unittest.mock import MagicMock
 
 from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.testing import WorkflowEnvironment
-from temporalio.worker import Worker
 
 from fishsense_services_api.clustering_store import ClusteringCandidate
 from fishsense_services_api.ingest_store import (
@@ -33,7 +32,6 @@ from fishsense_services_api.ingest_store import (
     RegisteredCapture,
     ResolvedDevice,
 )
-from fishsense_services_contracts import PROCESSOR_LIGHT_TASK_QUEUE
 from fishsense_services_orchestrator.clustering.activities import (
     ClusteringActivities,
     ClusteringTarget,
@@ -46,7 +44,7 @@ from fishsense_services_orchestrator.ingest.contracts import IngestDiveRequest
 from fishsense_services_orchestrator.ingest.nas import NasEntry
 from fishsense_services_orchestrator.ingest.nas_frames import NasSettings
 from fishsense_services_orchestrator.ingest.workflow import IngestDiveWorkflow
-from fishsense_services_orchestrator.labels.activities import LabelSyncActivities
+from fishsense_services_orchestrator.nrp.activities import NrpActivities
 from fishsense_services_orchestrator.settings import (
     OrchestratorSettings,
     TemporalSettings,
@@ -55,15 +53,19 @@ from fishsense_services_orchestrator.worker import (
     DEFAULT_TASK_QUEUE,
     build_worker,
 )
-from fishsense_services_processor.clustering.activities import cluster_dive_frames
-from fishsense_services_processor.clustering.workflow import (
-    DiveFrameClusteringWorkflow,
-)
+from fishsense_services_processor.worker import build_worker as build_processor
 
 from ._tiff_builder import build_orf
 
-# Registered, never called: these tests drive other workflows.
-_UNUSED_LABELS = LabelSyncActivities(catalog=None, label_studio_factory=lambda: None)
+
+def _activities_of(instance) -> list:
+    """An activities object's bound activity methods."""
+    return [
+        getattr(instance, name)
+        for name in dir(instance)
+        if hasattr(getattr(instance, name), "__temporal_activity_definition")
+    ]
+
 
 ROOT = "/fishsense_data/REEF/data"
 FOLDER = "2024.06.20.REEF/082929_FishModels_FSL07"
@@ -171,11 +173,7 @@ async def test_a_whole_ingest_runs_through_the_real_worker():
         data_converter=pydantic_data_converter
     ) as env:
         async with build_worker(
-            env.client,
-            ingest=activities,
-            clustering=ClusteringActivities(catalog=_ClusteringCatalog()),
-            labels=_UNUSED_LABELS,
-            task_queue="wiring",
+            env.client, activities=_activities_of(activities), task_queue="wiring"
         ):
             report = await env.client.execute_workflow(
                 IngestDiveWorkflow.run,
@@ -231,15 +229,10 @@ class _ClusteringCatalog:
 
 async def test_stage_1_runs_across_the_orchestrator_and_the_processor():
     """The orchestrator's real parent and activities, the processor's real
-    workflow and kernel, on their real queues: the contract between the two
-    packages, exercised the way it deploys."""
+    light-role worker, on their real queues: the contract between the two
+    packages, exercised the way it deploys. The NRP wake is the real activity,
+    unconfigured -- a no-op, as in compose and e2e."""
     catalog = _ClusteringCatalog()
-    ingest = IngestActivities(
-        nas_settings=NasSettings(url="https://nas.test:6021", username="u",
-                                 password="p", raw_root_path=ROOT),
-        nas_client_factory=lambda: None,
-        catalog=None,
-    )  # fmt: skip
 
     async with await WorkflowEnvironment.start_time_skipping(
         data_converter=pydantic_data_converter
@@ -247,17 +240,13 @@ async def test_stage_1_runs_across_the_orchestrator_and_the_processor():
         async with (
             build_worker(
                 env.client,
-                ingest=ingest,
-                clustering=ClusteringActivities(catalog=catalog),
-                labels=_UNUSED_LABELS,
+                activities=[
+                    *_activities_of(ClusteringActivities(catalog=catalog)),
+                    *_activities_of(NrpActivities(config=None)),
+                ],
                 task_queue="wiring",
             ),
-            Worker(
-                env.client,
-                task_queue=PROCESSOR_LIGHT_TASK_QUEUE,
-                workflows=[DiveFrameClusteringWorkflow],
-                activities=[cluster_dive_frames],
-            ),
+            build_processor(env.client, role="light"),
         ):
             target = await env.client.execute_workflow(
                 ClusterDiveFramesParentWorkflow.run,

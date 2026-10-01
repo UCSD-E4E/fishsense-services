@@ -6,6 +6,14 @@ requires-python = ">=3.13,<3.14"
 
 [tool.uv]
 package = false
+override-dependencies = [
+    # SAM3 (the processor's `torch` extra) declares `numpy>=1.26,<2`, which is
+    # stale rather than real: fishsense-lite has run it end to end on numpy
+    # 2.4.6, and fishsense-core requires numpy>=2.3.5, so without this the
+    # processor cannot resolve at all (fishsense-lite's root pyproject, same
+    # override). Revisit if SAM3 publishes a wheel with an honest pin.
+    "numpy",
+]
 
 [tool.uv.workspace]
 members = ["services/*"]
@@ -17,4 +25,6 @@ dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
     "testcontainers[postgres]>=4.10.0",
+    # An in-process S3 for the object-store tests (Garage speaks S3).
+    "moto[s3]>=5.0.0",
 ]

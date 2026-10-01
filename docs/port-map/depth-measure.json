@@ -1,0 +1,352 @@
+{
+  "slice": "depth-measure: laser depth (ComputeLaserDepths*) + stage 14 measurement (MeasureFish*), calibration/extrinsics resolution, fish binding to clusters, measurement parity rules, and the dive_pipeline_status view. v1 paths below are relative to /home/chris/Repos/school/e4e/fishsense/fishsense-lite (a8b2c3bc); v2 paths are relative to /home/chris/Repos/school/e4e/fishsense/fishsense-services.",
+  "workflows": [
+    {
+      "name": "ComputeLaserDepthsParentWorkflow",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/compute_laser_depths_parent_workflow.py",
+      "worker": "api-worker (fishsense_api_queue)",
+      "schedule": "id compute-laser-depths-workflow-schedule; every 1h, offset +35 min; overlap SKIP; run_timeout 1h30 (worker.py:715-741). The module docstring (line 12) says +25, which is out of date; worker.py is right. Can also be run on demand with id compute-laser-depths-parent-<tag>. Each run drains one dive.",
+      "calls": [
+        "select_next_high_priority_dive_for_laser_depth_activity (schedule_to_close 5m, SDK_FAIL_FAST_RETRY_POLICY: 2 attempts, HTTPStatusError non-retryable); returns None and ends if the cohort is empty",
+        "ensure_light_worker_running_activity (5m, SCALING_RETRY_POLICY: 3 attempts), which wakes the NRP light worker",
+        "execute_child_workflow ComputeLaserDepthsWorkflow(dive_id), id compute-laser-depths-{dive_id}, queue DATA_PROCESSING_LIGHT_TASK_QUEUE, execution_timeout 1h, id_reuse ALLOW_DUPLICATE; catches WorkflowAlreadyStartedError",
+        "returns dive_id"
+      ]
+    },
+    {
+      "name": "ComputeLaserDepthsWorkflow",
+      "file": "services/fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/workflows/compute_laser_depths_workflow.py",
+      "worker": "data-worker, role light (fishsense_data_processing_light_queue; registered in roles.py:110,203,213)",
+      "schedule": "on demand (child of the parent)",
+      "calls": [
+        "compute_laser_depths_activity(dive_id) (schedule_to_close 1h, heartbeat 2m, default unlimited retry) -> ComputeLaserDepthsResult"
+      ]
+    },
+    {
+      "name": "MeasureFishParentWorkflow",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/measure_fish_parent_workflow.py",
+      "worker": "api-worker (fishsense_api_queue)",
+      "schedule": "id measure-fish-workflow-schedule; every 1h, offset +40 min; overlap SKIP; run_timeout 1h30 (worker.py:688-713). Can also be run on demand with id measure-fish-parent-<tag>. Each run drains one dive.",
+      "calls": [
+        "select_next_high_priority_dive_for_measure_fish_activity (5m, SDK_FAIL_FAST)",
+        "ensure_light_worker_running_activity (5m, SCALING_RETRY_POLICY)",
+        "execute_child_workflow MeasureFishWorkflow(dive_id), id measure-fish-{dive_id}, light queue, execution_timeout 1h, ALLOW_DUPLICATE; catches WorkflowAlreadyStartedError",
+        "returns dive_id"
+      ]
+    },
+    {
+      "name": "MeasureFishWorkflow",
+      "file": "services/fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/workflows/measure_fish_workflow.py",
+      "worker": "data-worker, role light (roles.py:116,206,215)",
+      "schedule": "on demand (child)",
+      "calls": [
+        "measure_fish_activity(dive_id) (schedule_to_close 1h, heartbeat 2m) -> MeasureFishResult"
+      ]
+    }
+  ],
+  "activities": [
+    {
+      "name": "select_next_high_priority_dive_for_laser_depth_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/select_next_high_priority_dive_for_laser_depth_activity.py",
+      "purpose": "Makes one SDK call, fs.dives.select_next_for_laser_depth(), wrapped by cohort_selection.select_next_dive, which logs the result.",
+      "touches": [
+        "api GET /api/v1/dives/select-next/laser-depth/ (reads dive, image, laserlabel, laserdepth, laserextrinsics)"
+      ]
+    },
+    {
+      "name": "select_next_high_priority_dive_for_measure_fish_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/select_next_high_priority_dive_for_measure_fish_activity.py",
+      "purpose": "Makes one SDK call, fs.dives.select_next_for_measure_fish().",
+      "touches": [
+        "api GET /api/v1/dives/select-next/measure-fish/ (reads dive, image, specieslabel, laserlabel, headtaillabel, diveframecluster, diveframeclusterimagemapping, measurement, laserextrinsics)"
+      ]
+    },
+    {
+      "name": "select_next_dive (shared helper)",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/cohort_selection.py",
+      "purpose": "Opens the SDK client, runs the selector callable, and logs the picked or empty result. Shared by 9 selectors.",
+      "touches": [
+        "api (SDK)"
+      ]
+    },
+    {
+      "name": "ensure_light_worker_running_activity",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/ensure_light_worker_running_activity.py",
+      "purpose": "Scales the NRP light worker up before dispatch. It belongs to the NRP scaling slice; v2 policy is to create the processor on demand and delete it when idle.",
+      "touches": [
+        "k8s (NRP)"
+      ]
+    },
+    {
+      "name": "compute_laser_depths_activity",
+      "file": "services/fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/activities/compute_laser_depths_activity.py",
+      "purpose": "For each image with a valid laser label: skip it if its stored depth names one of the image's still-valid labels AND the resolved extrinsics id. Otherwise try the valid labels in ascending id order and take the first with a finite depth > 0, then PUT a LaserDepth (depth_m=Z, range_m=norm, residual_m, laser_label_id, laser_extrinsics_id). If no label gives depth > 0, count skipped_invalid_geometry and write nothing. Returns counters computed, skipped_current, skipped_unusable_label, skipped_invalid_geometry.",
+      "touches": [
+        "api GET /dives/{id} (dive.camera_id)",
+        "api GET camera intrinsics",
+        "api GET /dives/{id}/laser-extrinsics/ (resolved)",
+        "api GET /dives/{id}/labels/laser (non-superseded, all states)",
+        "api GET /dives/{id}/laser-depths/",
+        "api PUT /images/{image_id}/laser-depth/ (upsert on image_id)",
+        "model: fishsense_core.world_point.WorldPointHandler (>=3.0.0)"
+      ]
+    },
+    {
+      "name": "measure_fish_activity",
+      "file": "services/fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/activities/measure_fish_activity.py",
+      "purpose": "Stage 14. Loops over species labels with top_three_photos_of_group set and classifies each as a real fish (parse_species_names) or a rigid target (parse_model_name); anything else is skipped as unmeasurable. It then: invalidates stale fish bindings by DELETEing them; skips images already measured under the current extrinsics id and re-measures stale ones; requires a LABEL_STUDIO cluster for real fish only; fetches the per-image laser and headtail labels and requires all keypoints; runs find-or-create on species and then on fish (real fish: bound to the cluster via put_cluster; models: global by name); computes the length; skips non-finite lengths; and POSTs a Measurement (upsert on image_id+fish_id) carrying laser_extrinsics_id. Returns counters.",
+      "touches": [
+        "api GET /dives/{id}, camera intrinsics, /dives/{id}/laser-extrinsics/",
+        "api GET /dives/{id}/labels/species (non-superseded; sentinels included)",
+        "api GET /dives/{id}/images/clusters/LABEL_STUDIO",
+        "api GET /dives/{id}/measurements (404 when there are none -> None)",
+        "api GET /labels/laser/{image_id} and /labels/headtail/{image_id} (non-superseded .first(), no completed filter, no ORDER BY)",
+        "api GET/POST /fish/species (find-or-create by scientific_name)",
+        "api GET /fish/{id}, GET /fish/by-name/{name}, POST /fish (upsert on name)",
+        "api PUT /dives/{id}/images/clusters/{cluster_id} (rebinds fish_id and rewrites the mappings)",
+        "api DELETE /fish/{fish_id}/measurements/{image_id}",
+        "api POST /fish/{fish_id}/measurements",
+        "model: fishsense_core WorldPointHandler"
+      ]
+    },
+    {
+      "name": "load_dive_calibration_context",
+      "file": "services/fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/activities/utils.py:35",
+      "purpose": "Shared preamble for depth and measure: dive -> camera_id -> intrinsics -> resolved extrinsics. Raises ValueError on any miss; the raise is not marked non-retryable, so it retries until the 1h schedule_to_close.",
+      "touches": [
+        "api (SDK)"
+      ]
+    },
+    {
+      "name": "laser_geometry.compute_laser_point / measure_length_at_depth",
+      "file": "services/fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/laser_geometry.py",
+      "purpose": "The shared projection kernel. compute_world_point_from_laser_with_residual(laser_position, laser_axis, [x,y]) gives LaserPoint(depth_m=Z, range_m=norm, residual_m). Length = norm(K^-1[head,1]*Z - K^-1[tail,1]*Z). Uses inv(camera_matrix) only, with no distortion.",
+      "touches": [
+        "model: fishsense_core.world_point"
+      ]
+    }
+  ],
+  "api_endpoints": [
+    {
+      "route": "GET /api/v1/dives/select-next/laser-depth/",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/dive_cohort_controller.py:1119-1219 (_laser_depth_cohort_query)",
+      "semantics": "Returns the lowest dive.id with priority HIGH AND (an own LaserExtrinsics row exists OR one exists for dive.calibration_dive_id) AND there EXISTS a laserlabel on a canonical image of the dive that is valid (completed AND NOT superseded AND x,y not null) and whose image has NO current depth. A current depth is a LaserDepth for the image with laser_extrinsics_id = COALESCE(own extrinsics id, borrowed extrinsics id), whose laser_label_id names a label of the SAME image that is still valid. The inner subqueries use .correlate(LaserDepth, Image) and .correlate(Dive). ORDER BY id LIMIT 1."
+    },
+    {
+      "route": "GET /api/v1/dives/select-next/measure-fish/",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/dive_cohort_controller.py:1027-1116",
+      "semantics": "Returns the lowest dive.id with priority HIGH AND has extrinsics (own OR borrowed) AND there EXISTS a specieslabel on a canonical image of the dive with top_three_photos_of_group = TRUE AND a measurable content_of_image (LIKE '%(%)' OR rigid target: LIKE 'Fish Model,%' AND TRIM <> 'Fish Model,', OR IN ('Calibration Targets, Ruler','Calibration Targets, Box')) AND a valid laser label on the image AND a valid headtail label (completed, not superseded, head/tail x,y set) AND (image in a LABEL_STUDIO cluster OR it is a rigid target) AND NOT EXISTS a measurement for the image with laser_extrinsics_id = the resolved id. It does not filter sentinel species rows, does not apply the implausible-baseline filter, and does not use _reentry_last. ORDER BY id LIMIT 1."
+    },
+    {
+      "route": "GET /api/v1/dives/{dive_id}/laser-extrinsics/",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/dive_controller.py:293-331 (+ _plausible_extrinsics ~270, _latest_extrinsics_query 241)",
+      "semantics": "Resolution: the dive's own latest-created row, if its baseline is plausible (calibration_bounds.is_plausible_baseline, 0.097-0.145 m, i.e. norm(laser_position[:2])); otherwise, if calibration_dive_id is set, the source dive's row under the same plausibility test; otherwise 404. The own row wins over the link."
+    },
+    {
+      "route": "PUT /api/v1/dives/{dive_id}/laser-extrinsics/",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/dive_controller.py:334-375",
+      "semantics": "Upserts on dive_id and KEEPS the row id; stamps created_at; clears the refusal columns. Because the id does not change, a refit in place is invisible to the provenance-mismatch cohorts (CLAUDE.md:575-581)."
+    },
+    {
+      "route": "PUT|DELETE /api/v1/dives/{id}/calibration-source/{source_id}",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/dive_controller.py:422,464",
+      "semantics": "Sets or clears Dive.calibration_dive_id (borrowing). Calibration-source editing belongs to the portal slice, but stage 14 and depth read it."
+    },
+    {
+      "route": "PUT /api/v1/images/{image_id}/laser-depth/",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/laser_depth_controller.py:26",
+      "semantics": "Upserts on image_id (uq_laser_depth_image): one row per image, overwritten in place."
+    },
+    {
+      "route": "GET /api/v1/images/{image_id}/laser-depth/",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/laser_depth_controller.py:59",
+      "semantics": "Returns the single row, or 404."
+    },
+    {
+      "route": "GET /api/v1/dives/{dive_id}/laser-depths/",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/laser_depth_controller.py:79",
+      "semantics": "All LaserDepth rows for the dive's images (canonical or not); an empty list when there are none."
+    },
+    {
+      "route": "GET /api/v1/dives/{dive_id}/measurements",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/fish_controller.py:97",
+      "semantics": "All Measurement rows for the dive's images; 404 when there are none (the SDK maps that to None)."
+    },
+    {
+      "route": "POST /api/v1/fish/{fish_id}/measurements",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/fish_controller.py:122",
+      "semantics": "Upserts on (image_id, fish_id) (uq_measurement_image_fish)."
+    },
+    {
+      "route": "DELETE /api/v1/fish/{fish_id}/measurements/{image_id}",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/fish_controller.py:158",
+      "semantics": "Deletes the (image, fish) binding; idempotent, never 404s. Used to invalidate stale bindings."
+    },
+    {
+      "route": "GET /api/v1/fish/{id}, GET /api/v1/fish/by-name/{name}, POST /api/v1/fish",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/fish_controller.py:32,47,66",
+      "semantics": "POST upserts on name (uq_fish_name) for models; real fish (name NULL) always insert."
+    },
+    {
+      "route": "GET /api/v1/fish/species/{scientific_name}, POST /api/v1/fish/species",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/fish_controller.py:196,211",
+      "semantics": "Species find-or-create: GET 404s when absent; POST is a plain merge."
+    },
+    {
+      "route": "GET /api/v1/dives/{dive_id}/images/clusters/{data_source}, PUT /api/v1/dives/{dive_id}/images/clusters/{id}",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/image_controller.py:277,369",
+      "semantics": "Stage 14 reads LABEL_STUDIO clusters (with image_ids and fish_id). PUT merges fish_id and deletes and re-adds every mapping from the DTO's image_ids."
+    },
+    {
+      "route": "GET /api/v1/labels/laser/{image_id}, GET /api/v1/labels/headtail/{image_id}",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/label_controller.py:549,312",
+      "semantics": "The first non-superseded row, with NO completed filter and NO ORDER BY, so the choice is nondeterministic when an image has several rows."
+    },
+    {
+      "route": "GET /api/v1/dives/{dive_id}/labels/laser, /labels/species",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/label_controller.py:589,626",
+      "semantics": "Non-superseded rows ordered by image_id; 404 when empty. Sentinels are included."
+    },
+    {
+      "route": "VIEW dive_pipeline_status",
+      "file": "services/fishsense-api/src/fishsense_api/views.py:115-423 (created by alembic; latest recreate revisions include c3e8b1d47a52, d8b3f16c204e, b7c2e4d81a09, e3f70ac46d92, f2b5d0c8e3a1, a91d4e70c3b8, f4a9c2b17e60)",
+      "semantics": "One row per dive: dive_id, dive_name, priority, dive_slate_id, laser_preprocessed, laser_labeling_complete, headtail_preprocessed, headtail_labeling_complete, has_prediction_clusters, dive_images_preprocessed, species_labeling_complete, slate_applicable, slate_preprocessed, slate_labeling_complete, calibrated (own OR borrowed row, with NO plausibility filter), calibration_source ('own'|'borrowed'|'none'), and measured (>=1 measurement on a canonical image AND NOT EXISTS a measurable image, using the same predicate as the measure-fish cohort, without a measurement naming the resolved extrinsics id). Image correlations are canonical only; a vacuous condition reads as false. Superset reads it."
+    }
+  ],
+  "tests": [
+    "services/fishsense-data-processing-workflow-worker/tests/test_compute_laser_depths_activity.py (15 tests)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_compute_laser_depths_workflow.py (1)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_measure_fish_activity.py (30)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_measure_fish_workflow.py (1)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_laser_geometry.py (12; pins depth>0 gate, residual epipolar blindness, zero-axis raise)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_stage14_pipeline_sign_consistency.py (4)",
+    "services/fishsense-data-processing-workflow-worker/tests/test_compute_world_point_from_depth_convention.py (5)",
+    "services/fishsense-api-workflow-worker/tests/test_measure_fish_parent_workflow.py (2)",
+    "services/fishsense-api-workflow-worker/tests/test_select_next_high_priority_dive_for_measure_fish_activity.py (2)",
+    "services/fishsense-api-workflow-worker/tests/test_schedule_registration.py (schedule ids/offsets; shared)",
+    "NOTE: no v1 test exists for ComputeLaserDepthsParentWorkflow or select_next_high_priority_dive_for_laser_depth_activity; write them first when porting",
+    "services/fishsense-api/tests/test_laser_depth_endpoint.py (19; the cohort cases include the two-valid-labels drain and a superseded recorded label)",
+    "services/fishsense-api/tests/test_measurements_endpoint.py (8)",
+    "services/fishsense-api/tests/test_measurement_calibration_provenance.py (8; includes the correlated-subquery guard)",
+    "services/fishsense-api/tests/test_select_next_dive_endpoints.py (8 measure_fish tests at lines 1704-2032, out of 77)",
+    "services/fishsense-api/tests/test_dive_pipeline_status_view.py (60 tests, ~25 about measured/calibrated/taxonomy parity)",
+    "services/fishsense-api/tests/test_api_postgres_integration.py (test_every_cohort_selector_runs_on_postgres, test_laser_depth_cohort_drains_with_duplicate_labels_on_postgres, view tests)",
+    "services/fishsense-api/tests/test_canonical_only_pipeline_work.py (7; registry that every selector is canonical-only)",
+    "services/fishsense-api/tests/test_implausible_calibration_reentry.py (3)",
+    "services/fishsense-api/tests/test_calibration_source_endpoints.py (11)",
+    "services/fishsense-api/tests/test_laser_extrinsics_upsert.py (3)",
+    "services/fishsense-api/tests/test_fish_controller.py (5)",
+    "services/fishsense-api/tests_support/stage14_fixtures.py (fixture seeding)",
+    "libs/fishsense-shared/tests/test_taxonomy.py (29)",
+    "libs/fishsense-shared/tests/test_calibration_bounds.py (11)",
+    "libs/fishsense-api-sdk/tests/clients/test_dive_client.py and test_image_client.py (SDK wrappers for select_next_for_*, get_laser_extrinsics, laser depth; they go away in v2)"
+  ],
+  "shared_helpers": [
+    {
+      "name": "taxonomy (is_measurable, parse_species_names, parse_model_name, measurable_species_sql, rigid_target_sql, MEASURABLE_CALIBRATION_TARGETS, REAL_FISH_LIKE, FISH_MODEL_LIKE, MEASURABILITY_CORPUS, SQL_BROADER_THAN_PYTHON)",
+      "file": "libs/fishsense-shared/src/fishsense_shared/taxonomy.py",
+      "used_by_slices": "depth-measure (cohort, activity, view), species sync, slate stage 9, checkerboard cohort, analytics views"
+    },
+    {
+      "name": "calibration_bounds (baseline_m, is_plausible_baseline, MIN/MAX_BASELINE_M 0.097/0.145)",
+      "file": "libs/fishsense-shared/src/fishsense_shared/calibration_bounds.py",
+      "used_by_slices": "depth-measure (extrinsics read), calibration (stage 13/checkerboard gates, implausible re-entry)"
+    },
+    {
+      "name": "_valid_laser_conditions / views._VALID_LASER_SQL",
+      "file": "services/fishsense-api/src/fishsense_api/controllers/dive_cohort_controller.py:90; views.py:36",
+      "used_by_slices": "stages 1, 2, 5.1, 14, depth (v2 already has VALID_LASER in clustering_store.py)"
+    },
+    {
+      "name": "_valid_headtail_conditions / views._VALID_HEADTAIL_SQL",
+      "file": "dive_cohort_controller.py:168; views.py:57",
+      "used_by_slices": "stage 14 only"
+    },
+    {
+      "name": "_measurable_species_conditions, _is_fish_model_condition",
+      "file": "dive_cohort_controller.py:110,146",
+      "used_by_slices": "stage 14 cohort; mirrored in views._MEASURABLE_SPECIES_SQL/_IS_FISH_MODEL_SQL"
+    },
+    {
+      "name": "_resolved_laser_extrinsics_id / views._RESOLVED_EXTRINSICS_SQL",
+      "file": "dive_cohort_controller.py:187; views.py:50",
+      "used_by_slices": "depth cohort, measure cohort, view.measured"
+    },
+    {
+      "name": "load_dive_calibration_context",
+      "file": "services/fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/activities/utils.py:35",
+      "used_by_slices": "depth + measure"
+    },
+    {
+      "name": "laser_geometry (compute_laser_point, measure_length_at_depth, LaserPoint)",
+      "file": "services/fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/laser_geometry.py",
+      "used_by_slices": "depth + measure"
+    },
+    {
+      "name": "select_next_dive",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/activities/cohort_selection.py",
+      "used_by_slices": "all 9 selector activities"
+    },
+    {
+      "name": "SDK_FAIL_FAST_RETRY_POLICY, SCALING_RETRY_POLICY",
+      "file": "services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/workflows/_retry_policies.py",
+      "used_by_slices": "all parents"
+    },
+    {
+      "name": "implausible_calibration_dive_ids, _reentry_last",
+      "file": "dive_cohort_controller.py:289-340",
+      "used_by_slices": "calibration cohorts only (NOT used by the depth/measure cohorts)"
+    }
+  ],
+  "contracts": [
+    "v1 has no fishsense_shared DTO for this slice: both children take a bare dive_id:int and return dataclasses defined in the data-worker (ComputeLaserDepthsResult, MeasureFishResult). The only shared import is fishsense_shared.DATA_PROCESSING_LIGHT_TASK_QUEUE.",
+    "v1's data-worker does its own SDK reads and writes (the stage 13/14 pattern). v2's processor speaks only the contract package, so the port has to reshape the work: the orchestrator resolves the inputs (camera_matrix 3x3; the effective laser calibration id, laser_position and laser_axis; per capture the candidate valid laser labels (id, x, y) in ascending order, plus head/tail (id, head_x, head_y, tail_x, tail_y) for measure), the processor returns pure results, and the orchestrator persists them through the store. Proposed new contracts in services/fishsense-services-contracts: laser_depth.py (ComputeLaserDepthsInput/Result, one entry per capture carrying depth_m, range_m, residual_m, chosen laser_label_id, or a refusal reason) and measurement.py (MeasureFishInput/Result: length_m per capture plus a status). The results must include core_version (and algorithm/algorithm_version for measurements), because 0013 CHECKs require them.",
+    "v2 queue: PROCESSOR_LIGHT_TASK_QUEUE = 'fishsense_processor_light' (services/fishsense-services-contracts/src/fishsense_services_contracts/task_queues.py).",
+    "No object-store keys are involved: this slice reads and writes no bytes."
+  ],
+  "v2_schema_gaps": [
+    "No dive_pipeline_status view in v2 (grep finds none). The v1 columns listed in the endpoints entry need a v2 equivalent (dives.slate_template_id replaces dive_slate_id, priority is lowercase text, labels use ls_project_id, clusters use formed_by). PLAN \u00a76.2 lists Superset and research views as parity items.",
+    "species: 0004 grants the app role SELECT only, so v1's _ensure_species (find-or-create species by scientific_name at measure time) cannot INSERT. Needs a grant or a species-upsert path.",
+    "fish_models: 0012 grants SELECT only. v1 creates a Fish for any 'Fish Model, <name>'. In v2 an unregistered model name has no fish_model_id and cannot get a fish, so either register models (and make the cohort require a registered model, else the cohort/activity disagree and the dive wedges) or grant INSERT.",
+    "measurements are append-only (SELECT, INSERT; no DELETE) and current_measurements is DISTINCT ON (capture_id, fish_id, source). v1's stale-binding invalidation (DELETE /fish/{fish_id}/measurements/{image_id} when a relabel or re-cluster changes the fish) has no equivalent: the old (capture, old_fish) row stays current forever and double-counts the frame (the prod dives 341/383 bug). Needs a retraction row or state, or a currency rule tying the fish to the cluster binding or model name.",
+    "current_laser_depths (0013) is just the latest row per capture. It does not check that laser_calibration_id = the effective calibration or that laser_label_id is still valid (completed, not superseded, x/y set). The depth cohort and any 'current depth' read need that filter; add a view or put it in the store query.",
+    "No place to record 'tried, made no progress' for a depth (invalid geometry, depth_m <= 0 cannot be stored: CHECK depth_m > 0) or for a skipped measurement. That is exactly v1's dive-32 wedge (PLAN \u00a74.5 and \u00a79.16, still open). The v2 cohort needs a refusal/attempt record keyed by (capture, laser_label, laser_calibration) or it will wedge the same way.",
+    "effective_laser_calibrations (0008) follows coalesce(calibration_source_dive_id, d.id), so the LINK wins. v1 is OWN-wins-then-link (dive_controller.py:309-326; CLAUDE.md 'own wins'). Any dive with both an own calibration and a source link would measure differently. Decide this and pin it with a test. v1_migration._V1_FRESH also uses coalesce(link, own), so it would not catch the difference.",
+    "effective_laser_calibrations applies no baseline-plausibility filter. v1's read endpoint treats rows with norm(laser_position[:2]) outside 0.097-0.145 m as uncalibrated (and falls through to the borrowed calibration). Migrated v1 'accepted' rows with implausible baselines (the 8 known bad fits, if still present; uncertain whether they were deleted in prod) would be effective in v2 and get measured. lever_arm_m exists but migrated rows don't fill it.",
+    "measurements CHECK length_m > 0: v1 can write a 0 length (head == tail pixel). v2 would reject that insert and the dive would wedge. It is an edge case; count it as a skip.",
+    "Camera intrinsics: v1 uses the single cameraintrinsics row for dive.camera_id. v2 has current_camera_calibrations per device (dives.device_id is nullable) and laser_calibrations.camera_calibration_id, which the migration fills only when a device has exactly one calibration. Decide which one measurement uses; for parity, use the device's current calibration. Uncertain whether the two can differ in migrated data.",
+    "dive_frame_clusters: the fish_id UPDATE is granted, fine. 0012 has formed_by 'label_studio', matching v1's LABEL_STUDIO. Nothing is missing there.",
+    "The measurement provenance columns exist (laser_calibration_id, laser_depth_id, laser_label_id, head_tail_label_id, algorithm*, core_version, run_id). v1 stage 14 never reads LaserDepth, so laser_depth_id would be new linkage. Optional, and it only works if measure picks the same label the depth stage did."
+  ],
+  "dependencies": [
+    "Upstream (must be ported first, or have their v1 rows migrated): laser-label sync (done), headtail sync (valid head/tail labels), species sync (top_three_photos_of_group, content_of_image), stage 6.1 UpdateDiveImageGroupsWorkflow (LABEL_STUDIO clusters; real fish are skipped without them), stage 13 slate calibration and checkerboard calibration (laser_calibrations accepted rows), calibration-source editing (portal), camera calibrations (0007), ingest/canonical captures (done).",
+    "Shared foundations: v2 VALID_LASER (clustering_store.py), a taxonomy module (is_measurable etc.) ported into v2 (the contracts package or the API), fishsense-core >= 3.0.0 in the processor (compute_world_point_from_laser_with_residual), NRP processor stand-up/tear-down (replaces ensure_light_worker_running_activity), the v2 schedules module.",
+    "Downstream consumers: analytics views (fish_model_measurement_accuracy, fish_length_estimate, fish_model_species_mislabel_suspects in views.py:428-907, another slice) read measurement/fish/fishmodelreference; research repos; the web portal; v1_migration.measurement_parity (services/fishsense-services-api/src/fishsense_services_api/v1_migration.py:717-760) is the \u00a76.2 numbers gate for this slice.",
+    "Nothing in the pipeline depends on laser depth; it is terminal. Measure does not consume LaserDepth in v1."
+  ],
+  "gotchas": [
+    "The cohort and the activity must agree exactly. Any image the cohort offers that the activity skips without writing leaves the dive in the cohort forever, and because selection is ORDER BY id LIMIT 1 it blocks every higher dive (CLAUDE.md 1103-1268; the taxonomy empty-leaf 'Fish Model,' guard; dive 279; dive 32).",
+    "The depth cohort is keyed on the IMAGE, not a specific label. A depth is current if it names ANY still-valid label of that image under the resolved calibration. 461 prod images carry two valid labels, and the label-keyed version wedged dive 279 (dive_cohort_controller.py:1166-1177; activity lines 132-143).",
+    "Known open wedge: when every valid label triangulates at depth <= 0, the activity counts skipped_invalid_geometry, writes nothing and returns success, so the cohort never drains (dive 32 blocked 49 dives for 23 hours; CLAUDE.md 'That counter is no longer zero'). v2 must record the refusal (PLAN \u00a74.5/\u00a79.16).",
+    "The gate is depth_m > 0, not isfinite. The triangulation always returns a point, even the origin or a negative Z. Stage 14 in v1 still guards only on isfinite, so it measures from impossible depths (a length at -Z equals the length at +Z). Decide whether v2 keeps this for parity or adds the depth gate, and note that doing so changes parity.",
+    "residual_m is recorded, never gated on. Spearman rho with error was -0.026 (n=464) because it cannot see error along the epipolar line. Do not promote it to a quality gate (CLAUDE.md; test_laser_geometry.py pins this).",
+    "depth_m is Z (used for the back-projection); range_m is the Euclidean norm. Keep both and never conflate them.",
+    "The measurement length is a single-depth fronto-parallel projection: norm(K^-1[h,1]*Z - K^-1[t,1]*Z), using the camera_matrix only with no distortion. Positive sign, no flip (the stage14 sign-flip investigation). The real-frame regression against historical measurements was still open in v1 (CLAUDE.md 2604-2634).",
+    "A zero-length laser_axis raises ValueError in fishsense-core 3.0; it is deliberately not caught (dive-wide blast radius). A non-unit axis is normalised by core.",
+    "Provenance mismatch drives recomputation: LaserDepth(laser_label_id, laser_extrinsics_id) and Measurement(laser_extrinsics_id); NULL provenance reads as stale once. v2 append-only rows plus effective_laser_calibrations give the same result naturally because each refit is a new row with a new id. v1's PUT extrinsics KEPT the id, so v1 operators had to delete rows to force a recompute; v2 avoids that trap.",
+    "Calibration resolution: own row first (if its baseline is plausible), else the calibration_dive_id source (same plausibility test), else none. The SQL cohorts, the view's calibrated and _resolved_laser_extrinsics_id do NOT apply plausibility. Latent v1 inconsistency: a dive whose own row is implausible but which borrows a plausible one gets measured with the borrowed id, while the SQL resolves to the own id, so it never drains. A dive with only an implausible row gets selected, the activity 404s, the ValueError retries for an hour, and the dive head-of-line blocks. Uncertain whether this occurs in prod now.",
+    "Scalar subqueries nested in EXISTS must be explicitly correlated (.correlate(Dive), .correlate(LaserDepth, Image)). SQLite masked a multi-row subquery and took both selectors down in prod on 2026-08-20. Test the cohorts on real Postgres with multi-valued seeds (test_api_postgres_integration.py). v2 runs on real Postgres, so write raw SQL with explicit correlation.",
+    "Every cohort filters on is_canonical captures (duplicate dives otherwise wedge the pipeline); test_canonical_only_pipeline_work.py keeps a registry of this.",
+    "is_measurable is the definition of record; the SQL LIKE forms approximate it and are pinned by MEASURABILITY_CORPUS, with SQL_BROADER_THAN_PYTHON listing the accepted divergence. v2 is Postgres-only, so it could express the exact predicate (or compute it in Python in the store); keep a parity test either way. Calibration Targets are an allowlist (Ruler, Box); the E4E Checkerboard must NOT be measurable.",
+    "Real-fish identity is per LABEL_STUDIO cluster. _ensure_fish reuses cluster.fish_id, or creates Fish(species of the first measured frame) and rebinds the cluster. A later species relabel does NOT change the fish or invalidate anything; only disagreeing with the cluster's fish_id invalidates. Rigid targets are keyed globally by name and never touch cluster.fish_id, and the cluster gate is waived for them.",
+    "Stale bindings: a model image measured under a different name, or a real-fish row whose fish_id differs from the cluster's current fish_id, gets its old (image, fish) row DELETEd before re-measuring. Otherwise the upsert key (image_id, fish_id) adds a second row and double-counts (dives 341/383). v2 needs an append-only equivalent (see the schema gaps).",
+    "The check order inside measure matters: classify, then invalidate stale bindings, then the already-measured-under-current-calibration skip, then the cluster gate, then keypoints, then find-or-create fish. Stale-binding detection deliberately reads cluster.fish_id rather than calling _ensure_fish, so it does not create or rebind for an image it is about to skip.",
+    "v1 quirk to decide on: measure fetches the per-image laser and headtail label via GET /labels/{kind}/{image_id}, which is the first non-superseded row with no completed filter and no ordering, while depth uses the lowest-id valid label with depth > 0. For images with several labels the measure and depth inputs can differ. Port it deterministically (lowest-id valid) and accept a small parity delta ('nearly all duplicates of the same dot').",
+    "v1 quirk: the measure activity and cohort do NOT use select_species_label_per_image. Sentinel species rows (ls_project_id NULL) and multiple non-superseded rows per image are all iterated. Prod holds no sentinels today (CLAUDE.md 903-930). Two model names on one image would flip their bindings on each run (latent, uncertain). v2 should route through a single per-capture species selection: skip sentinels and superseded rows, highest id wins.",
+    "A dive with some measurement and no measurable-unmeasured image drops out of the cohort. view.measured requires >=1 measurement (vacuous reads false).",
+    "Parent schedule offsets: depth +35, measure +40, both placed before calibration (+50) so they don't crowd the +55 v1 scale-down sweeper. Child ids are deterministic (compute-laser-depths-{dive_id}, measure-fish-{dive_id}) with ALLOW_DUPLICATE, never FAILED_ONLY (dive 59). In v2 the ids must also be tenant-scoped (PLAN \u00a74.5).",
+    "A green child is not proof the work was done: read its result counters (CLAUDE.md 'Draining a cohort by hand').",
+    "The dive_pipeline_status SQL lives in one place (views.py) and every change is drop plus recreate; each flag mirrors a cohort predicate and must stay in step (test_dive_pipeline_status_view.py). In v2 the calibrated/measured flags should come from effective_laser_calibrations and current_measurements. Note the behaviour change: in v2 a refused-latest calibration un-calibrates the dive, while v1 still showed its measurements (v1_migration _V1_FRESH comment, PLAN \u00a79.13)."
+  ],
+  "size": "About 16 v1 source files. Orchestrator: 2 parents (~270 lines) and 2 selectors plus the helper (~110). Data-worker: 2 workflows (73), compute_laser_depths_activity (205), measure_fish_activity (470), laser_geometry (126), utils preamble (~70). API: the two cohort endpoints plus helpers (~350 of dive_cohort_controller.py's 1283), extrinsics resolve/upsert (~130), laser_depth_controller (96), fish_controller (223), dive_pipeline_status view (~310 of views.py's 907). Shared: taxonomy (446) and calibration_bounds (99). Roughly 2,900 source lines in total. Tests: ~3,000 lines directly in the slice. Data-worker 68 tests across 7 files. API-worker 4 tests (2 files) plus schedule registration, with none for the depth parent or selector. API ~95 slice tests: laser_depth 19, measurements 8, provenance 8, cohort 8, pipeline view ~25 of 60, implausible 3, calibration source 11, extrinsics upsert 3, fish 5, postgres 2-3, canonical 7. Shared: 40 (taxonomy 29, bounds 11)."
+}
