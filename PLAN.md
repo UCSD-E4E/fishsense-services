@@ -31,14 +31,14 @@ how we receive and store data** — tenant-scoped, device-agnostic, reproducible
 ## 2. Current system (prior art, from repo reads)
 
 *Snapshot: `fishsense-lite` @ `a8b2c3bc` (2026-09-21), `fishsense-core` v4.0.0 (`78d6814`).
-v1 is **not frozen** (§6) and moves fast (~500 commits between the first draft of this plan
+v1 keeps changing until its pre-cutover freeze (§6) and moves fast (~500 commits between the first draft of this plan
 and this snapshot) — re-verify a detail before building on it. v1's own `CLAUDE.md` is its
 most current doc; `docs/measurement_pipeline.md` is stale. Research repos (§2.7):
 `wuwnet-fishsense2026` @ `440c6a4`, `imwut_2026_fishsense_lite` @ `64c08bf`. Mobile and
 krg-infra were **not** re-read for this snapshot (still as of 2026-07-22).*
 
 The current stack is single-tenant and **production-only (no staging)**. It is the
-strangler base we build beside (§6), not a clean slate.
+system v2 replaces at a big-bang cutover, and the code v2 ports (§6) — not a clean slate.
 
 ### 2.1 `fishsense-api` (API v3.6.0, SDK v2.4.1)
 FastAPI + SQLModel + asyncpg, Postgres, Alembic (startup: `create_all` → `alembic upgrade`
@@ -226,8 +226,8 @@ how they read data. v2 must serve them as first-class consumers, not break them.
 
 | Area | Decision |
 |---|---|
-| **Role of this repo** | New **v2 backend** superseding `fishsense-api`; end state is a **monorepo** (this repo grows into it; consolidation deferred). |
-| **Delivery strategy** | **Strangler / parallel build — v1 is NOT frozen.** `fishsense-lite` keeps churning for the owner's PhD (freezing blocks publications). v2 is built beside it; both share `fishsense-core`. See §6–7. |
+| **Role of this repo** | **The monorepo.** v2 is built here, v1's pipeline is ported in, and at cutover the fishsense Incus slot is repointed to build from this repo (§6, §9.9). |
+| **Delivery strategy** | **Big-bang cutover on the existing fishsense Incus slot** *(decided 2026-09-23; supersedes the strangler plan)*. v1 keeps changing until a ~2-week freeze; v2 reaches parity and rehearses the migration, then replaces v1 over one weekend, with a 48 h rollback window. See §6–7. |
 | **Tenancy** | **Single Postgres DB**, `tenant_id` on all domain rows. App-layer mandatory scoping **+ Postgres RLS** backstop. Users ↔ tenants **many-to-many**; a capture/dataset may be associated to multiple tenants. |
 | **Identity** | **Authentik OIDC** for **web (confidential)** and **mobile (public + PKCE)**. Lab users via AD-backed Authentik. **External partners via tenant-scoped invite links → Authentik-LOCAL `external` accounts** (not AD) — **built in krg-infra PR #504** (flow `krg-collaborator-enrollment`). Tenant/org arrives as an **`org` OIDC claim**; **v2 clients must request the `org` scope**. Per-org isolation stays **app-side** (§4.2). |
 | **Authorization** | v2 API **validates the OIDC/JWT in-app** and derives tenant from **its own** membership + RBAC tables, keyed on the stable `sub` (`hashed_user_id`), **not email**. Drives the RLS session variable per request. |
@@ -244,7 +244,7 @@ how they read data. v2 must serve them as first-class consumers, not break them.
 | **API↔frontend typing** | **Generated from the FastAPI OpenAPI schema, done right**: `openapi-typescript` (types) + `openapi-fetch` (tiny typed client) + **zod** for runtime validation at the boundary (zod schemas must themselves be generated, not hand-kept). Requires cleaning up FastAPI `operation_id`s. v1's Python SDK already codegens models from OpenAPI with drift tests — reuse that CI pattern. (Not `openapi-generator` — the class-soup output that soured the v1 attempt.) tRPC-style *inferred* types are unavailable because the API is Python. |
 | **Ruled out** | **Go** (nobody in-org), **Rust for the app tier** (Rust talent is CV/systems), and **TypeScript for the app tier** (for now — §3.1 has the case both ways and the triggers to revisit). |
 | **Processing** | Keep the **two-worker split** (Temporal **workflow** orchestrator + **activity** processor). **Processor floats** — NRP today, phones later — and is model/GPU/TPU-capable. |
-| **Deployment** | **Control plane + state** (API, orchestrator, Postgres) → **krg Incus slot, Docker-Compose** (like v1; *no kube*). **Processor** → **Kubernetes**: NRP `amd64` now → junkyard/Pixel-Fold **ARM64** later. **Garage** and **Temporal** are external/shared. **ARM64/Knative are processor-only, future concerns.** |
+| **Deployment** | **Control plane + state** (API, orchestrator, Postgres) → **the existing fishsense krg Incus slot, Docker-Compose** (replacing v1 there at cutover, §6; *no kube*). **Processor** → **Kubernetes**: NRP `amd64` now → junkyard/Pixel-Fold **ARM64** later. **Garage** and **Temporal** are external/shared. **ARM64/Knative are processor-only, future concerns.** |
 
 ### 3.1 Why Python, not TypeScript, for the app tier *(decided 2026-09-23)*
 
@@ -288,6 +288,11 @@ question was the **API and orchestrator**.
 the first "against" point: TypeScript wins clearly only on the API, but the API and
 orchestrator share the domain logic, so a TypeScript API alone would split the domain model
 across two languages, and a TypeScript orchestrator would chase v1.
+
+*Note (after the big-bang decision, §6):* the argument above was written for the strangler
+plan, but the move to a big-bang cutover strengthens it. v2 reaches parity by **porting v1's
+pipeline code** into this repo (§6.3), and that port is only cheap because both sides are
+Python.
 
 **What the TypeScript case earned — binding commitments on the Python stack:**
 - **Contract-first, language-neutral schema** (§9.1). v2 does not import v1's models. It
@@ -404,6 +409,28 @@ table, not a rewrite. Maps onto existing tables where possible.
 
 Everything except the reference tables above carries `tenant_id`.
 
+**Schema conventions** *(decided 2026-09-24; enforced by tests)*:
+- **Isolation is audited, not remembered.** `schema_audit.tenancy_violations` classifies
+  every table: tenant-scoped (the default: non-null `tenant_id` → `tenants`, forced RLS, a
+  read+write policy on `app.tenant_id`), caller-scoped (`users`, `memberships`, `tenants`),
+  or global reference (read-only to the app role). The app role owns nothing. `migrate`
+  fails the deploy on any violation.
+- **Same-tenant references are enforced by the database.** A tenant-scoped table
+  references another through a **composite foreign key** `(tenant_id, parent_id) →
+  parent (tenant_id, id)`, so a row can never point into another tenant, even when written
+  as the owner.
+- **Ids:** `uuid` primary keys. Migrated rows keep **`v1_id bigint UNIQUE`** (PLAN §6.4).
+- **Enumerations:** `text` + `CHECK`, not Postgres enums, which are painful to evolve. v1's
+  enums are nullable at the DB level; v2's are `NOT NULL` with explicit defaults.
+- **JSON:** `jsonb`. **Timestamps:** `timestamptz`.
+- **Deletes:** `ON DELETE CASCADE` only from `tenants` (removing a tenant removes its
+  data). References within a tenant are `RESTRICT` (v1 had no ON DELETE rules at all), so
+  a delete can never silently take history with it.
+- **Measured reference values are versioned** by `valid_from`, never edited; `current_*`
+  views give the latest.
+- **Models mirror migrations.** Migrations are hand-written (policies and grants), the
+  typed `models.py` mirrors them, and a drift test compares the two.
+
 ### 4.4 Ingestion flows
 - **Lite (TG-6)** — batch/offline: a lab member offloads the SD card, uploads a
   dive/batch attributed to **their tenant + user**; raw images (+ slate, calibration,
@@ -415,7 +442,7 @@ Everything except the reference tables above carries `tenant_id`.
   workflow → processor activities → append-only `Measurement`s. Who verifies checksums when
   the API never sees bytes — §9.19.
 - **Lite, operator path** — an operator-run bulk ingest (v1's `IngestDiveWorkflow` shape)
-  stays useful for backfill and for lab data that never leaves the NAS until §9.15 is done.
+  is part of parity (§6.2): v2 ships it first, and user upload follows after cutover.
 - **Mobile** — authenticated app sync from local SQLite: image + LiDAR depth +
   on-device measurement. Raw + depth → Garage; `Capture` + mobile `CaptureExtension` +
   device measurement recorded. Raw retained so we **recompute/validate** the device's
@@ -451,7 +478,7 @@ Everything except the reference tables above carries `tenant_id`.
 
 ### 4.6 Storage & reproducibility
 - **The e4e Garage (S3) is the single durable, tenant-partitioned source of truth.** NAS
-  retired — backfill durable raw `.ORF` NAS → Garage (repeatable, since v1 keeps ingesting;
+  retired — copy durable raw `.ORF` NAS → Garage after cutover, in §9.15's order (
   today's Garage `raw/` is scratch — v2 makes raw **durable + retained**). Presigned
   **uploads** (new) + reads; Garage **CORS** for browser flows; a lifecycle rule to abort
   abandoned multipart uploads.
@@ -534,8 +561,11 @@ Everything except the reference tables above carries `tenant_id`.
   on-device size budget — §9.2.)*
 
 ### 4.8 Deployment / infrastructure
-- **Control plane + state** (API, orchestrator, Postgres) → **krg Incus slot, Docker-
-  Compose**, NixOS-converged, like v1's `deploy/incus/compose.yml`. **No kube here.**
+- **Control plane + state** (API, orchestrator, Postgres) → **the existing fishsense krg Incus
+  slot, Docker-Compose**, NixOS-converged, like v1's `deploy/incus/compose.yml`. **No kube
+  here.** v2 **replaces v1 on that slot at cutover** (§6.6), not before. Until then the slot
+  builds only from `fishsense-lite`, and nothing in this repo converges it. That slot is tight
+  (6 vCPU, 12 GiB, a 20 GB root disk), which v2's compose has to respect.
 - **Processor** → **Kubernetes**, kustomize: **NRP `amd64`** today (v1 has four Deployments —
   cpu / light / gpu / gpu-cpu-fallback — scaled 0↔N by the orchestrator), →
   junkyard/Pixel-Fold **ARM64** later. **Multi-arch images**; ARM64/Knative
@@ -566,57 +596,133 @@ Everything except the reference tables above carries `tenant_id`.
 - **(Cheap, deferred)** add Python bindings to `pixel-finch` so a Python worker can drive
   the Edge TPU on phones without a native-Rust rewrite.
 
-## 6. Migration strategy — strangler / parallel build (v1 is NOT frozen)
-- **Hard constraint:** `fishsense-lite` keeps iterating throughout (PhD data runs +
-  publications). Big-bang "freeze + cut over" and a live RLS retrofit are both off.
-- **Orthogonal axes:** the PhD iterates on *measurement/processing* (algorithms, models,
-  scheduled runs); v2 restructures *tenancy/control-plane*. They run **in parallel on
-  different layers**.
-- **`fishsense-core` is the shared, continuously-iterated research layer** (versioned
-  wheel; both v1 and v2 depend on it) — v2 **inherits** PhD progress, never chases it.
-- **Build v2's control plane fresh and additively** — designed-in tenancy/RLS, never
-  retrofitted onto live data.
-- **Lab-as-tenant at parity:** backfill existing data into a **primary lab tenant**; when
-  v2 reaches parity for the research loop, the PhD workflow continues *inside* v2 as that
-  tenant — no blocking cutover.
-  - **Backfill is repeatable and idempotent, not one-shot** — v1 keeps ingesting and
-    relabeling until parity.
-  - **Reference existing Garage objects in place; don't move them.** v1 reads the current keys,
-    and `Capture.raw_object_key` can point at them. Only new objects go under the tenant layout.
-  - v1's **label state** (`superseded`, `needs_reprocess`, sentinel) and **dive state**
-    (priority, refusals, borrowed calibration) must survive the backfill.
-  - **Keep v1 ids addressable** (v1 dive/image ids as stable columns, even if v2 uses UUIDs) —
-    they are hard-coded in the research SQL, tests, figures and the cscw repo (§2.7).
-  - Backfill reference data from **live** rows, not seeds, and record the seed→live
-    difference as version history.
-- **Discipline:** algorithm/model changes → shared `fishsense-core` / model registry;
-  control-plane / schema / storage-layout changes → **v2, not v1**. Exception: provenance
-  additions to v1's own tables (§7) are allowed — they serve the PhD's publications, and v1
-  is already heading that way.
+## 6. Migration strategy — big-bang cutover on the existing slot *(decided 2026-09-23)*
 
-## 7. What to do in v1 *now* (churn) vs. v2
+*Supersedes the original strangler / parallel-build plan. v2 is **not** run beside v1: no
+second Incus slot, no dual-write period, no per-dive ownership handoff. v2 is built and
+rehearsed here, then replaces v1 on the fishsense Incus slot in one planned window.*
 
-**Now, in `fishsense-lite` (helps the PhD + de-risks v2 — all on the shared/processing axis):**
-- **Extend v1's input-naming into full provenance** (partly done — `measurement` already
-  records `laser_extrinsics_id`): add `core_version` + model/predictor versions to
-  `measurement`; record the **producer** (slate / checkerboard) and residual on
-  `laserextrinsics`; mark gate auto-accepts on `laserlabel`. Append-only history would
-  replace the destructive upsert and the in-place extrinsics refit — reproducible,
-  publication-traceable lengths.
-- **Put all weights under one versioned scheme** (§9.12). SAM 3.1 already lives in Garage
-  `model-weights`; the laser detector is still baked in from Hugging Face.
-- ~~**Add GPU requests** to `deploy/k8s/data-worker`~~ — **done** (gpu Deployment + CPU
-  fallback).
-- Begin **Phase 0** (§5) in `fishsense-core`.
-- *(Optional)* opt-in-align v1 toward the v2 contract package (§9.1) where cheap — never
-  required; v1's existing `fishsense-api-sdk` / `preprocess_contracts.py` inform it.
+### 6.1 Decisions
+| Area | Decision |
+|---|---|
+| **Cutover style** | **Big bang**, on the **existing fishsense Incus slot** (same hostnames). |
+| **Code home** | **This repo becomes the monorepo.** v1's pipeline code is **ported in**, not rewritten (all Python, §3.1). At cutover an admin repoints the slot's `fishsense-selfupdate` flake and runner scope from `fishsense-lite` to `fishsense-services` (§9.9). |
+| **Web portal** | **Ported to the v2 API** before cutover (generated `openapi-typescript` client, tenant-scoped paths). No v1-compatible endpoints. |
+| **v1 freeze** | **~2 weeks** of v1 feature freeze before cutover. Until then v1 keeps changing, and each change is ported as it lands. |
+| **Downtime** | **A weekend** for the cutover window. |
+| **Data** | A **one-shot** migration, v1 `fishsense` DB → a new v2 database **in the same Postgres instance**. v1's database is never modified, which is what makes rollback possible. |
 
-**v2 (this repo, built beside v1):**
-- **Author the v2-owned processing data-contract package** (§9.1) — versioned,
-  contract-tested here; v1 opt-in only.
-- Tenancy + RLS + in-app OIDC validation + RBAC; device abstraction; presigned-upload
-  ingestion; tenant-aware schedule selectors; test/staging tenant; the Authentik
-  invite-flow prerequisite.
+### 6.2 What "parity" means — the gate for scheduling cutover
+v2 must do everything v1 does in production (§2) before a date is set:
+- **Ingest:** operator-run NAS ingest, with checksums and cross-dive duplicate detection (the
+  v1 `IngestDiveWorkflow` shape). User upload (§4.4) can follow after cutover.
+- **Pipeline:** the full stage set (DIAGRAMS §8), the schedules with `overlap=SKIP`, the
+  laser detector and the auto-accept gate, SAM 3.1 head/tail, clustering, slate and
+  checkerboard calibration with all four gates and refusals, laser depth, measure — on v2's
+  schema, tenant-scoped.
+- **Label Studio:** create/populate/sync for all four label kinds; existing projects and sync
+  cursors carried over, not recreated.
+- **Workers:** api-worker duties (selectors, NRP scaling, raw staging) and the NRP processor
+  on cpu/light/gpu queues.
+- **Web portal:** triage, calibration-source editing, and the project hub — on the v2 API.
+- **Ops:** nightly backups (§9.5), the image prune, Temporal cert rotation (`reload`), and
+  NRP cert sync.
+- **Consumers:** Superset dashboards and the research repos' queries run against v2
+  (§9.20) — v1-shaped research views, with v1 ids kept, so imwut/cscw/wuwnet don't break.
+- **Numbers:** per-dive measurement parity with v1 on a restored dump (§6.4), within an
+  agreed tolerance.
+
+### 6.3 Porting v1 while it keeps changing
+- Port **module by module** into the monorepo, adapting data access to v2's schema and
+  tenant-scoped transactions. Keep the ported code recognisable, so a later v1 change can be
+  re-applied by diff.
+- Track the v1 commit each ported module was taken from. Until the freeze, every v1
+  commit touching ported code is re-ported, so parity keeps up with v1.
+- **Freeze** (~2 weeks before cutover): v1 takes only fixes. That leaves a stable target for
+  the final port, the parity checks, and at least two full rehearsals.
+- `fishsense-core` stays the shared research layer. v2 pins the same wheel v1 runs at freeze.
+  **Phase 0's SDK untangling (§5) becomes a hard prerequisite**, because v2 retires the v1 SDK
+  that `RectifiedImage` still imports.
+
+### 6.4 Data migration
+- **One-shot and rehearsed.** A migration job reads v1's `fishsense` DB and writes the v2
+  database as the **lab tenant**. It is run against restored nightly dumps until it is
+  idempotent and its validation report is clean. On the day, it runs **locally on the slot**
+  (same Postgres instance, so no dump and no network hop).
+- **Mapping** (v1 → v2): `camera` → Device (`lite`); `dive` → Dive (priority, notes, refusal,
+  borrowed calibration); `image` → Capture (path + checksum + `is_canonical`); label tables →
+  Label (with source; auto-accept inferred from `laserprediction`); `laserextrinsics` → laser
+  calibration (the current row; producer inferred from the dive's calibration target);
+  predictions → Prediction; `measurement` → Measurement tagged `source = v1-migration`, with
+  unknown core/model versions recorded as **unknown**; reference data from **live** rows, with
+  the seed→live difference as version history.
+- **Keep v1 ids** as stable columns (the research SQL, tests, figures and cscw hard-code them).
+- **Objects stay where they are.** Captures point at the existing Garage keys and NAS paths.
+  Nothing is moved at cutover; re-homing under the tenant layout happens later, if ever.
+- **Lost by construction:** v1 overwrote calibrations and measurements in place, so v2's
+  history starts at migration. imwut's frozen CSVs are the only earlier record; importing
+  them as historical measurement versions is optional (§9.20).
+- **Validation report (go/no-go):** row counts per table, every image checksum carried over,
+  every Label Studio project mapped, and per-dive measurement parity after v2 re-measures
+  the migrated dives.
+
+### 6.5 Shared services during rehearsals and cutover
+Before cutover, v2 never runs against production shared services with production names:
+- **Temporal** (shared `fishsense` namespace): rehearsal workers use **distinct task-queue,
+  workflow-id and schedule-id prefixes**, so they can never take v1's tasks. At cutover, v1's
+  schedules are **deleted** (`ensure_schedule` never updates in place) and v2's created.
+- **Garage:** rehearsals read v1's buckets with **read-only** keys and write to scratch
+  buckets only.
+- **Label Studio:** rehearsals never write to the production workspace.
+- **NRP:** rehearsal processor Deployments use distinct names; at cutover the v2 image
+  replaces v1's Deployments, and its API URL changes.
+
+### 6.6 Cutover runbook (the weekend)
+1. **Before:** parity reached (§6.2); v1 frozen (§6.3); ≥2 clean rehearsals (§6.4); the admin
+   change to repoint selfupdate + the runner scope is prepared; the window is announced.
+2. **Stop v1:** pause all v1 schedules; drain in-flight workflows; scale the NRP data worker
+   to 0; put the portal into maintenance; turn off the nightly `autoUpgrade` from
+   `fishsense-lite`.
+3. **Back up:** a final `pg_dump` of `fishsense` and `superset`, copied **off the slot**.
+4. **Migrate:** `fishsense-services-api migrate` (schema), then the data migration job, then
+   the validation report → **go / no-go**.
+5. **Switch:** the admin repoints the slot to `fishsense-services#fishsense`; converge; delete
+   v1's schedules and create v2's; roll the v2 processor out to NRP; point the data-worker
+   config at the v2 API.
+6. **Verify:** a smoke-test script (health, a login, a known dive's measurements, one
+   end-to-end pipeline firing, a Label Studio sync, a portal triage action, one research
+   query).
+7. **Reopen**, and watch the first full schedule cycle.
+8. **Rollback window — 48 h.** Rollback = repoint the slot back to `fishsense-lite`, recreate
+   v1's schedules, restore the NRP Deployments. v1's database was never modified, but
+   **anything written in v2 after reopening is lost** on rollback. After 48 h: fix forward
+   only, and v1's database becomes a read-only archive.
+9. **After:** retire the v1 SDK; archive `fishsense-lite` (§9.9); NAS retirement follows its
+   own ordering (§9.15).
+
+## 7. What to do now
+
+**In `fishsense-lite`, until the freeze** (useful to the PhD, and it makes the migration
+richer):
+- **Extend v1's input-naming into full provenance** (partly done: `measurement` already
+  records `laser_extrinsics_id`): `core_version` + model/predictor versions on
+  `measurement`; the **producer** (slate / checkerboard) and residual on `laserextrinsics`;
+  gate auto-accepts marked on `laserlabel`. Every field v1 records now is one the migration
+  doesn't have to mark "unknown".
+- **Put all weights under one versioned scheme** (§9.12).
+- ~~**Add GPU requests** to `deploy/k8s/data-worker`~~ — **done**.
+- **Phase 0** (§5) in `fishsense-core`, starting with the SDK untangling: it is now on the
+  cutover's critical path.
+
+**In this repo, toward parity:**
+- The tenancy foundation — **done** (roles, RLS, in-app OIDC, memberships, first route,
+  packaging).
+- The v2 domain schema (§4.3), then the port of v1's pipeline, module by module (§6.3).
+- The processing contract package (§9.1), which the ported workers speak.
+- The data migration job and its validation report (§6.4), rehearsed early and often.
+- The web portal port (§6.1).
+- The production deploy: a `flake.nix` with the fishsense `mkTenant`, a production compose
+  (inner Traefik, vault-agent secrets), and the promote → converge workflow.
 
 ## 8. Extension seams for future devices
 - New device = new `DeviceKind` + a `CaptureExtension` table + processor algorithm(s)/
@@ -640,19 +746,17 @@ Grouped by when they need answering. Each has: **the decision**, *what it blocks
 
 ### A. Decide soon — unblocks v1-now churn (§7) and v2 foundations
 
-**9.1 — Stable processing data-contract** *(the strangler linchpin)* — *approach decided*
+**9.1 — Stable processing data-contract** *(what the ported workers speak)* — *approach
+decided; role revised 2026-09-23 for the big-bang cutover*
 - *Decision:* a **v2-owned, versioned contract package that lives here.** Schema-first
   (Pydantic / JSON-Schema, language-neutral), *informed by* v1's `fishsense-api-sdk` +
   `libs/fishsense-shared/preprocess_contracts.py` but **not** a rename of them.
-- **v1 may be made aware of it (opt-in — vendor / `pip install` / validate against it),
-  never a hard dependency.** A v2→v1 hard coupling is exactly the backwards dependency to
-  avoid; v1 must stay free to churn.
-- *Role:* it is the **convergence target**, not a lock on v1. It does **not** freeze v1's
-  task interfaces — those stay free to churn and get ported/adapted to the contract **at
-  parity** (lab-as-tenant migration); v1 can opt-in-align earlier where cheap. (Trades
-  "early protection of v1 tasks" for "v1 freedom" — the correct priority.)
-- *To close:* author the package here, version it, contract-test it in **v2's** CI,
-  optionally publish it as a wheel v1 can consume.
+- *Role:* the contract between v2's orchestrator and processor (and the processor's writes
+  back to the API). v1's worker interfaces are **ported onto it** during the port (§6.3).
+  v1 itself never adopts it: v1 is retired at cutover, so there is no convergence period
+  to protect.
+- *To close:* author the package here, version it, and contract-test it in CI, starting from
+  the v1 DTOs the first ported workers need.
 
 **9.2 — Model packaging** *(§4.7)* — *resolved (registry choice reopened as §9.12)*
 - MLflow-on-Garage = **canonical versioned registry**, consumed at **build/deploy time**
@@ -711,9 +815,14 @@ Grouped by when they need answering. Each has: **the decision**, *what it blocks
   - the app role neither owns the tables nor has `BYPASSRLS`, and tables use
     `FORCE ROW LEVEL SECURITY`;
   - migrations run as a separate role.
-- *Provisioning:* the invite puts `org` into the token, but nothing yet turns that into a v2
-  `Membership` row (just-in-time on first login? admin-created?). `org` is also single-valued,
-  while memberships are many-to-many.
+- *Provisioning:* ***decided 2026-09-23*** — a `users` row is created **just-in-time on the
+  first valid token** (keyed on `sub`; the app role may insert only the caller's own row).
+  v2 keeps **no local credentials**: Authentik stays the only IdP, and the API validates
+  bearer tokens itself rather than trusting forward-auth headers (mobile sends bearer tokens;
+  tenancy needs per-request membership; nothing that bypasses Traefik can claim an identity).
+  **Memberships are granted administratively.** Still open: turning a partner invite's `org`
+  claim into a membership automatically — `org` is single-valued, while memberships are
+  many-to-many.
 - *Token:* validate the client's own bearer token (issuer, audience = the web and mobile
   client ids, expiry, JWKS signature). Trust the proxy's `X-authentik-jwt` only if nothing
   can reach the API without going through Traefik.
@@ -871,7 +980,7 @@ token storage; fix the per-row file-delete leak.
   **as-of** reads for frozen corpora; exports as a first-class, reproducible job (query +
   version + timestamp recorded) instead of psql footers stripped by hand; data fixes through
   the API, not SQL.
-- Keep v1 ids addressable through the backfill (§6).
+- Keep v1 ids addressable through the migration (§6.4).
 
 **9.21 — Calibration and camera model for the research methods (`lite_flatport`)** — *open*
 - wuwnet is a **new camera kind** (§1): a TG-6 with the air lens removed is an axial,
@@ -902,13 +1011,19 @@ to the phone-cluster Garage (cross-cluster egress vs. locality — §4.6).
 **9.8 — Phone-cluster platform boundary** — how v2 (owning tenancy now) coexists with /
 hands off to the phone-cluster platform's own tenancy when it arrives.
 
-**9.9 — Monorepo consolidation** — when/how v1's pieces fold in; whether to rename off
-`fishsense-lite`.
+**9.9 — Monorepo consolidation** — *decided 2026-09-23:* **this repo is the monorepo.** v1's
+pipeline is ported in before cutover (§6.3), and the web portal is ported to the v2 API. At
+cutover a krg-infra admin repoints the slot's `fishsense-selfupdate` flake and the runner
+scope (`mkTenant.repo`) from `fishsense-lite` to `fishsense-services`. After the rollback
+window, `fishsense-lite` is archived. Still open: whether the web app moves into this repo
+or stays a separate one (and so whether the runner scope covers one repo or two), and
+whether to rename this repo.
 
 ### Resolved
 - **API↔frontend typing** → `openapi-typescript` + `openapi-fetch` + zod, cleaned `operation_id`s (§3).
 - **Garage topology** → three independent stores; start on e4e, may migrate later (§4.6).
-- **Language / stack, deployment split, Garage-as-durable, strangler delivery** → §3.
+- **Language / stack, deployment split, Garage-as-durable** → §3.
+- **Delivery: big-bang cutover on the existing slot; this repo is the monorepo; web portal ported; ~2-week freeze; weekend window** → §3, §6.
 - **Python vs TypeScript for the app tier; SQLAlchemy 2.0 over SQLModel; always TDD** → §3, §3.1.
 
 ## 10. Reference links

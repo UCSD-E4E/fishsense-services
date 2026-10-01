@@ -565,5 +565,5 @@ the seam moves up a level, to a camera model dispatched in core.*
   Edge TPU matter. The control plane never moves to kube in the near term.
 - **Everything versioned:** `algorithm_version`, `core_version`, `model_version`,
   `template_version` — so any measurement can be explained and reproduced.
-- Diagrams 4–6 all assume the **§9.1 contract**, which is v2-owned and only optionally
-  adopted by v1.
+- Diagrams 4–6 all assume the **§9.1 contract**: v2-owned, and what the ported workers
+  speak (v1 is retired at the big-bang cutover, PLAN §6).
