@@ -255,7 +255,7 @@ $R up -d                                        # db-bootstrap, migrate, api, we
 $R ps -a                                        # db-bootstrap + migrate: Exited (0)
 $R run --rm migrate fishsense-services-api migrate-v1      # -> GO
 $R up -d --force-recreate db-bootstrap          # binds the Superset login to the lab
-$R run --rm smoke --dive 490 --min-measurements 1          # temporal/db/api/web PASS; externals need real keys
+$R run --rm smoke --dive 491 --min-measurements 1          # temporal/db/api/web PASS; externals need real keys
 $R down -v                                      # the rehearsal's volumes only
 ```
 
@@ -274,6 +274,24 @@ web — whose landing page 500'd when the Authentik issuer was unreachable (it
 mints its service token per request). Fixed since: a kind the web cannot ask
 about is left out and the page says so (`lib/active-projects.ts`), so an
 Authentik outage costs the labeling cards and sign-in, not the public page.
+
+Rehearsals 1 and 2 (2026-10-01): the released `v0.1.0` images, v1's nightly
+dump `database_backups/fishsense/2026-10-01T03-00-31Z.dump` (525 dives,
+134,662 images, 3,130 measurements), no credentials. Each from empty volumes:
+- db-bootstrap, migrate and the cert sync exit 0, then exit 0 again on a
+  forced re-converge.
+- migrate-v1 GO in ~3m50s: every v1 row accounted for, tenancy audit clean,
+  parity 3,128 = 3,128.
+- In run 2, a second migrate-v1 is also GO and duplicates nothing (still 525
+  dives, 134,662 captures, 3,130 measurements).
+- Smoke with `--dive 491` passes 8 of 10, every check it has credentials for:
+  api, openapi, head (0034), audit, lab, research (28 measurements), 22
+  schedules, and the web (200, now that the outage fix is in). Label Studio and
+  the object store fail by design (`.invalid`).
+- No errors in any service's logs, except the web's per-kind "could not list"
+  lines, which are the outage fix logging the unreachable `.invalid` Authentik.
+
+Use dive 491, not 490, for the smoke test: v1 has no measurements on 490 now.
 
 ## 2. Stop v1 (T-0, Friday evening)
 
@@ -403,10 +421,10 @@ f. NRP: nothing to roll out. The first stage with work stands the processor up
 ### Step 6 — verify: GO / NO-GO
 
 ```bash
-dc run --rm smoke --dive 490 --min-measurements <dive 490's count in v1>
+dc run --rm smoke --dive 491 --min-measurements 28   # 491 has 28 in v1; 490 now has none
 ```
 Exit 0 and `GO: all 10 checks passed`: API `/healthz` and OpenAPI; schema at
-head; tenancy audit; lab tenant; dive 490's measurements read **as the research
+head; tenancy audit; lab tenant; dive 491's measurements read **as the research
 role** through the `v1` views; every v2 schedule on krg-prod and none of v1's;
 Label Studio (workspace `FishSense`); the web's landing page; a key under v1's
 JPEG prefix in Garage. Then by hand (PLAN.md §6.6):
