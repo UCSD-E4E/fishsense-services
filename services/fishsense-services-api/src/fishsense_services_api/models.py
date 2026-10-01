@@ -160,6 +160,7 @@ class Device(Base):
     __table_args__ = (
         UniqueConstraint("tenant_id", "serial"),
         UniqueConstraint("tenant_id", "id"),
+        UniqueConstraint("tenant_id", "name"),
         CheckConstraint(
             "kind IN ('lite', 'lite_flatport', 'mobile', 'multilens', 'mono', 'scout')",
             name="devices_kind_check",
@@ -170,6 +171,7 @@ class Device(Base):
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
     kind: Mapped[str] = mapped_column(Text)
     serial: Mapped[str] = mapped_column(Text)
+    name: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
     v1_id: Mapped[int | None] = _v1_id()
 
@@ -338,6 +340,9 @@ class LaserCalibration(Base):
     id: Mapped[uuid.UUID] = _id()
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
     v1_id: Mapped[int | None] = _v1_id()
+    v1_refusal_dive_id: Mapped[int | None] = mapped_column(
+        BigInteger, unique=True, nullable=True
+    )
     seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
     dive_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     camera_calibration_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
