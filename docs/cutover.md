@@ -58,7 +58,7 @@ V2_SCHEDULES="cluster-dive-frames compute-laser-depths evaluate-laser-auto-accep
 | Runner scope / selfupdate / autoUpgrade | `UCSD-E4E/fishsense-lite` | `UCSD-E4E/fishsense-services` — all three follow mkTenant's `repo` after the first switch |
 | `fishsense.e4e.ucsd.edu` | fishsense-lite-web | `web` (Next.js, in-app OIDC) |
 | `api.fishsense.e4e.ucsd.edu` | fishsense-api behind a forwardAuth outpost | `api`, bearer tokens validated in-app; **no outpost** |
-| `analytics.fishsense.e4e.ucsd.edu` | Superset (running) | Superset, **behind the `superset` profile, off until §3 step 5c** |
+| `analytics.fishsense.e4e.ucsd.edu` | Superset (running) | **down from the switch** (v1's stack unit's `compose down` removes it); v2's runs only if the `superset` profile is turned on (§3 step 5c). The owner leans toward sunsetting it |
 | Postgres | `postgres:17.10`, volume `pgdata` | **the same container and volume**; v2 in a new database `fishsense_services`; v1's `fishsense` untouched (rollback, then archive) |
 | Workers | api-workflow-worker, backup-worker | `orchestrator`, `backup` |
 | NRP | 4 standing Deployments, scaled 0↔N, `kubectl apply -k` from CI | stood up per wake and **deleted** when idle, from the orchestrator image's manifests at `FISHSENSE_NRP_IMAGE_TAG` |
@@ -67,9 +67,10 @@ V2_SCHEDULES="cluster-dive-frames compute-laser-depths evaluate-laser-auto-accep
 
 The compose project stays `fishsense` (the composeStack's working directory), so
 the switch's `up -d --remove-orphans` removes v1's app containers and keeps
-`postgres`, its volume and the network. v1's Superset containers are not
-orphans (their services exist in v2's file, behind a profile), so they keep
-running until the profile is turned on and recreates them (§4).
+`postgres`, its volume and the network. v1's Superset containers do **not**
+survive: during the switch the old stack unit runs v1's `docker compose down`,
+which removes them (krg-infra's cutover review, 2026-10-01). Analytics is down
+from the switch unless §3 step 5c turns v2's Superset on.
 
 ## 1. Before the weekend
 
@@ -100,10 +101,21 @@ running until the profile is turned on and recreates them (§4).
     four; PLAN.md §4.2). Redirect URI unchanged:
     `https://fishsense.e4e.ucsd.edu/api/auth/callback/authentik`;
   - a **web service account** with an app password, allowed to use the web
-    client's `client_credentials` grant. Its username + app password go to
-    OpenBao `web_service_account` (§1.3), its `sub` gets a lab membership (§3
-    step 4d). (v1's `api` basic-auth account may be reused if it is the same
-    Authentik account; then seed its values under the new path.)
+    client's `client_credentials` grant. **Done in krg-infra #550**:
+    `svc-fishsense-web`, written by tofu to OpenBao
+    `oidc/web-service-account` {`username`, `password`}, which `secrets.nix`
+    renders directly (nothing to copy). Its `sub` gets a lab membership (§3
+    step 4d). #550 also gives the web client a signing key: without one,
+    Authentik signs with HS256, and v2's API, which accepts only RS256, would
+    401 every call.
+- [ ] **krg-infra merged** (platform): #549 re-scopes the runner token to this
+      repo, #550 does Authentik (above), #551 is the hand-off
+      (`docs/handoff/fishsense-services/HANDOFF.md`: the admin's switch and
+      rollback). #552 retires v1's outpost: merge it only after the 48 h window.
+- [ ] **The runner's GitHub App is installed on this repo** (krg-infra's broker
+      mints with it): on krg-deploy,
+      `./deploy/mint-runner-token.sh --is-registered UCSD-E4E/fishsense-services fishsense`
+      must not error on the App. Without it, the slot has no runner after the switch.
 - [ ] **Decide** (owner): Fish Measurements dashboard — `GRANT fishsense_research
       TO fishsense_superset` or leave it broken (§4). PLAN.md §9.18 is open.
 - [ ] **Fix or accept** dive 509 (PLAN.md §6.4): its 162 measurements are stale in
@@ -131,6 +143,11 @@ they normally agree. Freeze both bumps (disable the workflow) for the weekend.
 
 vault-agent is **fail-closed**: one missing path/field keeps every render —
 including the `fishsense.vm` cert — from landing, and the slot serves nothing.
+A *soft* render (`nrp_orchestrator`) only tolerates a missing **field**: a
+missing **path** still fails the whole agent (krg-infra checked the
+openbao-template source). So `nrp_orchestrator` must exist before the switch,
+with a placeholder if its kubeconfig isn't ready; an empty kubeconfig is a
+clean no-op for v2 (no NRP until it's real).
 Seed everything before the switch. New passwords are hex (they are interpolated
 into URLs and a `sed`):
 
@@ -140,14 +157,13 @@ gen() { openssl rand -hex 32; }
 bao kv put secret/tenants/fishsense/services_db \
   owner_password="$(gen)" app_password="$(gen)" backup_password="$(gen)" \
   analytics_password="$(gen)" smoke_password="$(gen)"
-read -r -p 'web service account username: ' U
-read -rs -p 'its app password: ' P && echo
-bao kv put secret/tenants/fishsense/web_service_account username="$U" password=- <<<"$P"; unset P
+# The web service account is platform-written (krg-infra #550): oidc/web-service-account.
 bao kv put secret/tenants/fishsense/nrp_orchestrator kubeconfig=@nrp-orchestrator.kubeconfig   # §1.4
+#   not ready yet? the PATH must still exist:  bao kv put secret/tenants/fishsense/nrp_orchestrator kubeconfig=
 bao kv put secret/tenants/fishsense/model_weights access_key=- secret_key=...                 # §1.5 (processor only)
 # Confirm every field WITHOUT printing values:
 for p in postgres superset web label_studio object_store nas services_db \
-         web_service_account nrp_orchestrator oidc/web oidc/analytics; do
+         nrp_orchestrator oidc/web oidc/analytics oidc/web-service-account; do
   printf '%s: ' "$p"; bao kv get -format=json "secret/tenants/fishsense/$p" | jq -c '.data.data | keys'
 done
 ```
@@ -163,8 +179,8 @@ done
 | `oidc/web` | `client_id`, `client_secret`, `issuer_url` | platform (tofu) — **do not seed** | web; api (issuer, audience) |
 | `oidc/analytics` | `client_id`, `client_secret`, `issuer_url` | platform — **do not seed** | superset |
 | `services_db` | `owner_password`, `app_password`, `backup_password`, `analytics_password`, `smoke_password` | **new** | db-bootstrap (all), migrate (owner, backup), api + orchestrator (app), backup (backup), superset (analytics), smoke (smoke) |
-| `web_service_account` | `username`, `password` | **new** | web |
-| `nrp_orchestrator` | `kubeconfig` | **new** — *soft* render | orchestrator, nrp-temporal-cert-sync |
+| `oidc/web-service-account` | `username`, `password` | platform (tofu, krg-infra #550) — **do not seed** | web |
+| `nrp_orchestrator` | `kubeconfig` | **new** — *soft* render: the field may be empty, the **path must exist** | orchestrator, nrp-temporal-cert-sync |
 | `model_weights` | `access_key`, `secret_key` | **new** — not rendered on the slot | the NRP processor's Secret (§1.4) |
 
 v1's `api {username, password}`, `nrp {kubeconfig}` and `oidc/proxy-outpost-token`
@@ -265,6 +281,23 @@ credential is pointed at an `.invalid` host, so a rehearsal without values
 never calls app.heartex.com, s3.e4e.ucsd.edu or the NAS. A rehearsal passes
 when: bootstrap and migrate exit 0 twice in a row (idempotence), migrate-v1
 prints GO, and the smoke test passes every check it has credentials for.
+
+**The rehearsal can't see the platform's file permissions**: it uses a local
+Temporal without TLS and no NRP, and stage.py writes `/run/tenant` as the
+operator. On the slot, vault-agent writes the Temporal key and the NRP
+kubeconfig `0640 root:root`, and v2's images run as uid 10001, so the four
+services that read them carry `group_add: ["0"]` (pinned by
+`deploy/tests/test_production_compose.py`). To check an image against that:
+```bash
+d=$(mktemp -d); echo k > $d/tls.key
+docker run --rm -v $d:/r alpine:3 sh -c 'chown 0:0 /r/tls.key && chmod 0640 /r/tls.key'
+I=ghcr.io/ucsd-e4e/fishsense-services-orchestrator:vX.Y.Z
+docker run --rm -v $d:/k:ro --entrypoint python $I -c "open('/k/tls.key').read()"               # PermissionError
+docker run --rm --group-add 0 -v $d:/k:ro --entrypoint python $I -c "open('/k/tls.key').read()" # reads
+docker run --rm -v $d:/r alpine:3 rm -f /r/tls.key; rmdir $d
+```
+(2026-10-01, v0.1.0: exactly that. PermissionError as uid 10001 with groups
+[999]; a clean read with group 0.)
 
 First run (2026-09-30, local images, v1's committed schema, no credentials):
 bootstrap, migrate and the cert sync exit 0 on the first and second converge;
@@ -434,12 +467,12 @@ cycle in the Temporal UI (`https://workflows.krg.ucsd.edu/namespaces/fishsense`)
   `GRANT fishsense_research TO fishsense_superset`, it errors with "permission
   denied" (pinned by `deploy/tests/test_bootstrap_postgres.py`). The **Pipeline
   Status** dashboard and its three datasets work (same SQL as v1, tested on v2).
-- **Superset is v2's only from step 5c** (its login must be bound to the lab,
-  which exists only after migrate-v1). Until then v1's Superset containers keep
-  running: compose's `--remove-orphans` leaves a profile-disabled service's
-  containers alone (checked with compose 5.5), and traefik still reaches them
-  as `superset`. So analytics.fishsense stays up across the switch, showing v1's
-  frozen data, until step 5c recreates the containers from v2's definition.
+- **Superset goes down at the switch**, not at step 5c. `--remove-orphans`
+  alone would leave a profile-disabled service's containers running, but the
+  switch first stops v1's stack unit, which runs v1's `docker compose down`
+  and removes them (krg-infra's cutover review, 2026-10-01). Analytics stays
+  dark unless step 5c turns v2's Superset on; the owner leans toward
+  sunsetting it in favour of per-tenant pages in the portal.
   *Note:* v1's compose runs Superset unconditionally (since 2026-07-15), although
   v1's README still says "off by default"; v2 gates it for real.
 - **v1's Superset connection** is repointed (same uuid) at v2 by the first
