@@ -29,7 +29,7 @@
 # `openssl rand -hex 32` -- hex, because they are interpolated into URLs and a sed):
 #   services_db        { owner_password, app_password, backup_password,
 #                        analytics_password, smoke_password }
-#   web_service_account { username, password }   # the web's Authentik service account (app password)
+#   oidc/web-service-account { username, password }   # the web's Authentik service account; platform-written (krg-infra #550)
 #   nrp_orchestrator   { kubeconfig }            # the fishsense-orchestrator SA token kubeconfig
 #                                                # (deploy/nrp/deployer-rbac.yaml). NOT v1's `nrp`:
 #                                                # v1's scales via deployments/scale, v2's creates and
@@ -137,7 +137,7 @@
         {{ with secret "secret/data/tenants/fishsense/oidc/web" }}AUTH_AUTHENTIK_ID={{ .Data.data.client_id }}
         AUTH_AUTHENTIK_SECRET={{ .Data.data.client_secret }}
         AUTH_AUTHENTIK_ISSUER={{ .Data.data.issuer_url }}{{ end }}
-        {{ with secret "secret/data/tenants/fishsense/web_service_account" }}FISHSENSE_API_SERVICE_USERNAME={{ .Data.data.username }}
+        {{ with secret "secret/data/tenants/fishsense/oidc/web-service-account" }}FISHSENSE_API_SERVICE_USERNAME={{ .Data.data.username }}
         FISHSENSE_API_SERVICE_PASSWORD={{ .Data.data.password }}{{ end }}
         {{ with secret "secret/data/tenants/fishsense/label_studio" }}LABEL_STUDIO_API_KEY={{ .Data.data.api_key }}{{ end }}
       '';

@@ -179,6 +179,10 @@ services:
   # v1's fishsense-api-workflow-worker, plus the api's database side (PLAN.md §3).
   orchestrator:
     image: ghcr.io/ucsd-e4e/fishsense-services-orchestrator:v0.1.0
+    # Group 0 reads the platform's root-only renders: the Temporal key and the
+    # NRP kubeconfig are 0640 root:root (krg-infra vault-agent.nix). v2's images
+    # run as uid 10001, where v1's workers ran as root. Not root: just its group.
+    group_add: ["0"]
     restart: unless-stopped
     environment:
       # Acts for a tenant only through a membership granted to this principal
@@ -249,6 +253,7 @@ services:
   # holds. Dumps v2's database, v1's archive and Superset's.
   backup:
     image: ghcr.io/ucsd-e4e/fishsense-services-backup:v0.1.0
+    group_add: ["0"]
     restart: unless-stopped
     environment:
       FISHSENSE_BACKUP_DATABASE_HOST: postgres
@@ -297,6 +302,7 @@ services:
   # runs out. A no-op when the leaf is unchanged and every pod is on it.
   nrp-temporal-cert-sync:
     image: ghcr.io/ucsd-e4e/fishsense-services-orchestrator:v0.1.0
+    group_add: ["0"]
     container_name: fishsense-nrp-temporal-cert-sync
     restart: "no"
     command: ["python", "-m", "fishsense_services_orchestrator.ops.cert_sync"]
@@ -319,6 +325,7 @@ services:
   # as migrate does) and the smoke research login's. Never part of a converge.
   smoke:
     image: ghcr.io/ucsd-e4e/fishsense-services-orchestrator:v0.1.0
+    group_add: ["0"]
     profiles: [ops]
     restart: "no"
     entrypoint: ["python", "-m", "fishsense_services_orchestrator.ops.smoke"]

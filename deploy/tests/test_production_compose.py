@@ -484,3 +484,53 @@ def test_superset_is_off_unless_its_profile_is_named():
 def test_the_smoke_test_runs_only_when_asked():
     assert services()["smoke"].get("profiles") == ["ops"]
     assert services()["smoke"]["image"] == services()["orchestrator"]["image"]
+
+
+# --- reading the platform's renders ------------------------------------------------
+
+#: Platform renders under /run/tenant that a v2 service mounts. vault-agent writes
+#: them 0640 root:root in 0750/0755 dirs (krg-infra nix/modules/services/
+#: vault-agent.nix defaults; the Temporal key is 0640 in tenant.nix).
+ROOT_GROUP_RENDERS = ("temporal", "nrp")
+
+
+def _v2_image(service: dict) -> bool:
+    return service.get("image", "").startswith(f"{GHCR}/fishsense-services-")
+
+
+@pytest.mark.parametrize("render", ROOT_GROUP_RENDERS)
+def test_every_v2_service_that_mounts_a_root_render_can_read_it(render):
+    """v2's images run as uid 10001 (Dockerfile `USER app`), and the platform
+    writes the Temporal key and the NRP kubeconfig readable by root's group
+    only. v1's workers ran as root, so it never mattered; v2's would fail to
+    reach Temporal and NRP on the slot (krg-infra's cutover review, 2026-10-01).
+    Joining group 0 reads them without running as root."""
+    mounting = {
+        n: s
+        for n, s in services().items()
+        if mounts(s, f"{TENANT_RUN}/{render}") and _v2_image(s)
+    }
+    assert mounting, f"nothing mounts /run/tenant/{render}"
+    for name, service in mounting.items():
+        assert "0" in [str(g) for g in service.get("group_add", [])], name
+
+
+def test_no_v2_service_runs_as_root():
+    """Group 0 is the whole grant: the services still run as uid 10001."""
+    for name, service in services().items():
+        if _v2_image(service):
+            assert str(service.get("user", "")) not in ("0", "root"), name
+
+
+def test_the_web_service_account_is_the_one_the_platform_writes():
+    """krg-infra #550 creates `svc-fishsense-web` and writes its app password to
+    `tenants/fishsense/oidc/web-service-account` -- `oidc/` being the only tenant
+    prefix tofu may write. Rendering it from there leaves the owner nothing to
+    copy, and nothing to fall out of step when the platform rotates it."""
+    web = [
+        r for r in renders().values() if "FISHSENSE_API_SERVICE_USERNAME" in r.variables
+    ]
+    assert len(web) == 1
+    paths = {path for sources in web[0].sources.values() for path, _ in sources}
+    assert "oidc/web-service-account" in paths
+    assert not any("web_service_account" in (p or "") for p in paths)
