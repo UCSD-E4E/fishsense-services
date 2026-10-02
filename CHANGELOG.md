@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.1.0...v0.1.1) (2026-10-02)
+
+
+### Bug Fixes
+
+* **deploy:** v2's workers read the platform's root-only renders; act on krg-infra's review ([ecb8891](https://github.com/UCSD-E4E/fishsense-services/commit/ecb8891c3fed199545301b29044f70936d83d831))
+* **deploy:** v2's workers read the platform's root-only renders; act on krg-infra's review ([6ca1c48](https://github.com/UCSD-E4E/fishsense-services/commit/6ca1c48ae7585c0367543509e616f3b08e725232))
+
+
+### Documentation
+
+* **cutover:** two clean rehearsals on last night's dump with v0.1.0 ([5650dc9](https://github.com/UCSD-E4E/fishsense-services/commit/5650dc921d2a180a1e3e294a440af93f9669512b))
+* **cutover:** two clean rehearsals on last night's dump with v0.1.0 ([178cf74](https://github.com/UCSD-E4E/fishsense-services/commit/178cf7443555c27d1f2b0edb4ae431d615de0396))
+* dive 509 was fixed in v1 on 2026-09-16 ([08a3903](https://github.com/UCSD-E4E/fishsense-services/commit/08a3903a9ecc8099fe4b23ebe78e318083a58312))
+* revive [#932](https://github.com/UCSD-E4E/fishsense-services/issues/932)'s eroded laser labels in v2, after cutover ([3b9dbe4](https://github.com/UCSD-E4E/fishsense-services/commit/3b9dbe488b31140bdf526787586bfa824f03609d))
+
 ## 0.1.0 (2026-10-01)
 
 
