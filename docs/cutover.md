@@ -106,8 +106,9 @@ running until the profile is turned on and recreates them (§4).
     Authentik account; then seed its values under the new path.)
 - [ ] **Decide** (owner): Fish Measurements dashboard — `GRANT fishsense_research
       TO fishsense_superset` or leave it broken (§4). PLAN.md §9.18 is open.
-- [ ] **Fix or accept** dive 509 (PLAN.md §6.4): its 162 measurements are stale in
-      both.
+- [x] ~~**Fix or accept** dive 509~~: fixed in v1 on 2026-09-16. 509 now has
+      its own calibration, and its 162 measurements are current in both
+      (PLAN.md §6.4).
 
 ### 1.2 The krg-infra pin
 
@@ -255,7 +256,7 @@ $R up -d                                        # db-bootstrap, migrate, api, we
 $R ps -a                                        # db-bootstrap + migrate: Exited (0)
 $R run --rm migrate fishsense-services-api migrate-v1      # -> GO
 $R up -d --force-recreate db-bootstrap          # binds the Superset login to the lab
-$R run --rm smoke --dive 490 --min-measurements 1          # temporal/db/api/web PASS; externals need real keys
+$R run --rm smoke --dive 491 --min-measurements 1          # temporal/db/api/web PASS; externals need real keys
 $R down -v                                      # the rehearsal's volumes only
 ```
 
@@ -274,6 +275,24 @@ web — whose landing page 500'd when the Authentik issuer was unreachable (it
 mints its service token per request). Fixed since: a kind the web cannot ask
 about is left out and the page says so (`lib/active-projects.ts`), so an
 Authentik outage costs the labeling cards and sign-in, not the public page.
+
+Rehearsals 1 and 2 (2026-10-01): the released `v0.1.0` images, v1's nightly
+dump `database_backups/fishsense/2026-10-01T03-00-31Z.dump` (525 dives,
+134,662 images, 3,130 measurements), no credentials. Each from empty volumes:
+- db-bootstrap, migrate and the cert sync exit 0, then exit 0 again on a
+  forced re-converge.
+- migrate-v1 GO in ~3m50s: every v1 row accounted for, tenancy audit clean,
+  parity 3,128 = 3,128.
+- In run 2, a second migrate-v1 is also GO and duplicates nothing (still 525
+  dives, 134,662 captures, 3,130 measurements).
+- Smoke with `--dive 491` passes 8 of 10, every check it has credentials for:
+  api, openapi, head (0034), audit, lab, research (28 measurements), 22
+  schedules, and the web (200, now that the outage fix is in). Label Studio and
+  the object store fail by design (`.invalid`).
+- No errors in any service's logs, except the web's per-kind "could not list"
+  lines, which are the outage fix logging the unreachable `.invalid` Authentik.
+
+Use dive 491, not 490, for the smoke test: v1 has no measurements on 490 now.
 
 ## 2. Stop v1 (T-0, Friday evening)
 
@@ -403,10 +422,10 @@ f. NRP: nothing to roll out. The first stage with work stands the processor up
 ### Step 6 — verify: GO / NO-GO
 
 ```bash
-dc run --rm smoke --dive 490 --min-measurements <dive 490's count in v1>
+dc run --rm smoke --dive 491 --min-measurements 28   # 491 has 28 in v1; 490 now has none
 ```
 Exit 0 and `GO: all 10 checks passed`: API `/healthz` and OpenAPI; schema at
-head; tenancy audit; lab tenant; dive 490's measurements read **as the research
+head; tenancy audit; lab tenant; dive 491's measurements read **as the research
 role** through the `v1` views; every v2 schedule on krg-prod and none of v1's;
 Label Studio (workspace `FishSense`); the web's landing page; a key under v1's
 JPEG prefix in Garage. Then by hand (PLAN.md §6.6):
@@ -511,3 +530,17 @@ lost**. In order:
 - Archive `fishsense-lite` (PLAN.md §9.9); v1's NRP Deployments go to NRP's GC.
 - The web service account and every other `sub` is a membership row: grant and
   revoke there, not in Authentik groups.
+- **Revive the eroded laser labels (fishsense-lite #932), in v2.** Decided
+  2026-10-01: never applied in v1. On the 2026-10-01 dump, 15,263 of 50,266
+  laser labels are superseded, and every `superseded_reason` is NULL. v1's dry
+  run (~2026-09-26) proposed reviving 9,615 that the corrected validator keeps.
+  The migration carries every flag across.
+  1. Dry-run: `python -m fishsense_services_orchestrator.laser.remediate
+     dry-run --out report.json [--exclusions excl.json]`. It writes nothing.
+  2. The owner reviews the report and lists any dives to exclude.
+  3. `apply --report report.json`. It refuses anything but a reviewed dry-run
+     report, and records the revivals as `superseded_reason = remediation`.
+
+  Revived labels change laser depths, so v2 marks the affected lengths stale and
+  re-measures them. Live research queries will move; the frozen imwut/cscw CSVs
+  won't. Announce it before applying.
