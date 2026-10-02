@@ -106,8 +106,9 @@ running until the profile is turned on and recreates them (§4).
     Authentik account; then seed its values under the new path.)
 - [ ] **Decide** (owner): Fish Measurements dashboard — `GRANT fishsense_research
       TO fishsense_superset` or leave it broken (§4). PLAN.md §9.18 is open.
-- [ ] **Fix or accept** dive 509 (PLAN.md §6.4): its 162 measurements are stale in
-      both.
+- [x] ~~**Fix or accept** dive 509~~: fixed in v1 on 2026-09-16. 509 now has
+      its own calibration, and its 162 measurements are current in both
+      (PLAN.md §6.4).
 
 ### 1.2 The krg-infra pin
 

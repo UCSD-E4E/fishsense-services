@@ -711,9 +711,12 @@ v2 must do everything v1 does in production (§2) before a date is set:
 - **The migrating role must bypass RLS** (superuser or `BYPASSRLS`): `FORCE ROW LEVEL
   SECURITY` binds the table owner too, so a plain owner would be blocked by the very
   policies it writes under. `migrate-v1` checks this before touching data.
-- **v1 data issue found by the rehearsal:** dive 509 ("2023-08-18 Nathans Pool 04") borrows
-  calibration from dive 508, which has no extrinsics -- its 162 measurements are stale in v1
-  and v2 alike. Fix in v1 (or accept) before cutover.
+- **v1 data issue found by the rehearsal, since fixed in v1:** dive 509 ("2023-08-18
+  Nathans Pool 04") borrowed calibration from dive 508, which has no extrinsics, so its 162
+  measurements were stale in v1 and v2 alike. v1 refitted it on 2026-09-16: 509 now has its
+  own calibration (laserextrinsics 64, baseline 10.47 cm, plausible), which wins over the
+  link. All 162 measurements are bound to it in v1 and current in v2 (checked on the
+  2026-10-01 dump). Nothing left to do.
 - **Rehearsal hygiene:** production dumps are restored only into throwaway local
   containers; the committed test fixture is v1's schema only (`pg_dump --schema-only`).
 
