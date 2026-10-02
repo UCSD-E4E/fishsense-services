@@ -717,6 +717,10 @@ v2 must do everything v1 does in production (§2) before a date is set:
   own calibration (laserextrinsics 64, baseline 10.47 cm, plausible), which wins over the
   link. All 162 measurements are bound to it in v1 and current in v2 (checked on the
   2026-10-01 dump). Nothing left to do.
+- **fishsense-lite #932's revival (9,615 eroded laser labels in its dry run) happens in
+  v2, after cutover** *(decided 2026-10-01)*. It was never applied in v1. The migration
+  carries every label's superseded flag, and v2's ported remediation (dry-run, review,
+  apply) revives them. Steps in docs/cutover.md §7.
 - **Rehearsal hygiene:** production dumps are restored only into throwaway local
   containers; the committed test fixture is v1's schema only (`pg_dump --schema-only`).
 

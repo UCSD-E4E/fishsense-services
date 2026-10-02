@@ -530,3 +530,17 @@ lost**. In order:
 - Archive `fishsense-lite` (PLAN.md §9.9); v1's NRP Deployments go to NRP's GC.
 - The web service account and every other `sub` is a membership row: grant and
   revoke there, not in Authentik groups.
+- **Revive the eroded laser labels (fishsense-lite #932), in v2.** Decided
+  2026-10-01: never applied in v1. On the 2026-10-01 dump, 15,263 of 50,266
+  laser labels are superseded, and every `superseded_reason` is NULL. v1's dry
+  run (~2026-09-26) proposed reviving 9,615 that the corrected validator keeps.
+  The migration carries every flag across.
+  1. Dry-run: `python -m fishsense_services_orchestrator.laser.remediate
+     dry-run --out report.json [--exclusions excl.json]`. It writes nothing.
+  2. The owner reviews the report and lists any dives to exclude.
+  3. `apply --report report.json`. It refuses anything but a reviewed dry-run
+     report, and records the revivals as `superseded_reason = remediation`.
+
+  Revived labels change laser depths, so v2 marks the affected lengths stale and
+  re-measures them. Live research queries will move; the frozen imwut/cscw CSVs
+  won't. Announce it before applying.
