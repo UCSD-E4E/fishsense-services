@@ -101,17 +101,27 @@ from the switch unless §3 step 5c turns v2's Superset on.
     four; PLAN.md §4.2). Redirect URI unchanged:
     `https://fishsense.e4e.ucsd.edu/api/auth/callback/authentik`;
   - a **web service account** with an app password, allowed to use the web
-    client's `client_credentials` grant. **Done in krg-infra #550**:
-    `svc-fishsense-web`, written by tofu to OpenBao
+    client's `client_credentials` grant. **Done in krg-infra #550**: the
+    existing FishSense service identity `svc_fishsense`, with a new Authentik
+    app password (not its AD password), written by tofu to OpenBao
     `oidc/web-service-account` {`username`, `password`}, which `secrets.nix`
     renders directly (nothing to copy). Its `sub` gets a lab membership (§3
     step 4d). #550 also gives the web client a signing key: without one,
     Authentik signs with HS256, and v2's API, which accepts only RS256, would
     401 every call.
-- [ ] **krg-infra merged** (platform): #549 re-scopes the runner token to this
-      repo, #550 does Authentik (above), #551 is the hand-off
-      (`docs/handoff/fishsense-services/HANDOFF.md`: the admin's switch and
-      rollback). #552 retires v1's outpost: merge it only after the 48 h window.
+- [x] **krg-infra merged** (platform, 2026-10-02): #549 re-scopes the runner
+      token to this repo, #550 does Authentik (above), #551 is the platform's
+      hand-off, `docs/handoff/fishsense-services/HANDOFF.md`, which is the
+      admin's source of truth for the switch and rollback. #552 (draft) retires
+      v1's outpost: merge it only after the 48 h window.
+      *Consequence:* since #549, v1's auto-deploy runner can't re-register
+      (it's scoped here now), so v1 has no auto-deploy from its next
+      selfupdate. v1 is frozen; the admin converges it by hand if needed.
+- [ ] **#550 APPLIED, not just merged** (admin): `web.env` is a hard render of
+      `oidc/web-service-account`, so if the tofu apply hasn't run, the path is
+      missing and the whole agent fails, cert included (HANDOFF B4). The
+      `Deploy fleet` run after the merge must be a real deploy, not the ~9 s
+      "skipping deploy".
 - [ ] **The runner's GitHub App is installed on this repo** (krg-infra's broker
       mints with it): on krg-deploy,
       `./deploy/mint-runner-token.sh --is-registered UCSD-E4E/fishsense-services fishsense`
@@ -164,7 +174,7 @@ bao kv put secret/tenants/fishsense/nrp_orchestrator kubeconfig=@nrp-orchestrato
 bao kv put secret/tenants/fishsense/model_weights access_key=- secret_key=...                 # §1.5 (processor only)
 # Confirm every field WITHOUT printing values:
 for p in postgres superset web label_studio object_store nas services_db \
-         nrp_orchestrator oidc/web oidc/analytics oidc/web-service-account; do
+         nrp_orchestrator model_weights oidc/web oidc/analytics oidc/web-service-account; do
   printf '%s: ' "$p"; bao kv get -format=json "secret/tenants/fishsense/$p" | jq -c '.data.data | keys'
 done
 ```
@@ -363,11 +373,21 @@ done
 
 ### Step 4 — switch the slot to v2, then migrate
 
-a. **Admin, the first converge** (v1's selfupdate still targets fishsense-lite):
+a. **Admin, the first converge** (v1's selfupdate still targets fishsense-lite).
+   The exact commands and checks are krg-infra's
+   `docs/handoff/fishsense-services/HANDOFF.md` §4 "The switch". In short:
 
    ```bash
+   slot nixos-rebuild build --flake github:UCSD-E4E/fishsense-services#fishsense --refresh   # pre-flight, touches nothing
+   ./deploy/stage-tenant-secret-zero.sh     # on krg-deploy: a fresh runner token (~1 h life); switch within the hour
    slot nixos-rebuild switch --flake github:UCSD-E4E/fishsense-services#fishsense --refresh
+   slot systemctl show openbao-agent.service fishsense.service -p Id -p Result   # both success
    ```
+   If `openbao-agent` failed, `slot journalctl -u openbao-agent -n 50`: a
+   `no secret exists at …` names the missing path; seed it, then
+   `slot systemctl restart openbao-agent fishsense`. Then confirm the runner
+   came online on this repo (`gh api repos/UCSD-E4E/fishsense-services/actions/runners`);
+   if not, push a fresh token again (the runner retries every 30 s).
    It renders v2's secrets, links v2's config, and `up -d --remove-orphans
    --force-recreate`s v2's interior: **db-bootstrap** (v2's roles, the
    `fishsense_services` database — nothing of v1's), **migrate** (schema to head
@@ -397,15 +417,31 @@ c. **migrate-v1** — v1's `fishsense` → v2's lab tenant, one transaction, rea
    dc run --rm migrate fishsense-services-api migrate-v1 | tee migrate-v1-$(date -u +%F).log
    ```
    Exit 0 and `GO:` on the last line — every v1 row accounted for, the tenancy
-   audit clean, measurement parity (rehearsed: 2 968 = 2 968). Anything else is
+   audit clean, measurement parity (rehearsed 2026-10-01: 3,128 = 3,128). Anything else is
    **NO-GO → §6 rollback** (v2's database can simply be dropped; v1's is intact).
 
 d. **Memberships** (as the owner; there is no API for them yet):
 
    A `sub` is what Authentik issues for the web client (the provider's subject
    mode — by default the user's hashed id, Authentik → Directory → Users → UID).
-   Never an email. Admins are the people in v1's `FishSense-Prod-Admins`. Fill
-   in the subs, then run (idempotent: re-running updates the roles):
+   Never an email. Admins are the people in v1's `FishSense-Prod-Admins`.
+   The web service account's `sub` comes from one client-credentials call
+   (krg-infra HANDOFF.md §3; it prints the claim only, never the token, and a
+   non-null `sub` also proves the grant works end to end):
+
+   ```bash
+   S=$(bao kv get -format=json secret/tenants/fishsense/oidc/web-service-account)
+   W=$(bao kv get -format=json secret/tenants/fishsense/oidc/web)
+   curl -s https://auth.krg.ucsd.edu/application/o/token/ \
+     -d grant_type=client_credentials -d scope=openid \
+     -d client_id="$(jq -r .data.data.client_id <<<"$W")" \
+     -d client_secret="$(jq -r .data.data.client_secret <<<"$W")" \
+     -d username="$(jq -r .data.data.username <<<"$S")" \
+     -d password="$(jq -r .data.data.password <<<"$S")" \
+     | jq -r .access_token | cut -d. -f2 | tr '_-' '/+' | base64 -d 2>/dev/null | jq -r .sub
+   unset S W
+   ```
+   Fill in the subs, then run (idempotent: re-running updates the roles):
 
 ```bash
 dc exec -T postgres psql -U postgres -d fishsense_services -v ON_ERROR_STOP=1 <<'SQL'
@@ -555,8 +591,15 @@ lost**. In order:
 
 ## 7. After the window
 
-- Retire v1's OpenBao paths (`api`, `nrp`, `oidc/proxy-outpost-token`) and ask the
-  platform to retire the `fishsense_orchestrator` proxy provider/outpost (#440).
+- Confirm "no rollback" to the platform, which then merges krg-infra #552
+  (retires the `fishsense_orchestrator` proxy provider and outpost, its token,
+  and the data-worker app password), and removes the stale `fishsense` runner
+  from fishsense-lite.
+- Delete v1-only OpenBao paths: `bao kv metadata delete secret/tenants/fishsense/api`
+  and `…/nrp` (`oidc/proxy-outpost-token` goes with #552).
+- **Re-enable the flake bump on this repo only**:
+  `gh workflow enable update-flake.yml -R UCSD-E4E/fishsense-services`. Skip it
+  and the slot freezes on old packages.
 - v1's `fishsense` database is the read-only archive (and the backup keeps
   dumping it): revoke v1's `superset` and `backup` roles' logins when nothing
   needs them.
