@@ -1,6 +1,6 @@
 [project]
 name = "fishsense-services-contracts"
-version = "0.1.0"
+version = "0.1.1"
 description = "FishSense v2 processing contract: what the orchestrator and processor exchange (PLAN.md §9.1)."
 requires-python = ">=3.13,<3.14"
 dependencies = [
