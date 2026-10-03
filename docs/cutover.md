@@ -159,21 +159,18 @@ missing **path** still fails the whole agent (krg-infra checked the
 openbao-template source). So `nrp_orchestrator` must exist before the switch,
 with a placeholder if its kubeconfig isn't ready; an empty kubeconfig is a
 clean no-op for v2 (no NRP until it's real).
-Seed everything before the switch. New passwords are hex (they are interpolated
-into URLs and a `sed`):
+Seed everything before the switch. v2's five DB passwords are NOT seeded here: krg-infra
+generates them (terraform/secrets, #554) at `generated/services_db`.
 
 ```bash
-gen() { openssl rand -hex 32; }
 # New paths: `put` (they don't exist). Read secrets from stdin, never argv.
-bao kv put secret/tenants/fishsense/services_db \
-  owner_password="$(gen)" app_password="$(gen)" backup_password="$(gen)" \
-  analytics_password="$(gen)" smoke_password="$(gen)"
+# DB passwords are platform-generated (krg-infra #554): generated/services_db.
 # The web service account is platform-written (krg-infra #550): oidc/web-service-account.
 bao kv put secret/tenants/fishsense/nrp_orchestrator kubeconfig=@nrp-orchestrator.kubeconfig   # §1.4
 #   not ready yet? the PATH must still exist:  bao kv put secret/tenants/fishsense/nrp_orchestrator kubeconfig=
 bao kv put secret/tenants/fishsense/model_weights access_key=- secret_key=...                 # §1.5 (processor only)
 # Confirm every field WITHOUT printing values:
-for p in postgres superset web label_studio object_store nas services_db \
+for p in postgres superset web label_studio object_store nas generated/services_db \
          nrp_orchestrator model_weights oidc/web oidc/analytics oidc/web-service-account; do
   printf '%s: ' "$p"; bao kv get -format=json "secret/tenants/fishsense/$p" | jq -c '.data.data | keys'
 done
@@ -189,7 +186,7 @@ done
 | `nas` | `username`, `password` | **v1's, reuse** — needs read on `/fishsense_data/REEF/data` and write on `/fishsense_process_work/database_backups_v2` | orchestrator, backup |
 | `oidc/web` | `client_id`, `client_secret`, `issuer_url` | platform (tofu) — **do not seed** | web; api (issuer, audience) |
 | `oidc/analytics` | `client_id`, `client_secret`, `issuer_url` | platform — **do not seed** | superset |
-| `services_db` | `owner_password`, `app_password`, `backup_password`, `analytics_password`, `smoke_password` | **new** | db-bootstrap (all), migrate (owner, backup), api + orchestrator (app), backup (backup), superset (analytics), smoke (smoke) |
+| `generated/services_db` | `owner_password`, `app_password`, `backup_password`, `analytics_password`, `smoke_password` | platform (tofu, krg-infra #554) — **do not seed** | db-bootstrap (all), migrate (owner, backup), api + orchestrator (app), backup (backup), superset (analytics), smoke (smoke) |
 | `oidc/web-service-account` | `username`, `password` | platform (tofu, krg-infra #550) — **do not seed** | web |
 | `nrp_orchestrator` | `kubeconfig` | **new** — *soft* render: the field may be empty, the **path must exist** | orchestrator, nrp-temporal-cert-sync |
 | `model_weights` | `access_key`, `secret_key` | **new** — not rendered on the slot | the NRP processor's Secret (§1.4) |

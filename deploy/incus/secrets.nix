@@ -25,11 +25,7 @@
 #   label_studio  { api_key }                    # the service account's (e4e+fishsense@ucsd.edu)
 #   object_store  { access_key, secret_key }     # Garage; also Label Studio's presign key (v1's fallback)
 #   nas           { username, password }         # Synology FileStation (read for ingest, write for backups)
-# NEW for v2 (docs/cutover.md "Seed OpenBao"; generate each password with
-# `openssl rand -hex 32` -- hex, because they are interpolated into URLs and a sed):
-#   services_db        { owner_password, app_password, backup_password,
-#                        analytics_password, smoke_password }
-#   oidc/web-service-account { username, password }   # the web's Authentik service account; platform-written (krg-infra #550)
+# NEW for v2, owner-seeded (docs/cutover.md "Seed OpenBao"):
 #   nrp_orchestrator   { kubeconfig }            # the fishsense-orchestrator SA token kubeconfig
 #                                                # (deploy/nrp/deployer-rbac.yaml). NOT v1's `nrp`:
 #                                                # v1's scales via deployments/scale, v2's creates and
@@ -37,6 +33,10 @@
 #   model_weights      { access_key, secret_key }  # NOT rendered here -- the NRP processor's Secret
 #                                                  # (docs/cutover.md); listed so the layout is whole.
 # PLATFORM writes (tofu — do NOT seed):
+#   generated/services_db { owner_password, app_password, backup_password,
+#                           analytics_password, smoke_password }
+#                   # v2's DB logins; generate-once, [a-z0-9]{64} (krg-infra terraform/secrets #554)
+#   oidc/web-service-account { username, password }   # svc_fishsense's app password (krg-infra #550)
 #   oidc/web        { client_id, client_secret, issuer_url }   (#438)
 #   oidc/analytics  { client_id, client_secret, issuer_url }   (#438)
 # No longer read: api {username, password} (v1's basic-auth service account) and
@@ -72,7 +72,7 @@
       destination = "/run/tenant/secrets/db-bootstrap.env";
       contents = ''
         {{ with secret "secret/data/tenants/fishsense/postgres" }}PGPASSWORD={{ .Data.data.password }}{{ end }}
-        {{ with secret "secret/data/tenants/fishsense/services_db" }}FISHSENSE_OWNER_PASSWORD={{ .Data.data.owner_password }}
+        {{ with secret "secret/data/tenants/fishsense/generated/services_db" }}FISHSENSE_OWNER_PASSWORD={{ .Data.data.owner_password }}
         FISHSENSE_APP_PASSWORD={{ .Data.data.app_password }}
         FISHSENSE_BACKUP_PASSWORD={{ .Data.data.backup_password }}
         FISHSENSE_ANALYTICS_PASSWORD={{ .Data.data.analytics_password }}
@@ -85,7 +85,7 @@
       # writes, so migrate-v1 cannot modify v1 even by mistake.
       destination = "/run/tenant/secrets/migrate.env";
       contents = ''
-        {{ with secret "secret/data/tenants/fishsense/services_db" }}FISHSENSE_MIGRATION_DATABASE_URL=postgresql+psycopg://fishsense_owner:{{ .Data.data.owner_password | urlquery }}@postgres:5432/fishsense_services
+        {{ with secret "secret/data/tenants/fishsense/generated/services_db" }}FISHSENSE_MIGRATION_DATABASE_URL=postgresql+psycopg://fishsense_owner:{{ .Data.data.owner_password | urlquery }}@postgres:5432/fishsense_services
         FISHSENSE_V1_DATABASE_URL=postgresql+psycopg://fishsense_backup:{{ .Data.data.backup_password | urlquery }}@postgres:5432/fishsense{{ end }}
       '';
     }
@@ -96,7 +96,7 @@
       # the audiences when it exists.
       destination = "/run/tenant/secrets/api.env";
       contents = ''
-        {{ with secret "secret/data/tenants/fishsense/services_db" }}FISHSENSE_DATABASE_URL=postgresql+asyncpg://fishsense_app:{{ .Data.data.app_password | urlquery }}@postgres:5432/fishsense_services{{ end }}
+        {{ with secret "secret/data/tenants/fishsense/generated/services_db" }}FISHSENSE_DATABASE_URL=postgresql+asyncpg://fishsense_app:{{ .Data.data.app_password | urlquery }}@postgres:5432/fishsense_services{{ end }}
         {{ with secret "secret/data/tenants/fishsense/oidc/web" }}FISHSENSE_OIDC_ISSUER={{ .Data.data.issuer_url }}
         FISHSENSE_OIDC_AUDIENCES={{ .Data.data.client_id }}{{ end }}
       '';
@@ -107,7 +107,7 @@
       # presigns with (v1's `presign_*` fallback to `object_store`).
       destination = "/run/tenant/secrets/orchestrator.env";
       contents = ''
-        {{ with secret "secret/data/tenants/fishsense/services_db" }}FISHSENSE_DATABASE_URL=postgresql+asyncpg://fishsense_app:{{ .Data.data.app_password | urlquery }}@postgres:5432/fishsense_services{{ end }}
+        {{ with secret "secret/data/tenants/fishsense/generated/services_db" }}FISHSENSE_DATABASE_URL=postgresql+asyncpg://fishsense_app:{{ .Data.data.app_password | urlquery }}@postgres:5432/fishsense_services{{ end }}
         {{ with secret "secret/data/tenants/fishsense/nas" }}FISHSENSE_NAS_USERNAME={{ .Data.data.username }}
         FISHSENSE_NAS_PASSWORD={{ .Data.data.password }}{{ end }}
         {{ with secret "secret/data/tenants/fishsense/label_studio" }}FISHSENSE_LABEL_STUDIO_API_KEY={{ .Data.data.api_key }}{{ end }}
@@ -122,7 +122,7 @@
       # writes dumps to. The orchestrator never holds this file.
       destination = "/run/tenant/secrets/backup.env";
       contents = ''
-        {{ with secret "secret/data/tenants/fishsense/services_db" }}FISHSENSE_BACKUP_DATABASE_PASSWORD={{ .Data.data.backup_password }}{{ end }}
+        {{ with secret "secret/data/tenants/fishsense/generated/services_db" }}FISHSENSE_BACKUP_DATABASE_PASSWORD={{ .Data.data.backup_password }}{{ end }}
         {{ with secret "secret/data/tenants/fishsense/nas" }}FISHSENSE_NAS_USERNAME={{ .Data.data.username }}
         FISHSENSE_NAS_PASSWORD={{ .Data.data.password }}{{ end }}
       '';
@@ -154,14 +154,14 @@
         {{ with secret "secret/data/tenants/fishsense/oidc/analytics" }}AUTHENTIK_KEY={{ .Data.data.client_id }}
         AUTHENTIK_SECRET={{ .Data.data.client_secret }}
         AUTHENTIK_ISSUER={{ .Data.data.issuer_url }}{{ end }}
-        {{ with secret "secret/data/tenants/fishsense/services_db" }}ANALYTICS_DATABASE_PASSWORD={{ .Data.data.analytics_password }}{{ end }}
+        {{ with secret "secret/data/tenants/fishsense/generated/services_db" }}ANALYTICS_DATABASE_PASSWORD={{ .Data.data.analytics_password }}{{ end }}
       '';
     }
     {
       # The smoke test's research login (profile `ops`, run by hand).
       destination = "/run/tenant/secrets/smoke.env";
       contents = ''
-        {{ with secret "secret/data/tenants/fishsense/services_db" }}FISHSENSE_SMOKE_RESEARCH_DATABASE_URL=postgresql+psycopg://fishsense_smoke:{{ .Data.data.smoke_password | urlquery }}@postgres:5432/fishsense_services{{ end }}
+        {{ with secret "secret/data/tenants/fishsense/generated/services_db" }}FISHSENSE_SMOKE_RESEARCH_DATABASE_URL=postgresql+psycopg://fishsense_smoke:{{ .Data.data.smoke_password | urlquery }}@postgres:5432/fishsense_services{{ end }}
       '';
     }
     {

@@ -53,7 +53,7 @@ def test_urlquery_keeps_a_hostile_password_intact_in_the_dsn():
     the URL. The DSN must decode back to the exact password."""
     hostile = "p@ss/w:rd+&%"
     rendered = sut.render_secrets(
-        SECRETS_NIX.read_text(), {"services_db": {"owner_password": hostile}}
+        SECRETS_NIX.read_text(), {"generated/services_db": {"owner_password": hostile}}
     )
     env = _env(rendered[f"{TENANT_RUN}/secrets/migrate.env"])
 

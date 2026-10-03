@@ -51,7 +51,7 @@ _WITH = re.compile(r'\{\{\s*with secret "secret/data/tenants/fishsense/([^"]+)"\
 _FIELD = re.compile(r"\{\{\s*\.Data\.data\.([a-z_]+)(\s*\|\s*urlquery)?\s*\}\}")
 
 #: Generated when not given: they are the rehearsal's own, never production's.
-GENERATED = {"postgres", "services_db", "superset", "web"}
+GENERATED = {"postgres", "generated/services_db", "superset", "web"}
 #: Placeholders shaped like the real thing, where a service validates a shape.
 PLACEHOLDERS = {
     ("oidc/web", "issuer_url"): "https://auth.example.invalid/application/o/fishsense/",
