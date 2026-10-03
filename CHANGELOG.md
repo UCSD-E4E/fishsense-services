@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.2](https://github.com/UCSD-E4E/fishsense-services/compare/v0.1.1...v0.1.2) (2026-10-03)
+
+
+### Bug Fixes
+
+* **deploy:** read services_db from the platform-generated path ([b407871](https://github.com/UCSD-E4E/fishsense-services/commit/b407871f2a8cc55fda7b16d8a3d1c664194f1198))
+* **deploy:** read services_db from the platform-generated path ([10b4c9a](https://github.com/UCSD-E4E/fishsense-services/commit/10b4c9a9ffd9697bcc20946b9ae9c81dbeee43e8))
+
+
+### Documentation
+
+* **cutover:** align with krg-infra's merged hand-off ([#549](https://github.com/UCSD-E4E/fishsense-services/issues/549)–[#551](https://github.com/UCSD-E4E/fishsense-services/issues/551)) ([37fb514](https://github.com/UCSD-E4E/fishsense-services/commit/37fb51485fa1c0c9e92d55dfa70b11b50091cb39))
+
 ## [0.1.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.1.0...v0.1.1) (2026-10-02)
 
 
