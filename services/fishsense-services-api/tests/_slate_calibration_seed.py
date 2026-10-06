@@ -210,13 +210,17 @@ async def slate_label(
     skipped_points=None,
     ls_updated_at: datetime | None = None,
     source: str = "human",
+    detected_by: uuid.UUID | None = None,
 ) -> uuid.UUID:
+    """`detected_by`: the slate presence prediction that queued the frame."""
     return await _one(
         engine,
         "INSERT INTO slate_labels (tenant_id, capture_id, source, ls_project_id, "
         "ls_task_id, completed, superseded, needs_reprocess, reference_points, "
-        "skipped_points, ls_updated_at) VALUES (:t, :c, :src, :p, :k, :done, :gone, "
-        ":flag, :refs, :skip, :at) RETURNING id",
+        "skipped_points, ls_updated_at, slate_presence_prediction_id) VALUES (:t, "
+        ":c, :src, :p, :k, :done, :gone, :flag, :refs, :skip, :at, :detected) "
+        "RETURNING id",
+        detected=detected_by,
         t=tenant_id,
         c=capture_id,
         src=source,
@@ -299,3 +303,26 @@ async def laser_calibration(
 
 def later(hours: float) -> datetime:
     return T0 + timedelta(hours=hours)
+
+
+async def slate_presence(
+    engine,
+    tenant_id,
+    capture_id,
+    *,
+    probability: float | None = 0.97,
+    model_version: int = 1,
+) -> uuid.UUID:
+    """A slate detector prediction; None is an abstention (`decode_failed`)."""
+    return await _one(
+        engine,
+        "INSERT INTO slate_presence_predictions (tenant_id, capture_id, status, "
+        "probability, model_version, weights_sha256) VALUES (:t, :c, :s, :p, :v, "
+        ":sha) RETURNING id",
+        t=tenant_id,
+        c=capture_id,
+        s="decode_failed" if probability is None else "predicted",
+        p=probability,
+        v=model_version,
+        sha="b8d377ba22d155e7056a5e9ae747fdd0970c7c73dee981bbee17d95c8156cf78",
+    )

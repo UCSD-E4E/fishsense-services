@@ -489,7 +489,12 @@ class _LabelCore:
                 ["tenant_id", "capture_id"], ["captures.tenant_id", "captures.id"]
             ),
             CheckConstraint(f"source IN {LABEL_SOURCES}", name=f"{table}_source_check"),
+            *cls._extra_table_args(),
         )
+
+    @classmethod
+    def _extra_table_args(cls) -> tuple:
+        return ()
 
 
 class LaserLabel(_LabelCore, Base):
@@ -519,6 +524,21 @@ class SlateLabel(_LabelCore, Base):
     slate_rectangle: Mapped[list | None] = mapped_column(JSONB)
     skipped_points: Mapped[list | None] = mapped_column(JSONB)
     image_url: Mapped[str | None] = mapped_column(Text)
+    #: The slate detector's prediction that queued this frame (migration
+    #: slate_01); NULL for a frame a person marked, and every v1 row.
+    slate_presence_prediction_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+
+    @classmethod
+    def _extra_table_args(cls) -> tuple:
+        return (
+            ForeignKeyConstraint(
+                ["tenant_id", "slate_presence_prediction_id"],
+                [
+                    "slate_presence_predictions.tenant_id",
+                    "slate_presence_predictions.id",
+                ],
+            ),
+        )
 
 
 class SpeciesLabel(_LabelCore, Base):
@@ -718,6 +738,51 @@ class SpeciesPrediction(Base):
     top1_probability: Mapped[float | None] = mapped_column(Double)
     margin: Mapped[float | None] = mapped_column(Double)
     top5: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    created_at: Mapped[datetime] = _created_at()
+
+
+class SlatePresencePrediction(Base):
+    """The slate detector's P(slate) for one frame, appended (migration
+    slate_01; new in v2). The latest per capture is current."""
+
+    __tablename__ = "slate_presence_predictions"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "capture_id"], ["captures.tenant_id", "captures.id"]
+        ),
+        CheckConstraint(
+            "status IN ('predicted', 'decode_failed')",
+            name="slate_presence_predictions_status_check",
+        ),
+        CheckConstraint(
+            "probability BETWEEN 0 AND 1",
+            name="slate_presence_predictions_probability_check",
+        ),
+        CheckConstraint(
+            "weights_sha256 ~ '^[0-9a-f]{64}$'",
+            name="slate_presence_predictions_weights_sha256_check",
+        ),
+        CheckConstraint(
+            "(status = 'predicted') = (probability IS NOT NULL)",
+            name="slate_presence_predictions_scored_check",
+        ),
+        Index(
+            "slate_presence_predictions_tenant_id_capture_id_seq_idx",
+            "tenant_id",
+            "capture_id",
+            "seq",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    status: Mapped[str] = mapped_column(Text)
+    probability: Mapped[float | None] = mapped_column(Double)
+    model_version: Mapped[int] = mapped_column(Integer)
+    weights_sha256: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
 
 
