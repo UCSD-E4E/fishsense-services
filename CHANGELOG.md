@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.2.0...v0.3.0) (2026-10-06)
+
+
+### Features
+
+* **slate-detect:** one run drains the backlog, not one dive ([30b46bc](https://github.com/UCSD-E4E/fishsense-services/commit/30b46bcb58915e15055f0b427ce27733424bc9d0))
+* **slate-detect:** one run drains the backlog, not one dive ([f73513b](https://github.com/UCSD-E4E/fishsense-services/commit/f73513be7be710e6fbdebe62f8010efeb7380e90))
+
 ## [0.2.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.1.2...v0.2.0) (2026-10-06)
 
 
