@@ -11,7 +11,9 @@ raw-reading child on the GPU queue), and keeps its rules:
   is scored once, so it takes the next dive until `DETECT_DRAIN_WINDOW` has
   passed since it started, the cohort is empty, or it hands back a dive this
   run already took (one whose frames could not be persisted would otherwise
-  spin);
+  spin), and it tells the cohort which dives it took;
+* a dive with a raw the NAS no longer has (moved since ingest) is cleaned up
+  and skipped, logged at ERROR: it must not hold the backlog;
 * nothing to detect needs no worker; `unavailable` from the GPU wake ends
   the run **before staging** (a child on an unserved queue hangs until its
   execution timeout); the dive stays in the cohort;
@@ -23,18 +25,26 @@ raw-reading child on the GPU queue), and keeps its rules:
   longest, so a slow CPU-fallback child is not terminated with its parent.
 """
 
+import uuid
 from datetime import timedelta
 from typing import List, Optional
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
-from temporalio.exceptions import WorkflowAlreadyStartedError
+from temporalio.exceptions import (
+    ActivityError,
+    ApplicationError,
+    WorkflowAlreadyStartedError,
+)
 
 with workflow.unsafe.imports_passed_through():
     import annotated_types  # noqa: F401  pylint: disable=unused-import
     import pydantic  # noqa: F401  pylint: disable=unused-import
 
     from fishsense_services_contracts import PROCESSOR_GPU_TASK_QUEUE
+    from fishsense_services_orchestrator.ingest.nas_errors import (
+        NAS_FILE_NOT_FOUND_TYPE,
+    )
     from fishsense_services_contracts.slate_presence import (
         DetectSlateImagesInput,
         SlatePresenceResult,
@@ -105,6 +115,7 @@ DETECT_RUN_TIMEOUT = (
 
 #: What one dive's detection tells the drain.
 _NEXT = "next"
+_SKIPPED = "skipped"
 _STOP = "stop"
 
 
@@ -118,21 +129,24 @@ class DetectSlatePresenceParentWorkflow:
     @workflow.run
     async def run(self) -> Optional[StagingTarget]:
         started = workflow.now()
-        taken: set = set()
+        taken: List[uuid.UUID] = []
         last: Optional[StagingTarget] = None
         while workflow.now() - started < DETECT_DRAIN_WINDOW:
             target: Optional[StagingTarget] = await workflow.execute_activity(
                 "select_next_dive_for_slate_detection",
+                list(taken),
                 schedule_to_close_timeout=DETECT_SELECT_TIMEOUT,
                 retry_policy=_DB_FAIL_FAST,
                 result_type=Optional[StagingTarget],
             )
             if target is None or target.dive_id in taken:
                 break
-            taken.add(target.dive_id)
+            taken.append(target.dive_id)
             outcome = await self._detect(target)
             if outcome is None:
                 break
+            if outcome == _SKIPPED:
+                continue
             last = target
             if outcome == _STOP:
                 break
@@ -165,7 +179,22 @@ class DetectSlatePresenceParentWorkflow:
             return None
         workflow.logger.info("slate detection running on %s capacity", mode)
 
-        await stage_raw(target)
+        try:
+            await stage_raw(target)
+        except ActivityError as exc:
+            cause = exc.cause
+            if not (
+                isinstance(cause, ApplicationError)
+                and cause.type == NAS_FILE_NOT_FOUND_TYPE
+            ):
+                raise
+            workflow.logger.error(
+                "skipping dive=%s: a raw is missing from the NAS (%s)",
+                target.dive_id,
+                cause.message,
+            )
+            await cleanup_raw(target)
+            return _SKIPPED
         try:
             results: List[SlatePresenceResult] = await workflow.execute_child_workflow(
                 "DetectSlatePresenceWorkflow",

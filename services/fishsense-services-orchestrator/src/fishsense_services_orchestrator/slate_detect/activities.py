@@ -57,7 +57,11 @@ class SlatePresenceCatalog(Protocol):
     async def member_tenants(self) -> list[uuid.UUID]: ...
 
     async def next_dive_for_slate_detection(
-        self, tenant_id: uuid.UUID, *, model_version: int
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        model_version: int,
+        exclude: Sequence[uuid.UUID] = (),
     ) -> SlateDetectionCandidate | None: ...
 
     async def slate_detection_inputs(
@@ -78,13 +82,15 @@ class SlateDetectionActivities:
         self._layout = layout
 
     @activity.defn(name="select_next_dive_for_slate_detection")
-    async def select_next_dive_for_slate_detection(self) -> Optional[StagingTarget]:
+    async def select_next_dive_for_slate_detection(
+        self, exclude: Optional[List[uuid.UUID]] = None
+    ) -> Optional[StagingTarget]:
         """The oldest dive across tenants with a canonical frame the current
-        model has not predicted."""
+        model has not predicted, other than those the run already took."""
         best, best_key = None, None
         for tenant_id in await self._catalog.member_tenants():
             candidate = await self._catalog.next_dive_for_slate_detection(
-                tenant_id, model_version=SLATE_DETECTOR_VERSION
+                tenant_id, model_version=SLATE_DETECTOR_VERSION, exclude=exclude or []
             )
             if candidate is None:
                 continue

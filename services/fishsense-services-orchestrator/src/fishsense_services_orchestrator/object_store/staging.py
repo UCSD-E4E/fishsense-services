@@ -13,7 +13,8 @@ activities/stage_raw_bytes_for_dive_activity.py. Behaviour is v1's:
   under it produced the 200x-per-file storm that tripped the NAS auto-block
   (krg-infra#501). A transient FileStation error (502, 407, 402) propagates; a
   permanent one (408, no such file) becomes a non-retryable `NasFileNotFound`,
-  surfaced from under the TaskGroup's ExceptionGroup so Temporal honours it;
+  and so does any failure for a file the NAS then says is not there (v2: a
+  moved file's download is a 502, which retried forever), surfaced from under the TaskGroup's ExceptionGroup so Temporal honours it;
 * **never skip a file** that fails to download: a silently missing frame
   would stage the dive incomplete and hide a real NAS problem;
 * **one download at a time** by default: FileStation's shared download
@@ -41,6 +42,7 @@ from temporalio.exceptions import ApplicationError
 
 from fishsense_services_orchestrator.ingest.nas import NasClient
 from fishsense_services_orchestrator.ingest.nas_errors import (
+    NAS_FILE_NOT_FOUND_TYPE,
     raise_if_permanent_dsm_error,
 )
 from fishsense_services_orchestrator.ingest.nas_frames import (
@@ -92,12 +94,37 @@ def _iter_leaf_exceptions(exc: BaseException):
 
 
 async def _download_one(nas: NasClient, *, src_path: str, dest_dir: str) -> None:
-    """One file, one attempt: only *classify* a failure (see module docstring)."""
+    """One file, one attempt: only *classify* a failure (see module docstring).
+
+    FileStation answers a download of a file that is not there (moved or
+    deleted since ingest) with a 502, not a 408, so any failed download asks
+    whether the file exists; only a definite no makes it permanent.
+    """
     try:
         await asyncio.to_thread(nas.download_to, src_path=src_path, dest_dir=dest_dir)
     except DSMError as exc:
         raise_if_permanent_dsm_error(exc, context=src_path)
+        await _raise_if_missing(nas, src_path, exc)
         raise
+    except Exception as exc:
+        await _raise_if_missing(nas, src_path, exc)
+        raise
+
+
+async def _raise_if_missing(nas: NasClient, src_path: str, exc: Exception) -> None:
+    try:
+        there = await asyncio.to_thread(nas.exists, file_path=src_path)
+    except Exception:  # pylint: disable=broad-exception-caught
+        # A check that fails proves nothing missing: the download's error
+        # stands, and the retry policy owns it.
+        return
+    if not there:
+        raise ApplicationError(
+            f"NAS path not found (download failed, and the file is not there): "
+            f"{src_path}",
+            type=NAS_FILE_NOT_FOUND_TYPE,
+            non_retryable=True,
+        ) from exc
 
 
 class RawStagingActivities:

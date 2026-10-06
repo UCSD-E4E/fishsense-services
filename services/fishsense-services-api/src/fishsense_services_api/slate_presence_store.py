@@ -171,20 +171,27 @@ class CurrentSlatePresence:
 
 
 async def next_dive_for_slate_detection(
-    conn: AsyncConnection, tenant_id: uuid.UUID, *, model_version: int
+    conn: AsyncConnection,
+    tenant_id: uuid.UUID,
+    *,
+    model_version: int,
+    exclude: Sequence[uuid.UUID] = (),
 ) -> SlateDetectionCandidate | None:
     """The tenant's oldest dive with a canonical capture the current model
-    has not predicted, whatever its priority."""
+    has not predicted, whatever its priority, other than `exclude` (the dives
+    the run already took: one whose raws can't be staged would otherwise be
+    handed back every time)."""
     row = (
         await conn.execute(
             text(f"""
                 SELECT d.id, d.created_at FROM dives d
                 WHERE d.tenant_id = :tenant
                   AND {slate_detection_cohort(":version")}
+                  AND NOT d.id = ANY(CAST(:exclude AS uuid[]))
                 ORDER BY d.created_at, d.id
                 LIMIT 1
                 """),
-            {"tenant": tenant_id, "version": model_version},
+            {"tenant": tenant_id, "version": model_version, "exclude": list(exclude)},
         )
     ).one_or_none()
     return None if row is None else SlateDetectionCandidate(row.id, row.created_at)
@@ -347,11 +354,15 @@ class SlatePresenceCatalog(ServicePrincipal):
     principal (and the automatic chain's)."""
 
     async def next_dive_for_slate_detection(
-        self, tenant_id: uuid.UUID, *, model_version: int
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        model_version: int,
+        exclude: Sequence[uuid.UUID] = (),
     ) -> SlateDetectionCandidate | None:
         async with self._tenant(tenant_id) as conn:
             return await next_dive_for_slate_detection(
-                conn, tenant_id, model_version=model_version
+                conn, tenant_id, model_version=model_version, exclude=exclude
             )
 
     async def slate_detection_inputs(
