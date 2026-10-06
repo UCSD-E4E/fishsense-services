@@ -40,6 +40,8 @@ RAW_SCRATCH_READERS = (
     "predict-slate",
     "perform-checkerboard-calibration",
     "verify-checkerboard-lattice",
+    # Automatic results (new in v2): the GPU frames step reads every raw.
+    "automatic-frames",
 )
 
 
