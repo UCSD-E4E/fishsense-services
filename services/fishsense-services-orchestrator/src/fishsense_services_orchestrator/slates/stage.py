@@ -11,6 +11,7 @@ from datetime import timedelta
 from temporalio.client import ScheduleOverlapPolicy
 
 from fishsense_services_api.label_project_store import LabelProjectCatalog
+from fishsense_services_api.label_sync_store import LabelSyncCatalog
 from fishsense_services_api.slate_store import SlateCatalog
 from fishsense_services_contracts.object_store import ObjectStoreConnection
 from fishsense_services_orchestrator.ingest.nas_frames import NasSettings
@@ -59,6 +60,7 @@ def _activities(deps: Deps):
     )
     sync = SlateSyncActivities(
         catalog=catalog,
+        sync_catalog=LabelSyncCatalog(deps.engine, sub=deps.sub),
         label_studio_factory=lambda: LabelStudioClient.from_settings(
             label_studio_settings
         ),

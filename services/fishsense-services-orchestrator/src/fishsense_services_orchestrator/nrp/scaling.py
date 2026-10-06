@@ -190,15 +190,24 @@ def _clamp(value: int, low: int, high: int) -> int:
     return max(low, min(int(value), high))
 
 
+def kubeconfig_is_blank(path: str) -> bool:
+    """A kubeconfig file that is there but empty: what an unseeded soft render
+    leaves on the slot (vault-agent writes the file, blank, when
+    `nrp_orchestrator` has no kubeconfig yet). It means "no NRP yet", like an
+    unset path. A path to no file at all is a misconfiguration, left to fail."""
+    file = Path(path)
+    return file.is_file() and not file.read_text().strip()
+
+
 def resolve_scaling_config(settings: NrpSettings | None = None) -> ScalingConfig | None:
     """Return the scaling config, or ``None`` when scaling is disabled.
 
-    Disabled = no kubeconfig (the default -- the processor then runs under
-    compose, always on). When there is one, the namespace and the image tag
+    Disabled = no kubeconfig, or a blank one (the default -- the processor then
+    runs under compose, always on). When there is one, the namespace and the image tag
     are required, the manifests must load, and every replica count is clamped.
     """
     settings = settings or NrpSettings()
-    if not settings.kubeconfig_path:
+    if not settings.kubeconfig_path or kubeconfig_is_blank(settings.kubeconfig_path):
         return None
     if not settings.namespace:
         raise ValueError(

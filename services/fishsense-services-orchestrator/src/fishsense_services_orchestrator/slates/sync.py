@@ -241,8 +241,13 @@ async def apply_slate_task(
 
 
 class SlateSyncActivities:
-    def __init__(self, *, catalog, label_studio_factory: Callable, pdfs: _Pdfs) -> None:
+    def __init__(
+        self, *, catalog, sync_catalog, label_studio_factory: Callable, pdfs: _Pdfs
+    ) -> None:
         self._catalog = catalog
+        # The cursor (`sync_cursor`, `advance_sync_cursor`) lives in the label
+        # sync store, as for every kind; the slate catalog doesn't carry it.
+        self._sync_catalog = sync_catalog
         self._label_studio_factory = label_studio_factory
         self._pdfs = pdfs
 
@@ -278,7 +283,7 @@ class SlateSyncActivities:
             project,
             "slate",
             ls=self._label_studio_factory(),
-            catalog=self._catalog,
+            catalog=self._sync_catalog,
             apply=apply,
         )
         if skipped:
