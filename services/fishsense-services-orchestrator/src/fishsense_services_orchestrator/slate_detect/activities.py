@@ -5,9 +5,13 @@ classifier (on the processor, `slate_detect`); these activities are built as
 laser and species prediction's are, and keep their rules:
 
 * the target is (tenant, dive), and the selector takes the oldest candidate
-  across every tenant the orchestrator serves. The cohort is any priority
-  (`fishsense_services_api.slate_presence_store`): this is for dives nobody
-  labelled;
+  across every tenant the orchestrator serves. The cohort is every canonical
+  frame not yet scored by the current model, labelled or not, at any
+  priority (`fishsense_services_api.slate_presence_store`; the owner's
+  decision, so the model can be evaluated for publication);
+* each result is persisted with everything that made it -- model, weights,
+  fishsense-core and processor versions, render, time -- as the processor
+  stamped it;
 * **the orchestrator issues the keys** (PLAN.md §9.11): each frame's staged
   raw, which the parent stages before the child runs;
 * a dive the resolver cannot resolve (no pinhole camera), and a refusal of
@@ -139,8 +143,13 @@ class SlateDetectionActivities:
                 capture_id=r.capture_id,
                 status=r.status,
                 probability=r.probability,
+                model_name=r.model_name,
                 model_version=r.model_version,
                 weights_sha256=r.weights_sha256,
+                core_version=r.core_version,
+                processor_version=r.processor_version,
+                render=r.render.model_dump(mode="json"),
+                predicted_at=r.predicted_at,
             )
             for r in results
         ]

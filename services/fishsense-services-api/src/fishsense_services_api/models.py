@@ -764,6 +764,12 @@ class SlatePresencePrediction(Base):
             name="slate_presence_predictions_weights_sha256_check",
         ),
         CheckConstraint(
+            "input_width > 0", name="slate_presence_predictions_input_width_check"
+        ),
+        CheckConstraint(
+            "input_height > 0", name="slate_presence_predictions_input_height_check"
+        ),
+        CheckConstraint(
             "(status = 'predicted') = (probability IS NOT NULL)",
             name="slate_presence_predictions_scored_check",
         ),
@@ -781,8 +787,17 @@ class SlatePresencePrediction(Base):
     capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     status: Mapped[str] = mapped_column(Text)
     probability: Mapped[float | None] = mapped_column(Double)
+    model_name: Mapped[str] = mapped_column(Text)
     model_version: Mapped[int] = mapped_column(Integer)
     weights_sha256: Mapped[str] = mapped_column(Text)
+    core_version: Mapped[str | None] = mapped_column(Text)
+    processor_version: Mapped[str | None] = mapped_column(Text)
+    decode_config: Mapped[str] = mapped_column(Text)
+    rectified: Mapped[bool] = mapped_column(Boolean)
+    input_width: Mapped[int] = mapped_column(Integer)
+    input_height: Mapped[int] = mapped_column(Integer)
+    render: Mapped[dict] = mapped_column(JSONB)
+    predicted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created_at()
 
 

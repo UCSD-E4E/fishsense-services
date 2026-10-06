@@ -9,6 +9,7 @@ with it, and the threshold is the model's operating point (precision 0.999,
 recall 0.993 at 0.5 in 5-fold CV grouped by dive).
 """
 
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -17,13 +18,17 @@ from pydantic import ValidationError
 from fishsense_services_contracts import MODELS
 from fishsense_services_contracts.object_store import ObjectRef
 from fishsense_services_contracts.slate_presence import (
+    SLATE_DETECTOR_MODEL_NAME,
     SLATE_DETECTOR_VERSION,
+    SLATE_INPUT_HEIGHT,
+    SLATE_INPUT_WIDTH,
     SLATE_PRESENCE_STATUSES,
     SLATE_PRESENCE_THRESHOLD,
     DetectSlateImage,
     DetectSlateImageInput,
     DetectSlateImagesInput,
     SlatePresenceResult,
+    SlateRender,
     is_slate,
 )
 
@@ -33,6 +38,17 @@ D = [-0.1, 0.05, 0.0, 0.0, 0.0]
 SHA = "b8d377ba22d155e7056a5e9ae747fdd0970c7c73dee981bbee17d95c8156cf78"
 
 
+AT = datetime(2026, 10, 5, 12, tzinfo=UTC)
+
+
+def _render(**overrides) -> SlateRender:
+    values = {
+        "decode_config": "production",
+        "decode_params": {"stretch_mode": "off", "clahe_enabled": True},
+    }
+    return SlateRender(**{**values, **overrides})
+
+
 def _result(**overrides) -> SlatePresenceResult:
     values = {
         "capture_id": uuid4(),
@@ -40,8 +56,42 @@ def _result(**overrides) -> SlatePresenceResult:
         "probability": 0.97,
         "model_version": SLATE_DETECTOR_VERSION,
         "weights_sha256": SHA,
+        "core_version": "4.1.0",
+        "processor_version": "0.1.2",
+        "render": _render(),
+        "predicted_at": AT,
     }
     return SlatePresenceResult(**{**values, **overrides})
+
+
+def test_a_result_records_enough_to_reproduce_it():
+    """For publication: the model and its weights, fishsense-core and the
+    processor that ran it, how the frame was decoded and sized, and when."""
+    result = _result()
+
+    assert result.model_name == SLATE_DETECTOR_MODEL_NAME == "slate-detector"
+    assert (result.core_version, result.processor_version) == ("4.1.0", "0.1.2")
+    assert result.predicted_at == AT
+    render = result.render
+    assert (render.decode_config, render.rectified) == ("production", True)
+    assert (
+        (render.input_width, render.input_height)
+        == (
+            SLATE_INPUT_WIDTH,
+            SLATE_INPUT_HEIGHT,
+        )
+        == (1024, 768)
+    )
+    assert (render.cache_long_side, render.jpeg_quality, render.tta) == (
+        1600,
+        95,
+        "hflip",
+    )
+
+
+def test_a_naive_timestamp_is_refused():
+    with pytest.raises(ValidationError):
+        _result(predicted_at=datetime(2026, 10, 5, 12))
 
 
 def test_the_constants():
@@ -65,6 +115,7 @@ def test_the_models_are_contract():
         DetectSlateImageInput,
         DetectSlateImagesInput,
         SlatePresenceResult,
+        SlateRender,
     } <= set(MODELS)
 
 

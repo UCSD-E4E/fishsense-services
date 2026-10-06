@@ -11,6 +11,11 @@ either way: the queue's CPU fallback is barely slower, and the light role
 could not run it at all -- no torch in its image, and a 2 Gi pod against a
 decode the per-image role sizes at 1-3 GB.
 
+**Known, not this stage's:** on the CPU fallback, fishsense-core 4.1.0's
+preload of libnvblas makes torch's CPU BLAS segfault in a worker that imported
+fishsense-core first, as every worker does (tests/
+test_slate_detect_cpu_fallback.py pins it); the GPU path is unaffected.
+
 The object store, the weight store and the pin are read on first use, not
 here: the registry imports every stage wherever it runs, and only a pod
 serving this queue ever fetches the weights.

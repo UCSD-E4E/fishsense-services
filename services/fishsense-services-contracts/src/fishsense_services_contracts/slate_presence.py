@@ -17,6 +17,14 @@ labels, queues it in the dive's slate Label Studio project, so slate
 calibration needs no frame-hunting. A human still places every reference
 point.
 
+**Every canonical frame, publication-grade** (owner's decision,
+2026-10-05): every canonical frame of every dive, at every priority and
+labelled or not, is scored once per model version, and each result records
+enough to reproduce it -- model name and version, weights sha256,
+fishsense-core and processor versions, the render (`SlateRender`), the
+probability itself and when -- so the paper can evaluate the model against
+the human answers (`slate_presence_evaluation`).
+
 **Version the behaviour, not the model** (head/tail's rule). Bump
 `SLATE_DETECTOR_VERSION` by hand whenever the output would differ for an
 unchanged raw frame: new weights, another decode or resize, another TTA.
@@ -27,21 +35,34 @@ dive: ROC AUC 0.9994, precision 0.999 and recall 0.993 at 0.5.
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from fishsense_services_contracts.object_store import ObjectRef
 
 __all__ = [
+    "SLATE_CACHE_LONG_SIDE",
+    "SLATE_DETECTOR_MODEL_NAME",
     "SLATE_DETECTOR_VERSION",
+    "SLATE_INPUT_HEIGHT",
+    "SLATE_INPUT_WIDTH",
+    "SLATE_JPEG_QUALITY",
     "SLATE_PRESENCE_STATUSES",
     "SLATE_PRESENCE_THRESHOLD",
+    "SLATE_TTA",
     "DetectSlateImage",
     "DetectSlateImageInput",
     "DetectSlateImagesInput",
     "SlatePresenceResult",
+    "SlateRender",
     "is_slate",
 ]
 
@@ -56,6 +77,16 @@ SLATE_PRESENCE_THRESHOLD = 0.5
 #: What a row may record: a probability, or a raw that would not decode (an
 #: abstention is persisted too: the cohort selects on a row's absence).
 SLATE_PRESENCE_STATUSES = ("predicted", "decode_failed")
+
+#: The model's name in `model-weights` and in every row.
+SLATE_DETECTOR_MODEL_NAME = "slate-detector"
+#: The model's input: the whole frame, resized (never cropped), 4:3.
+SLATE_INPUT_WIDTH = 1024
+SLATE_INPUT_HEIGHT = 768
+#: The source repo's frame cache the model was trained on.
+SLATE_CACHE_LONG_SIDE = 1600
+SLATE_JPEG_QUALITY = 95
+SLATE_TTA = "hflip"
 
 
 def is_slate(probability: float) -> bool:
@@ -106,16 +137,44 @@ class DetectSlateImageInput(BaseModel):
         return _camera_matrix(value)
 
 
+class SlateRender(BaseModel):
+    """How the frame was turned into the model's input: enough to reproduce
+    it from the raw. The defaults are the only render version 1 runs."""
+
+    #: fishsense-core's `DecodeConfig` constructor (`production`), and every
+    #: field of the config it built.
+    decode_config: str
+    decode_params: Dict[str, Any]
+    rectified: bool = True
+    #: The training cache's shrink and JPEG round trip.
+    cache_long_side: int = SLATE_CACHE_LONG_SIDE
+    jpeg_quality: int = SLATE_JPEG_QUALITY
+    input_width: int = SLATE_INPUT_WIDTH
+    input_height: int = SLATE_INPUT_HEIGHT
+    #: Test-time augmentation: the frame and its horizontal flip, logits
+    #: averaged.
+    tta: str = SLATE_TTA
+
+
 class SlatePresenceResult(BaseModel):
     """One frame's prediction (processor -> orchestrator). `probability` is
-    P(slate), set exactly when the frame decoded."""
+    P(slate), set exactly when the frame decoded. Publication-grade: it names
+    the model and weights, the fishsense-core and processor that ran it, the
+    render, and when."""
 
     capture_id: UUID
     status: str
     probability: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    model_name: str = SLATE_DETECTOR_MODEL_NAME
     model_version: int
     #: The verified weights' sha256: what the prediction ran.
     weights_sha256: str
+    #: Installed package versions (the processor image's release); None only
+    #: when the metadata cannot be read.
+    core_version: Optional[str] = None
+    processor_version: Optional[str] = None
+    render: SlateRender
+    predicted_at: AwareDatetime
 
     @field_validator("status")
     @classmethod

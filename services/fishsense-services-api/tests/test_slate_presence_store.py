@@ -6,8 +6,9 @@ The model is 2026-10-03_slate_detector@95a77d95's presence classifier; see
 
 * **predictions are appended, never updated** (migration slate_01, like every
   prediction table), and `current_slate_presence` is the latest per capture;
-* **the cohort**: a dive of **any** priority (this is for dives nobody
-  labelled; the other cohorts are high-only, deliberately) whose device has a
+* **the cohort**: a dive of **any** priority, labelled or not (every canonical
+  frame is scored, for publication; the other cohorts are high-only,
+  deliberately) whose device has a
   current pinhole calibration (the frame is rectified) and which has a
   canonical capture with no current prediction at the current model version.
   An abstention counts as a prediction; another version is stale. Oldest
@@ -24,6 +25,7 @@ The model is 2026-10-03_slate_detector@95a77d95's presence classifier; see
 
 import json
 import uuid
+from datetime import timedelta
 
 import pytest
 from sqlalchemy import text
@@ -37,8 +39,12 @@ from _slate_calibration_seed import (
     device_with_camera,
     dive,
     later,
+    slate_label,
+    species,
     tenant,
 )
+from _slate_calibration_seed import slate_presence as slate_presence_row
+from research_seed import rows
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.slate_presence_store import (
     SLATE_PRESENCE_THRESHOLD,
@@ -71,18 +77,14 @@ async def _dive(owner_engine, lab, *, camera=True, **kwargs):
 
 
 async def _predicted(owner_engine, lab, capture_id, *, probability=0.9, version=V,
-                     status="predicted"):  # fmt: skip
-    return await _one(
+                     status="predicted", **columns):  # fmt: skip
+    return await slate_presence_row(
         owner_engine,
-        "INSERT INTO slate_presence_predictions (tenant_id, capture_id, status, "
-        "probability, model_version, weights_sha256) VALUES (:t, :c, :s, :p, :v, "
-        ":sha) RETURNING id",
-        t=lab,
-        c=capture_id,
-        s=status,
-        p=probability if status == "predicted" else None,
-        v=version,
-        sha=SHA,
+        lab,
+        capture_id,
+        probability=probability if status == "predicted" else None,
+        model_version=version,
+        **columns,
     )
 
 
@@ -98,13 +100,31 @@ async def _next(app_engine, lab, version=V):
     return None if candidate is None else candidate.dive_id
 
 
+AT = T0 + timedelta(days=34)
+RENDER = {
+    "decode_config": "production",
+    "decode_params": {"stretch_mode": "off", "clahe_enabled": True},
+    "rectified": True,
+    "cache_long_side": 1600,
+    "jpeg_quality": 95,
+    "input_width": 1024,
+    "input_height": 768,
+    "tta": "hflip",
+}
+
+
 def _row(capture_id, probability=0.97, **overrides):
     values = {
         "capture_id": capture_id,
         "status": "predicted",
         "probability": probability,
+        "model_name": "slate-detector",
         "model_version": V,
         "weights_sha256": SHA,
+        "core_version": "4.1.0",
+        "processor_version": "0.1.2",
+        "render": RENDER,
+        "predicted_at": AT,
     }
     return SlatePresenceRow(**{**values, **overrides})
 
@@ -118,35 +138,40 @@ async def test_a_prediction_has_its_probability_exactly_when_predicted(owner_eng
 
     for status, probability in (("predicted", None), ("decode_failed", 0.5)):
         with pytest.raises(IntegrityError, match="check"):
-            await _one(
-                owner_engine,
-                "INSERT INTO slate_presence_predictions (tenant_id, capture_id, "
-                "status, probability, model_version, weights_sha256) VALUES "
-                "(:t, :c, :s, :p, 1, :sha)",
-                t=lab, c=frame, s=status, p=probability, sha=SHA,
-            )  # fmt: skip
+            await slate_presence_row(
+                owner_engine, lab, frame, status=status, probability=probability
+            )
 
 
 @pytest.mark.parametrize(
     ("column", "value"),
-    [("probability", 1.5), ("status", "skipped"), ("weights_sha256", "abc")],
+    [
+        ("probability", 1.5),
+        ("status", "skipped"),
+        ("weights_sha256", "abc"),
+        ("input_width", 0),
+    ],
 )
 async def test_the_rows_are_checked(owner_engine, column, value):
     lab = await tenant(owner_engine)
     frame = await capture(owner_engine, lab, await _dive(owner_engine, lab))
-    values = {"status": "predicted", "probability": 0.5, "weights_sha256": SHA}
-    values[column] = value
 
     with pytest.raises(IntegrityError, match="check"):
-        await _one(
-            owner_engine,
-            "INSERT INTO slate_presence_predictions (tenant_id, capture_id, status, "
-            "probability, model_version, weights_sha256) VALUES (:t, :c, :status, "
-            ":probability, 1, :weights_sha256)",
-            t=lab,
-            c=frame,
-            **values,
-        )
+        await slate_presence_row(owner_engine, lab, frame, **{column: value})
+
+
+@pytest.mark.parametrize(
+    "column",
+    ["model_name", "decode_config", "rectified", "input_width", "input_height",
+     "render", "predicted_at"],
+)  # fmt: skip
+async def test_a_prediction_must_say_how_it_was_made(owner_engine, column):
+    """Publication-grade: no row without its model, its render and its time."""
+    lab = await tenant(owner_engine)
+    frame = await capture(owner_engine, lab, await _dive(owner_engine, lab))
+
+    with pytest.raises(IntegrityError, match="null"):
+        await slate_presence_row(owner_engine, lab, frame, **{column: None})
 
 
 async def test_a_prediction_is_its_tenants_capture(owner_engine):
@@ -173,12 +198,26 @@ async def test_selects_a_dive_with_an_unpredicted_canonical_capture(
 
 @pytest.mark.parametrize("priority", ["high", "low"])
 async def test_any_priority(owner_engine, app_engine, priority):
-    """Unlike every other cohort: this is for dives nobody labelled."""
+    """Unlike every other cohort: every canonical frame is scored."""
     lab = await tenant(owner_engine)
     only = await _dive(owner_engine, lab, priority=priority)
     await capture(owner_engine, lab, only)
 
     assert await _next(app_engine, lab) == only
+
+
+async def test_labelled_frames_are_scored_too(owner_engine, app_engine):
+    """The owner's decision: every canonical frame, so the model can be
+    evaluated against the answers people already gave."""
+    lab = await tenant(owner_engine)
+    only = await _dive(owner_engine, lab)
+    frame = await capture(owner_engine, lab, only)
+    await species(owner_engine, lab, frame)
+    await slate_label(owner_engine, lab, frame, completed=True)
+
+    assert await _next(app_engine, lab) == only
+    inputs = await _in(app_engine, lab, slate_detection_inputs, only, model_version=V)
+    assert [c.capture_id for c in inputs.captures] == [frame]
 
 
 async def test_drops_out_once_every_canonical_capture_is_predicted(
@@ -327,6 +366,38 @@ async def test_persist_appends_and_the_latest_is_current(owner_engine, app_engin
         )
         assert current.scalars().all() == [0.8]
     assert [tuple(r) for r in rows] == [(0.2, V, SHA), (0.8, V, SHA)]
+
+
+async def test_persist_records_how_each_prediction_was_made(owner_engine, app_engine):
+    """Publication-grade: the model, weights, fishsense-core and processor
+    versions, the render (its headline settings as columns, all of it as
+    JSON), the probability and when it ran."""
+    lab = await tenant(owner_engine)
+    only = await _dive(owner_engine, lab)
+    frame = await capture(owner_engine, lab, only)
+
+    await _in(app_engine, lab, persist_slate_presence, only, [_row(frame, 0.73)])
+
+    (row,) = await rows(
+        owner_engine,
+        "SELECT probability, model_name, model_version, weights_sha256, "
+        "core_version, processor_version, decode_config, rectified, input_width, "
+        "input_height, render, predicted_at FROM slate_presence_predictions",
+    )
+    assert row == {
+        "probability": 0.73,
+        "model_name": "slate-detector",
+        "model_version": V,
+        "weights_sha256": SHA,
+        "core_version": "4.1.0",
+        "processor_version": "0.1.2",
+        "decode_config": "production",
+        "rectified": True,
+        "input_width": 1024,
+        "input_height": 768,
+        "render": RENDER,
+        "predicted_at": AT,
+    }
 
 
 async def test_an_abstention_is_recorded_without_a_probability(

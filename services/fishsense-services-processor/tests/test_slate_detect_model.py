@@ -18,10 +18,28 @@ checkpoint is test_slate_detect_real_weights.py (opt-in). Pinned here:
 from __future__ import annotations
 
 import pickle
+from pathlib import Path
 
 import numpy as np
 import pytest
 from PIL import Image
+
+
+def nvblas_preloaded() -> bool:
+    """fishsense-core 4.1.0's `__init__` dlopens every `nvidia/*/lib/*.so`
+    with RTLD_GLOBAL, libnvblas included; with no nvblas config, torch's CPU
+    BLAS then segfaults (test_slate_detect_cpu_fallback.py). In a full
+    run, collection has imported fishsense-core by now, so the in-process CPU
+    tests below run only when this file runs on its own."""
+    maps = Path("/proc/self/maps")
+    return maps.exists() and "libnvblas" in maps.read_text()
+
+
+if nvblas_preloaded():
+    pytest.skip(
+        "fishsense-core preloaded libnvblas; run this file on its own",
+        allow_module_level=True,
+    )
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")

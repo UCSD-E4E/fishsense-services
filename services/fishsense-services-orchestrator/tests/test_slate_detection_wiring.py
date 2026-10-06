@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from importlib.metadata import version
 from pathlib import Path
 
 from temporalio import activity
@@ -185,3 +186,15 @@ async def test_detection_runs_across_the_orchestrator_and_the_processor():
     assert {
         (r.status, r.model_version, r.weights_sha256) for r in by_capture.values()
     } == {("predicted", SLATE_DETECTOR_VERSION, SHA)}
+    row = by_capture[catalog.slate]
+    assert (row.model_name, row.core_version) == (
+        "slate-detector",
+        version("fishsense-core"),
+    )
+    assert row.processor_version == version("fishsense-services-processor")
+    assert (row.render["decode_config"], row.render["rectified"]) == (
+        "production",
+        True,
+    )
+    assert (row.render["input_width"], row.render["input_height"]) == (1024, 768)
+    assert row.predicted_at.tzinfo is not None

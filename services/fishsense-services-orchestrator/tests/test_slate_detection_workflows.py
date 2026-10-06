@@ -16,7 +16,7 @@ stage), and pinned the same way:
 from __future__ import annotations
 
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import List
 
 from temporalio import activity, workflow
@@ -30,6 +30,7 @@ from fishsense_services_contracts.slate_presence import (
     DetectSlateImage,
     DetectSlateImagesInput,
     SlatePresenceResult,
+    SlateRender,
 )
 from fishsense_services_orchestrator.object_store.contracts import (
     CleanupRawBytesResult,
@@ -75,6 +76,8 @@ def _result():
     return SlatePresenceResult(
         capture_id=uuid.uuid4(), status="predicted", probability=0.9,
         model_version=1, weights_sha256=SHA,
+        render=SlateRender(decode_config="production", decode_params={}),
+        predicted_at=datetime(2026, 10, 5, tzinfo=UTC),
     )  # fmt: skip
 
 

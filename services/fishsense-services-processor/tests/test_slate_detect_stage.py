@@ -29,8 +29,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import json
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
+from importlib.metadata import version
 from pathlib import Path
 from typing import List
 
@@ -323,13 +325,46 @@ async def test_a_frame_gets_its_probability_and_provenance():
     assert store.read == [RAW], "the raw is read from the ref it was handed"
     assert rendered == [(b"raw", K, D)]
     assert len(classifier.seen) == 1
-    assert result == SlatePresenceResult(
-        capture_id=payload.image.capture_id,
-        status="predicted",
-        probability=0.93,
-        model_version=SLATE_DETECTOR_VERSION,
-        weights_sha256=SHA,
+    assert (result.capture_id, result.status, result.probability) == (
+        payload.image.capture_id,
+        "predicted",
+        0.93,
     )
+    assert (result.model_name, result.model_version, result.weights_sha256) == (
+        "slate-detector",
+        SLATE_DETECTOR_VERSION,
+        SHA,
+    )
+
+
+async def test_a_result_says_how_it_was_made():
+    """Publication-grade: fishsense-core's and the processor's installed
+    versions, the render as `frame.render_settings()` describes it, and when
+    the frame was scored."""
+    before = datetime.now(UTC)
+    result = await _run(_activities(), _payload())
+
+    assert result.core_version == version("fishsense-core")
+    assert result.processor_version == version("fishsense-services-processor")
+    assert result.render == frames.render_settings()
+    assert before <= result.predicted_at <= datetime.now(UTC)
+
+
+def test_the_render_settings_are_the_production_decode_at_1024_by_768():
+    render = frames.render_settings()
+
+    assert (render.decode_config, render.rectified) == ("production", True)
+    assert (render.input_width, render.input_height) == (1024, 768)
+    assert (render.cache_long_side, render.jpeg_quality, render.tta) == (
+        frames.CACHE_LONG_SIDE,
+        frames.JPEG_QUALITY,
+        "hflip",
+    )
+    production = DecodeConfig.production()
+    assert render.decode_params["clahe_enabled"] is production.clahe_enabled
+    assert render.decode_params["stretch_mode"] == production.stretch_mode
+    assert render.decode_params["white_balance"] == production.white_balance.value
+    assert json.loads(json.dumps(render.decode_params)) == render.decode_params
 
 
 async def test_a_raw_that_will_not_decode_is_an_abstention():
@@ -426,6 +461,8 @@ async def _detect(payload: DetectSlateImageInput) -> SlatePresenceResult:
         probability=0.5,
         model_version=SLATE_DETECTOR_VERSION,
         weights_sha256=SHA,
+        render=frames.render_settings(),
+        predicted_at=datetime.now(UTC),
     )
 
 

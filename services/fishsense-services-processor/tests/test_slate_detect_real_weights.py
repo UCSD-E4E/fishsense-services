@@ -31,6 +31,22 @@ pytestmark = pytest.mark.skipif(
     not WEIGHTS, reason="opt-in: set FISHSENSE_SLATE_DETECTOR_REAL_WEIGHTS"
 )
 
+
+@pytest.fixture(autouse=True)
+def _not_on_a_poisoned_cpu():
+    """See test_slate_detect_cpu_fallback.py: after fishsense-core preloads
+    libnvblas, torch's CPU BLAS segfaults. Run this file on its own on a
+    machine with no GPU."""
+    torch = pytest.importorskip("torch")
+    maps = Path("/proc/self/maps")
+    if (
+        not torch.cuda.is_available()
+        and maps.exists()
+        and "libnvblas" in maps.read_text()
+    ):
+        pytest.skip("fishsense-core preloaded libnvblas; run this file on its own")
+
+
 #: What the owner uploads to model-weights/slate-detector/q1/ and pins in
 #: FISHSENSE_SLATE_DETECTOR_SHA256 / _SIZE.
 Q1_SHA256 = "b8d377ba22d155e7056a5e9ae747fdd0970c7c73dee981bbee17d95c8156cf78"

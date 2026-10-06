@@ -6,8 +6,10 @@ classifier (`slate_detect.model`), over the frame it was trained on
 activities are:
 
 * the weights are fetched and verified through fishsense-core
-  (`slate_detect.weights`), and every result records the verified weights'
-  sha256 and `SLATE_DETECTOR_VERSION`;
+  (`slate_detect.weights`), and every result records, for publication, the
+  model's name and `SLATE_DETECTOR_VERSION`, the verified weights' sha256,
+  fishsense-core's and the processor's installed versions, the render
+  (`frame.render_settings`) and when it was scored;
 * **a weights, settings or checkpoint failure is non-retryable**, each cause
   its own type: retrying re-downloads the same refused bytes per frame;
 * the classifier loads once per process, under a lock (a cold pod's first
@@ -26,6 +28,8 @@ from __future__ import annotations
 import asyncio
 import tempfile
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +39,7 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from fishsense_services_contracts.slate_presence import (
+    SLATE_DETECTOR_MODEL_NAME,
     SLATE_DETECTOR_VERSION,
     DetectSlateImageInput,
     SlatePresenceResult,
@@ -42,6 +47,7 @@ from fishsense_services_contracts.slate_presence import (
 from fishsense_services_processor.slate_detect.frame import (
     DECODE_ERRORS,
     render_frame,
+    render_settings,
 )
 
 __all__ = ["CheckpointInvalid", "SlateDetectActivities"]
@@ -65,6 +71,19 @@ _WEIGHTS_FAILURES: tuple[tuple[type[BaseException], str, str], ...] = (
      "the weights are not in model-weights"),
     (KeyError, "SlateDetectorNotInManifest", "the manifest has no slate-detector entry"),
 )  # fmt: skip
+
+
+def _installed(package: str) -> str | None:
+    """An installed package's version: provenance only (the processor's is
+    its image's release)."""
+    try:
+        return version(package)
+    except PackageNotFoundError:
+        return None
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
 
 
 def _load_classifier(path: Path, weights_sha256: str) -> Any:
@@ -146,8 +165,12 @@ class SlateDetectActivities:
         image = payload.image
         common = {
             "capture_id": image.capture_id,
+            "model_name": SLATE_DETECTOR_MODEL_NAME,
             "model_version": SLATE_DETECTOR_VERSION,
             "weights_sha256": self._sha256,
+            "core_version": _installed("fishsense-core"),
+            "processor_version": _installed("fishsense-services-processor"),
+            "render": render_settings(),
         }
         with tempfile.TemporaryDirectory() as tmpdir:
             raw = await self._object_store().download_raw(image.raw, Path(tmpdir))
@@ -162,11 +185,16 @@ class SlateDetectActivities:
                 activity.logger.warning(
                     "raw would not decode capture=%s: %s", image.capture_id, exc
                 )
-                return SlatePresenceResult(status="decode_failed", **common)
+                return SlatePresenceResult(
+                    status="decode_failed", predicted_at=_now(), **common
+                )
         probability = await asyncio.to_thread(classifier.probability, frame)
         activity.logger.info(
             "slate presence capture=%s p=%.4f", image.capture_id, probability
         )
         return SlatePresenceResult(
-            status="predicted", probability=probability, **common
+            status="predicted",
+            probability=probability,
+            predicted_at=_now(),
+            **common,
         )

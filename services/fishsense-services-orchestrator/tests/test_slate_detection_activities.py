@@ -33,6 +33,7 @@ from fishsense_services_contracts.slate_presence import (
     SLATE_DETECTOR_VERSION,
     DetectSlateImage,
     SlatePresenceResult,
+    SlateRender,
 )
 from fishsense_services_orchestrator.object_store.contracts import StagingTarget
 from fishsense_services_orchestrator.slate_detect.activities import (
@@ -134,10 +135,15 @@ async def test_a_dive_that_cannot_be_resolved_is_final():
     assert raised.value.non_retryable
 
 
+RENDER = SlateRender(decode_config="production", decode_params={"clahe_enabled": True})
+AT = datetime(2026, 10, 5, 12, tzinfo=UTC)
+
+
 def _result(status="predicted", probability=0.91, version=SLATE_DETECTOR_VERSION):
     return SlatePresenceResult(
         capture_id=uuid.uuid4(), status=status, probability=probability,
-        model_version=version, weights_sha256=SHA,
+        model_version=version, weights_sha256=SHA, core_version="4.1.0",
+        processor_version="0.1.2", render=RENDER, predicted_at=AT,
     )  # fmt: skip
 
 
@@ -153,7 +159,12 @@ async def test_persists_each_result_as_the_processor_stamped_it():
     ((tenant, dive, rows),) = catalog.persisted
     assert (tenant, dive) == (LAB, DIVE)
     assert rows == [
-        SlatePresenceRow(r.capture_id, r.status, r.probability, r.model_version, SHA)
+        SlatePresenceRow(
+            capture_id=r.capture_id, status=r.status, probability=r.probability,
+            model_name="slate-detector", model_version=r.model_version,
+            weights_sha256=SHA, core_version="4.1.0", processor_version="0.1.2",
+            render=RENDER.model_dump(), predicted_at=AT,
+        )  # fmt: skip
         for r in results
     ]
 

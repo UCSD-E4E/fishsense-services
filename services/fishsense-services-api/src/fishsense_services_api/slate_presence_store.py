@@ -11,8 +11,10 @@ prediction store is (`species_prediction_store`), with its rules:
 * **the cohort** is a dive of **any priority** whose device has a current
   pinhole calibration (the frame is rectified; `camera_sql`) and which has a
   canonical capture with no current prediction at the current model version.
-  Any priority because this is for dives nobody labelled; every other cohort
-  is high-only, deliberately. An abstention (`decode_failed`) is a
+  By the owner's decision (2026-10-05) **every** canonical frame is scored,
+  labelled or not, in every dive at every priority, so the predictions can
+  be evaluated for publication (`slate_presence_evaluation`, migration
+  slate_01); every other cohort is high-only, deliberately. An abstention (`decode_failed`) is a
   prediction, so a raw that never decodes doesn't re-select its dive hourly.
   Oldest first;
 * the resolver mirrors the selector exactly, or a dive re-fires every hour;
@@ -33,10 +35,11 @@ its slate frames queued in its slate project.
 
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Sequence
+from typing import Any, Sequence
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -143,8 +146,16 @@ class SlatePresenceRow:
     capture_id: uuid.UUID
     status: str
     probability: float | None
+    model_name: str
     model_version: int
     weights_sha256: str
+    core_version: str | None
+    processor_version: str | None
+    #: The contract's `SlateRender`, as JSON: `decode_config`, `decode_params`,
+    #: `rectified`, `cache_long_side`, `jpeg_quality`, `input_width`,
+    #: `input_height`, `tta`.
+    render: dict[str, Any]
+    predicted_at: datetime
 
 
 @dataclass(frozen=True)
@@ -254,15 +265,29 @@ async def persist_slate_presence(
             f"not captures of dive {dive_id}: {sorted(map(str, foreign))}"
         )
     for r in rows:
+        render = r.render
         await conn.execute(
             text("""
                 INSERT INTO slate_presence_predictions (
-                    tenant_id, capture_id, status, probability, model_version,
-                    weights_sha256)
-                VALUES (:tenant, :capture_id, :status, :probability,
-                        :model_version, :weights_sha256)
+                    tenant_id, capture_id, status, probability, model_name,
+                    model_version, weights_sha256, core_version,
+                    processor_version, decode_config, rectified, input_width,
+                    input_height, render, predicted_at)
+                VALUES (:tenant, :capture_id, :status, :probability, :model_name,
+                        :model_version, :weights_sha256, :core_version,
+                        :processor_version, :decode_config, :rectified,
+                        :input_width, :input_height, CAST(:render AS jsonb),
+                        :predicted_at)
                 """),
-            {"tenant": tenant_id, **r.__dict__},
+            {
+                **r.__dict__,
+                "tenant": tenant_id,
+                "decode_config": render["decode_config"],
+                "rectified": render["rectified"],
+                "input_width": render["input_width"],
+                "input_height": render["input_height"],
+                "render": json.dumps(render, sort_keys=True),
+            },
         )
     return len(rows)
 
