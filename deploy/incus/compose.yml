@@ -234,6 +234,11 @@ services:
       # evaluation (species_predict/settings.py). Explicit, so turning it on is
       # a reviewed diff here.
       FISHSENSE_SPECIES_PREDICTION_ENABLED: "false"
+      # The slate presence detector scores every canonical frame (owner's
+      # decision, 2026-10-06, for publication). Its weights are in
+      # model-weights/slate-detector/q1/ and fishsense-processor-secrets pins
+      # them (FISHSENSE_SLATE_DETECTOR_SHA256/_SIZE; slate_detect/settings.py).
+      FISHSENSE_SLATE_DETECTION_ENABLED: "true"
     # FISHSENSE_DATABASE_URL (app role), the NAS, Label Studio and Garage keys.
     env_file:
       - /run/tenant/secrets/orchestrator.env

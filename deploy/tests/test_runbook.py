@@ -48,3 +48,16 @@ def test_production_turns_bioclip_off_as_the_runbook_assumes():
     compose = yaml.safe_load((REPO / "deploy" / "incus" / "compose.yml").read_text())
     env = compose["services"]["orchestrator"]["environment"]
     assert env["FISHSENSE_SPECIES_PREDICTION_ENABLED"] == "false"
+
+
+def test_production_runs_the_slate_detector_now_its_weights_are_pinned():
+    """Its schedule needs the processor's FISHSENSE_SLATE_DETECTOR_* pin and
+    the weights in model-weights. Both are in place (2026-10-06: weights
+    verified in Garage, sha256 b8d377ba…cf78, 16,339,455 bytes; the pin in
+    fishsense-processor-secrets), and the owner asked for every frame to be
+    scored, so production runs it. Turning it off is a reviewed diff."""
+    import yaml
+
+    compose = yaml.safe_load((REPO / "deploy" / "incus" / "compose.yml").read_text())
+    env = compose["services"]["orchestrator"]["environment"]
+    assert env["FISHSENSE_SLATE_DETECTION_ENABLED"] == "true"

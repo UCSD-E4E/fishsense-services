@@ -33,7 +33,12 @@ v2 changes:
   a migrated frame, whose task already holds that URL, so dedup finds it);
 * the retired slate predictor's keypoint pre-annotations are not seeded: its
   rows were removed in prod when it was retired (2026-08-03), and v1's
-  populate read an empty table. A task carries no predictions.
+  populate read an empty table. A task carries no predictions;
+* **the slate detector queues frames too** (new): in a dive with no person's
+  slate work, the store's candidates include the frames the presence
+  detector calls slate (`fishsense_services_api.slate_store`), and each row
+  records the prediction that queued it. The task is the same: a labeler
+  places the reference points.
 """
 
 from __future__ import annotations
@@ -110,6 +115,7 @@ class _Catalog(Protocol):
         ls_project_id: int,
         ls_task_id: int,
         image_url: str,
+        slate_presence_prediction_id: uuid.UUID | None = None,
     ) -> None: ...
 
     async def supersede_stale_slate_labels(
@@ -200,6 +206,7 @@ class DiveSlateProjectActivities:
                 ls_project_id=project_id,
                 ls_task_id=task_id,
                 image_url=jpeg.uri,
+                slate_presence_prediction_id=capture.slate_presence_prediction_id,
             )
 
         result = await import_tasks_and_record_labels(

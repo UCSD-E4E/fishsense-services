@@ -59,7 +59,15 @@ v2 changes:
 * the sync writes only the columns it owns (never `needs_reprocess` or
   `superseded`), as the laser sync's port does;
 * the camera is the dive's device's current camera calibration (v1: the
-  camera's intrinsics).
+  camera's intrinsics);
+* **the slate detector feeds it too** (new; `slate_presence_store`,
+  2026-10-03_slate_detector@95a77d95). In a dive with no person's slate work
+  -- no live slate marker, no live slate label in a real project the detector
+  did not queue -- a canonical frame whose current prediction is a slate is
+  drawn and queued as a marked frame is. Its label row records the
+  prediction that queued it (`slate_presence_prediction_id`). The marker
+  path is unchanged, and a dive a person marked is left to it.
+  `dive_pipeline_status` (0029) froze the marker-only predicate.
 """
 
 from __future__ import annotations
@@ -74,6 +82,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from fishsense_services_api.service_principal import ServicePrincipal
+from fishsense_services_api.slate_presence_store import detector_slate_frame
 from fishsense_services_api.taxonomy_sql import SLATE_CONTENT_MARKER
 
 __all__ = [
@@ -152,6 +161,9 @@ class SlatePopulateCapture:
     checksum: str
     from_v1: bool
     captured_at: datetime | None
+    #: The slate presence prediction that queued the frame; None for a frame
+    #: a person marked.
+    slate_presence_prediction_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -203,7 +215,54 @@ def _marked_and_unlabeled(marker: str) -> str:
 """
 
 
-_MARKED_AND_UNLABELED = _marked_and_unlabeled(":marker")
+def _no_persons_slate_work(marker: str) -> str:
+    """Dive `d` holds no person's slate work: no live slate marker on a
+    canonical frame, and no live slate label in a real project that the
+    detector did not queue. Its own queued rows don't count, so this stays
+    true while they are labelled, and goes false for good once a person marks
+    a slate (the marker path then owns the dive)."""
+    return f"""
+    NOT EXISTS (
+        SELECT 1 FROM captures pc
+        JOIN species_labels psp
+          ON psp.tenant_id = pc.tenant_id AND psp.capture_id = pc.id
+        WHERE pc.tenant_id = d.tenant_id AND pc.dive_id = d.id AND pc.is_canonical
+          AND psp.content_of_image = {marker} AND NOT psp.superseded
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM captures pc
+        JOIN slate_labels ps ON ps.tenant_id = pc.tenant_id AND ps.capture_id = pc.id
+        WHERE pc.tenant_id = d.tenant_id AND pc.dive_id = d.id AND pc.is_canonical
+          AND ps.ls_project_id IS NOT NULL AND NOT ps.superseded
+          AND ps.slate_presence_prediction_id IS NULL
+    )
+"""
+
+
+def _detected(marker: str) -> str:
+    """Capture `c` of dive `d` is a slate frame the detector queues: its
+    current prediction says slate, in a dive with no person's slate work."""
+    return f"({detector_slate_frame()} AND {_no_persons_slate_work(marker)})"
+
+
+def _slate_frame_and_unlabeled(marker: str) -> str:
+    """`_marked_and_unlabeled`, or the same for a frame the detector queues.
+    `c` is the capture, `d` its dive."""
+    return f"""
+    (EXISTS (
+        SELECT 1 FROM species_labels sp
+        WHERE sp.tenant_id = c.tenant_id AND sp.capture_id = c.id
+          AND sp.content_of_image = {marker} AND NOT sp.superseded
+    ) OR {_detected(marker)})
+    AND NOT EXISTS (
+        SELECT 1 FROM slate_labels s
+        WHERE s.tenant_id = c.tenant_id AND s.capture_id = c.id
+          AND s.ls_project_id IS NOT NULL AND NOT s.superseded
+    )
+"""
+
+
+_MARKED_AND_UNLABELED = _slate_frame_and_unlabeled(":marker")
 
 #: Dive `d` is one stage 9 can run at all: its device has a current camera
 #: calibration, and its template can be scaled (a dpi, reference points) and
@@ -235,25 +294,35 @@ _FLAGGED = """
 # --- stage 9: the cohort and the resolver -------------------------------------
 
 
-def slate_preprocess_work(marker: str) -> str:
+def slate_preprocess_work(marker: str, *, detector: bool = False) -> str:
     """Dive `d` has stage-9 work: a canonical frame marked and unlabeled, or
     flagged for a redraw. `marker` is SQL for the stage-9 marker. Named, with
     the cohort, so `dive_pipeline_status` reads the same predicates
-    (migration 0029)."""
+    (migration 0029).
+
+    `detector` also counts a frame the slate detector queues (`_detected`).
+    The selector and resolver pass it; 0029 froze the predicate without it,
+    so `dive_pipeline_status` does not see those frames until a migration
+    recreates its function."""
+    unlabeled = (
+        _slate_frame_and_unlabeled(marker)
+        if detector
+        else _marked_and_unlabeled(marker)
+    )
     return f"""EXISTS (
         SELECT 1 FROM captures c
         WHERE {_CANONICAL_OF_DIVE}
-          AND (({_marked_and_unlabeled(marker)}) OR {_FLAGGED})
+          AND (({unlabeled}) OR {_FLAGGED})
     )"""
 
 
-def slate_preprocess_cohort(marker: str) -> str:
+def slate_preprocess_cohort(marker: str, *, detector: bool = False) -> str:
     """The stage-9 cohort over dive `d`, but for the tenant and priority terms
     the selector adds: a slate template, a dive stage 9 can resolve, and
-    work."""
+    work (`detector`: see `slate_preprocess_work`)."""
     return (
         f"d.slate_template_id IS NOT NULL AND {_RESOLVABLE}"
-        f" AND {slate_preprocess_work(marker)}"
+        f" AND {slate_preprocess_work(marker, detector=detector)}"
     )
 
 
@@ -266,7 +335,7 @@ async def next_dive_for_slate_preprocessing(
             text(f"""
                 SELECT d.id, d.created_at FROM dives d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
-                  AND {slate_preprocess_cohort(":marker")}
+                  AND {slate_preprocess_cohort(":marker", detector=True)}
                 ORDER BY d.created_at, d.id
                 LIMIT 1
                 """),
@@ -423,19 +492,26 @@ async def clear_slate_reprocess_flags(
 async def slate_populate_candidates(
     conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
 ) -> list[SlatePopulateCapture]:
-    """The dive's canonical frames marked as slate (a live species label) with
-    no completed live slate label, in capture order."""
-    rows = await conn.execute(
-        text("""
-            SELECT c.id, c.number, c.checksum, c.v1_id IS NOT NULL AS from_v1,
-                   c.captured_at
-            FROM captures c
-            WHERE c.tenant_id = :tenant AND c.dive_id = :dive AND c.is_canonical
-              AND EXISTS (
+    """The dive's canonical frames marked as slate (a live species label), or
+    queued by the slate detector (`_detected`), with no completed live slate
+    label, in capture order. A detector frame carries the prediction that
+    queued it."""
+    marked = """EXISTS (
                   SELECT 1 FROM species_labels sp
                   WHERE sp.tenant_id = c.tenant_id AND sp.capture_id = c.id
                     AND sp.content_of_image = :marker AND NOT sp.superseded
-              )
+              )"""
+    rows = await conn.execute(
+        text(f"""
+            SELECT c.id, c.number, c.checksum, c.v1_id IS NOT NULL AS from_v1,
+                   c.captured_at,
+                   CASE WHEN {marked} THEN NULL ELSE p.id END AS detected_by
+            FROM captures c
+            JOIN dives d ON d.tenant_id = c.tenant_id AND d.id = c.dive_id
+            LEFT JOIN current_slate_presence p
+              ON p.tenant_id = c.tenant_id AND p.capture_id = c.id
+            WHERE c.tenant_id = :tenant AND c.dive_id = :dive AND c.is_canonical
+              AND ({marked} OR {_detected(":marker")})
               AND NOT EXISTS (
                   SELECT 1 FROM slate_labels s
                   WHERE s.tenant_id = c.tenant_id AND s.capture_id = c.id
@@ -446,7 +522,9 @@ async def slate_populate_candidates(
         {"tenant": tenant_id, "dive": dive_id, "marker": SLATE_CONTENT_MARKER},
     )
     return [
-        SlatePopulateCapture(r.id, r.number, r.checksum, r.from_v1, r.captured_at)
+        SlatePopulateCapture(
+            r.id, r.number, r.checksum, r.from_v1, r.captured_at, r.detected_by
+        )
         for r in rows
     ]
 
@@ -459,22 +537,28 @@ async def record_slate_label(
     ls_project_id: int,
     ls_task_id: int,
     image_url: str,
+    slate_presence_prediction_id: uuid.UUID | None = None,
 ) -> None:
     """Anchor the (capture, task, project) triple: a new row seeded for a
-    labeler (`human`), or the existing one re-anchored and revived."""
+    labeler (`human`), or the existing one re-anchored and revived. A frame
+    the slate detector queued records the prediction that queued it (the
+    latest, on a re-anchor); a marked frame records none."""
     await conn.execute(
         text("""
             INSERT INTO slate_labels
                 (tenant_id, capture_id, source, ls_project_id, ls_task_id,
-                 image_url, completed, superseded)
-            VALUES (:tenant, :capture, 'human', :project, :task, :url, false, false)
+                 image_url, completed, superseded, slate_presence_prediction_id)
+            VALUES (:tenant, :capture, 'human', :project, :task, :url, false, false,
+                    :detected_by)
             ON CONFLICT (tenant_id, capture_id, ls_project_id) DO UPDATE SET
                 ls_task_id = excluded.ls_task_id,
                 image_url = excluded.image_url,
-                superseded = false
+                superseded = false,
+                slate_presence_prediction_id = excluded.slate_presence_prediction_id
             """),
         {"tenant": tenant_id, "capture": capture_id, "project": ls_project_id,
-         "task": ls_task_id, "url": image_url},
+         "task": ls_task_id, "url": image_url,
+         "detected_by": slate_presence_prediction_id},
     )  # fmt: skip
 
 
@@ -659,6 +743,7 @@ class SlateCatalog(ServicePrincipal):
         ls_project_id: int,
         ls_task_id: int,
         image_url: str,
+        slate_presence_prediction_id: uuid.UUID | None = None,
     ) -> None:
         async with self._tenant(tenant_id) as conn:
             await record_slate_label(
@@ -668,6 +753,7 @@ class SlateCatalog(ServicePrincipal):
                 ls_project_id=ls_project_id,
                 ls_task_id=ls_task_id,
                 image_url=image_url,
+                slate_presence_prediction_id=slate_presence_prediction_id,
             )
 
     async def supersede_stale_slate_labels(

@@ -62,6 +62,7 @@ class FakeCatalog:
         self.candidates = candidates
         self.had_rows = had_rows
         self.recorded = []
+        self.provenance = {}
         self.superseded_with = None
 
     async def slate_populate_candidates(self, tenant_id, dive_id):
@@ -73,9 +74,11 @@ class FakeCatalog:
         return self.had_rows
 
     async def record_slate_label(
-        self, tenant_id, capture_id, *, ls_project_id, ls_task_id, image_url
-    ):
+        self, tenant_id, capture_id, *, ls_project_id, ls_task_id, image_url,
+        slate_presence_prediction_id=None,
+    ):  # fmt: skip
         self.recorded.append((capture_id, ls_project_id, ls_task_id, image_url))
+        self.provenance[capture_id] = slate_presence_prediction_id
 
     async def supersede_stale_slate_labels(
         self, tenant_id, dive_id, *, ls_project_id, keep_capture_ids
@@ -187,6 +190,25 @@ async def test_imports_only_candidate_images():
     assert all(p == PROJECT for _, p, _, _ in catalog.recorded)
     assert all("preprocess_slate_images_jpeg" in url for *_, url in catalog.recorded)
     assert sorted(t for _, _, t, _ in catalog.recorded) == [4001, 4002]
+
+
+async def test_a_frame_the_detector_queued_records_its_prediction():
+    """v2: the slate detector feeds populate too (`slate_store`), and each
+    row it queued says which prediction queued it; a marked frame's says
+    none."""
+    prediction = uuid.uuid4()
+    detected = SlatePopulateCapture(
+        capture_id=uuid.UUID(int=200), number=2, checksum="d" * 32, from_v1=False,
+        captured_at=T0, slate_presence_prediction_id=prediction,
+    )  # fmt: skip
+    catalog = FakeCatalog([_capture(1), detected])
+
+    assert await _populate(_activities(catalog)) == 2
+
+    assert catalog.provenance == {
+        _capture(1).capture_id: None,
+        detected.capture_id: prediction,
+    }
 
 
 async def test_no_slate_marked_images_is_a_no_op():

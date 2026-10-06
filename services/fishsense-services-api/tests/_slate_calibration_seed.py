@@ -210,13 +210,17 @@ async def slate_label(
     skipped_points=None,
     ls_updated_at: datetime | None = None,
     source: str = "human",
+    detected_by: uuid.UUID | None = None,
 ) -> uuid.UUID:
+    """`detected_by`: the slate presence prediction that queued the frame."""
     return await _one(
         engine,
         "INSERT INTO slate_labels (tenant_id, capture_id, source, ls_project_id, "
         "ls_task_id, completed, superseded, needs_reprocess, reference_points, "
-        "skipped_points, ls_updated_at) VALUES (:t, :c, :src, :p, :k, :done, :gone, "
-        ":flag, :refs, :skip, :at) RETURNING id",
+        "skipped_points, ls_updated_at, slate_presence_prediction_id) VALUES (:t, "
+        ":c, :src, :p, :k, :done, :gone, :flag, :refs, :skip, :at, :detected) "
+        "RETURNING id",
+        detected=detected_by,
         t=tenant_id,
         c=capture_id,
         src=source,
@@ -299,3 +303,47 @@ async def laser_calibration(
 
 def later(hours: float) -> datetime:
     return T0 + timedelta(hours=hours)
+
+
+async def slate_presence(
+    engine,
+    tenant_id,
+    capture_id,
+    *,
+    probability: float | None = 0.97,
+    model_version: int = 1,
+    **columns,
+) -> uuid.UUID:
+    """A slate detector prediction, with version 1's provenance; None is an
+    abstention (`decode_failed`). `columns` override any column."""
+    values = {
+        "tenant_id": tenant_id,
+        "capture_id": capture_id,
+        "status": "decode_failed" if probability is None else "predicted",
+        "probability": probability,
+        "model_name": "slate-detector",
+        "model_version": model_version,
+        "weights_sha256": PRESENCE_SHA,
+        "core_version": "4.1.0",
+        "processor_version": "0.1.2",
+        "decode_config": "production",
+        "rectified": True,
+        "input_width": 1024,
+        "input_height": 768,
+        "render": json.dumps({"decode_config": "production", "tta": "hflip"}),
+        "predicted_at": T0,
+        **columns,
+    }
+    names = ", ".join(values)
+    params = ", ".join(
+        "CAST(:render AS jsonb)" if name == "render" else f":{name}" for name in values
+    )
+    return await _one(
+        engine,
+        f"INSERT INTO slate_presence_predictions ({names}) VALUES ({params}) "
+        "RETURNING id",
+        **values,
+    )
+
+
+PRESENCE_SHA = "b8d377ba22d155e7056a5e9ae747fdd0970c7c73dee981bbee17d95c8156cf78"

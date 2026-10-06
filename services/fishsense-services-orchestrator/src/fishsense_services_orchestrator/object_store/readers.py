@@ -40,6 +40,11 @@ RAW_SCRATCH_READERS = (
     "predict-slate",
     "perform-checkerboard-calibration",
     "verify-checkerboard-lattice",
+    # The slate presence detector (new in v2; `slate_detect`). Not v1's
+    # retired `predict-slate`, which estimated pose.
+    "detect-slate",
+    # Automatic results (new in v2): the GPU frames step reads every raw.
+    "automatic-frames",
 )
 
 
