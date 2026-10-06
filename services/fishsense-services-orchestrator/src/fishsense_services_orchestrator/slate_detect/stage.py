@@ -7,9 +7,10 @@ way. Schedules are created if missing and never updated in place
 (`schedules`), so turning the stage off again means deleting
 `detect-slate-presence` as well.
 
-Enabled, it fires hourly at +42, one dive per run, oldest first across
-tenants and any priority: before stage 9 at +45, which draws and queues the
-slate frames it finds in dives with no slate labels.
+Enabled, it fires hourly at +42 and drains dive after dive for up to 50
+minutes (`workflow.DETECT_DRAIN_WINDOW`), oldest first across tenants and any
+priority; stage 9 at +45 draws and queues the slate frames it finds in dives
+with no slate labels.
 """
 
 from datetime import timedelta

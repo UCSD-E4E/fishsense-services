@@ -5,17 +5,22 @@ classifier, which reads the whole rectified frame, so the parent is shaped as
 laser prediction's is (`laser.workflow.PredictLaserImagesParentWorkflow`: a
 raw-reading child on the GPU queue), and keeps its rules:
 
-* one dive per run: select, resolve, wake the GPU processor, stage the raws,
+* per dive: select, resolve, wake the GPU processor, stage the raws,
   dispatch the child, persist, clean the scratch up;
-* nothing to detect needs no worker; `unavailable` from the GPU wake means
-  return **before staging** (a child on an unserved queue hangs until its
+* **unlike laser prediction, a run drains the backlog**: every canonical frame
+  is scored once, so it takes the next dive until `DETECT_DRAIN_WINDOW` has
+  passed since it started, the cohort is empty, or it hands back a dive this
+  run already took (one whose frames could not be persisted would otherwise
+  spin);
+* nothing to detect needs no worker; `unavailable` from the GPU wake ends
+  the run **before staging** (a child on an unserved queue hangs until its
   execution timeout); the dive stays in the cohort;
 * the child's id comes from `raw_scratch_reader_id("detect-slate", dive)`, so
   another stage's cleanup waits for it, and it is reused ALLOW_DUPLICATE; **a
   child still running means do nothing more** -- it owns the scratch, and its
   own parent persists;
-* the run timeout covers every step at its longest, so a slow CPU-fallback
-  child is not terminated with its parent.
+* the run timeout covers the window and then one dive's every step at its
+  longest, so a slow CPU-fallback child is not terminated with its parent.
 """
 
 from datetime import timedelta
@@ -53,6 +58,7 @@ with workflow.unsafe.imports_passed_through():
 __all__ = [
     "CLEANUP_RAW_TIMEOUT",
     "DETECT_CHILD_TIMEOUT",
+    "DETECT_DRAIN_WINDOW",
     "DETECT_PERSIST_TIMEOUT",
     "DETECT_RESOLVE_TIMEOUT",
     "DETECT_RUN_TIMEOUT",
@@ -80,9 +86,14 @@ CLEANUP_RAW_TIMEOUT = timedelta(minutes=15)
 #: 1,000-frame dive is under 3 h on either the GPU or its CPU fallback.
 DETECT_CHILD_TIMEOUT = timedelta(hours=6)
 DETECT_PERSIST_TIMEOUT = timedelta(minutes=15)
-#: The schedule's run timeout: every step at its longest.
+#: How long after its start a run may begin another dive. Under the hourly
+#: schedule (overlaps skipped), a dive is ~8 minutes, so ~6 dives an hour.
+DETECT_DRAIN_WINDOW = timedelta(minutes=50)
+#: The schedule's run timeout: the window, then one dive's every step at its
+#: longest.
 DETECT_RUN_TIMEOUT = (
-    DETECT_SELECT_TIMEOUT
+    DETECT_DRAIN_WINDOW
+    + DETECT_SELECT_TIMEOUT
     + DETECT_RESOLVE_TIMEOUT
     + GPU_WAKE_TIMEOUT
     + STAGE_RAW_TIMEOUT
@@ -92,24 +103,44 @@ DETECT_RUN_TIMEOUT = (
 )
 
 
+#: What one dive's detection tells the drain.
+_NEXT = "next"
+_STOP = "stop"
+
+
 @workflow.defn
 class DetectSlatePresenceParentWorkflow:
     # pylint: disable=too-few-public-methods
-    """Score the next dive's unpredicted frames for a slate on the
-    processor's GPU queue, and persist the predictions. Returns the target,
-    or None when there was nothing to do or no worker."""
+    """Score the backlog's unpredicted frames for a slate, dive after dive,
+    on the processor's GPU queue, and persist the predictions. Returns the
+    last dive taken, or None when there was nothing to do or no worker."""
 
     @workflow.run
     async def run(self) -> Optional[StagingTarget]:
-        target: Optional[StagingTarget] = await workflow.execute_activity(
-            "select_next_dive_for_slate_detection",
-            schedule_to_close_timeout=DETECT_SELECT_TIMEOUT,
-            retry_policy=_DB_FAIL_FAST,
-            result_type=Optional[StagingTarget],
-        )
-        if target is None:
-            return None
+        started = workflow.now()
+        taken: set = set()
+        last: Optional[StagingTarget] = None
+        while workflow.now() - started < DETECT_DRAIN_WINDOW:
+            target: Optional[StagingTarget] = await workflow.execute_activity(
+                "select_next_dive_for_slate_detection",
+                schedule_to_close_timeout=DETECT_SELECT_TIMEOUT,
+                retry_policy=_DB_FAIL_FAST,
+                result_type=Optional[StagingTarget],
+            )
+            if target is None or target.dive_id in taken:
+                break
+            taken.add(target.dive_id)
+            outcome = await self._detect(target)
+            if outcome is None:
+                break
+            last = target
+            if outcome == _STOP:
+                break
+        return last
 
+    @staticmethod
+    async def _detect(target: StagingTarget) -> Optional[str]:
+        """One dive. None: no worker, so nothing was done."""
         inputs: DetectSlateImagesInput = await workflow.execute_activity(
             "resolve_slate_detection_inputs",
             target,
@@ -123,7 +154,7 @@ class DetectSlatePresenceParentWorkflow:
             len(inputs.images),
         )
         if not inputs.images:
-            return target
+            return _NEXT
 
         mode = await wake_gpu_processor()
         if mode == MODE_UNAVAILABLE:
@@ -151,7 +182,7 @@ class DetectSlatePresenceParentWorkflow:
                 "the scratch and persists",
                 target.dive_id,
             )
-            return target
+            return _STOP
 
         if results:
             await workflow.execute_activity(
@@ -165,4 +196,4 @@ class DetectSlatePresenceParentWorkflow:
                 ),
             )
         await cleanup_raw(target)
-        return target
+        return _NEXT
