@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.2.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.1.2...v0.2.0) (2026-10-06)
+
+
+### Features
+
+* **api:** automatic results as their own append-only track ([d3547e1](https://github.com/UCSD-E4E/fishsense-services/commit/d3547e13eb7a3315bb8f2c30d5617312c540619d))
+* **api:** slate presence predictions, and detector frames feed stage 9 ([767a845](https://github.com/UCSD-E4E/fishsense-services/commit/767a8450b4c637d04e241c0b7b1a7f6cd208006f))
+* **api:** validate-automatic, the paper's metrics on a database ([c9341da](https://github.com/UCSD-E4E/fishsense-services/commit/c9341da9c48e8fdcbd8b40b1272d7f168c17b8f6))
+* **contracts:** slate presence detector contract ([10e1597](https://github.com/UCSD-E4E/fishsense-services/commit/10e1597ab489bf4b58439745e35923bda9306ca8))
+* **deploy:** score every frame with the slate detector in production ([65f4152](https://github.com/UCSD-E4E/fishsense-services/commit/65f41522883af7bc7502745a6e411271e02f373c))
+* **orchestrator:** automatic results stage, off by default ([53cd02f](https://github.com/UCSD-E4E/fishsense-services/commit/53cd02fc4a1919bd6a01b72ff18f7ccc62d2c2d6))
+* **orchestrator:** slate detection stage, shipped disabled; detector frames carry provenance ([885ce53](https://github.com/UCSD-E4E/fishsense-services/commit/885ce53940b93b07b0bb8ce85e1db86e9e4c83e4))
+* **processor:** automatic frames stage (dot, SAM 3.1 at the dot, head/tail) ([099bd17](https://github.com/UCSD-E4E/fishsense-services/commit/099bd1796cebf79e040d1fb6c06bb45739837886))
+* **processor:** label-free calibration and automatic length stages ([e1b14a9](https://github.com/UCSD-E4E/fishsense-services/commit/e1b14a98319bb46706a01af0d15f8e269162f140))
+* **processor:** label-free size-constancy laser calibration, ported from cscw ([8cd8ec5](https://github.com/UCSD-E4E/fishsense-services/commit/8cd8ec5405f4825b90eb5cd8a3edd14743910ea5))
+* publication-grade slate predictions and their evaluation view ([ccb95e8](https://github.com/UCSD-E4E/fishsense-services/commit/ccb95e8fa2785e863f8ece3a21406340c3d773c5))
+* slate presence detector and the automatic results track (off by default) ([933e3ca](https://github.com/UCSD-E4E/fishsense-services/commit/933e3ca594e249bb2b1221c056a7ce2db0dec55e))
+
+
+### Bug Fixes
+
+* **api:** a frame the slate detector names is not measured; harness skips unrun frames ([f7afa1d](https://github.com/UCSD-E4E/fishsense-services/commit/f7afa1d511661f4d602ef69139c72f755fba9547))
+* **automatic-results:** the cohort reads the slate detector, and a corrupt raw is recorded ([3b7ecb5](https://github.com/UCSD-E4E/fishsense-services/commit/3b7ecb587a71fbf475b57740b88247ed0e14c04c))
+
+
+### Documentation
+
+* platform admin (decided, deferred) and the cutover as run ([1aa396e](https://github.com/UCSD-E4E/fishsense-services/commit/1aa396e20fa4f5a7b24f6ad4724528bf8e41166c))
+
 ## [0.1.2](https://github.com/UCSD-E4E/fishsense-services/compare/v0.1.1...v0.1.2) (2026-10-06)
 
 
