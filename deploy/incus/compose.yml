@@ -116,7 +116,7 @@ services:
   # migrate-v1 is NOT run here -- it is a one-shot operator command during the
   # cutover (docs/cutover.md):  run --rm migrate fishsense-services-api migrate-v1
   migrate:
-    image: ghcr.io/ucsd-e4e/fishsense-services-api:v0.2.0
+    image: ghcr.io/ucsd-e4e/fishsense-services-api:v0.3.0
     restart: "no"
     command: ["fishsense-services-api", "migrate"]
     environment:
@@ -132,7 +132,7 @@ services:
 
   # ── API → api.fishsense.e4e.ucsd.edu (bearer tokens, validated in-app) ─────────────────
   api:
-    image: ghcr.io/ucsd-e4e/fishsense-services-api:v0.2.0
+    image: ghcr.io/ucsd-e4e/fishsense-services-api:v0.3.0
     restart: unless-stopped
     # FISHSENSE_DATABASE_URL (app role), FISHSENSE_OIDC_ISSUER / _AUDIENCES (the
     # web's Authentik client: its tokens are the ones the API accepts).
@@ -148,7 +148,7 @@ services:
 
   # ── web portal → fishsense.e4e.ucsd.edu (in-app OIDC) ──────────────────────────────────
   web:
-    image: ghcr.io/ucsd-e4e/fishsense-services-web:v0.2.0
+    image: ghcr.io/ucsd-e4e/fishsense-services-web:v0.3.0
     restart: unless-stopped
     # Non-secret config inline; secrets (AUTH_SECRET, AUTH_AUTHENTIK_*, the web's
     # service account, LABEL_STUDIO_API_KEY) from web.env. FISHSENSE_API_URL is the
@@ -178,7 +178,7 @@ services:
   # ── the orchestrator: every schedule, every stage's parent, NRP stand-up/tear-down ──────
   # v1's fishsense-api-workflow-worker, plus the api's database side (PLAN.md §3).
   orchestrator:
-    image: ghcr.io/ucsd-e4e/fishsense-services-orchestrator:v0.2.0
+    image: ghcr.io/ucsd-e4e/fishsense-services-orchestrator:v0.3.0
     # Group 0 reads the platform's root-only renders: the Temporal key and the
     # NRP kubeconfig are 0640 root:root (krg-infra vault-agent.nix). v2's images
     # run as uid 10001, where v1's workers ran as root. Not root: just its group.
@@ -229,7 +229,7 @@ services:
       # release's, bumped with the pins above. The kubeconfig is a SOFT render.
       FISHSENSE_NRP_KUBECONFIG_PATH: /run/tenant/nrp/kubeconfig
       FISHSENSE_NRP_NAMESPACE: e4e-fishsense
-      FISHSENSE_NRP_IMAGE_TAG: v0.2.0
+      FISHSENSE_NRP_IMAGE_TAG: v0.3.0
       # BioCLIP species pre-annotation ships OFF until the FishSense-frame
       # evaluation (species_predict/settings.py). Explicit, so turning it on is
       # a reviewed diff here.
@@ -257,7 +257,7 @@ services:
   # Its own process and queue with the backup role, which the orchestrator never
   # holds. Dumps v2's database, v1's archive and Superset's.
   backup:
-    image: ghcr.io/ucsd-e4e/fishsense-services-backup:v0.2.0
+    image: ghcr.io/ucsd-e4e/fishsense-services-backup:v0.3.0
     group_add: ["0"]
     restart: unless-stopped
     environment:
@@ -306,7 +306,7 @@ services:
   # run failed (NRP's apiserver down) is retried long before the 2-day margin
   # runs out. A no-op when the leaf is unchanged and every pod is on it.
   nrp-temporal-cert-sync:
-    image: ghcr.io/ucsd-e4e/fishsense-services-orchestrator:v0.2.0
+    image: ghcr.io/ucsd-e4e/fishsense-services-orchestrator:v0.3.0
     group_add: ["0"]
     container_name: fishsense-nrp-temporal-cert-sync
     restart: "no"
@@ -329,7 +329,7 @@ services:
   # The orchestrator's configuration plus the owner's DSN (it reads the schema
   # as migrate does) and the smoke research login's. Never part of a converge.
   smoke:
-    image: ghcr.io/ucsd-e4e/fishsense-services-orchestrator:v0.2.0
+    image: ghcr.io/ucsd-e4e/fishsense-services-orchestrator:v0.3.0
     group_add: ["0"]
     profiles: [ops]
     restart: "no"
