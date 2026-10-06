@@ -1,6 +1,6 @@
 [project]
 name = "fishsense-services"
-version = "0.1.2"
+version = "0.2.0"
 description = "FishSense v2 monorepo (workspace root — see services/ for the deliverables)."
 requires-python = ">=3.13,<3.14"
 
