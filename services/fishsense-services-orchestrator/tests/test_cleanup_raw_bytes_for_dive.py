@@ -229,6 +229,7 @@ class TestReaderIds:
             f"predict-slate-{DIVE}",
             f"perform-checkerboard-calibration-{DIVE}",
             f"verify-checkerboard-lattice-{DIVE}",
+            f"detect-slate-{DIVE}",
         ]
 
     def test_a_parent_builds_its_childs_id_from_the_same_list(self):

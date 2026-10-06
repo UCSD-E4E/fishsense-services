@@ -257,6 +257,16 @@ into the orchestrator image): role, krg-prod Temporal, `/certs`, the weights cac
   sha256sum sam3.1_multiplex.pt; stat -c %s sam3.1_multiplex.pt   # -> FISHSENSE_SAM3_SHA256 / _SIZE (§1.4c)
   ```
 - **BioCLIP** — not needed at cutover (ships disabled).
+- **Slate presence detector** — ships disabled
+  (`FISHSENSE_SLATE_DETECTION_ENABLED`). Before enabling it, upload
+  2026-10-03_slate_detector's `runs/final-q1/slate_efficientnet_b0.pt` and add
+  `FISHSENSE_SLATE_DETECTOR_SHA256=b8d377ba22d155e7056a5e9ae747fdd0970c7c73dee981bbee17d95c8156cf78`
+  and `FISHSENSE_SLATE_DETECTOR_SIZE=16339455` to `fishsense-processor-secrets`:
+
+  ```bash
+  aws s3 cp runs/final-q1/slate_efficientnet_b0.pt \
+    s3://model-weights/slate-detector/q1/slate_efficientnet_b0.pt --endpoint-url https://s3.e4e.ucsd.edu
+  ```
 
 ### 1.6 Rehearse (≥ 2 clean runs; PLAN.md §6.4)
 

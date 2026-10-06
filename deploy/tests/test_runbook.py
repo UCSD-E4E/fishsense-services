@@ -48,3 +48,13 @@ def test_production_turns_bioclip_off_as_the_runbook_assumes():
     compose = yaml.safe_load((REPO / "deploy" / "incus" / "compose.yml").read_text())
     env = compose["services"]["orchestrator"]["environment"]
     assert env["FISHSENSE_SPECIES_PREDICTION_ENABLED"] == "false"
+
+
+def test_production_turns_the_slate_detector_off_until_its_weights_are_pinned():
+    """Its schedule needs the processor's FISHSENSE_SLATE_DETECTOR_* pin and
+    the weights in model-weights; turning it on is a reviewed diff."""
+    import yaml
+
+    compose = yaml.safe_load((REPO / "deploy" / "incus" / "compose.yml").read_text())
+    env = compose["services"]["orchestrator"]["environment"]
+    assert env["FISHSENSE_SLATE_DETECTION_ENABLED"] == "false"
