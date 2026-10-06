@@ -660,10 +660,11 @@ async def automatic_measure_inputs(
     dive_id: uuid.UUID,
     *,
     algorithm_version: str,
+    slate_frames: SlateFrames = no_slate_frames,
 ) -> AutomaticMeasureInputs:
-    """The dive's predicted fish (never a slate frame) with no current
-    automatic length at the current version, and the calibration to measure
-    them with; nothing to measure without one."""
+    """The dive's predicted fish (never a slate frame, by its row or by the
+    detector now) with no current automatic length at the current version,
+    and the calibration to measure them with; nothing to measure without one."""
     cal = (
         await conn.execute(
             text("""
@@ -691,6 +692,7 @@ async def automatic_measure_inputs(
             """),
         {"t": tenant_id, "d": dive_id, "mv": algorithm_version},
     )
+    slate = await _slate_probabilities(slate_frames, conn, tenant_id, dive_id)
     return AutomaticMeasureInputs(
         calibration=MeasurementCalibration(
             source=cal.calibration_source,
@@ -705,6 +707,7 @@ async def automatic_measure_inputs(
             AutomaticMeasureCapture(r.capture_id, r.id, r.laser_x, r.laser_y,
                                     r.head_x, r.head_y, r.tail_x, r.tail_y)  # fmt: skip
             for r in rows
+            if slate.get(r.capture_id, 0.0) < SLATE_FRAME_THRESHOLD
         ],
     )
 
@@ -806,8 +809,9 @@ class AutomaticResultsCatalog(ServicePrincipal):
     ) -> AutomaticMeasureInputs:
         async with self._tenant(tenant_id) as conn:
             return await automatic_measure_inputs(
-                conn, tenant_id, dive_id, algorithm_version=algorithm_version
-            )
+                conn, tenant_id, dive_id, algorithm_version=algorithm_version,
+                slate_frames=self._slate_frames,
+            )  # fmt: skip
 
     async def persist_automatic_measurements(
         self, tenant_id: uuid.UUID, dive_id: uuid.UUID, rows

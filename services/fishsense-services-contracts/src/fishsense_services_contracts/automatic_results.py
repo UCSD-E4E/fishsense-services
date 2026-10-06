@@ -26,7 +26,9 @@ never as labels or human-path predictions (decided 2026-10-06).
 differ for the same raw frame (detector, SAM checkpoint, gate, crop, prompt,
 keypointer); `AUTOMATIC_CALIBRATION_VERSION` when the fit would; and
 `AUTOMATIC_MEASUREMENT_VERSION` when a length would. History: 1 (2026-10-06)
-the chain as cscw ran it.
+the chain as cscw ran it, with the slate-presence detector stubbed (no frame
+is a slate). **Bump the head/tail version when the detector lands**, so every
+frame is re-classified as fish or slate (a slate frame keeps only its dot).
 
 Not in ``MODELS``: integration publishes schemas once for every slice.
 """

@@ -14,7 +14,9 @@ the frames humans labelled, as the paper chose them:
 * the camera matrix, the dive's effective stored calibration (0026's
   `dive_laser_geometry`) and its label-free one (own, else its link's);
 * the automatic chain's current output for the frame
-  (`current_automatic_head_tail_predictions`), unless `outputs` supplies it.
+  (`current_automatic_head_tail_predictions`), unless `outputs` supplies it;
+  then a frame `outputs` does not name was not run, and is left out (the
+  paper sampled 200 frames of each of reef dives 362 and 366).
 """
 
 from __future__ import annotations
@@ -141,7 +143,8 @@ async def validation_frames(
         )
         given = (outputs or {}).get(r.capture_number)
         if outputs is not None:
-            given = given or {}
+            if given is None:
+                continue  # never run: no evidence either way
             auto_dot = _pair(given.get("auto_dot"))
             auto_ht = _pair(given.get("auto_head_tail"))
             humandot = _pair(given.get("auto_head_tail_humandot"))

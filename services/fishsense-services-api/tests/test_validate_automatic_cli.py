@@ -124,6 +124,23 @@ async def test_outputs_from_a_file_replace_the_databases(
     assert f.auto_head_tail_humandot == (5.0, 6.0, 7.0, 8.0)
 
 
+async def test_a_frame_the_file_does_not_name_was_not_run(
+    owner_engine, app_engine, references
+):
+    """The paper ran a sample of some dives (200 frames each of 362 and 366):
+    a frame it never ran is no evidence either way, so it is left out."""
+    await references("Ruler", 0.3429)
+    lab = await tenant(owner_engine)
+    pool = await _paper_dive(owner_engine, lab, 58)
+    await _labelled(owner_engine, lab, pool, "Calibration Targets, Ruler")
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        frames = await validation_frames(conn, lab, pool_dives=[58], reef_dives=[],
+                                         outputs={})  # fmt: skip
+
+    assert frames == []
+
+
 async def test_the_cli_prints_the_papers_tables(owner_engine, app_engine, app_url,
                                                 monkeypatch, capsys, references):  # fmt: skip
     await references("Grouper", 0.36)

@@ -544,6 +544,25 @@ async def test_slate_frames_are_never_measured(owner_engine, app_engine):
     assert (await _measure_inputs(app_engine, lab, dive_id)).captures == []
 
 
+async def test_a_frame_the_detector_now_calls_a_slate_is_not_measured(
+    owner_engine, app_engine
+):
+    """Frames segmented before the detector landed were taken as fish; once it
+    names one a slate, its mask is not measured (a version bump re-runs it)."""
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    await calibrate(owner_engine, lab, dive_id)
+    c = await capture(owner_engine, lab, dive_id)
+    await _predict(app_engine, lab, dive_id, _predicted(c))
+
+    async def detector(conn, tenant_id, d):
+        return [(c, 0.8)]
+
+    inputs = await _in(app_engine, lab, automatic_measure_inputs, dive_id,
+                       algorithm_version="1", slate_frames=detector)  # fmt: skip
+    assert inputs.captures == []
+
+
 # -- measurements: current, stale, never the human path's -------------------------
 
 
