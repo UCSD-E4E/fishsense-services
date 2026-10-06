@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.2](https://github.com/UCSD-E4E/fishsense-services/compare/v0.1.1...v0.1.2) (2026-10-06)
+
+
+### Bug Fixes
+
+* **deploy:** read services_db from the platform-generated path ([b407871](https://github.com/UCSD-E4E/fishsense-services/commit/b407871f2a8cc55fda7b16d8a3d1c664194f1198))
+* **deploy:** read services_db from the platform-generated path ([10b4c9a](https://github.com/UCSD-E4E/fishsense-services/commit/10b4c9a9ffd9697bcc20946b9ae9c81dbeee43e8))
+* **orchestrator:** a blank NRP kubeconfig means no NRP; the slate sync has a cursor store ([a17895b](https://github.com/UCSD-E4E/fishsense-services/commit/a17895b62ab973df8722a123f98757360e8d8ffd))
+* **orchestrator:** a blank NRP kubeconfig means no NRP; the slate sync has a cursor store ([df174e6](https://github.com/UCSD-E4E/fishsense-services/commit/df174e65b1154ff515b38bb772a2e48f16d3f02a))
+
+
+### Documentation
+
+* **cutover:** align with krg-infra's merged hand-off ([#549](https://github.com/UCSD-E4E/fishsense-services/issues/549)–[#551](https://github.com/UCSD-E4E/fishsense-services/issues/551)) ([37fb514](https://github.com/UCSD-E4E/fishsense-services/commit/37fb51485fa1c0c9e92d55dfa70b11b50091cb39))
+
 ## [0.1.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.1.0...v0.1.1) (2026-10-02)
 
 
