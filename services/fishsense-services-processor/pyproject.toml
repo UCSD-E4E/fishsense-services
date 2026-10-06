@@ -43,6 +43,11 @@ torch = [
     # under SPECIES_PREDICTOR_VERSION without a visible diff; 3.x reads a
     # `local-dir:` model, which is how the verified weights load offline.
     "open-clip-torch==3.3.0",
+    # The slate presence detector (new in v2) builds torchvision's
+    # EfficientNet-B0 and its v2 transforms, as 2026-10-03_slate_detector
+    # trained it. Already locked through open-clip-torch and fishsense-core's
+    # extras; declared because the stage imports it directly.
+    "torchvision",
 ]
 
 [project.scripts]

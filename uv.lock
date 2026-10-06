@@ -730,6 +730,7 @@ torch = [
     { name = "pycocotools" },
     { name = "sam3" },
     { name = "setuptools" },
+    { name = "torchvision" },
 ]
 
 [package.metadata]
@@ -752,6 +753,7 @@ requires-dist = [
     { name = "scikit-learn", specifier = "==1.9.0" },
     { name = "setuptools", marker = "extra == 'torch'", specifier = ">=80.9.0,<84" },
     { name = "temporalio", specifier = ">=1.15.0" },
+    { name = "torchvision", marker = "extra == 'torch'" },
 ]
 provides-extras = ["torch"]
 
