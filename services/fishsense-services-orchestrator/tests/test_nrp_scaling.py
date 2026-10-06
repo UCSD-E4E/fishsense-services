@@ -63,6 +63,23 @@ def test_disabled_when_no_kubeconfig(monkeypatch):
     assert scaling.resolve_scaling_config(NrpSettings(namespace="ns")) is None
 
 
+@pytest.mark.parametrize("contents", ["", "\n", "  \n"])
+def test_disabled_when_the_kubeconfig_is_blank(tmp_path, contents):
+    """An unseeded soft render: vault-agent writes the file, blank, when
+    `nrp_orchestrator` has no kubeconfig yet (docs/cutover.md says `""` means
+    "no NRP yet"). Production, 2026-10-06: the wake loaded it and failed, so
+    the laser sync and the hourly tear-down failed with it. Same rule as the
+    cert sync's (ops/cert_sync.py)."""
+    path = tmp_path / "kubeconfig"
+    path.write_text(contents)
+    assert (
+        scaling.resolve_scaling_config(
+            NrpSettings(kubeconfig_path=str(path), namespace="ns", image_tag="v1.0.0")
+        )
+        is None
+    )
+
+
 def test_the_settings_come_from_the_environment(monkeypatch):
     monkeypatch.setenv("FISHSENSE_NRP_KUBECONFIG_PATH", "/run/secrets/nrp")
     monkeypatch.setenv("FISHSENSE_NRP_NAMESPACE", "e4e-fishsense")

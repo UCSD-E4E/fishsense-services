@@ -97,3 +97,34 @@ def test_schedules_come_from_the_stages_and_each_runs_a_served_workflow():
     assert SCHEDULES == tuple(sch for s in stages() for sch in s.schedules)
     assert {sch.workflow for sch in SCHEDULES} <= set(WORKFLOWS)
     assert len({sch.schedule_id for sch in SCHEDULES}) == len(SCHEDULES)
+
+
+def test_every_label_sync_is_built_with_a_cursor_store(deps):
+    """Each kind's sync hands `labels.sync.sync_label_studio_project` the
+    catalog it reads and advances the cursor with. The unit tests fake it, so
+    a stage wired with a catalog that lacks the cursor passed every test and
+    failed on its first production run (the dive-slate sync, 2026-10-06:
+    `'SlateCatalog' object has no attribute 'sync_cursor'`). Built from the
+    real stages, so the wiring itself is what's checked."""
+    syncs = [
+        activity
+        for stage in stages()
+        for activity in stage.build_activities(deps)
+        if re.fullmatch(
+            r"sync_[a-z_]+_labels", activity.__temporal_activity_definition.name
+        )
+    ]
+    assert {a.__temporal_activity_definition.name for a in syncs} >= {
+        "sync_laser_labels",
+        "sync_species_labels",
+        "sync_head_tail_labels",
+        "sync_slate_labels",
+    }
+    for activity in syncs:
+        owner = activity.__self__
+        stores = [
+            value
+            for value in vars(owner).values()
+            if hasattr(value, "sync_cursor") and hasattr(value, "advance_sync_cursor")
+        ]
+        assert stores, activity.__temporal_activity_definition.name

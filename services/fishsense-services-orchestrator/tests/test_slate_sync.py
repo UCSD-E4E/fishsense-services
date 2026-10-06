@@ -369,8 +369,10 @@ class FakeLabelStudio:
 
 
 async def test_lists_every_served_tenants_slate_projects():
+    catalog = FakeCatalog()
     activities = sut.SlateSyncActivities(
-        catalog=FakeCatalog(),
+        catalog=catalog,
+        sync_catalog=catalog,
         label_studio_factory=lambda: FakeLabelStudio([]),
         pdfs=FakePdfs(None),
     )
@@ -388,6 +390,7 @@ async def test_syncs_a_projects_tasks_under_the_slate_cursor():
     catalog = FakeCatalog()
     activities = sut.SlateSyncActivities(
         catalog=catalog,
+        sync_catalog=catalog,
         label_studio_factory=lambda: FakeLabelStudio(
             [_task(1, annotations=[_geometry_annotation(250.0, 50.0, 300.0, 100.0)])]
         ),
