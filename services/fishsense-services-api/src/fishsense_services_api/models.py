@@ -1017,3 +1017,171 @@ class LabelStudioProject(Base):
     ls_project_id: Mapped[int] = mapped_column(Integer)
     title: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
+
+
+# -- automatic results (migration autoresults_01; new in v2) ------------------------
+
+
+def _producer() -> Mapped[str]:
+    return mapped_column(Text, server_default=text("'automatic'::text"))
+
+
+def _capture_seq_index(table: str) -> Index:
+    return Index(
+        f"{table}_tenant_id_capture_id_seq_idx", "tenant_id", "capture_id", "seq"
+    )
+
+
+def _fk(columns: tuple[str, str], table: str) -> ForeignKeyConstraint:
+    return ForeignKeyConstraint(list(columns), [f"{table}.tenant_id", f"{table}.id"])
+
+
+class AutomaticHeadTailPrediction(Base):
+    """The detector's dot and the SAM 3.1 head/tail at it, with no human
+    input; never a label, never a human-path prediction."""
+
+    __tablename__ = "automatic_head_tail_predictions"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        _fk(("tenant_id", "capture_id"), "captures"),
+        _capture_seq_index("automatic_head_tail_predictions"),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    producer: Mapped[str] = _producer()
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    status: Mapped[str] = mapped_column(Text)
+    laser_x: Mapped[float | None] = mapped_column(Double)
+    laser_y: Mapped[float | None] = mapped_column(Double)
+    laser_confidence: Mapped[float | None] = mapped_column(Double)
+    laser_predictor_version: Mapped[int | None] = mapped_column(Integer)
+    laser_checkpoint: Mapped[str | None] = mapped_column(Text)
+    head_x: Mapped[float | None] = mapped_column(Double)
+    head_y: Mapped[float | None] = mapped_column(Double)
+    tail_x: Mapped[float | None] = mapped_column(Double)
+    tail_y: Mapped[float | None] = mapped_column(Double)
+    width: Mapped[int | None] = mapped_column(Integer)
+    height: Mapped[int | None] = mapped_column(Integer)
+    mask_area_px: Mapped[int | None] = mapped_column(Integer)
+    silhouette_ratio: Mapped[float | None] = mapped_column(Double)
+    crop_x: Mapped[int | None] = mapped_column(Integer)
+    crop_y: Mapped[int | None] = mapped_column(Integer)
+    mask_bbox: Mapped[list[int] | None] = mapped_column(ARRAY(Integer))
+    sam_score: Mapped[float | None] = mapped_column(Double)
+    slate_probability: Mapped[float | None] = mapped_column(Double)
+    predictor_version: Mapped[int] = mapped_column(Integer)
+    checkpoint: Mapped[str | None] = mapped_column(Text)
+    core_version: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class AutomaticLaserCalibration(Base):
+    """A dive's label-free size-constancy calibration, accepted or refused."""
+
+    __tablename__ = "automatic_laser_calibrations"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        _fk(("tenant_id", "dive_id"), "dives"),
+        _fk(("tenant_id", "camera_calibration_id"), "camera_calibrations"),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    producer: Mapped[str] = _producer()
+    dive_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    camera_calibration_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    method: Mapped[str] = mapped_column(
+        Text, server_default=text("'size_constancy'::text")
+    )
+    algorithm_version: Mapped[str] = mapped_column(Text)
+    outcome: Mapped[str] = mapped_column(Text)
+    refusal_reason: Mapped[str | None] = mapped_column(Text)
+    laser_position: Mapped[list | None] = mapped_column(JSONB)
+    laser_axis: Mapped[list | None] = mapped_column(JSONB)
+    vanishing_px: Mapped[float | None] = mapped_column(Double)
+    line_direction: Mapped[list | None] = mapped_column(JSONB)
+    line_offset_px: Mapped[float | None] = mapped_column(Double)
+    o_mag_m: Mapped[float | None] = mapped_column(Double)
+    frames_used: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    candidate_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    pair_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    size_ratio: Mapped[float | None] = mapped_column(Double)
+    se_px: Mapped[float | None] = mapped_column(Double)
+    pair_residual_sd: Mapped[float | None] = mapped_column(Double)
+    capture_ids: Mapped[list[uuid.UUID]] = mapped_column(
+        ARRAY(Uuid), server_default=text("'{}'::uuid[]")
+    )
+    core_version: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class AutomaticSpeciesPrediction(Base):
+    """BioCLIP's zero-shot species on an automatic mask's crop."""
+
+    __tablename__ = "automatic_species_predictions"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        _fk(("tenant_id", "capture_id"), "captures"),
+        _fk(
+            ("tenant_id", "automatic_head_tail_prediction_id"),
+            "automatic_head_tail_predictions",
+        ),
+        _capture_seq_index("automatic_species_predictions"),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    producer: Mapped[str] = _producer()
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    automatic_head_tail_prediction_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    status: Mapped[str] = mapped_column(Text)
+    predictor_version: Mapped[int] = mapped_column(Integer)
+    model_id: Mapped[str] = mapped_column(Text)
+    predicted_choice: Mapped[str | None] = mapped_column(Text)
+    top1_probability: Mapped[float | None] = mapped_column(Double)
+    margin: Mapped[float | None] = mapped_column(Double)
+    top5: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    created_at: Mapped[datetime] = _created_at()
+
+
+class AutomaticMeasurement(Base):
+    """An automatic length (or why not), naming its head/tail and calibration."""
+
+    __tablename__ = "automatic_measurements"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        _fk(("tenant_id", "capture_id"), "captures"),
+        _fk(
+            ("tenant_id", "automatic_head_tail_prediction_id"),
+            "automatic_head_tail_predictions",
+        ),
+        _fk(
+            ("tenant_id", "automatic_laser_calibration_id"),
+            "automatic_laser_calibrations",
+        ),
+        _fk(("tenant_id", "laser_calibration_id"), "laser_calibrations"),
+        _fk(("tenant_id", "camera_calibration_id"), "camera_calibrations"),
+        _capture_seq_index("automatic_measurements"),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    producer: Mapped[str] = _producer()
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    automatic_head_tail_prediction_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    calibration_source: Mapped[str] = mapped_column(Text)
+    automatic_laser_calibration_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    laser_calibration_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    camera_calibration_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    length_m: Mapped[float | None] = mapped_column(Double)
+    depth_m: Mapped[float | None] = mapped_column(Double)
+    refusal: Mapped[str | None] = mapped_column(Text)
+    algorithm: Mapped[str] = mapped_column(Text)
+    algorithm_version: Mapped[str] = mapped_column(Text)
+    core_version: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
