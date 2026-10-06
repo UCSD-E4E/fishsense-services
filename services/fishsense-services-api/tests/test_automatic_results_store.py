@@ -685,3 +685,68 @@ async def test_the_catalog_rechecks_membership(
         await catalog.next_dive_for_automatic_results(tenants["lab"], **VERSIONS)
         is None
     )
+
+
+# -- the slate detector, read by the cohort itself (0035) ---------------------------
+
+
+async def test_a_detector_slate_frame_does_not_hold_its_dive_in_the_cohort(
+    owner_engine, app_engine
+):
+    """A frame given a fish head/tail before the detector scored it is never
+    measured once the detector calls it a slate, so it must not count as a
+    length outstanding -- else its dive is never done, and the track (always
+    the oldest dive) picks it every hour and stalls the backlog."""
+    from _slate_calibration_seed import slate_presence as presence
+
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    await calibrate(owner_engine, lab, dive_id)
+    c = await capture(owner_engine, lab, dive_id)
+    await _predict(app_engine, lab, dive_id, _predicted(c))
+    # Scored before the calibration, so the calibration is current.
+    await presence(owner_engine, lab, c, probability=0.9)
+    await _in(app_engine, lab, persist_automatic_calibration, dive_id,
+              _label_free(outcome="refused", refusal_reason="no_candidates",
+                          laser_position=None, laser_axis=None))  # fmt: skip
+
+    assert await _next(app_engine, lab) is None
+
+
+async def test_a_detector_slate_frame_gets_no_species(owner_engine, app_engine):
+    """A slate is not a fish to name: no BioCLIP job for it."""
+    from _slate_calibration_seed import slate_presence as presence
+
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    fish = await capture(owner_engine, lab, dive_id)
+    slate = await capture(owner_engine, lab, dive_id)
+    await _predict(app_engine, lab, dive_id, _predicted(fish), _predicted(slate))
+    await presence(owner_engine, lab, slate, probability=0.9)
+
+    jobs = await _in(app_engine, lab, automatic_species_captures, dive_id,
+                     species_version=1)  # fmt: skip
+    assert [j.capture_id for j in jobs] == [fish]
+
+
+async def test_a_late_slate_score_makes_the_calibration_stale(owner_engine, app_engine):
+    """Calibration candidates are the detector's slate frames; a score written
+    after the dive's calibration may add candidates, so the dive is
+    recalibrated -- not left on its 'no candidates' refusal."""
+    from _slate_calibration_seed import slate_presence as presence
+
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    c = await capture(owner_engine, lab, dive_id)
+    await _predict(app_engine, lab, dive_id,
+                   AutomaticHeadTailRow(capture_id=c, status="no_detections",
+                                        laser_x=1.0, laser_y=2.0,
+                                        predictor_version=1))  # fmt: skip
+    await _in(app_engine, lab, persist_automatic_calibration, dive_id,
+              _label_free(outcome="refused", refusal_reason="no_candidates",
+                          laser_position=None, laser_axis=None))  # fmt: skip
+    assert await _next(app_engine, lab) is None
+
+    await presence(owner_engine, lab, c, probability=0.9)
+
+    assert await _next(app_engine, lab) == dive_id

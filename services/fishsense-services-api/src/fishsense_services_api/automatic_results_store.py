@@ -129,6 +129,15 @@ _FRAME_DONE = """EXISTS (
       AND h.predictor_version = :hv
 )"""
 
+#: Capture `c` is one the slate-presence detector currently calls a slate
+#: (0035). The same rule as `slate_frames`, in SQL, so the cohort and the
+#: inputs agree.
+_DETECTOR_SLATE = f"""EXISTS (
+    SELECT 1 FROM current_slate_presence sp
+    WHERE sp.tenant_id = c.tenant_id AND sp.capture_id = c.id
+      AND sp.probability >= {SLATE_FRAME_THRESHOLD}
+)"""
+
 #: Dive `d` has a human measurement: any `measurements` row on its captures.
 _HUMAN_MEASURED = """EXISTS (
     SELECT 1 FROM measurements m
@@ -146,7 +155,7 @@ _WORK = f"""(
         SELECT 1 FROM current_automatic_head_tail_predictions h
         JOIN captures c ON c.tenant_id = h.tenant_id AND c.id = h.capture_id
         WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id AND c.is_canonical
-          AND h.status = 'predicted'
+          AND h.status = 'predicted' AND NOT {_DETECTOR_SLATE}
           AND NOT EXISTS (
               SELECT 1 FROM current_automatic_species_predictions s
               WHERE s.tenant_id = h.tenant_id AND s.capture_id = h.capture_id
@@ -163,12 +172,24 @@ _WORK = f"""(
             SELECT 1 FROM current_automatic_laser_calibrations a
             WHERE a.tenant_id = d.tenant_id AND a.dive_id = d.id
               AND a.algorithm_version = :cv
-              AND a.created_at >= coalesce((
-                  SELECT max(h.created_at)
-                  FROM current_automatic_head_tail_predictions h
-                  JOIN captures c ON c.tenant_id = h.tenant_id AND c.id = h.capture_id
-                  WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
-              ), '-infinity')
+              -- Stale against new frames, and against a slate score written
+              -- after it: the detector's slate frames are the candidates.
+              AND a.created_at >= greatest(
+                  coalesce((
+                      SELECT max(h.created_at)
+                      FROM current_automatic_head_tail_predictions h
+                      JOIN captures c
+                        ON c.tenant_id = h.tenant_id AND c.id = h.capture_id
+                      WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+                  ), '-infinity'),
+                  coalesce((
+                      SELECT max(sp.created_at)
+                      FROM current_slate_presence sp
+                      JOIN captures c
+                        ON c.tenant_id = sp.tenant_id AND c.id = sp.capture_id
+                      WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+                  ), '-infinity')
+              )
         )
     )
     OR (
@@ -181,6 +202,9 @@ _WORK = f"""(
             JOIN captures c ON c.tenant_id = h.tenant_id AND c.id = h.capture_id
             WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id AND c.is_canonical
               AND h.status = 'predicted'
+              -- A frame the detector now calls a slate is never measured
+              -- (automatic_measure_inputs), so it is no length outstanding.
+              AND NOT {_DETECTOR_SLATE}
               AND NOT EXISTS (
                   SELECT 1 FROM current_automatic_measurements m
                   WHERE m.tenant_id = h.tenant_id AND m.capture_id = h.capture_id
@@ -435,7 +459,7 @@ async def automatic_species_captures(
     """The dive's kept automatic masks with no automatic species at the
     current version cropped from them, in capture order."""
     rows = await conn.execute(
-        text("""
+        text(f"""
             SELECT c.id, c.checksum, c.v1_id IS NOT NULL AS from_v1,
                    h.id AS head_tail_id, h.mask_bbox,
                    s.id IS NOT NULL AS has_existing
@@ -445,7 +469,7 @@ async def automatic_species_captures(
             LEFT JOIN current_automatic_species_predictions s
               ON s.tenant_id = c.tenant_id AND s.capture_id = c.id
             WHERE c.tenant_id = :t AND c.dive_id = :d AND c.is_canonical
-              AND h.status = 'predicted'
+              AND h.status = 'predicted' AND NOT {_DETECTOR_SLATE}
               AND (s.id IS NULL OR s.automatic_head_tail_prediction_id <> h.id
                    OR s.predictor_version IS DISTINCT FROM :sv)
             ORDER BY c.number

@@ -42,6 +42,7 @@ from fishsense_services_contracts.automatic_results import (
     PredictAutomaticFrameInput,
 )
 from fishsense_services_contracts.laser_region import point_in_laser_region
+from fishsense_services_processor.slate_detect.frame import DECODE_ERRORS
 from fishsense_services_processor.automatic_results.frames import (
     LaserDot,
     automatic_frame_result,
@@ -106,25 +107,39 @@ class AutomaticFramesActivities:  # pylint: disable=too-few-public-methods
                     predictor_version=AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
                     slate_probability=frame.slate_probability,
                 )
-            dot = await asyncio.to_thread(
-                self._predict_dot,
-                raw_path,
-                payload.camera_matrix,
-                payload.distortion_coefficients,
-            )
-            raw_bytes = await asyncio.to_thread(raw_path.read_bytes)
+            try:
+                dot = await asyncio.to_thread(
+                    self._predict_dot,
+                    raw_path,
+                    payload.camera_matrix,
+                    payload.distortion_coefficients,
+                )
+                raw_bytes = await asyncio.to_thread(raw_path.read_bytes)
+                jpeg = await asyncio.to_thread(
+                    self._render_jpeg,
+                    raw_bytes,
+                    payload.camera_matrix,
+                    payload.distortion_coefficients,
+                )
+            except DECODE_ERRORS as exc:
+                # Recorded, not raised: raised, it retries to the child's
+                # timeout and the dive is re-selected every hour, stalling the
+                # backlog behind one corrupt file (the slate stage's rule).
+                activity.logger.warning(
+                    "capture=%s: raw would not decode: %s", frame.capture_id, exc
+                )
+                return AutomaticFrameResult(
+                    capture_id=frame.capture_id,
+                    status="decode_failed",
+                    predictor_version=AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
+                    slate_probability=frame.slate_probability,
+                )
         if (
             dot is not None
             and payload.laser_region
             and not point_in_laser_region(dot.x, dot.y, payload.laser_region)
         ):
             dot = None  # the laser stage's region gate
-        jpeg = await asyncio.to_thread(
-            self._render_jpeg,
-            raw_bytes,
-            payload.camera_matrix,
-            payload.distortion_coefficients,
-        )
         if frame.write_jpeg:
             await store.upload_processed_jpeg(frame.jpeg, jpeg)
 

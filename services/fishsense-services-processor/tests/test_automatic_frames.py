@@ -27,6 +27,7 @@ from typing import List
 import cv2
 import numpy as np
 import pytest
+import rawpy
 from botocore.exceptions import ClientError
 from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.exceptions import ApplicationError
@@ -182,7 +183,13 @@ class _Store:
         self.uploaded[ref.key] = data
 
 
-def _activities(store, *, gpu=True, dot=DOT, segmenter=None):
+def _corrupt_raw(*args):
+    raise rawpy.LibRawError("Input data is corrupted")
+
+
+def _activities(
+    store, *, gpu=True, dot=DOT, segmenter=None, predict_dot=None, render=None
+):
     async def checkpoint():
         return Path("/w/sam3.pt"), "sam3/3.1@abc"
 
@@ -190,10 +197,13 @@ def _activities(store, *, gpu=True, dot=DOT, segmenter=None):
         store_factory=lambda: store,
         sam3_checkpoint=checkpoint,
         cuda_available=lambda: gpu,
-        predict_dot=lambda raw_path, camera, dist: (
-            None if dot is None else LaserDot(dot[0], dot[1], 0.9, 3, "laser@x")
+        predict_dot=predict_dot
+        or (
+            lambda raw_path, camera, dist: (
+                None if dot is None else LaserDot(dot[0], dot[1], 0.9, 3, "laser@x")
+            )
         ),
-        render_jpeg=lambda raw_bytes, camera, dist: _jpeg(),
+        render_jpeg=render or (lambda raw_bytes, camera, dist: _jpeg()),
         segmenter=lambda path: segmenter or _Scored([(_mask_at(*DOT), 0.8)]),
     )
 
@@ -240,6 +250,22 @@ async def test_a_raw_missing_from_scratch_is_an_abstention():
         _activities(_Store(missing=True)).predict_automatic_frame, _payload()
     )
     assert r.status == "raw_unavailable"
+
+
+@pytest.mark.parametrize("stage", ["dot", "render"])
+async def test_a_raw_that_will_not_decode_is_an_abstention(stage):
+    """A corrupt raw must be recorded, not raised: raised, the activity retries
+    to the child's 6 h timeout, the parent fails, and the next hourly run picks
+    the same dive -- one bad file stalls the whole backlog. The slate detector
+    records the same as `decode_failed`."""
+    kwargs = (
+        {"predict_dot": _corrupt_raw} if stage == "dot" else {"render": _corrupt_raw}
+    )
+    r = await ActivityEnvironment().run(
+        _activities(_Store(), **kwargs).predict_automatic_frame, _payload()
+    )
+    assert r.status == "decode_failed"
+    assert r.capture_id == CAPTURE
 
 
 async def test_no_gpu_is_a_final_refusal():
