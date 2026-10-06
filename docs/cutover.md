@@ -168,7 +168,11 @@ generates them (terraform/secrets, #554) at `generated/services_db`.
 # The web service account is platform-written (krg-infra #550): oidc/web-service-account.
 bao kv put secret/tenants/fishsense/nrp_orchestrator kubeconfig=@nrp-orchestrator.kubeconfig   # §1.4
 #   not ready yet? the PATH must still exist:  bao kv put secret/tenants/fishsense/nrp_orchestrator kubeconfig=
-bao kv put secret/tenants/fishsense/model_weights access_key=- secret_key=...                 # §1.5 (processor only)
+# model_weights (processor only, §1.5). A field of `-` reads stdin, but only one field
+# may, so send both as JSON on stdin (a lone `-` reads the whole secret):
+read -rs -p 'model-weights access key: ' A && echo; read -rs -p 'secret key: ' S && echo
+jq -n --arg a "$A" --arg s "$S" '{access_key:$a, secret_key:$s}' \
+  | bao kv put secret/tenants/fishsense/model_weights -; unset A S
 # Confirm every field WITHOUT printing values:
 for p in postgres superset web label_studio object_store nas generated/services_db \
          nrp_orchestrator model_weights oidc/web oidc/analytics oidc/web-service-account; do
@@ -510,6 +514,25 @@ JPEG prefix in Garage. Then by hand (PLAN.md §6.6):
 Re-enable the nightly converge (`slot systemctl start nixos-upgrade.timer`; it
 now builds this repo), unfreeze merges, announce. Watch the first full hourly
 cycle in the Temporal UI (`https://workflows.krg.ucsd.edu/namespaces/fishsense`).
+
+### The cutover, as run (2026-10-05)
+
+Pre-checks all clean (krg-deploy checkout at origin/main; 12 OpenBao paths with
+their fields; the runner App sees this repo). Pre-flight build OK, images pre-pulled.
+Switched at **22:46 UTC** right after staging a fresh runner token:
+`switch-to-configuration` exited 4 because `nixos-upgrade.service` collided with the
+switch ("Unit nixos-rebuild-switch-to-configuration.service was already loaded");
+`openbao-agent` and `fishsense.service` both `Result=success`; db-bootstrap and
+migrate `Exited (0)`; the runner re-registered on this repo. migrate-v1 **GO**
+(parity 3,128 = 3,128). Memberships: the orchestrator and the web service account
+(`svc_fishsense`), then the owner as `admin`. The provider's `sub` is Authentik's
+hashed user id, the user's `uid` in Authentik's API; the UI may not show it, so look
+it up read-only with the platform's admin token on krg-deploy
+(`/api/v3/core/users/?search=<name>`, print only username and uid). v1's 22
+schedules deleted, v2's 22 unpaused, smoke **GO 10/10** (Label Studio and the object
+store included). Surprises: v1's Superset containers survived the switch (krg-infra
+expected them removed) and still serve analytics.fishsense; the web's first requests
+404'd until its service account had its membership.
 
 ## 4. What breaks, or differs, from v1
 

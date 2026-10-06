@@ -383,6 +383,22 @@ point a TypeScript API + orchestrator over Python activity queues becomes the be
   hints, not the source of truth. **Never key identity on email** (krg convention:
   emails are admin-mutable).
 
+- **Platform admin** *(decided 2026-10-05, build after the cutover's rollback window)*.
+  v2 has tenant roles only (`admin`, `member`); nobody in the app can act across tenants.
+  Today tenants and memberships are created in SQL as the database owner, which doesn't
+  scale past the lab and hands a person the BYPASSRLS password. So:
+  - a **`platform_admin` flag on `users`**, granted only by the database owner, never
+    through the API;
+  - it allows **tenant and membership management** through the API: create a tenant,
+    grant and revoke memberships and roles, list who is in which tenant. No tenant data;
+  - **it doesn't bypass RLS.** A platform admin who needs a tenant's data grants
+    themselves a membership, so every access to tenant data is still a membership row
+    with a who and a when (§4.1);
+  - the web portal gets a platform page for it; memberships stop being raw SQL in
+    docs/cutover.md §3 step 4d;
+  - rejected: a superuser who reads every tenant without a membership. Simpler, but it
+    gives up "every access is a membership".
+
 ### 4.3 Device abstraction & data model
 Core model shared by all devices; a typed extension per kind so new devices add a
 table, not a rewrite. Maps onto existing tables where possible.
