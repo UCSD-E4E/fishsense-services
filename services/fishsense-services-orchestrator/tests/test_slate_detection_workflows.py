@@ -10,7 +10,10 @@ stage), and pinned the same way:
 * `unavailable` from the GPU wake means no staging and no child (an unserved
   queue hangs);
 * a child still running means do nothing more: it owns the scratch;
-* the run timeout covers every step at its longest.
+* one run drains the backlog: it takes the next dive until the drain window
+  has passed, the cohort is empty, it hands back a dive this run already
+  took, or the GPU is unavailable;
+* the run timeout covers the window and then every step at its longest.
 """
 
 from __future__ import annotations
@@ -52,6 +55,9 @@ SHA = "b8d377ba22d155e7056a5e9ae747fdd0970c7c73dee981bbee17d95c8156cf78"
 
 EVENTS: list[tuple] = []
 CHILD_RESULTS: list[SlatePresenceResult] = []
+#: How long the stub child takes (skipped by the time-skipping server). Read
+#: through an activity: the sandboxed child sees its own copy of this module.
+CHILD_TAKES: list[timedelta] = [timedelta(0)]
 
 
 def _inputs(n=1):
@@ -91,6 +97,11 @@ async def _child_results() -> List[SlatePresenceResult]:
     return list(CHILD_RESULTS)
 
 
+@activity.defn(name="_child_takes")
+async def _child_takes() -> float:
+    return CHILD_TAKES[0].total_seconds()
+
+
 @workflow.defn(name="DetectSlatePresenceWorkflow")
 class _StubChild:  # pylint: disable=too-few-public-methods
     @workflow.run
@@ -100,6 +111,10 @@ class _StubChild:  # pylint: disable=too-few-public-methods
             ["child", workflow.info().workflow_id],
             schedule_to_close_timeout=timedelta(seconds=5),
         )
+        takes = await workflow.execute_activity(
+            "_child_takes", schedule_to_close_timeout=timedelta(seconds=5)
+        )
+        await workflow.sleep(takes)
         return await workflow.execute_activity(
             "_child_results",
             schedule_to_close_timeout=timedelta(seconds=5),
@@ -108,9 +123,16 @@ class _StubChild:  # pylint: disable=too-few-public-methods
 
 
 def _stubs(*, mode="gpu", images=1, selected=TARGET):
+    """`selected` is the cohort's answer every time, or a list of answers in
+    turn (None once it runs out); `mode` likewise for the GPU wake."""
+    cohort = list(selected) if isinstance(selected, list) else None
+    modes = list(mode) if isinstance(mode, list) else None
+
     @activity.defn(name="select_next_dive_for_slate_detection")
     async def select() -> StagingTarget | None:
-        return selected
+        if cohort is None:
+            return selected
+        return cohort.pop(0) if cohort else None
 
     @activity.defn(name="resolve_slate_detection_inputs")
     async def resolve(target: StagingTarget) -> DetectSlateImagesInput:
@@ -119,7 +141,7 @@ def _stubs(*, mode="gpu", images=1, selected=TARGET):
     @activity.defn(name="ensure_gpu_processor_running")
     async def wake() -> str:
         EVENTS.append(("wake",))
-        return mode
+        return modes.pop(0) if modes is not None else mode
 
     @activity.defn(name="stage_raw_bytes_for_dive")
     async def stage(target: StagingTarget) -> StageRawBytesResult:
@@ -136,13 +158,14 @@ def _stubs(*, mode="gpu", images=1, selected=TARGET):
         EVENTS.append(("persist", len(results)))
         return len(results)
 
-    return [select, resolve, wake, stage, cleanup, persist, _record, _child_results]
+    return [select, resolve, wake, stage, cleanup, persist]
 
 
-async def _run(child_results=(), before=None, **stubs):
+async def _run(child_results=(), before=None, child_takes=timedelta(0), **stubs):
     EVENTS.clear()
     CHILD_RESULTS.clear()
     CHILD_RESULTS.extend(child_results)
+    CHILD_TAKES[0] = child_takes
     async with await WorkflowEnvironment.start_time_skipping(
         data_converter=pydantic_data_converter
     ) as env:
@@ -151,13 +174,13 @@ async def _run(child_results=(), before=None, **stubs):
                 env.client,
                 task_queue=QUEUE,
                 workflows=[DetectSlatePresenceParentWorkflow],
-                activities=_stubs(**stubs),
+                activities=_stubs(**stubs) + [_record, _child_results, _child_takes],
             ),
             Worker(
                 env.client,
                 task_queue=PROCESSOR_GPU_TASK_QUEUE,
                 workflows=[_StubChild],
-                activities=[_record, _child_results],
+                activities=[_record, _child_results, _child_takes],
             ),
         ):
             if before:
@@ -230,9 +253,56 @@ async def test_a_child_already_running_means_do_nothing_more():
     assert _kinds() == ["wake", "stage"]
 
 
+def _dive():
+    return StagingTarget(TENANT, uuid.uuid4())
+
+
+def _children():
+    return [e[1] for e in EVENTS if e[0] == "child"]
+
+
+async def test_one_run_drains_the_backlog_until_the_cohort_is_empty():
+    dives = [_dive(), _dive(), _dive()]
+    assert await _run([_result()], selected=dives) == dives[-1]
+    assert _children() == [f"detect-slate-{d.dive_id}" for d in dives]
+    assert [e for e in EVENTS if e[0] == "cleanup"] == [
+        ("cleanup", d.dive_id) for d in dives
+    ]
+
+
+async def test_no_new_dive_is_started_once_the_drain_window_has_passed():
+    """The window bounds when a dive may start, not how long it may run."""
+    dives = [_dive() for _ in range(5)]
+    most = sut.DETECT_DRAIN_WINDOW * 0.6
+    assert await _run([_result()], selected=dives, child_takes=most) == dives[1]
+    assert _children() == [f"detect-slate-{d.dive_id}" for d in dives[:2]]
+
+
+async def test_a_dive_handed_back_twice_ends_the_run():
+    """A dive whose frames all fail to persist stays in the cohort; taking it
+    again would spin until the window closed."""
+    assert await _run([_result()]) == TARGET
+    assert _children() == [f"detect-slate-{DIVE}"]
+
+
+async def test_the_gpu_going_away_mid_drain_ends_the_run():
+    dives = [_dive(), _dive(), _dive()]
+    got = await _run([_result()], selected=dives, mode=["gpu", "unavailable"])
+    assert got == dives[0]
+    assert _children() == [f"detect-slate-{dives[0].dive_id}"]
+    assert ("stage", dives[1].dive_id) not in EVENTS
+
+
+async def test_a_dive_with_nothing_to_detect_does_not_end_the_drain():
+    dives = [_dive(), _dive()]
+    assert await _run(images=0, selected=dives) == dives[-1]
+    assert not EVENTS
+
+
 def test_the_run_outlives_every_step_it_waits_on():
     assert sut.DETECT_RUN_TIMEOUT >= (
-        sut.DETECT_SELECT_TIMEOUT
+        sut.DETECT_DRAIN_WINDOW
+        + sut.DETECT_SELECT_TIMEOUT
         + sut.DETECT_RESOLVE_TIMEOUT
         + sut.GPU_WAKE_TIMEOUT
         + sut.STAGE_RAW_TIMEOUT
