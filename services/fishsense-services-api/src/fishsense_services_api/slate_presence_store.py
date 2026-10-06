@@ -6,7 +6,7 @@ frame? The model is 2026-10-03_slate_detector@95a77d95's (see
 `fishsense_services_contracts.slate_presence`). Built the way the species
 prediction store is (`species_prediction_store`), with its rules:
 
-* **predictions are appended** (migration slate_01), and every reader judges
+* **predictions are appended** (migration 0035), and every reader judges
   the current one (`current_slate_presence`);
 * **the cohort** is a dive of **any priority** whose device has a current
   pinhole calibration (the frame is rectified; `camera_sql`) and which has a
@@ -14,7 +14,7 @@ prediction store is (`species_prediction_store`), with its rules:
   By the owner's decision (2026-10-05) **every** canonical frame is scored,
   labelled or not, in every dive at every priority, so the predictions can
   be evaluated for publication (`slate_presence_evaluation`, migration
-  slate_01); every other cohort is high-only, deliberately. An abstention (`decode_failed`) is a
+  0035); every other cohort is high-only, deliberately. An abstention (`decode_failed`) is a
   prediction, so a raw that never decodes doesn't re-select its dive hourly.
   Oldest first;
 * the resolver mirrors the selector exactly, or a dive re-fires every hour;

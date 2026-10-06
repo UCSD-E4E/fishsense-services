@@ -128,3 +128,23 @@ def test_every_label_sync_is_built_with_a_cursor_store(deps):
             if hasattr(value, "sync_cursor") and hasattr(value, "advance_sync_cursor")
         ]
         assert stores, activity.__temporal_activity_definition.name
+
+
+def test_the_automatic_chain_reads_the_real_slate_detector(deps):
+    """The automatic track was built against a stub (`no_slate_frames`) while
+    the slate detector was built beside it. Wired, a frame the detector calls
+    a slate is excluded from fish measurement and used for calibration; left
+    stubbed, every slate would be measured as a fish."""
+    from fishsense_services_api.automatic_results_store import AutomaticResultsCatalog
+    from fishsense_services_api.slate_presence_store import slate_frames
+
+    catalogs = [
+        value
+        for stage in stages()
+        if stage.name == "automatic_results"
+        for activity in stage.build_activities(deps)
+        for value in vars(activity.__self__).values()
+        if isinstance(value, AutomaticResultsCatalog)
+    ]
+    assert catalogs
+    assert all(c._slate_frames is slate_frames for c in catalogs)

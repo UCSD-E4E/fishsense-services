@@ -40,7 +40,7 @@ role (0032's lab binding, on these tables too).
 
 Additive: new tables and views only.
 
-Revision ID: autoresults_01
+Revision ID: 0036
 Revises: 0034
 """
 
@@ -52,8 +52,8 @@ from fishsense_services_api.schema_audit import (
     RESEARCH_ROLE,
 )
 
-revision = "autoresults_01"
-down_revision = "0034"
+revision = "0036"
+down_revision = "0035"
 
 ACTIVE_TENANT = "NULLIF(current_setting('app.tenant_id', true), '')::uuid"
 _LAB = "tenant_id = (SELECT public.research_tenant_id())"

@@ -34,7 +34,7 @@ the detector queued: the prediction that put its frame in the dive's slate
 project. NULL is every other row (a frame a person marked `Slate, Laser on
 slate`, and everything v1 wrote). Additive, nullable, same-tenant.
 
-Revision ID: slate_01
+Revision ID: 0035
 Revises: 0034
 """
 
@@ -49,7 +49,7 @@ from fishsense_services_api.schema_audit import (
 )
 from fishsense_services_api.slate_presence_store import SLATE_PRESENCE_THRESHOLD
 
-revision = "slate_01"
+revision = "0035"
 down_revision = "0034"
 
 ACTIVE_TENANT = "NULLIF(current_setting('app.tenant_id', true), '')::uuid"

@@ -4,7 +4,7 @@ New in v2 (no v1 counterpart): fish lengths with no human label, by the chain
 cscw-fishsense2027@96a8da07 validated (PAPER.md §6; e2e_measurement/
 run_e2e.py, score.py, tail/evaluate.py). Decided 2026-10-06:
 
-* **a separate track** (migration autoresults_01): its own append-only tables,
+* **a separate track** (migration 0036): its own append-only tables,
   producer ``automatic``. Nothing here reads a label as an input or writes a
   label, a human-path prediction or a `measurements` row; the human path is
   exactly as it was;

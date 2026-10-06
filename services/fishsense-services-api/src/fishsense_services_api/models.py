@@ -525,7 +525,7 @@ class SlateLabel(_LabelCore, Base):
     skipped_points: Mapped[list | None] = mapped_column(JSONB)
     image_url: Mapped[str | None] = mapped_column(Text)
     #: The slate detector's prediction that queued this frame (migration
-    #: slate_01); NULL for a frame a person marked, and every v1 row.
+    #: 0035); NULL for a frame a person marked, and every v1 row.
     slate_presence_prediction_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
 
     @classmethod
@@ -743,7 +743,7 @@ class SpeciesPrediction(Base):
 
 class SlatePresencePrediction(Base):
     """The slate detector's P(slate) for one frame, appended (migration
-    slate_01; new in v2). The latest per capture is current."""
+    0035; new in v2). The latest per capture is current."""
 
     __tablename__ = "slate_presence_predictions"
     __table_args__ = (
@@ -1099,7 +1099,7 @@ class LabelStudioProject(Base):
     created_at: Mapped[datetime] = _created_at()
 
 
-# -- automatic results (migration autoresults_01; new in v2) ------------------------
+# -- automatic results (migration 0036; new in v2) ------------------------
 
 
 def _producer() -> Mapped[str]:

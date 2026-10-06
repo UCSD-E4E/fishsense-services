@@ -4,7 +4,7 @@ New in v2 (v1's slate predictor estimated pose and was retired 2026-08-03).
 The model is 2026-10-03_slate_detector@95a77d95's presence classifier; see
 `fishsense_services_contracts.slate_presence`. Pinned here:
 
-* **predictions are appended, never updated** (migration slate_01, like every
+* **predictions are appended, never updated** (migration 0035, like every
   prediction table), and `current_slate_presence` is the latest per capture;
 * **the cohort**: a dive of **any** priority, labelled or not (every canonical
   frame is scored, for publication; the other cohorts are high-only,

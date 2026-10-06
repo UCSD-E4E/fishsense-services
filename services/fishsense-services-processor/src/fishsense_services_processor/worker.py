@@ -16,6 +16,21 @@ deleting its Deployment, which SIGTERMs a pod that may be mid-activity.
     FISHSENSE_PROCESSOR_ROLE=light python -m fishsense_services_processor
 """
 
+# Import torch before anything imports fishsense-core, wherever torch is
+# installed (the GPU image; the light image has none). fishsense-core 4.1.0's
+# `__init__` dlopens every `site-packages/nvidia/*/lib/*.so*` with RTLD_GLOBAL,
+# libnvblas included, and torch loaded after that segfaults on any CPU matrix
+# multiply ("[NVBLAS] CPU Blas library need to be provided") -- the GPU
+# queue's CPU-fallback Deployment, for every torch stage. Here, in the
+# process's entry point, not the package's `__init__`: Temporal's workflow
+# sandbox re-imports the package, and torch in the sandbox crashes it.
+# Pinned by tests/test_slate_detect_cpu_fallback.py; remove once
+# fishsense-core stops preloading libnvblas.
+try:
+    import torch  # noqa: F401  pylint: disable=unused-import
+except ImportError:
+    pass
+
 import asyncio
 import logging
 import signal

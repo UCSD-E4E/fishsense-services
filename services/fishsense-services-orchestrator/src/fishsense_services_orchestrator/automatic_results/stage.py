@@ -6,10 +6,10 @@ activities are registered either way, so a named dive can be run by hand.
 Enabled, it fires hourly at +48 -- after head/tail (+32) and species (+36)
 predict, whose GPU it shares -- and skips on overlap: one dive per run.
 
-The slate-presence detector is being built in parallel; until it lands the
-catalog's `slate_frames` is the store's stub (no slate frames), so every
-backlog dive's lengths fall back to its effective stored calibration where it
-has one. Wire its store function here when it lands.
+The catalog reads the slate-presence detector's frames (`slate_presence_store.
+slate_frames`, 0035): a frame it calls a slate is never measured as a fish and
+is a calibration candidate. A dive the detector hasn't scored yet reads as
+having none, so run the detector ahead of this stage.
 """
 
 from datetime import timedelta
@@ -17,6 +17,7 @@ from datetime import timedelta
 from temporalio.client import ScheduleOverlapPolicy
 
 from fishsense_services_api.automatic_results_store import AutomaticResultsCatalog
+from fishsense_services_api.slate_presence_store import slate_frames
 from fishsense_services_contracts.object_store import ObjectStoreConnection
 from fishsense_services_orchestrator.automatic_results.activities import (
     AutomaticResultsActivities,
@@ -57,7 +58,11 @@ def automatic_results_schedules(
 
 def _activities(deps: Deps):
     activities = AutomaticResultsActivities(
-        catalog=AutomaticResultsCatalog(deps.engine, sub=deps.sub),
+        # The slate-presence detector's frames: never measured as fish, and
+        # calibration candidates (0035).
+        catalog=AutomaticResultsCatalog(
+            deps.engine, sub=deps.sub, slate_frames=slate_frames
+        ),
         store=OrchestratorObjectStore.from_settings(ObjectStoreConnection()),
     )
     return [

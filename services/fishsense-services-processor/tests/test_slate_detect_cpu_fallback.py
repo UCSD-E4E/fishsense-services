@@ -10,9 +10,8 @@ on the CPU-fallback Deployment every torch stage dies the same way (the slate
 detector, laser prediction, head/tail's Mask R-CNN); on a GPU the convolutions
 run on CUDA and it does not show. Importing torch first avoids it.
 
-Pinned as a strict xfail: it passes the day fishsense-core stops preloading
-libnvblas (or the processor imports torch first), and then this marker must
-go. Runs in a subprocess, so the crash cannot take the test session with it.
+Fixed in the processor: its worker entry point imports torch first, wherever
+torch is installed. Runs in a subprocess, so the crash cannot take the test session with it.
 Needs the `torch` extra.
 """
 
@@ -28,6 +27,7 @@ pytest.importorskip("torch")
 
 _PROBE = textwrap.dedent("""
     {first}
+    from fishsense_services_processor import worker  # the process's entry point
     from fishsense_services_processor import registry
     registry.stages()  # what the worker does at start: every stage imported
     import torch
@@ -51,13 +51,11 @@ def _cpu_inference(first: str = "") -> subprocess.CompletedProcess:
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="fishsense-core 4.1.0 preloads libnvblas with RTLD_GLOBAL; torch's "
-    "CPU BLAS then segfaults on the GPU queue's CPU fallback",
-)
 def test_cpu_inference_after_every_stage_is_imported():
-    assert _cpu_inference().returncode == 0
+    """The worker, the process's entry point, imports torch before anything
+    imports fishsense-core (`fishsense_services_processor/worker.py`)."""
+    result = _cpu_inference()
+    assert result.returncode == 0, result.stderr[-2000:]
 
 
 def test_importing_torch_first_avoids_it():
