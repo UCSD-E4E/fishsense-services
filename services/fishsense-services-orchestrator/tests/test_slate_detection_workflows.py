@@ -22,13 +22,19 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import List
 
+import pytest
 from temporalio import activity, workflow
+from temporalio.client import WorkflowFailureError
 from temporalio.contrib.pydantic import pydantic_data_converter
+from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
 from fishsense_services_contracts import PROCESSOR_GPU_TASK_QUEUE
 from fishsense_services_contracts.object_store import ObjectRef
+from fishsense_services_orchestrator.ingest.nas_errors import (
+    NAS_FILE_NOT_FOUND_TYPE,
+)
 from fishsense_services_contracts.slate_presence import (
     DetectSlateImage,
     DetectSlateImagesInput,
@@ -54,6 +60,8 @@ K = [[3500.0, 0.0, 2000.0], [0.0, 3500.0, 1500.0], [0.0, 0.0, 1.0]]
 SHA = "b8d377ba22d155e7056a5e9ae747fdd0970c7c73dee981bbee17d95c8156cf78"
 
 EVENTS: list[tuple] = []
+#: What each cohort query was told to exclude, in turn.
+SELECTS: list[tuple] = []
 CHILD_RESULTS: list[SlatePresenceResult] = []
 #: How long the stub child takes (skipped by the time-skipping server). Read
 #: through an activity: the sandboxed child sees its own copy of this module.
@@ -122,14 +130,16 @@ class _StubChild:  # pylint: disable=too-few-public-methods
         )
 
 
-def _stubs(*, mode="gpu", images=1, selected=TARGET):
+def _stubs(*, mode="gpu", images=1, selected=TARGET, stage_fails=None):
     """`selected` is the cohort's answer every time, or a list of answers in
-    turn (None once it runs out); `mode` likewise for the GPU wake."""
+    turn (None once it runs out); `mode` likewise for the GPU wake.
+    `stage_fails` maps a dive to the error its staging raises."""
     cohort = list(selected) if isinstance(selected, list) else None
     modes = list(mode) if isinstance(mode, list) else None
 
     @activity.defn(name="select_next_dive_for_slate_detection")
-    async def select() -> StagingTarget | None:
+    async def select(exclude: List[uuid.UUID] | None = None) -> StagingTarget | None:
+        SELECTS.append(tuple(exclude or ()))
         if cohort is None:
             return selected
         return cohort.pop(0) if cohort else None
@@ -146,6 +156,8 @@ def _stubs(*, mode="gpu", images=1, selected=TARGET):
     @activity.defn(name="stage_raw_bytes_for_dive")
     async def stage(target: StagingTarget) -> StageRawBytesResult:
         EVENTS.append(("stage", target.dive_id))
+        if stage_fails and target.dive_id in stage_fails:
+            raise stage_fails[target.dive_id]
         return StageRawBytesResult(staged=1, skipped_already_present=0, no_path=0)
 
     @activity.defn(name="cleanup_raw_bytes_for_dive")
@@ -163,6 +175,7 @@ def _stubs(*, mode="gpu", images=1, selected=TARGET):
 
 async def _run(child_results=(), before=None, child_takes=timedelta(0), **stubs):
     EVENTS.clear()
+    SELECTS.clear()
     CHILD_RESULTS.clear()
     CHILD_RESULTS.extend(child_results)
     CHILD_TAKES[0] = child_takes
@@ -310,3 +323,41 @@ def test_the_run_outlives_every_step_it_waits_on():
         + sut.DETECT_PERSIST_TIMEOUT
         + sut.CLEANUP_RAW_TIMEOUT
     )
+
+
+def _missing():
+    return ApplicationError(
+        "NAS path not found: PA190160.ORF",
+        type=NAS_FILE_NOT_FOUND_TYPE,
+        non_retryable=True,
+    )
+
+
+async def test_the_run_passes_the_dives_it_took_to_the_cohort():
+    dives = [_dive(), _dive()]
+    await _run([_result()], selected=dives)
+    assert SELECTS == [
+        (),
+        (dives[0].dive_id,),
+        (dives[0].dive_id, dives[1].dive_id),
+    ]
+
+
+async def test_a_dive_whose_raws_are_missing_is_cleaned_up_and_skipped():
+    """A frame moved on the NAS since ingest must not hold the backlog: the
+    dive is cleaned up and the run goes on to the next one."""
+    bad, good = _dive(), _dive()
+    got = await _run(
+        [_result()], selected=[bad, good], stage_fails={bad.dive_id: _missing()}
+    )
+    assert got == good
+    assert _children() == [f"detect-slate-{good.dive_id}"]
+    assert ("cleanup", bad.dive_id) in EVENTS
+    assert ("persist", 1) in EVENTS
+
+
+async def test_any_other_staging_failure_still_fails_the_run():
+    boom = ApplicationError("bucket gone", type="Boom", non_retryable=True)
+    with pytest.raises(WorkflowFailureError):
+        await _run([_result()], stage_fails={DIVE: boom})
+    assert _children() == []

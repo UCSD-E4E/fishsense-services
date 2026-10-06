@@ -97,12 +97,26 @@ class _Catalog:
 
 
 class _Nas:
-    """FileStation's `download_to`: the file lands at dest_dir/basename."""
+    """FileStation's `download_to`: the file lands at dest_dir/basename.
+    `there` is what `exists` answers: True, False, or an error to raise."""
 
-    def __init__(self, payload=b"raw-bytes", error: BaseException | None = None):
+    def __init__(
+        self,
+        payload=b"raw-bytes",
+        error: BaseException | None = None,
+        there: bool | BaseException = True,
+    ):
         self.payload = payload
         self.error = error
+        self.there = there
         self.calls: list[str] = []
+        self.checked: list[str] = []
+
+    def exists(self, *, file_path: str) -> bool:
+        self.checked.append(file_path)
+        if isinstance(self.there, BaseException):
+            raise self.there
+        return self.there
 
     def download_to(self, *, src_path: str, dest_dir: str) -> None:
         self.calls.append(src_path)
@@ -278,6 +292,49 @@ async def test_permanent_408_raises_non_retryable_application_error(s3):
     assert excinfo.value.type == NAS_FILE_NOT_FOUND_TYPE
     assert len(nas.calls) == 1
     assert _raw_keys(s3) == set()
+
+
+async def test_a_502_for_a_file_the_nas_does_not_have_is_permanent(s3):
+    """FileStation answers a download of a moved or deleted file with a 502,
+    not a 408: retried, it held the slate scan on one dive for hours. A
+    failed download asks whether the file is there; if not, it is final."""
+    nas = _Nas(error=TransportError("download HTTP 502 Bad Gateway"), there=False)
+
+    with pytest.raises(ApplicationError) as excinfo:
+        await _stage(_activities(s3, [_capture(1)], nas))
+
+    assert excinfo.value.non_retryable is True
+    assert excinfo.value.type == NAS_FILE_NOT_FOUND_TYPE
+    assert nas.calls[0] in str(excinfo.value)
+    assert nas.checked == nas.calls
+    assert _raw_keys(s3) == set()
+
+
+async def test_a_502_for_a_file_that_is_there_stays_transient(s3):
+    nas = _Nas(error=TransportError("download HTTP 502 Bad Gateway"), there=True)
+
+    with pytest.raises(BaseException) as excinfo:
+        await _stage(_activities(s3, [_capture(1)], nas))
+
+    leaves = list(sut._iter_leaf_exceptions(excinfo.value))
+    assert not any(isinstance(leaf, ApplicationError) for leaf in leaves)
+    assert any(isinstance(leaf, TransportError) for leaf in leaves)
+
+
+async def test_an_existence_check_that_fails_leaves_the_download_error_transient(s3):
+    """The NAS that 502s a download may 502 the check too: that proves
+    nothing missing, so the download's own (transient) error stands."""
+    nas = _Nas(
+        error=TransportError("download HTTP 502 Bad Gateway"),
+        there=TransportError("list HTTP 502 Bad Gateway"),
+    )
+
+    with pytest.raises(BaseException) as excinfo:
+        await _stage(_activities(s3, [_capture(1)], nas))
+
+    leaves = list(sut._iter_leaf_exceptions(excinfo.value))
+    assert not any(isinstance(leaf, ApplicationError) for leaf in leaves)
+    assert [str(leaf) for leaf in leaves] == ["download HTTP 502 Bad Gateway"]
 
 
 async def test_transient_dsm_407_propagates_retryable(s3):

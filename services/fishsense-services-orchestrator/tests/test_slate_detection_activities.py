@@ -59,13 +59,17 @@ class FakeCatalog:
         self.inputs = inputs
         self.refuse = refuse
         self.versions = []
+        self.excluded = []
         self.persisted = []
 
     async def member_tenants(self):
         return [LAB, REEF]
 
-    async def next_dive_for_slate_detection(self, tenant_id, *, model_version):
+    async def next_dive_for_slate_detection(
+        self, tenant_id, *, model_version, exclude=()
+    ):
         self.versions.append(model_version)
+        self.excluded.append((tenant_id, list(exclude)))
         return self.candidates.get(tenant_id)
 
     async def slate_detection_inputs(self, tenant_id, dive_id, *, model_version):
@@ -101,6 +105,15 @@ async def test_selects_the_oldest_dive_across_tenants():
 
     assert target == StagingTarget(REEF, DIVE)
     assert catalog.versions == [SLATE_DETECTOR_VERSION] * 2
+
+
+async def test_the_dives_a_run_already_took_are_excluded_in_every_tenant():
+    taken = [DIVE, uuid.uuid4()]
+    catalog = FakeCatalog()
+
+    await _run(_activities(catalog).select_next_dive_for_slate_detection, taken)
+
+    assert catalog.excluded == [(LAB, taken), (REEF, taken)]
 
 
 async def test_no_candidate_is_none():

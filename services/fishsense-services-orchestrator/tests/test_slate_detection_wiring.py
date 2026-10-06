@@ -74,8 +74,10 @@ class _Catalog:
     async def member_tenants(self):
         return [TENANT]
 
-    async def next_dive_for_slate_detection(self, tenant_id, *, model_version):
-        return SlateDetectionCandidate(DIVE, T0)
+    async def next_dive_for_slate_detection(
+        self, tenant_id, *, model_version, exclude=()
+    ):
+        return None if DIVE in exclude else SlateDetectionCandidate(DIVE, T0)
 
     async def slate_detection_inputs(self, tenant_id, dive_id, *, model_version):
         return SlateDetectionInputs(

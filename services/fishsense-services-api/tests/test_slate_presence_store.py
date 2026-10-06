@@ -299,6 +299,29 @@ async def test_the_oldest_dive_first(owner_engine, app_engine):
     assert await _next(app_engine, lab) == older
 
 
+async def test_a_dive_the_run_already_took_is_not_offered_again(
+    owner_engine, app_engine
+):
+    """A dive whose raws can't be staged keeps its unpredicted frames; the
+    run passes the dives it took so it moves past one instead of stalling."""
+    lab = await tenant(owner_engine)
+    older = await _dive(owner_engine, lab, created_at=later(1))
+    newer = await _dive(owner_engine, lab, created_at=later(2))
+    for each in (newer, older):
+        await capture(owner_engine, lab, each)
+
+    async def _next_but(*exclude):
+        candidate = await _in(
+            app_engine, lab, next_dive_for_slate_detection,
+            model_version=V, exclude=list(exclude),
+        )  # fmt: skip
+        return None if candidate is None else candidate.dive_id
+
+    assert await _next_but() == older
+    assert await _next_but(older) == newer
+    assert await _next_but(older, newer) is None
+
+
 async def test_another_tenants_dive_is_never_offered(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     reef = await tenant(owner_engine, "reef")
@@ -553,6 +576,12 @@ async def test_the_catalog_acts_only_in_tenants_it_is_a_member_of(
     assert await catalog.member_tenants() == [lab]
     candidate = await catalog.next_dive_for_slate_detection(lab, model_version=V)
     assert candidate is not None
+    assert (
+        await catalog.next_dive_for_slate_detection(
+            lab, model_version=V, exclude=[candidate.dive_id]
+        )
+        is None
+    )
     inputs = await catalog.slate_detection_inputs(
         lab, candidate.dive_id, model_version=V
     )
