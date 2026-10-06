@@ -25,6 +25,11 @@ SAM_KEY=sam3/3.1/sam3.1_multiplex.pt
 RUN3_KEY=laser-detector/run3/run3_epoch_021.pt
 RUN3_SHA256=bd3ab8f5e273   # prefix of fishsense-core 4.1.0's manifest entry
 RUN3_SIZE=294473278
+# The slate presence detector (2026-10-03_slate_detector, runs/final-q1). Its
+# weights are uploaded by hand; this verifies the copy in Garage and pins it.
+SLATE_KEY=slate-detector/q1/slate_efficientnet_b0.pt
+SLATE_SHA256=b8d377ba22d155e7056a5e9ae747fdd0970c7c73dee981bbee17d95c8156cf78
+SLATE_SIZE=16339455
 
 work=$(mktemp -d)
 trap 'rm -rf "${work:?}"' EXIT
@@ -73,6 +78,13 @@ SAM_SIZE=$(stat -c %s "$work/sam3.pt")
 rm -f "$work/sam3.pt"
 echo "sha256 $SAM_SHA256  size $SAM_SIZE"
 
+echo "== slate detector (verified against its pin)"
+s3 s3 cp "s3://$WEIGHTS_BUCKET/$SLATE_KEY" "$work/slate.pt" --only-show-errors
+[ "$(stat -c %s "$work/slate.pt")" = "$SLATE_SIZE" ] || { echo "slate detector: wrong size" >&2; exit 1; }
+[ "$(sha256sum "$work/slate.pt" | cut -d' ' -f1)" = "$SLATE_SHA256" ] || { echo "slate detector: wrong sha256" >&2; exit 1; }
+rm -f "$work/slate.pt"
+echo "ok"
+
 echo "== the Secret"
 cat > "$work/processor.env" <<EOF
 FISHSENSE_OBJECT_STORE_ENDPOINT_URL=$ENDPOINT
@@ -86,6 +98,8 @@ FISHSENSE_MODEL_WEIGHTS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
 FISHSENSE_MODEL_WEIGHTS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
 FISHSENSE_SAM3_SHA256=$SAM_SHA256
 FISHSENSE_SAM3_SIZE=$SAM_SIZE
+FISHSENSE_SLATE_DETECTOR_SHA256=$SLATE_SHA256
+FISHSENSE_SLATE_DETECTOR_SIZE=$SLATE_SIZE
 EOF
 unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
 kubectl -n "$NS" create secret generic fishsense-processor-secrets \
