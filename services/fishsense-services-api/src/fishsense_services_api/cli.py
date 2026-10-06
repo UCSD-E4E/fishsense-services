@@ -4,10 +4,14 @@ fishsense-services-api migrate      # bring the schema to head, as the owner
 fishsense-services-api migrate-v1   # one-shot v1 data migration, with go/no-go
 fishsense-services-api audit-range-trend --tenant lab 490 491
                                     # read-only calibration audit (range_trend)
+fishsense-services-api validate-automatic --tenant <id>
+                                    # read-only: the automatic chain against the
+                                    # paper's dives (cscw-fishsense2027 §6)
 """
 
 import argparse
 import asyncio
+import json
 import sys
 import uuid
 from collections.abc import Mapping, Sequence
@@ -16,6 +20,15 @@ from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from fishsense_services_api.automatic_validation import (
+    PAPER_POOL_DIVES,
+    PAPER_REEF_DIVES,
+    format_report,
+    pool_ladder,
+    reef_comparison,
+    reef_coverage,
+)
+from fishsense_services_api.automatic_validation_store import validation_frames
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.migrations import head_revision, upgrade
 from fishsense_services_api.range_trend import (
@@ -61,6 +74,31 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("dive_numbers", type=int, nargs="+", metavar="dive_number")
     audit.add_argument("--min-frames", type=int, default=DEFAULT_MIN_FRAMES)
     audit.add_argument("--min-range-ratio", type=float, default=DEFAULT_MIN_RANGE_RATIO)
+    validate = commands.add_parser(
+        "validate-automatic",
+        help="score the automatic chain against human labels and tape on the "
+        "paper's dives, by its metrics (read-only)",
+    )
+    validate.add_argument(
+        "--tenant", required=True, help="the tenant's slug, or its id"
+    )
+    validate.add_argument(
+        "--pool-dives", type=int, nargs="*", default=list(PAPER_POOL_DIVES)
+    )
+    validate.add_argument(
+        "--reef-dives", type=int, nargs="*", default=list(PAPER_REEF_DIVES)
+    )
+    validate.add_argument(
+        "--frame-outputs",
+        help="JSON lines of automatic outputs by capture number, replacing the "
+        "database's (capture_number, auto_dot, auto_head_tail, "
+        "auto_head_tail_humandot)",
+    )
+    validate.add_argument(
+        "--label-free",
+        help="JSON {dive number: {laser_position, laser_axis}}, replacing the "
+        "database's label-free calibrations",
+    )
     return parser
 
 
@@ -73,6 +111,8 @@ async def main(argv: Sequence[str]) -> int:
         return await _migrate_v1()
     if args.command == "audit-range-trend":
         return await _audit_range_trend(args)
+    if args.command == "validate-automatic":
+        return await _validate_automatic(args)
     return 2  # unreachable: argparse rejects unknown commands
 
 
@@ -205,6 +245,51 @@ async def _audit_range_trend(args: argparse.Namespace) -> int:
         return 1 if missing else 0
     finally:
         await engine.dispose()
+
+
+async def _validate_automatic(args: argparse.Namespace) -> int:
+    """The validation harness: the paper's tables from a database. Read-only;
+    exits 0 whatever the numbers say (they are findings, not failures)."""
+    settings = _settings(AuditSettings)
+    if settings is None:
+        return 2
+    outputs = label_free = None
+    if args.frame_outputs:
+        with open(args.frame_outputs, encoding="utf-8") as fh:
+            outputs = {
+                int(r["capture_number"]): r
+                for r in (json.loads(line) for line in fh if line.strip())
+            }
+    if args.label_free:
+        with open(args.label_free, encoding="utf-8") as fh:
+            label_free = {
+                int(k): (v["laser_position"], v["laser_axis"])
+                for k, v in json.load(fh).items()
+            }
+    engine = create_async_engine(settings.database_url.get_secret_value())
+    try:
+        tenant_id = await _tenant_id(engine, args.tenant)
+        if tenant_id is None:
+            print(f"unknown tenant {args.tenant!r}", file=sys.stderr)
+            return 1
+        async with tenant_transaction(engine, tenant_id) as conn:
+            frames = await validation_frames(
+                conn,
+                tenant_id,
+                pool_dives=args.pool_dives,
+                reef_dives=args.reef_dives,
+                outputs=outputs,
+                label_free=label_free,
+            )
+    finally:
+        await engine.dispose()
+    source = "outputs from " + args.frame_outputs if outputs else "the database"
+    print(
+        format_report(
+            source, pool_ladder(frames), reef_comparison(frames), reef_coverage(frames)
+        )
+    )
+    return 0
 
 
 async def _tenant_id(engine: AsyncEngine, tenant: str) -> uuid.UUID | None:
