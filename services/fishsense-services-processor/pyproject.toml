@@ -1,6 +1,6 @@
 [project]
 name = "fishsense-services-processor"
-version = "0.3.1"
+version = "0.3.2"
 description = "FishSense v2 processor: the compute side of the pipeline, ported from v1's data-worker."
 requires-python = ">=3.13,<3.14"
 dependencies = [
