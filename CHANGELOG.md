@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.3.0...v0.3.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **slate-detect:** a raw moved on the NAS no longer stalls the backlog ([1a4ea2e](https://github.com/UCSD-E4E/fishsense-services/commit/1a4ea2ea5df49eb86fc037e944bebd01c162fff3))
+* **slate-detect:** a raw moved on the NAS no longer stalls the backlog ([0278a1e](https://github.com/UCSD-E4E/fishsense-services/commit/0278a1e8a22455d1087633df13ee51f462e98467))
+
 ## [0.3.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.2.0...v0.3.0) (2026-10-06)
 
 
