@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.2](https://github.com/UCSD-E4E/fishsense-services/compare/v0.3.1...v0.3.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* **nas:** sign in to SMB on the KRG domain, and take synology-filestation 0.9.0 ([69ec8c7](https://github.com/UCSD-E4E/fishsense-services/commit/69ec8c7c0bdbd5abd6baefe332435069bac14fa7))
+* **nas:** sign in to SMB on the KRG domain, and take synology-filestation 0.9.0 ([51bf2a1](https://github.com/UCSD-E4E/fishsense-services/commit/51bf2a16c7645a4a4479c96756e3296a69194787))
+
 ## [0.3.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.3.0...v0.3.1) (2026-10-06)
 
 
