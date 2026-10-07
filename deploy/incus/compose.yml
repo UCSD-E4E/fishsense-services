@@ -201,6 +201,10 @@ services:
       # The e4e NAS: ingest and raw staging read it (read-only, by policy).
       FISHSENSE_NAS_URL: https://e4e-nas.ucsd.edu:6021
       FISHSENSE_NAS_RAW_ROOT_PATH: /fishsense_data/REEF/data
+      # The client prefers SMB, with the FileStation username: bare, it is a
+      # local NAS account to SMB and fails; three failures in a day and the NAS
+      # blocks krg-nat, every tenant's address (2026-10-07). SMB alone.
+      SYNOLOGY_FS_SMB_DOMAIN: KRG
       # One serial .ORF download at a time — FileStation's download backend falls
       # over under concurrent large transfers (v1). Ramp up only while watching.
       FISHSENSE_NAS_STAGE_CONCURRENCY: "1"
@@ -270,6 +274,8 @@ services:
       # insurance. v1's stay where they are, untouched.
       FISHSENSE_BACKUP_NAS_ROOT_PATH: /fishsense_process_work/database_backups_v2
       FISHSENSE_NAS_URL: https://e4e-nas.ucsd.edu:6021
+      # SMB's domain for the bare FileStation username (see the orchestrator).
+      SYNOLOGY_FS_SMB_DOMAIN: KRG
       FISHSENSE_TEMPORAL_ADDRESS: krg-prod.ucsd.edu:7233
       FISHSENSE_TEMPORAL_NAMESPACE: fishsense
       FISHSENSE_TEMPORAL_DOMAIN: workflows.krg.ucsd.edu

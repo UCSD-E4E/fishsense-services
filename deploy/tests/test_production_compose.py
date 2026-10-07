@@ -534,3 +534,20 @@ def test_the_web_service_account_is_the_one_the_platform_writes():
     paths = {path for sources in web[0].sources.values() for path, _ in sources}
     assert "oidc/web-service-account" in paths
     assert not any("web_service_account" in (p or "") for p in paths)
+
+
+def test_every_nas_client_signs_in_to_smb_on_the_krg_domain():
+    """The NAS client prefers SMB (FileStation alone broke the NAS under v1),
+    and builds its SMB login from the FileStation username. That username is
+    the bare `svc_fishsense`, which FileStation accepts but SMB checks against
+    the NAS's *local* accounts: every probe failed, and three failures in a
+    day had the NAS block krg-nat -- every tenant's address -- on 2026-10-07.
+    The domain is set beside it, for SMB alone."""
+    nas_clients = {
+        name: environment(service)
+        for name, service in services().items()
+        if "FISHSENSE_NAS_URL" in environment(service)
+    }
+    assert set(nas_clients) == {"orchestrator", "backup"}
+    for name, env in nas_clients.items():
+        assert env.get("SYNOLOGY_FS_SMB_DOMAIN") == "KRG", name
