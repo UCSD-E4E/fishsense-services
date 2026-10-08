@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
 
-from synology_filestation import DSMError
+from synology_filestation import FileStationError
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
@@ -145,7 +145,7 @@ async def _list(client: NasClient, folder_path: str) -> List[NasEntry]:
     """
     try:
         return await asyncio.to_thread(client.list_dir, folder_path=folder_path)
-    except DSMError as exc:
+    except FileStationError as exc:
         raise_if_permanent_dsm_error(exc, context=folder_path)
         raise
 
@@ -586,7 +586,7 @@ def _read_frame(nas: NasClient, src_path: str) -> tuple[str, datetime | None]:
     with tempfile.TemporaryDirectory() as tmpdir:
         try:
             nas.download_to(src_path=src_path, dest_dir=tmpdir)
-        except DSMError as exc:
+        except FileStationError as exc:
             raise_if_permanent_dsm_error(exc, context=src_path)
             raise
         local = Path(tmpdir) / os.path.basename(src_path)
@@ -628,7 +628,7 @@ async def _read_header(nas: NasClient, file_path: str) -> bytes:
         return await asyncio.to_thread(
             nas.download_range, file_path=file_path, offset=0, length=EXIF_HEADER_BYTES
         )
-    except DSMError as exc:
+    except FileStationError as exc:
         raise_if_permanent_dsm_error(exc, context=file_path)
         raise
 

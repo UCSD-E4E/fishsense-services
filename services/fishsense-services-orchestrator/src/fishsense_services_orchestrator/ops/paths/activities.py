@@ -33,13 +33,13 @@ from collections import defaultdict
 from collections.abc import Callable
 from typing import Protocol
 
-from synology_filestation import DSMError
+from synology_filestation import FileStationError
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from fishsense_services_api.capture_path_store import PathCapture
 from fishsense_services_orchestrator.ingest.nas import NasClient
-from fishsense_services_orchestrator.ingest.nas_errors import dsm_error_code
+from fishsense_services_orchestrator.ingest.nas_errors import is_nas_not_found
 from fishsense_services_orchestrator.ingest.nas_frames import (
     NasSettings,
     build_nas_client,
@@ -55,9 +55,6 @@ from fishsense_services_orchestrator.ops.paths.contracts import (
 )
 
 __all__ = ["PathRepairActivities", "PathRepairCatalog"]
-
-#: "No such file or directory": the folder itself is gone.
-_DSM_NOT_FOUND = 408
 
 
 class PathRepairCatalog(Protocol):
@@ -105,8 +102,8 @@ class _Folder:
     def list(self) -> None:
         try:
             entries = self._nas.list_dir(folder_path=self.absolute)
-        except DSMError as exc:
-            if dsm_error_code(exc) == _DSM_NOT_FOUND:
+        except FileStationError as exc:
+            if is_nas_not_found(exc):
                 self.gone = True
                 return
             raise

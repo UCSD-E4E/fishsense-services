@@ -8,11 +8,13 @@ that tripped the NAS auto-block (krg-infra#501). So the helpers only classify.
 """
 
 import pytest
+from synology_filestation import DSMError, NoSuchFile, PermissionDenied, TransportError
 from temporalio.exceptions import ApplicationError
 
 from fishsense_services_orchestrator.ingest.nas_errors import (
     NAS_FILE_NOT_FOUND_TYPE,
     dsm_error_code,
+    is_nas_not_found,
     raise_if_permanent_dsm_error,
 )
 
@@ -53,3 +55,43 @@ def test_the_error_type_matches_what_retry_policies_name():
     """Temporal matches non-retryable types by string; a rename here would
     silently restore retrying doomed work."""
     assert NAS_FILE_NOT_FOUND_TYPE == "NasFileNotFound"
+
+
+# synology-filestation 0.10.0 raises typed errors, not `DSMError`, for a
+# missing path: `NoSuchFile` (SMB, and FileStation codes 403/414/415), and
+# `PermissionDenied` for code 408 -- the code v1 saw for a missing file. Only
+# unmapped codes stay `DSMError`. Each carries the code structurally.
+
+
+def test_no_such_file_is_permanent():
+    with pytest.raises(ApplicationError) as raised:
+        raise_if_permanent_dsm_error(NoSuchFile("not found"), context="dives/d10")
+
+    assert raised.value.non_retryable is True
+    assert raised.value.type == NAS_FILE_NOT_FOUND_TYPE
+    assert "dives/d10" in str(raised.value)
+
+
+def test_a_408_is_still_a_missing_file_whatever_class_carries_it():
+    denied = PermissionDenied("permission denied")
+    denied.code = 408
+
+    assert is_nas_not_found(denied)
+
+
+def test_any_other_permission_error_is_not_a_missing_file():
+    denied = PermissionDenied("permission denied")
+    denied.code = 1805
+
+    assert not is_nas_not_found(denied)
+
+
+def test_an_outage_is_not_a_missing_file():
+    assert not is_nas_not_found(TransportError("connection reset"))
+
+
+def test_the_code_is_read_from_the_error_when_it_carries_one():
+    error = DSMError("Synology API error")
+    error.code = 502
+
+    assert dsm_error_code(error) == 502

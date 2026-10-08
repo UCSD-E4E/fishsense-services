@@ -45,7 +45,7 @@ from typing import Protocol
 
 import pymupdf
 from botocore.exceptions import ClientError
-from synology_filestation import DSMError
+from synology_filestation import FileStationError
 from temporalio import activity
 
 from fishsense_services_api.slate_store import SlateTemplate
@@ -160,7 +160,7 @@ class SlatePdfs:
                 await asyncio.to_thread(
                     nas.download_to, src_path=src_path, dest_dir=tmpdir
                 )
-            except DSMError as exc:
+            except FileStationError as exc:
                 raise_if_permanent_dsm_error(exc, context=src_path)
                 raise
             data = await asyncio.to_thread(

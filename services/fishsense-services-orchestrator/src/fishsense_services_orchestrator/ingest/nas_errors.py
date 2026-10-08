@@ -16,15 +16,21 @@ So these helpers only *classify*. A permanent error becomes a non-retryable
 else propagates untouched so the bounded jittered policy backs off and tries
 again.
 
-The code is recovered by string-parsing `DSMError`'s message because the
-`synology-filestation` client doesn't expose it structurally yet (feedback
-filed upstream). Delete `dsm_error_code` when it does.
+**What "missing" looks like.** synology-filestation 0.10.0 raises typed errors,
+not `DSMError`, for a path that isn't there: `NoSuchFile` (over SMB, and for
+FileStation codes 403/414/415), and `PermissionDenied` for code 408 -- the code
+v1 saw for a missing file, so it still counts. Only unmapped codes stay
+`DSMError`. So callers catch the base `FileStationError` and ask
+`is_nas_not_found`; catching `DSMError` alone let a missing file through as an
+outage, retried until the budget ran out. Every error carries its code as
+`.code`; the message is parsed only as a fallback.
 """
 
 from __future__ import annotations
 
 import re
 
+from synology_filestation import NoSuchFile
 from temporalio.exceptions import ApplicationError
 
 # `type` on the non-retryable ApplicationError raised for a missing file. Must
@@ -45,21 +51,31 @@ __all__ = [
     "NAS_FILE_NOT_FOUND_TYPE",
     "PERMANENT_DSM_CODES",
     "dsm_error_code",
+    "is_nas_not_found",
     "raise_if_permanent_dsm_error",
 ]
 
 
 def dsm_error_code(exc: BaseException) -> int | None:
-    """Best-effort extract the FileStation error code from a `DSMError`, whose
-    message is `"Synology API error <code>"`. Returns None when the message
-    doesn't carry one — an unrecognised error is treated as transient, which
+    """The FileStation error code: the error's own `.code`, else parsed from a
+    message like `"Synology API error <code>"`. Returns None when neither
+    carries one — an unrecognised error is treated as transient, which
     errs toward retrying rather than toward declaring a dive dead."""
+    code = getattr(exc, "code", None)
+    if isinstance(code, int):
+        return code
     match = re.search(r"error\s+(\d+)", str(exc))
     return int(match.group(1)) if match else None
 
 
+def is_nas_not_found(exc: BaseException) -> bool:
+    """True iff ``exc`` says the path isn't on the NAS: a `NoSuchFile`, or any
+    error carrying a permanent code (408)."""
+    return isinstance(exc, NoSuchFile) or dsm_error_code(exc) in PERMANENT_DSM_CODES
+
+
 def raise_if_permanent_dsm_error(exc: BaseException, *, context: str) -> None:
-    """Convert a permanent `DSMError` into a non-retryable `ApplicationError`.
+    """Convert a missing-path error into a non-retryable `ApplicationError`.
 
     Returns normally when the error is transient (or unrecognised), leaving the
     caller to re-raise so Temporal's policy owns the backoff.
@@ -68,10 +84,11 @@ def raise_if_permanent_dsm_error(exc: BaseException, *, context: str) -> None:
     resulting failure is what an operator reads in the Temporal UI, and
     "Synology 408" on its own doesn't say which file was missing.
     """
-    code = dsm_error_code(exc)
-    if code in PERMANENT_DSM_CODES:
+    if is_nas_not_found(exc):
+        code = dsm_error_code(exc)
+        reason = f"Synology {code}" if code is not None else type(exc).__name__
         raise ApplicationError(
-            f"NAS path not found (Synology {code}): {context}",
+            f"NAS path not found ({reason}): {context}",
             type=NAS_FILE_NOT_FOUND_TYPE,
             non_retryable=True,
         ) from exc
