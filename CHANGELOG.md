@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.5.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.4.0...v0.5.0) (2026-10-08)
+
+
+### Features
+
+* **api:** a partner joins their org's tenant from the org claim ([01dbdc5](https://github.com/UCSD-E4E/fishsense-services/commit/01dbdc580e7df3e67cccd27ac79e2fc1590d90aa))
+* partners join their org's tenant automatically from the org claim ([6885acd](https://github.com/UCSD-E4E/fishsense-services/commit/6885acd5ca8417eb745d2bfa37457e7569e7cb80))
+* **web:** tell a partner turned away from the portal which tenant is theirs ([18e8a29](https://github.com/UCSD-E4E/fishsense-services/commit/18e8a29a25d8e23145b24cae9c6a1a86baceb24b))
+
+
+### Bug Fixes
+
+* **nas:** a missing path is NoSuchFile now, not DSMError 408 ([6a4771c](https://github.com/UCSD-E4E/fishsense-services/commit/6a4771c8e74f1d3c6cf0e6f8026a10e33f24b952))
+* **nas:** a missing path is NoSuchFile now, not DSMError 408 ([0368eee](https://github.com/UCSD-E4E/fishsense-services/commit/0368eee2d41b083bf1fb2acb48e86acaffe84e31))
+* **nrp:** a wake protects its processor while the parent that woke it lives ([04283f1](https://github.com/UCSD-E4E/fishsense-services/commit/04283f19323a55ee049f55f76ce62060b781506a))
+* **nrp:** a wake's cold start isn't a wedge, and a child mid-sweep keeps its processor ([829c2d4](https://github.com/UCSD-E4E/fishsense-services/commit/829c2d4e1f31a89ae1aaa0dd20afabb89a5b3170))
+* **nrp:** three holes in a wake's protection from the sweeper ([f877295](https://github.com/UCSD-E4E/fishsense-services/commit/f8772951385d4913cbc9c4e7cb3bc6a68761039d))
+
+
+### Documentation
+
+* partner tenants runbook; org-claim membership decided ([30fbaa6](https://github.com/UCSD-E4E/fishsense-services/commit/30fbaa63f63350ae368abba60aa2e813cf5c0eb9))
+
 ## [0.4.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.3.2...v0.4.0) (2026-10-08)
 
 
