@@ -39,7 +39,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
-from synology_filestation import DSMError
+from synology_filestation import DSMError, NoSuchFile
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
 
@@ -117,7 +117,7 @@ class FakeNas:
         self.downloaded.append(src_path)
         name = src_path.rsplit("/", 1)[-1]
         if name not in self.contents:
-            raise DSMError("Synology API error 408")
+            raise NoSuchFile("no such file or folder")
         Path(dest_dir, name).write_bytes(self.contents[name])
 
 

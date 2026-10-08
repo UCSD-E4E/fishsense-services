@@ -28,7 +28,7 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from synology_filestation import DSMError
+from synology_filestation import DSMError, NoSuchFile
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
 
@@ -110,7 +110,7 @@ class FakeNas:
                 head, _, rest = path[len(prefix) :].partition("/")
                 children[head] = bool(rest)
         if not children:
-            raise DSMError("Synology API error 408")
+            raise NoSuchFile("no such file or folder")
         return [
             NasEntry(path=prefix + name, name=name, is_dir=is_dir, size=0)
             for name, is_dir in sorted(children.items())

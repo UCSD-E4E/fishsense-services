@@ -49,13 +49,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Protocol
 
-from synology_filestation import DSMError
+from synology_filestation import FileStationError
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from fishsense_services_api.checksum_store import VerifyCapture
 from fishsense_services_orchestrator.ingest.nas import NasClient
-from fishsense_services_orchestrator.ingest.nas_errors import dsm_error_code
+from fishsense_services_orchestrator.ingest.nas_errors import is_nas_not_found
 from fishsense_services_orchestrator.ingest.nas_frames import (
     HASH_CHUNK_BYTES,
     NasSettings,
@@ -69,10 +69,6 @@ from fishsense_services_orchestrator.ops.checksums.contracts import (
 )
 
 __all__ = ["ChecksumActivities", "ChecksumCatalog", "DIVE_NOT_FOUND_TYPE"]
-
-#: "No such file or directory". Here a *finding* (the row outlived its file),
-#: not the permanent failure it is when staging.
-_DSM_NOT_FOUND = 408
 
 #: The non-retryable error for a dive number no served tenant holds.
 DIVE_NOT_FOUND_TYPE = "DiveNotFound"
@@ -126,8 +122,8 @@ def _verify_one(
     with tempfile.TemporaryDirectory() as tmpdir:
         try:
             nas.download_to(src_path=src_path, dest_dir=tmpdir)
-        except DSMError as exc:
-            if dsm_error_code(exc) == _DSM_NOT_FOUND:
+        except FileStationError as exc:
+            if is_nas_not_found(exc):
                 report.missing_on_nas.append(
                     ChecksumMismatch(
                         capture_number=capture.number,

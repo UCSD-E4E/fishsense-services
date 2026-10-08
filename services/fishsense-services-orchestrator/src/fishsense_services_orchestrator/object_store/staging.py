@@ -36,7 +36,7 @@ from pathlib import Path
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from synology_filestation import DSMError
+from synology_filestation import FileStationError
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
@@ -102,7 +102,7 @@ async def _download_one(nas: NasClient, *, src_path: str, dest_dir: str) -> None
     """
     try:
         await asyncio.to_thread(nas.download_to, src_path=src_path, dest_dir=dest_dir)
-    except DSMError as exc:
+    except FileStationError as exc:
         raise_if_permanent_dsm_error(exc, context=src_path)
         await _raise_if_missing(nas, src_path, exc)
         raise
@@ -202,7 +202,7 @@ class RawStagingActivities:
             # isn't rescheduled; anything else re-raises for the bounded policy.
             for leaf in _iter_leaf_exceptions(group):
                 if isinstance(leaf, ApplicationError) and leaf.non_retryable:
-                    # `leaf` already carries its own cause (the DSMError).
+                    # `leaf` already carries its own cause (the NAS error).
                     raise leaf  # pylint: disable=raise-missing-from
             raise
 

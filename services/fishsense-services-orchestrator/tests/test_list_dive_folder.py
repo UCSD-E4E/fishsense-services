@@ -291,3 +291,19 @@ async def test_an_empty_folder_lists_cleanly_rather_than_failing(monkeypatch):
 
     assert listing.files == []
     assert listing.subfolders == []
+
+
+async def test_a_missing_folder_as_the_client_reports_it_fails_non_retryably(
+    monkeypatch,
+):
+    """synology-filestation 0.10.0 raises `NoSuchFile` for a missing path, not
+    a `DSMError`; that must be as final as a 408."""
+    from synology_filestation import NoSuchFile
+
+    client = MagicMock()
+    client.list_dir.side_effect = NoSuchFile("no such file or folder")
+
+    with pytest.raises(ApplicationError) as excinfo:
+        await _run(_request(), client, monkeypatch)
+
+    assert excinfo.value.non_retryable
