@@ -31,6 +31,8 @@ Guardrails kept from v1, so "too many pods on NRP" can't happen by accident:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import ssl
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -486,6 +488,121 @@ def woken_at(apps, namespace: str, name: str) -> datetime | None:
         return datetime.fromisoformat(stamp) if stamp else None
     except ValueError:
         return None
+
+
+# -- who woke a Deployment ----------------------------------------------------------
+#
+# `WOKEN_AT` says when, not for whom, so "work has reached the queue since the
+# wake" can't tell one parent's child from another's: a second parent's short
+# child ended the first parent's wake while it was still staging. Each wake
+# therefore also records its parent workflow, one annotation per parent, and
+# the sweeper leaves the Deployment while any of them is still running.
+#
+# Written by JSON merge patch under their own field manager, not in the
+# applied body: a merge patch sets only its key (concurrent wakes by different
+# parents all land, with no read-modify-write), and the orchestrator's next
+# server-side apply, which doesn't list them, leaves another manager's fields.
+
+#: Field manager of the per-parent wake records (never `FIELD_MANAGER`).
+WAKE_FIELD_MANAGER: Final = "fishsense-orchestrator-wake"
+#: Annotation-key prefix of a wake record; the name part hashes the workflow id.
+WAKER_PREFIX: Final = "woken-by.fishsense.e4e/"
+
+
+@dataclass(frozen=True)
+class Waker:
+    """A parent workflow that woke a Deployment, and when."""
+
+    workflow_id: str
+    run_id: str
+    at: datetime
+
+
+def waker_annotation(waker: Waker) -> tuple[str, str]:
+    """The (key, value) recording ``waker``: one key per parent workflow, so a
+    parent's later wake replaces its own record and no one else's."""
+    digest = hashlib.sha256(waker.workflow_id.encode()).hexdigest()[:32]
+    value = json.dumps(
+        {
+            "workflow_id": waker.workflow_id,
+            "run_id": waker.run_id,
+            "at": waker.at.isoformat(),
+        }
+    )
+    return f"{WAKER_PREFIX}{digest}", value
+
+
+def _wakers(annotations: Mapping[str, str] | None) -> dict[str, Waker]:
+    found = {}
+    for key, value in (annotations or {}).items():
+        if not key.startswith(WAKER_PREFIX):
+            continue
+        try:
+            record = json.loads(value)
+            found[key] = Waker(
+                record["workflow_id"],
+                record["run_id"],
+                datetime.fromisoformat(record["at"]),
+            )
+        except (ValueError, KeyError, TypeError):
+            continue  # unreadable: protects nothing
+    return found
+
+
+def read_wakers(apps, namespace: str, name: str) -> list[Waker]:
+    """Every parent recorded as having woken Deployment ``name``, oldest
+    first; none when it doesn't exist."""
+    return sorted(
+        _read_waker_records(apps, namespace, name).values(), key=lambda w: w.at
+    )
+
+
+def _read_waker_records(apps, namespace: str, name: str) -> dict[str, Waker]:
+    try:
+        deployment = apps.read_namespaced_deployment(name=name, namespace=namespace)
+    except Exception as exc:  # pylint: disable=broad-except
+        if _is_not_found(exc):
+            return {}
+        raise
+    metadata = getattr(deployment, "metadata", None)
+    return _wakers(getattr(metadata, "annotations", None))
+
+
+def _patch_annotations(apps, namespace: str, name: str, changes: dict) -> None:
+    apps.patch_namespaced_deployment(
+        name=name,
+        namespace=namespace,
+        body={"metadata": {"annotations": changes}},
+        field_manager=WAKE_FIELD_MANAGER,
+        _content_type="application/merge-patch+json",
+    )
+
+
+def record_waker(apps, namespace: str, name: str, waker: Waker) -> None:
+    """Record that ``waker`` woke Deployment ``name`` (just applied). Nothing
+    to record on a Deployment that isn't there."""
+    key, value = waker_annotation(waker)
+    try:
+        _patch_annotations(apps, namespace, name, {key: value})
+    except Exception as exc:  # pylint: disable=broad-except
+        if not _is_not_found(exc):
+            raise
+
+
+def forget_wakers_before(
+    apps, namespace: str, name: str, cutoff: datetime
+) -> list[Waker]:
+    """Drop the records older than ``cutoff`` (they protect nothing any
+    more); return the rest. A Deployment that's gone has none."""
+    records = _read_waker_records(apps, namespace, name)
+    stale = {key: None for key, w in records.items() if w.at < cutoff}
+    if stale:
+        try:
+            _patch_annotations(apps, namespace, name, stale)
+        except Exception as exc:  # pylint: disable=broad-except
+            if not _is_not_found(exc):
+                raise
+    return [w for key, w in records.items() if key not in stale]
 
 
 def delete_deployment(apps, namespace: str, name: str) -> bool:
