@@ -171,8 +171,8 @@ Plus four SQL views that Superset reads directly (§2.6).
 - **Mobile** — `fishsense-mobile`: Flutter; captures image + LiDAR + on-device
   measurement (Rust); local SQLite; "cloud sync" stubbed, **not wired to a backend**.
 - **Identity/infra (`KastnerRG/krg-infra`)** — **Authentik** (Terraform IaC, AD-backed
-  via LDAP). The invitation/enrollment flow (ADR 0013) is **built in PR #504 — merged, not
-  yet applied to live Authentik** as of 2026-07-22 (§4.2). Also runs **MLflow, Temporal,
+  via LDAP). The invitation/enrollment flow (ADR 0013) is **built in PR #504 and live**, with
+  per-org reusable invites as code since PR #565 (2026-10-08 UTC; §4.2, §9.3). Also runs **MLflow, Temporal,
   OpenBao, Traefik**. Substrate is **x86 Proxmox + Incus + Docker-Compose + NixOS — no
   Kubernetes, no ARM64.** The only k8s is the data-worker kustomize in `fishsense-lite`,
   targeting **NRP** (external).
@@ -374,9 +374,11 @@ point a TypeScript API + orchestrator over Python activity queues becomes the be
     scope** to receive the claim; (b) v2's apps must be added to
     `local.fishsense_collab_targets` or collaborators can't reach them — and we must decide
     deliberately whether partners reach the **v2 API** (v1 currently binds all three apps
-    incl. the orchestrator API); (c) **invites are minted out-of-band** via the Authentik UI
-    (no `authentik_invitation` provider resource), so **self-service invite generation from
-    our web app is not available today** — it would need Authentik API calls (§9.3).
+    incl. the orchestrator API); (c) **invites are minted outside our app** — per-org
+    reusable ones as code in krg-infra (PR #565), one-offs in the Authentik UI — so
+    **self-service invite generation from our web app is not available today** (§9.3).
+    *All three settled 2026-10-07* (§9.3): a partner joins their org's tenant automatically
+    from the `org` claim (§9.10).
 - **Authorization is owned by this service**, not Authentik: validate the JWT (the
   forward-auth proxy already emits `X-authentik-jwt`), map the stable `sub` →
   `users`/`memberships`/roles, set the RLS `tenant_id`. Authentik groups/claims are
@@ -855,15 +857,21 @@ Grouped by when they need answering. Each has: **the decision**, *what it blocks
 - The enrollment/invitation/local-`user_write` flow now exists; tenant/org is carried as a
   user attribute and emitted as an **`org` OIDC claim**, with per-org isolation left
   **app-side** — matching our `sub`-keyed tenancy model.
-- *Remaining follow-ups:*
-  - **Apply to live Authentik** (PR is `tofu validate`/`tflint` clean but **not yet applied**).
-  - **Register v2's OIDC clients requesting the `org` scope**, and add v2's apps to
-    `local.fishsense_collab_targets`.
-  - **Decide whether external partners may reach the v2 API** (v1 binds all three apps incl.
-    the orchestrator API — one-line change to drop it).
-  - **Self-service invites?** Today invites are minted **out-of-band in the Authentik UI**
-    (no provider resource). If tenant admins should invite colleagues from our web app, that
-    needs Authentik API integration — a new v2 UX workstream.
+- *Follow-ups, as of 2026-10-07:*
+  - ~~Apply to live Authentik~~ — **live**.
+  - ~~Register v2's OIDC clients requesting the `org` scope~~ — the web requests it, and
+    v2's web client (`fishsense-oauth`) is in `local.fishsense_collab_targets`.
+  - ~~Decide whether external partners may reach the v2 API~~ — **yes, as members of their
+    org's tenant only** (§9.10): the API admits a partner to the tenant claiming their `org`
+    and 404s every other.
+  - **Per-org reusable invites as code** — krg-infra **PR #565** (live 2026-10-08 UTC):
+    `collaborator_invites.tf` mints one multi-use, expiring invite per partner org (first:
+    `conservation-angler`), the link in OpenBao at
+    `secret/krg-prod/authentik-managed/collaborator-invites/<org>`. One-off invites are still
+    minted in the Authentik UI. Onboarding a partner is: the krg-infra entry, then
+    `fishsense-services-api add-tenant <slug> --name … --org-claim <org>` here.
+  - **Self-service invites from our web app?** Would need Authentik API integration — a new
+    v2 UX workstream.
 
 **9.4 — Temporal multi-tenancy isolation** — *resolved: in-workflow scoping*
 - **Single `fishsense` namespace on the shared krg-prod cluster; tenant scoping lives in the
@@ -902,9 +910,16 @@ Grouped by when they need answering. Each has: **the decision**, *what it blocks
   v2 keeps **no local credentials**: Authentik stays the only IdP, and the API validates
   bearer tokens itself rather than trusting forward-auth headers (mobile sends bearer tokens;
   tenancy needs per-request membership; nothing that bypasses Traefik can claim an identity).
-  **Memberships are granted administratively.** Still open: turning a partner invite's `org`
-  claim into a membership automatically — `org` is single-valued, while memberships are
-  many-to-many.
+  **Memberships are granted administratively**, with one exception ***decided 2026-10-07***:
+  **a partner joins their org's tenant automatically, from the `org` claim.** A tenant may
+  claim one org (`tenants.org_claim`, unique; set by an operator with
+  `fishsense-services-api add-tenant`), and a caller whose token carries that `org` becomes a
+  `member` of it on their first request (migration 0037's `join_claimed_tenant()`, the app
+  role's only way to add a membership: the caller, that tenant, `member`, never touching an
+  existing row). `org` being single-valued is fine: it yields exactly one membership, and
+  every other membership or role above `member` stays administrative. Leaving the org doesn't
+  remove the membership; offboarding is deactivating the Authentik account. `GET
+  /me/memberships` lists the caller's tenants.
 - *Token:* validate the client's own bearer token (issuer, audience = the web and mobile
   client ids, expiry, JWKS signature). Trust the proxy's `X-authentik-jwt` only if nothing
   can reach the API without going through Traefik.
