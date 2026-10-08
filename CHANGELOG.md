@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.3.2...v0.4.0) (2026-10-08)
+
+
+### Features
+
+* **nas:** synology-filestation 0.10.0; a fallback to FileStation is loud ([e396525](https://github.com/UCSD-E4E/fishsense-services/commit/e39652557abcabc0d956a22d43f035808e98c5ee))
+* **ops:** repair captures whose files moved on the NAS ([6a563f5](https://github.com/UCSD-E4E/fishsense-services/commit/6a563f56b757414c66d31cd8a08e208ad30d46eb))
+
+
+### Bug Fixes
+
+* **nrp:** a wake protects a processor only until its work reaches the queue ([788d085](https://github.com/UCSD-E4E/fishsense-services/commit/788d0852e79172884cac2c5cb5c28cf78a307fd1))
+* **slate-detect:** buffer one firing instead of skipping it ([b8c26c6](https://github.com/UCSD-E4E/fishsense-services/commit/b8c26c6e38419b47b3ef2a46e2fb9e9bb98baf31))
+
 ## [0.3.2](https://github.com/UCSD-E4E/fishsense-services/compare/v0.3.1...v0.3.2) (2026-10-07)
 
 
