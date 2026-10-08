@@ -32,7 +32,8 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 
 from temporalio import activity
-from temporalio.client import Client
+from temporalio.client import Client, WorkflowExecutionStatus
+from temporalio.service import RPCError, RPCStatusCode
 
 from fishsense_services_orchestrator.nrp.gpu_fallback import (
     MODE_CPU_FALLBACK,
@@ -45,12 +46,15 @@ from fishsense_services_orchestrator.nrp.scaling import (
     Kubernetes,
     ScalingConfig,
     current_leaf,
+    Waker,
     delete_deployment,
     deployment_is_wedged,
+    forget_wakers_before,
     kubernetes_apis,
     read_deployment,
     read_gpu_state,
     readiness,
+    record_waker,
     set_deployment_replicas,
     woken_at,
     write_gpu_state,
@@ -62,6 +66,8 @@ __all__ = ["NrpActivities", "build_busy_query", "task_queue_busy"]
 BusyCheck = Callable[[int, str], Awaitable[bool]]
 #: (task queue, since) -> whether a workflow started on it after `since`.
 UsedSinceCheck = Callable[[str, datetime], Awaitable[bool]]
+#: (workflow id, run id) -> is that parent run still Running?
+WakerRunningCheck = Callable[[str, str], Awaitable[bool]]
 
 
 def build_busy_query(cooldown_minutes: int, task_queue: str) -> str:
@@ -114,6 +120,26 @@ async def _used_through_the_worker_client(task_queue: str, since: datetime) -> b
     return await queue_used_since(activity.client(), task_queue, since)
 
 
+async def waker_running(client: Client, workflow_id: str, run_id: str) -> bool:
+    """True iff that run of the parent workflow is still Running. A run that
+    is gone (retention) is not."""
+    try:
+        described = await client.get_workflow_handle(
+            workflow_id, run_id=run_id
+        ).describe()
+    except RPCError as exc:
+        if exc.status == RPCStatusCode.NOT_FOUND:
+            return False
+        raise
+    return described.status == WorkflowExecutionStatus.RUNNING
+
+
+async def _waker_running_through_the_worker_client(
+    workflow_id: str, run_id: str
+) -> bool:
+    return await waker_running(activity.client(), workflow_id, run_id)
+
+
 async def _busy_through_the_worker_client(
     cooldown_minutes: int, task_queue: str
 ) -> bool:
@@ -130,6 +156,7 @@ class NrpActivities:
         kubernetes: Callable[[str], Kubernetes] = kubernetes_apis,
         task_queue_busy: BusyCheck = _busy_through_the_worker_client,
         queue_used_since: UsedSinceCheck = _used_through_the_worker_client,
+        waker_running: WakerRunningCheck = _waker_running_through_the_worker_client,
         poll_interval_seconds: float = 10,
     ) -> None:
         #: None when scaling is off: every activity no-ops.
@@ -137,6 +164,7 @@ class NrpActivities:
         self._kubernetes = kubernetes
         self._task_queue_busy = task_queue_busy
         self._queue_used_since = queue_used_since
+        self._waker_running = waker_running
         #: How often the GPU wake re-reads a Deployment while waiting for a
         #: pod to go Ready. Tests set it to 0.
         self._poll_interval_seconds = poll_interval_seconds
@@ -156,8 +184,22 @@ class NrpActivities:
             )
 
         await asyncio.to_thread(_apply)
+        await self._record_waker(name)
         activity.logger.info(
             "stood up %s/%s at %d replica(s)", self.config.namespace, name, replicas
+        )
+
+    async def _record_waker(self, name: str) -> None:
+        """Note on Deployment ``name`` which parent woke it, so the sweeper
+        leaves it while that parent lives (`record_waker`)."""
+        info = activity.info()
+        if not info.workflow_id:
+            return  # not called from a workflow: no parent to wait for
+        waker = Waker(
+            info.workflow_id, info.workflow_run_id or "", datetime.now(timezone.utc)
+        )
+        await asyncio.to_thread(
+            record_waker, self._apis().apps, self.config.namespace, name, waker
         )
 
     # -- the per-image and light wakes -------------------------------------------
@@ -296,6 +338,7 @@ class NrpActivities:
             if decision.mode == MODE_CPU_FALLBACK
             else config.gpu.deployment_name
         )
+        await self._record_waker(chosen)
         if await self._wait_ready(chosen):
             return decision.mode
 
@@ -309,10 +352,10 @@ class NrpActivities:
                 config.gpu.start_timeout_seconds,
                 decision.reason,
             )
-            if decision.mode == MODE_CPU_FALLBACK and await self._wait_ready(
-                config.gpu.fallback_deployment_name
-            ):
-                return MODE_CPU_FALLBACK
+            if decision.mode == MODE_CPU_FALLBACK:
+                await self._record_waker(config.gpu.fallback_deployment_name)
+                if await self._wait_ready(config.gpu.fallback_deployment_name):
+                    return MODE_CPU_FALLBACK
 
         # Nothing is serving the queue. Say so rather than let the caller
         # dispatch a child that would hang until its execution timeout.
@@ -334,8 +377,9 @@ class NrpActivities:
         closed within ``idle_cooldown_minutes`` (so back-to-back dives don't
         thrash the pod). Each Deployment is swept against its own queue, so a
         busy per-image queue never keeps a GPU pod alive and vice versa. A busy
-        queue keeps its Deployment only while it has a Ready pod: a wedged one
-        is torn down anyway, since it can't drain what keeps it "busy".
+        queue keeps its Deployment only while it has a Ready pod, or is within
+        the start timeout of a wake (still pulling its image): a wedged one is
+        torn down anyway, since it can't drain what keeps it "busy".
 
         Writes **only** Deployments, never the GPU-fallback state. That
         separation is load-bearing: the fallback counts "pods wanted, none
@@ -352,31 +396,60 @@ class NrpActivities:
             return False
 
         targets = config.sweep_targets()
+
+        # A recent wake is spared while a parent that woke it (`record_waker`)
+        # is still running: it may still be staging raws before its child
+        # reaches the queue. Only that long. Every wake re-stamps the
+        # Deployment and stages wake hourly, so sparing any recent wake kept
+        # the GPU and light processors up for a day and a half (2026-10-06/07);
+        # once every parent that woke it has finished, idleness decides -- a
+        # child can't start after its parent ends. Not "work reached the queue
+        # since the wake": that can't say whose work, so a second parent's
+        # short child ended a first parent's wake mid-staging.
+        grace = timedelta(minutes=config.wake_grace_minutes)
+        now = datetime.now(timezone.utc)
+
+        def _stamps() -> dict[str, tuple[datetime | None, list[Waker]]]:
+            apps = self._apis().apps
+            return {
+                name: (
+                    woken_at(apps, config.namespace, name),
+                    forget_wakers_before(apps, config.namespace, name, now - grace),
+                )
+                for name, _ in targets
+            }
+
+        # The light and per-image wakes don't wait for a Ready pod, so their
+        # child can reach the queue mid image pull: busy with no Ready pod is
+        # a cold start for the start timeout after a wake, not a wedge. Only
+        # that long -- stages wake hourly, so the wake grace would shield a
+        # processor that never starts forever.
+        cold_start = timedelta(seconds=config.gpu.start_timeout_seconds)
+        waiting, starting = set(), set()
+        for (name, task_queue), (woken, wakers) in zip(
+            targets, (await asyncio.to_thread(_stamps)).values()
+        ):
+            if woken is not None and now - woken < cold_start:
+                starting.add(name)
+            if wakers:
+                for waker in wakers:
+                    if await self._waker_running(waker.workflow_id, waker.run_id):
+                        waiting.add(name)
+                        break
+            elif woken is not None and now - woken < grace:
+                # A wake with no parent on record (one from before parents
+                # were recorded, or from outside a workflow): fall back to
+                # "nothing has reached its queue since".
+                if not await self._queue_used_since(task_queue, woken):
+                    waiting.add(name)
+
+        # Asked *after* "used since the wake?": a child that lands between the
+        # two questions then reads as busy, never as used-but-not-busy.
         busy = set()
         # Each queue once, however many Deployments serve it.
         for task_queue in dict.fromkeys(q for _, q in targets):
             if await self._task_queue_busy(config.idle_cooldown_minutes, task_queue):
                 busy.add(task_queue)
-
-        # A recent wake is spared while its work hasn't reached the queue yet:
-        # its parent may still be staging raws, and its pods may not be Ready
-        # (`WOKEN_AT`). Only that long. Every wake re-stamps the Deployment and
-        # stages wake hourly, so sparing any recent wake kept the GPU and light
-        # processors up for a day and a half (2026-10-06/07); once the queue
-        # has had work since the wake, idleness decides.
-        def _stamps() -> dict[str, datetime | None]:
-            apps = self._apis().apps
-            return {name: woken_at(apps, config.namespace, name) for name, _ in targets}
-
-        grace = timedelta(minutes=config.wake_grace_minutes)
-        now = datetime.now(timezone.utc)
-        waiting = set()
-        for (name, task_queue), woken in zip(
-            targets, (await asyncio.to_thread(_stamps)).values()
-        ):
-            if woken is not None and now - woken < grace:
-                if not await self._queue_used_since(task_queue, woken):
-                    waiting.add(name)
 
         def _sweep() -> list[tuple[str, str]]:
             """(deployment, outcome) pairs; one client for the whole pass."""
@@ -386,11 +459,13 @@ class NrpActivities:
                 if name in waiting:
                     outcomes.append((name, "just-woken"))
                     continue
-                if task_queue in busy and not deployment_is_wedged(
-                    apps, config.namespace, name
-                ):
-                    outcomes.append((name, "busy"))
-                    continue
+                if task_queue in busy:
+                    if not deployment_is_wedged(apps, config.namespace, name):
+                        outcomes.append((name, "busy"))
+                        continue
+                    if name in starting:
+                        outcomes.append((name, "starting"))
+                        continue
                 deleted = delete_deployment(apps, config.namespace, name)
                 if not deleted:
                     outcomes.append((name, "absent"))
@@ -403,11 +478,20 @@ class NrpActivities:
         for name, outcome in outcomes:
             if outcome == "just-woken":
                 activity.logger.info(
-                    "processor %s/%s was woken within %d minutes and no work has "
-                    "reached its queue since; leaving it up for its parent",
+                    "processor %s/%s was woken within %d minutes by a parent still "
+                    "running (or nothing has reached its queue since); leaving it "
+                    "up for its parent",
                     config.namespace,
                     name,
                     config.wake_grace_minutes,
+                )
+            elif outcome == "starting":
+                activity.logger.info(
+                    "processor %s/%s has work but no Ready pod yet, within %ds of "
+                    "its wake; leaving it to finish starting",
+                    config.namespace,
+                    name,
+                    config.gpu.start_timeout_seconds,
                 )
             elif outcome == "busy":
                 activity.logger.info(

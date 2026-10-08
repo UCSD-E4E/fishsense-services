@@ -34,6 +34,8 @@ from __future__ import annotations
 
 import os
 import time
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -144,6 +146,19 @@ def _used(answer: bool):
     return _check
 
 
+async def _finished(_workflow_id, _run_id) -> bool:
+    """Every parent that woke the Deployment has finished."""
+    return False
+
+
+def _as_parent(workflow_id: str) -> ActivityEnvironment:
+    env = ActivityEnvironment()
+    env.info = replace(
+        env.info, workflow_id=workflow_id, workflow_run_id=f"run-{workflow_id}"
+    )
+    return env
+
+
 async def test_ensure_running_stands_the_real_deployment_up(config, apis):
     result = await ActivityEnvironment().run(
         NrpActivities(config=config).ensure_per_image_processor_running
@@ -185,7 +200,10 @@ async def test_re_applying_an_unchanged_manifest_rolls_nothing(config, apis):
 async def test_tear_down_when_idle_deletes_the_real_deployment(config, apis):
     # The wake's work has reached the queue and finished: the grace is spent.
     nrp = NrpActivities(
-        config=config, task_queue_busy=_busy(False), queue_used_since=_used(True)
+        config=config,
+        task_queue_busy=_busy(False),
+        queue_used_since=_used(True),
+        waker_running=_finished,
     )
     await ActivityEnvironment().run(nrp.ensure_per_image_processor_running)
 
@@ -207,7 +225,10 @@ async def test_tear_down_leaves_a_busy_healthy_deployment_alone(
     """
     monkeypatch.setattr(activities_mod, "deployment_is_wedged", lambda *_a: False)
     nrp = NrpActivities(
-        config=config, task_queue_busy=_busy(True), queue_used_since=_used(True)
+        config=config,
+        task_queue_busy=_busy(True),
+        queue_used_since=_used(True),
+        waker_running=_finished,
     )
     await ActivityEnvironment().run(nrp.ensure_per_image_processor_running)
 
@@ -287,3 +308,31 @@ async def test_gpu_worker_falls_back_to_cpu_against_a_real_cluster(config, apis)
 
     _wait_gone(apis, config, GPU)
     assert FALLBACK_UNTIL_KEY in _state(apis, config)
+
+
+async def test_a_parents_wake_record_survives_another_parents_apply(config, apis):
+    """The sweeper leaves a Deployment while a parent that woke it lives, so
+    each parent's record must outlast every later wake. Only a real apiserver
+    can confirm the two field-manager semantics this rests on: a merge patch
+    sets just its key, and the orchestrator's forced server-side apply, which
+    doesn't list it, leaves another manager's annotation in place."""
+    nrp = NrpActivities(config=config)
+    await _as_parent("parent-a").run(nrp.ensure_per_image_processor_running)
+    await _as_parent("parent-b").run(nrp.ensure_per_image_processor_running)
+
+    found = scaling.read_wakers(apis.apps, config.namespace, PER_IMAGE)
+
+    assert sorted(w.workflow_id for w in found) == ["parent-a", "parent-b"]
+
+
+async def test_forgetting_a_wake_record_removes_it_on_a_real_apiserver(config, apis):
+    """A null in the merge patch must actually delete the annotation, or old
+    records would pile up on a long-lived Deployment."""
+    nrp = NrpActivities(config=config)
+    await _as_parent("parent-a").run(nrp.ensure_per_image_processor_running)
+
+    future = datetime.now(timezone.utc) + timedelta(minutes=1)
+    kept = scaling.forget_wakers_before(apis.apps, config.namespace, PER_IMAGE, future)
+
+    assert kept == []
+    assert scaling.read_wakers(apis.apps, config.namespace, PER_IMAGE) == []

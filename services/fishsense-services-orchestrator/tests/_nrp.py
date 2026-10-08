@@ -87,6 +87,9 @@ class _Apps:
     def patch_namespaced_deployment(
         self, name, namespace, body, *, field_manager=None, force=None, **kwargs
     ):
+        if kwargs.get("_content_type") == "application/merge-patch+json":
+            self._cluster.merge_annotations(name, namespace, body, field_manager)
+            return
         self._cluster.apply(name, namespace, body, field_manager, force, kwargs)
 
     def delete_namespaced_deployment(self, name, namespace, **kwargs):
@@ -145,8 +148,18 @@ class FakeCluster:
         self.deletes: list[str] = []
         self.config_map_writes: list[tuple[str, dict]] = []
         self.reads = 0
+        #: name -> annotations written by merge patch: owned by another field
+        #: manager, so a later server-side apply (which omits them) keeps them.
+        self.merged: dict[str, dict[str, str]] = {}
+        #: The field manager of each merge patch.
+        self.merge_managers: list[str | None] = []
 
     # -- what a test sets up or inspects ------------------------------------
+
+    def annotations(self, name: str) -> dict[str, str]:
+        """Every annotation the Deployment holds, however it was written."""
+        metadata = self.deployments[name].get("metadata", {})
+        return {**(metadata.get("annotations") or {}), **self.merged.get(name, {})}
 
     def replicas(self, name: str) -> int:
         """0 when the Deployment doesn't exist -- v2's "scaled to zero"."""
@@ -187,9 +200,8 @@ class FakeCluster:
         if name not in self.deployments:
             raise _not_found()
         ready = self.ready.get(name, 0)
-        metadata = self.deployments[name].get("metadata", {})
         return SimpleNamespace(
-            metadata=SimpleNamespace(annotations=metadata.get("annotations") or None),
+            metadata=SimpleNamespace(annotations=self.annotations(name) or None),
             spec=SimpleNamespace(replicas=self.deployments[name]["spec"]["replicas"]),
             # k8s omits readyReplicas rather than sending 0.
             status=SimpleNamespace(ready_replicas=ready or None),
@@ -204,6 +216,21 @@ class FakeCluster:
         replicas = body["spec"]["replicas"]
         self.ready[name] = 0 if name in self.broken else replicas
 
+    def merge_annotations(self, name, namespace, body, field_manager):
+        """A JSON merge patch of annotations: each key set or (None) removed,
+        the rest untouched -- no read-modify-write, so concurrent patches of
+        different keys all land."""
+        assert namespace == self.namespace
+        if name not in self.deployments:
+            raise _not_found()
+        self.merge_managers.append(field_manager)
+        merged = self.merged.setdefault(name, {})
+        for key, value in body["metadata"]["annotations"].items():
+            if value is None:
+                merged.pop(key, None)
+            else:
+                merged[key] = value
+
     def delete(self, name, namespace):
         assert namespace == self.namespace
         if name not in self.deployments:
@@ -211,6 +238,7 @@ class FakeCluster:
         self.deletes.append(name)
         del self.deployments[name]
         self.ready.pop(name, None)
+        self.merged.pop(name, None)
 
 
 def without_wake(body: dict) -> dict:
