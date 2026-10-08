@@ -4,7 +4,9 @@ Each request goes through the same four steps before touching tenant data:
 
 1. authenticate the bearer token in-app (401; 503 if the IdP's keys can't be
    fetched -- an outage is not a bad token);
-2. provision the caller's user row on first sight;
+2. provision the caller's user row on first sight, and -- for a partner whose
+   token carries an ``org`` claim -- their membership in the tenant that
+   claims that org (as ``member``; migration 0037);
 3. resolve their membership in the tenant named by the path (404 for both
    "not a member" and "no such tenant", so tenants can't be probed);
 4. run the tenant work in a tenant-scoped transaction, under RLS.
@@ -27,11 +29,23 @@ from fishsense_services_api.auth import (
     TokenValidator,
 )
 from fishsense_services_api.db import principal_transaction, tenant_transaction
-from fishsense_services_api.memberships import Membership, resolve_membership
+from fishsense_services_api.memberships import (
+    Membership,
+    join_claimed_tenant,
+    list_memberships,
+    resolve_membership,
+)
 from fishsense_services_api.portal_api import add_portal_routes
 from fishsense_services_api.users import provision_user
 
 UNIQUE_VIOLATION = "23505"  # Postgres SQLSTATE
+
+
+class MyTenant(BaseModel):
+    slug: str
+    name: str
+    role: str
+    is_admin: bool
 
 
 # Must equal the devices_kind_check constraint (a test compares them).
@@ -67,13 +81,15 @@ def create_app(*, engine: AsyncEngine, validator: TokenValidator) -> FastAPI:
         except KeysUnavailable:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE) from None
 
-    async def membership(
-        slug: str, principal: Annotated[Principal, Depends(authenticate)]
-    ) -> Membership:
+    Caller = Annotated[Principal, Depends(authenticate)]
+
+    async def membership(slug: str, principal: Caller) -> Membership:
         # Provision and resolve in one transaction that *commits* before any
         # 404 is raised, so a newcomer's user row survives the refusal.
-        async with principal_transaction(engine, principal.sub) as conn:
-            await provision_user(conn, principal.sub)
+        async with principal_transaction(
+            engine, principal.sub, org=principal.org
+        ) as conn:
+            await _first_sight(conn, principal)
             found = await resolve_membership(conn, principal.sub, slug)
         if found is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND)
@@ -85,6 +101,23 @@ def create_app(*, engine: AsyncEngine, validator: TokenValidator) -> FastAPI:
     @app.get("/healthz", include_in_schema=False)
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get(
+        "/me/memberships",
+        operation_id="list_my_memberships",
+        response_model=list[MyTenant],
+    )
+    async def my_memberships(principal: Caller) -> list[MyTenant]:
+        """The tenants the caller belongs to (a partner's is their org's)."""
+        async with principal_transaction(
+            engine, principal.sub, org=principal.org
+        ) as conn:
+            await _first_sight(conn, principal)
+            found = await list_memberships(conn, principal.sub)
+        return [
+            MyTenant(slug=m.slug, name=m.name, role=m.role, is_admin=m.is_admin)
+            for m in found
+        ]
 
     @app.get(
         "/tenants/{slug}/devices",
@@ -133,6 +166,13 @@ def create_app(*, engine: AsyncEngine, validator: TokenValidator) -> FastAPI:
 
     add_portal_routes(app, engine=engine, membership=membership)
     return app
+
+
+async def _first_sight(conn, principal: Principal) -> None:
+    """Step 2: the caller's user row, and their org's tenant if they have one."""
+    await provision_user(conn, principal.sub)
+    if principal.org is not None:
+        await join_claimed_tenant(conn)
 
 
 def _is_unique_violation(error: IntegrityError) -> bool:

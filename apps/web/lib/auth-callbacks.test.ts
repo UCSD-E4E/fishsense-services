@@ -19,12 +19,14 @@ const baseToken = { sub: "u1", name: "User One", email: "u@e.com" };
 
 let deps: AuthDeps & {
   membership: ReturnType<typeof vi.fn>;
+  tenants: ReturnType<typeof vi.fn>;
   refresh: ReturnType<typeof vi.fn>;
 };
 
 beforeEach(() => {
   deps = {
     membership: vi.fn(async () => ({ role: "admin", isAdmin: true })),
+    tenants: vi.fn(async () => []),
     refresh: vi.fn(async () => ({
       accessToken: "at-new",
       expiresAt: NOW + 300,
@@ -130,6 +132,48 @@ describe("jwtCallback on sign-in", () => {
     );
     expect(result.role).toBeNull();
     expect(result.isAdmin).toBe(false);
+  });
+
+  it("records which tenants a non-member belongs to instead", async () => {
+    // A partner who enrolled through their org's invite is a member of their
+    // org's tenant (the API joins them on the `org` claim), not the lab's.
+    deps.membership.mockResolvedValue(null);
+    deps.tenants.mockResolvedValue([
+      { slug: "conservation-angler", name: "Conservation Angler", role: "member", isAdmin: false },
+    ]);
+    const result = await jwtCallback(
+      { token: { ...baseToken }, account: signIn() as never, profile: {} as never },
+      deps,
+    );
+    expect(deps.tenants).toHaveBeenCalledExactlyOnceWith("at-123");
+    expect(result.otherTenants).toEqual(["Conservation Angler"]);
+    expect(result.isAdmin).toBe(false);
+  });
+
+  it("does not ask a member of this tenant for others", async () => {
+    const result = await jwtCallback(
+      {
+        token: { ...baseToken, otherTenants: ["stale"] },
+        account: signIn() as never,
+        profile: {} as never,
+      },
+      deps,
+    );
+    expect(deps.tenants).not.toHaveBeenCalled();
+    expect(result.otherTenants).toBeUndefined();
+  });
+
+  it("still signs a non-member in when their other tenants can't be read", async () => {
+    // Only the explanation suffers; the answer that matters (no role) stands.
+    deps.membership.mockResolvedValue(null);
+    deps.tenants.mockRejectedValue(new Error("api down"));
+    const result = await jwtCallback(
+      { token: { ...baseToken }, account: signIn() as never, profile: {} as never },
+      deps,
+    );
+    expect(result.role).toBeNull();
+    expect(result.otherTenants).toEqual([]);
+    expect(result.membershipError).toBeUndefined();
   });
 
   it("fails closed, and says so, when the API cannot answer", async () => {
@@ -301,5 +345,13 @@ describe("sessionCallback", () => {
     });
     expect(result.error).toBe("RefreshAccessTokenError");
     expect(result.membershipError).toBe("api down");
+  });
+
+  it("carries a non-member's other tenants through", async () => {
+    const result = await sessionCallback({
+      session: { user: {}, expires: "2099-01-01" } as never,
+      token: { ...baseToken, otherTenants: ["Conservation Angler"] } as never,
+    });
+    expect(result.otherTenants).toEqual(["Conservation Angler"]);
   });
 });

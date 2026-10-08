@@ -324,6 +324,9 @@ sequenceDiagram
 ## 6. Sequence — Partner onboarding and tenant scoping
 
 How an external partner becomes a scoped identity, and how a request gets isolated.
+Once per partner org, an operator declares the org's reusable invite in krg-infra
+(`collaborator_invites.tf`) and opens its tenant here (`add-tenant --org-claim`); after
+that, each of the org's people onboards with no operator involved (PLAN.md §9.10).
 
 ```mermaid
 sequenceDiagram
@@ -334,9 +337,10 @@ sequenceDiagram
     participant A as API
     participant DB as Postgres
 
-    Admin->>AK: create invitation<br/>fixed_data: attributes.tenant/org
-    AK-->>Admin: invite link (itoken)
-    Admin->>P: send link
+    Admin->>AK: krg-infra collaborator_invites.tf<br/>multi-use invite, fixed_data: attributes.tenant/org
+    AK-->>Admin: invite link (itoken, via OpenBao)
+    Admin->>DB: add-tenant <slug> --org-claim <org>
+    Admin->>P: send link (to the whole org)
 
     P->>AK: open link → enrollment flow
     AK->>AK: user_write (external, inactive)
@@ -349,8 +353,9 @@ sequenceDiagram
     AK-->>W: id/access token (sub + org claim)
     W->>A: request + JWT
 
-    A->>A: validate JWT, read stable sub
-    A->>DB: lookup User + Membership by sub
+    A->>A: validate JWT, read stable sub + org
+    A->>DB: provision User; join_claimed_tenant()<br/>(member of the tenant claiming org, once)
+    A->>DB: lookup Membership by sub + path slug
     DB-->>A: tenant_id + role
     A->>DB: SET app.tenant_id for this request
     Note over DB: RLS policies scope every row

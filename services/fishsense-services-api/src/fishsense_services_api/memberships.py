@@ -49,3 +49,43 @@ async def resolve_membership(
         )
     ).one_or_none()
     return None if row is None else Membership(tenant_id=row.tenant_id, role=row.role)
+
+
+async def join_claimed_tenant(conn: AsyncConnection) -> None:
+    """Make the caller a member of the tenant that claims their org, if any.
+
+    Runs in a :func:`~fishsense_services_api.db.principal_transaction` opened
+    with the caller's ``org``; the database function reads both from that
+    scope. A no-op without an org, for an org no tenant claims, or for a
+    caller already in that tenant -- whatever their role there.
+    """
+    await conn.execute(text("SELECT join_claimed_tenant()"))
+
+
+@dataclass(frozen=True)
+class TenantMembership:
+    """One of the caller's tenants, by name: what ``GET /me/memberships`` lists."""
+
+    slug: str
+    name: str
+    role: str
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == ADMIN_ROLE
+
+
+async def list_memberships(conn: AsyncConnection, sub: str) -> list[TenantMembership]:
+    """Every tenant the caller belongs to, by slug -- and no other."""
+    rows = await conn.execute(
+        text("""
+            SELECT t.slug, t.name, m.role
+            FROM memberships m
+            JOIN users u ON u.id = m.user_id
+            JOIN tenants t ON t.id = m.tenant_id
+            WHERE u.sub = :sub
+            ORDER BY t.slug
+            """),
+        {"sub": sub},
+    )
+    return [TenantMembership(**row._mapping) for row in rows]

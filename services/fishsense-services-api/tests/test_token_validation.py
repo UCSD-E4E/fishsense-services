@@ -109,3 +109,34 @@ def test_a_symmetric_token_is_rejected(validator):
 def test_garbage_is_rejected(validator):
     with pytest.raises(InvalidToken):
         validator.validate("not.a.token")
+
+
+# A partner's org rides on the `org` claim (krg-infra fishsense_collaborators.tf):
+# the collaborator invite pins it on the Authentik user, and the `org` scope
+# emits it. An AD member has no such attribute, so the claim is null.
+
+
+def test_a_partners_org_claim_is_carried_on_the_principal(validator):
+    assert validator.validate(_token(org="conservation-angler")) == Principal(
+        sub="hashed-user-id-123", org="conservation-angler"
+    )
+
+
+def test_a_token_without_an_org_claim_has_no_org(validator):
+    assert validator.validate(_token()).org is None
+
+
+def test_a_null_org_claim_has_no_org(validator):
+    """What Authentik emits for a lab member: the scope ran, the attribute is unset."""
+    now = int(time.time())
+    claims = {"iss": ISSUER, "aud": WEB_CLIENT, "sub": "s", "iat": now,
+              "exp": now + 300, "org": None}  # fmt: skip
+    token = jwt.encode(claims, SIGNING_KEY, algorithm="RS256", headers={"kid": KID})
+
+    assert validator.validate(token).org is None
+
+
+@pytest.mark.parametrize("org", ["", 42, ["conservation-angler"], {"a": 1}])
+def test_an_org_claim_that_is_not_a_name_has_no_org(validator, org):
+    """Fails closed to "no org": only a non-empty string can join a tenant."""
+    assert validator.validate(_token(org=org)).org is None

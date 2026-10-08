@@ -7,6 +7,8 @@
 //    Basic-auth password, re-minted once if the API refuses it;
 //  * v2 spells the kinds as the database does (`head_tail`, `slate`);
 //  * the caller's own membership, which is what the portal gate now asks.
+//  * the tenants the caller is in, so a partner turned away from the lab's
+//    portal is told which tenant is theirs.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { getServiceToken } = vi.hoisted(() => ({
@@ -17,6 +19,7 @@ vi.mock("./service-token", () => ({ getServiceToken }));
 import {
   ApiError,
   getMyMembership,
+  getMyTenants,
   getProjectIds,
   getTenantProjectIds,
 } from "./fishsense-api";
@@ -289,6 +292,38 @@ describe("getMyMembership", () => {
     );
 
     const error = await getMyMembership("user-token").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(status);
+  });
+});
+
+describe("getMyTenants", () => {
+  it("asks the API, as the signed-in user, which tenants they are in", async () => {
+    const fetchMock = vi.fn<FetchSig>(async () =>
+      jsonResponse([
+        { slug: "conservation-angler", name: "Conservation Angler", role: "member", is_admin: false },
+      ]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await getMyTenants("user-token")).toEqual([
+      { slug: "conservation-angler", name: "Conservation Angler", role: "member", isAdmin: false },
+    ]);
+
+    const [request, init] = fetchMock.mock.calls[0];
+    expect(request.url).toBe("http://api.test/me/memberships");
+    expect(request.headers.get("Authorization")).toBe("Bearer user-token");
+    expect(request.cache === "no-store" || init?.cache === "no-store").toBe(true);
+    expect(getServiceToken).not.toHaveBeenCalled();
+  });
+
+  it.each([401, 500, 503])("throws on %i, which is not an answer", async (status) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<FetchSig>(async () => new Response("", { status, statusText: "x" })),
+    );
+
+    const error = await getMyTenants("user-token").catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).status).toBe(status);
   });

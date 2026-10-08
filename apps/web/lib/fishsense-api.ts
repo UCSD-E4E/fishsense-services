@@ -10,7 +10,9 @@
  *  * a bearer token for the web's Authentik service account, not v1's
  *    Basic-auth password -- re-minted once if the API refuses it;
  *  * `getMyMembership`: the caller's role in the tenant, which is what the
- *    portal's gate is now made of.
+ *    portal's gate is now made of;
+ *  * `getMyTenants`: every tenant the caller is in, which tells a partner
+ *    turned away from the lab's portal which tenant is theirs.
  */
 import { ApiError, apiClient, failure, type Schemas } from "./api/client";
 import { tenantSlug } from "./env";
@@ -120,6 +122,24 @@ export async function getMyMembership(accessToken: string): Promise<Membership |
   }
   if (response.status === 404) return null;
   throw failure("fishsense-api membership failed", response, error);
+}
+
+export type TenantMembership = Membership & { slug: string; name: string };
+
+/**
+ * Every tenant the signed-in user is in, asked as them. A partner's is their
+ * org's: the API joins them to it on their token's `org` claim.
+ */
+export async function getMyTenants(accessToken: string): Promise<TenantMembership[]> {
+  const { data, error, response } = await apiClient(accessToken).GET("/me/memberships");
+  if (data === undefined) throw failure("fishsense-api memberships failed", response, error);
+  const tenants: Schemas["MyTenant"][] = data;
+  return tenants.map((t) => ({
+    slug: t.slug,
+    name: t.name,
+    role: t.role,
+    isAdmin: t.is_admin === true,
+  }));
 }
 
 export type { LabelKind };

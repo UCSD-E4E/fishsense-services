@@ -237,6 +237,7 @@ async def test_every_operation_has_an_explicit_operation_id(offline_client):
         "list_devices",
         "list_dives",
         "list_label_studio_project_ids",
+        "list_my_memberships",
         "raise_needs_reprocess",
         "set_dive_calibration_source",
         "set_dive_calibration_target",
