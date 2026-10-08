@@ -1,5 +1,5 @@
-"""Operations, as a stage: checksum verification (on demand) and the hourly
-labeling-config reconcile.
+"""Operations, as a stage: checksum verification and path repair (on demand),
+and the hourly labeling-config reconcile.
 
 The nightly backup and the NRP cert sync are also ops, but not stages: each is
 its own process, with credentials the orchestrator must never hold (see
@@ -10,6 +10,7 @@ from datetime import timedelta
 
 from temporalio.client import ScheduleOverlapPolicy
 
+from fishsense_services_api.capture_path_store import CapturePathCatalog
 from fishsense_services_api.checksum_store import ChecksumCatalog
 from fishsense_services_orchestrator.ingest.nas_frames import NasSettings
 from fishsense_services_orchestrator.labels.label_studio import (
@@ -32,12 +33,22 @@ from fishsense_services_orchestrator.ops.labeling_configs.registry import (
 from fishsense_services_orchestrator.ops.labeling_configs.workflow import (
     ReconcileLabelingConfigsWorkflow,
 )
+from fishsense_services_orchestrator.ops.paths.activities import (
+    PathRepairActivities,
+)
+from fishsense_services_orchestrator.ops.paths.workflow import (
+    RepairMovedCapturePathsWorkflow,
+)
 from fishsense_services_orchestrator.registry import Deps, ScheduledWorkflow, Stage
 
 
 def _activities(deps: Deps):
+    nas = NasSettings()
     checksums = ChecksumActivities(
-        catalog=ChecksumCatalog(deps.engine, sub=deps.sub), nas_settings=NasSettings()
+        catalog=ChecksumCatalog(deps.engine, sub=deps.sub), nas_settings=nas
+    )
+    paths = PathRepairActivities(
+        catalog=CapturePathCatalog(deps.engine, sub=deps.sub), nas_settings=nas
     )
     label_studio = LabelStudioSettings()
     reconcile = LabelingConfigActivities(
@@ -51,6 +62,7 @@ def _activities(deps: Deps):
         checksums.verify_dive_checksums,
         checksums.select_canonical_dive_numbers,
         reconcile.reconcile_labeling_configs,
+        paths.repair_moved_capture_paths,
     ]
 
 
@@ -60,6 +72,7 @@ STAGE = Stage(
         VerifyDiveChecksumsWorkflow,
         VerifyAllDivesChecksumsWorkflow,
         ReconcileLabelingConfigsWorkflow,
+        RepairMovedCapturePathsWorkflow,
     ],
     build_activities=_activities,
     schedules=[

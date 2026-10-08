@@ -27,6 +27,9 @@ from fishsense_services_orchestrator.ops.checksums.workflows import (
 from fishsense_services_orchestrator.ops.labeling_configs.workflow import (
     ReconcileLabelingConfigsWorkflow,
 )
+from fishsense_services_orchestrator.ops.paths.workflow import (
+    RepairMovedCapturePathsWorkflow,
+)
 from fishsense_services_orchestrator.registry import Deps, stages
 from fishsense_services_orchestrator.schedules import ensure_schedules
 
@@ -38,11 +41,12 @@ def _ops():
     return stage
 
 
-def test_the_ops_stage_serves_its_three_workflows():
+def test_the_ops_stage_serves_its_workflows():
     assert set(_ops().workflows) == {
         VerifyDiveChecksumsWorkflow,
         VerifyAllDivesChecksumsWorkflow,
         ReconcileLabelingConfigsWorkflow,
+        RepairMovedCapturePathsWorkflow,
     }
 
 
@@ -56,6 +60,7 @@ def test_its_activities_build_from_the_nas_and_label_studio_settings(monkeypatch
         "verify_dive_checksums",
         "select_canonical_dive_numbers",
         "reconcile_labeling_configs",
+        "repair_moved_capture_paths",
     }
 
 
