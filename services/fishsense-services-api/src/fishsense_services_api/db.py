@@ -21,10 +21,15 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 @asynccontextmanager
 async def principal_transaction(
-    bind: AsyncEngine | AsyncConnection, sub: str
+    bind: AsyncEngine | AsyncConnection, sub: str, *, org: str | None = None
 ) -> AsyncIterator[AsyncConnection]:
-    """Open a transaction in which RLS exposes only the caller's own rows."""
-    async with _scoped_transaction(bind, {"app.user_sub": sub}) as conn:
+    """Open a transaction in which RLS exposes only the caller's own rows.
+
+    ``org`` is the caller's verified ``org`` claim (``app.user_org``), which
+    :func:`~fishsense_services_api.memberships.join_claimed_tenant` reads.
+    """
+    settings = {"app.user_sub": sub, "app.user_org": org or ""}
+    async with _scoped_transaction(bind, settings) as conn:
         yield conn
 
 

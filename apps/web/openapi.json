@@ -193,6 +193,34 @@
         "title": "MyMembership",
         "type": "object"
       },
+      "MyTenant": {
+        "properties": {
+          "is_admin": {
+            "title": "Is Admin",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "role",
+          "is_admin"
+        ],
+        "title": "MyTenant",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -247,6 +275,34 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/me/memberships": {
+      "get": {
+        "description": "The tenants the caller belongs to (a partner's is their org's).",
+        "operationId": "list_my_memberships",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MyTenant"
+                  },
+                  "title": "Response List My Memberships",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "My Memberships"
+      }
+    },
     "/tenants/{slug}/devices": {
       "get": {
         "operationId": "list_devices",

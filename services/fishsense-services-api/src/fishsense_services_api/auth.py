@@ -3,6 +3,12 @@
 The API trusts no upstream header: it verifies the token's signature against
 the issuer's keys and checks issuer, audience and expiry itself. The caller's
 identity is the stable ``sub`` claim -- never email, which admins can change.
+
+A partner's account also carries an ``org`` claim: the partner org its
+collaborator invite pinned on it in Authentik (krg-infra
+``collaborator_invites.tf``). It names the tenant the caller joins
+(:func:`fishsense_services_api.memberships.join_claimed_tenant`); it is never
+identity.
 """
 
 import threading
@@ -32,6 +38,8 @@ class Principal:
     """The authenticated caller, identified by the IdP's stable subject."""
 
     sub: str
+    #: The partner org the IdP vouches for, or None (a lab member's is null).
+    org: str | None = None
 
 
 class KeySource(Protocol):
@@ -139,4 +147,9 @@ class TokenValidator:
             )
         except jwt.PyJWTError as error:
             raise InvalidToken(str(error)) from error
-        return Principal(sub=claims["sub"])
+        return Principal(sub=claims["sub"], org=_org(claims.get("org")))
+
+
+def _org(claim: object) -> str | None:
+    """A non-empty string, or no org at all: anything else fails closed."""
+    return claim if isinstance(claim, str) and claim else None

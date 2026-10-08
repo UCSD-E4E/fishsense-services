@@ -64,6 +64,8 @@ class Tenant(Base):
     slug: Mapped[str] = mapped_column(Text, unique=True)
     name: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
+    #: The partner org whose accounts join this tenant as members (0037).
+    org_claim: Mapped[str | None] = mapped_column(Text, unique=True)
 
 
 class User(Base):

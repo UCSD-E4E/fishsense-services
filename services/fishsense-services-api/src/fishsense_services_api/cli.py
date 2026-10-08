@@ -7,17 +7,23 @@ fishsense-services-api audit-range-trend --tenant lab 490 491
 fishsense-services-api validate-automatic --tenant <id>
                                     # read-only: the automatic chain against the
                                     # paper's dives (cscw-fishsense2027 §6)
+fishsense-services-api add-tenant conservation-angler \\
+    --name "Conservation Angler" --org-claim conservation-angler
+                                    # a partner's tenant, joined by its org's
+                                    # invitees (migration 0037), as the owner
 """
 
 import argparse
 import asyncio
 import json
+import re
 import sys
 import uuid
 from collections.abc import Mapping, Sequence
 
 from pydantic import ValidationError
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from fishsense_services_api.automatic_validation import (
@@ -56,6 +62,10 @@ from fishsense_services_api.v1_migration import (
 )
 
 ENV_PREFIX = "FISHSENSE_"
+#: One path segment of lowercase letters, digits and dashes: a tenant slug goes
+#: into every API path (apps/web lib/env.ts checks the same), and an org is a
+#: krg-infra ``collaborator_invites`` key, which has the same shape.
+SLUG = re.compile(r"[a-z0-9][a-z0-9-]*")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -99,6 +109,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON {dive number: {laser_position, laser_axis}}, replacing the "
         "database's label-free calibrations",
     )
+    add_tenant = commands.add_parser(
+        "add-tenant",
+        help="create (or update) a tenant, optionally joined by a partner org's "
+        "accounts, as the schema owner",
+    )
+    add_tenant.add_argument("slug", help="the tenant's slug, as in its API paths")
+    add_tenant.add_argument("--name", required=True, help="its display name")
+    add_tenant.add_argument(
+        "--org-claim",
+        help="the partner org (Authentik `org` claim) whose accounts join this "
+        "tenant as members; left as it is when omitted",
+    )
     return parser
 
 
@@ -113,7 +135,44 @@ async def main(argv: Sequence[str]) -> int:
         return await _audit_range_trend(args)
     if args.command == "validate-automatic":
         return await _validate_automatic(args)
+    if args.command == "add-tenant":
+        return await _add_tenant(args)
     return 2  # unreachable: argparse rejects unknown commands
+
+
+async def _add_tenant(args: argparse.Namespace) -> int:
+    for label, value in (("tenant slug", args.slug), ("org claim", args.org_claim)):
+        if value is not None and not SLUG.fullmatch(value):
+            print(f"not a valid {label}: {value!r}", file=sys.stderr)
+            return 2
+    settings = _settings(MigrationSettings)
+    if settings is None:
+        return 2
+    engine = create_async_engine(settings.migration_database_url.get_secret_value())
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("""
+                    INSERT INTO tenants (slug, name, org_claim)
+                    VALUES (:slug, :name, :org)
+                    ON CONFLICT (slug) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        org_claim = COALESCE(EXCLUDED.org_claim, tenants.org_claim)
+                    """),
+                {"slug": args.slug, "name": args.name, "org": args.org_claim},
+            )
+    except IntegrityError:
+        print(
+            f"org {args.org_claim!r} is already claimed by another tenant -- "
+            "nothing changed",
+            file=sys.stderr,
+        )
+        return 1
+    finally:
+        await engine.dispose()
+    claim = f", joined by org {args.org_claim}" if args.org_claim else ""
+    print(f"tenant {args.slug} ({args.name}){claim}")
+    return 0
 
 
 async def _migrate() -> int:

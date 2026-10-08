@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+    "/me/memberships": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My Memberships
+         * @description The tenants the caller belongs to (a partner's is their org's).
+         */
+        get: operations["list_my_memberships"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{slug}/devices": {
         parameters: {
             query?: never;
@@ -286,6 +306,17 @@ export interface components {
             /** Role */
             role: string;
         };
+        /** MyTenant */
+        MyTenant: {
+            /** Is Admin */
+            is_admin: boolean;
+            /** Name */
+            name: string;
+            /** Role */
+            role: string;
+            /** Slug */
+            slug: string;
+        };
         /** ValidationError */
         ValidationError: {
             /** Context */
@@ -308,6 +339,26 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_my_memberships: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyTenant"][];
+                };
+            };
+        };
+    };
     list_devices: {
         parameters: {
             query?: never;
