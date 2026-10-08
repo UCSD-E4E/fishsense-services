@@ -442,10 +442,9 @@ def deployment_is_wedged(apps, namespace: str, name: str) -> bool:
       then not-Ready and the timestamp resets every few seconds.
 
     Nothing here is time-based, which leaves one false positive: a sweep that
-    lands inside a genuine cold start (image pull) sees no Ready pod and tears
-    it down. That costs an hour, not correctness — the next parent with real
-    work stands it straight back up, and processor activities are idempotent
-    by design, so the children it interrupts simply re-run.
+    lands inside a genuine cold start (image pull) sees no Ready pod. The
+    sweeper covers that with the wake stamp: for the start timeout after a
+    wake, busy with no Ready pod is a cold start, not a wedge.
 
     A Deployment that doesn't exist is not wedged (v2): nothing is held.
     """

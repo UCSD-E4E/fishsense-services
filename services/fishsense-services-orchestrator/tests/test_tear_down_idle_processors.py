@@ -363,3 +363,83 @@ def test_work_since_a_wake_is_any_workflow_started_on_the_queue_after_it():
     assert sut.build_used_since_query("processor_light", since) == (
         'TaskQueue = "processor_light" and StartTime > "2026-10-07T21:42:05Z"'
     )
+
+
+# -- a wake's cold start is not a wedge (code review of #52) -------------------------
+
+START_TIMEOUT = {"start_timeout_seconds": 600}
+
+
+def _cold(cluster: FakeCluster, name: str, minutes_ago: float) -> None:
+    """Woken `minutes_ago`, its pod not Ready yet (pulling its image)."""
+    _woken(cluster, name, minutes_ago)
+    cluster.ready[name] = 0
+
+
+async def _sweep_with(cluster: FakeCluster, busy, used, **config_overrides) -> None:
+    activities = NrpActivities(
+        config=config(**config_overrides),
+        kubernetes=cluster.kubernetes,
+        task_queue_busy=busy,
+        queue_used_since=used,
+    )
+    await ActivityEnvironment().run(activities.tear_down_idle_processors)
+
+
+async def test_a_fresh_wake_whose_child_arrived_during_its_cold_start_is_left():
+    """The light and per-image wakes don't wait for a Ready pod, so the child
+    can reach the queue while the pod still pulls its image. That ends the
+    wake's grace -- but busy + no Ready pod is a cold start, not a wedge, and
+    deleting it left the child waiting on an unserved queue."""
+    cluster = FakeCluster()
+    _cold(cluster, LIGHT, minutes_ago=2)
+
+    await _sweep_with(
+        cluster,
+        _busy({PROCESSOR_LIGHT_TASK_QUEUE}),
+        _used({PROCESSOR_LIGHT_TASK_QUEUE}),
+        gpu=START_TIMEOUT,
+    )
+
+    assert cluster.exists(LIGHT)
+
+
+async def test_a_wake_still_not_ready_after_the_start_timeout_is_wedged():
+    """The cold-start allowance is the start timeout, not the wake grace:
+    stages wake hourly, so a 90-minute allowance would keep a processor that
+    never starts up forever -- the leak the wedge check exists to end."""
+    cluster = FakeCluster()
+    _cold(cluster, LIGHT, minutes_ago=11)
+
+    await _sweep_with(
+        cluster,
+        _busy({PROCESSOR_LIGHT_TASK_QUEUE}),
+        _used({PROCESSOR_LIGHT_TASK_QUEUE}),
+        gpu=START_TIMEOUT,
+    )
+
+    assert not cluster.exists(LIGHT)
+
+
+async def test_a_child_arriving_mid_sweep_does_not_get_its_processor_deleted():
+    """A child that reaches the queue between the sweeper's two questions.
+    Asked "busy?" first, then "used since the wake?", it reads not busy, yet
+    used -- and the processor was deleted under the child. Asked the other
+    way round, either answer keeps it: not used yet (the wake still waits) or
+    used and so already busy."""
+    cluster = FakeCluster()
+    _woken(cluster, LIGHT, minutes_ago=5)
+    arrived = {"child": False}
+
+    async def _light_queue(*args) -> bool:
+        """Either question about the light queue: the child lands right after
+        the first one is answered."""
+        if PROCESSOR_LIGHT_TASK_QUEUE not in args:
+            return False
+        seen = arrived["child"]
+        arrived["child"] = True
+        return seen
+
+    await _sweep_with(cluster, _light_queue, _light_queue)
+
+    assert cluster.exists(LIGHT)

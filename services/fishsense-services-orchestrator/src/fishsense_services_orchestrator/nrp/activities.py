@@ -334,8 +334,9 @@ class NrpActivities:
         closed within ``idle_cooldown_minutes`` (so back-to-back dives don't
         thrash the pod). Each Deployment is swept against its own queue, so a
         busy per-image queue never keeps a GPU pod alive and vice versa. A busy
-        queue keeps its Deployment only while it has a Ready pod: a wedged one
-        is torn down anyway, since it can't drain what keeps it "busy".
+        queue keeps its Deployment only while it has a Ready pod, or is within
+        the start timeout of a wake (still pulling its image): a wedged one is
+        torn down anyway, since it can't drain what keeps it "busy".
 
         Writes **only** Deployments, never the GPU-fallback state. That
         separation is load-bearing: the fallback counts "pods wanted, none
@@ -352,11 +353,6 @@ class NrpActivities:
             return False
 
         targets = config.sweep_targets()
-        busy = set()
-        # Each queue once, however many Deployments serve it.
-        for task_queue in dict.fromkeys(q for _, q in targets):
-            if await self._task_queue_busy(config.idle_cooldown_minutes, task_queue):
-                busy.add(task_queue)
 
         # A recent wake is spared while its work hasn't reached the queue yet:
         # its parent may still be staging raws, and its pods may not be Ready
@@ -369,14 +365,32 @@ class NrpActivities:
             return {name: woken_at(apps, config.namespace, name) for name, _ in targets}
 
         grace = timedelta(minutes=config.wake_grace_minutes)
+        # The light and per-image wakes don't wait for a Ready pod, so their
+        # child can reach the queue mid image pull: busy with no Ready pod is
+        # a cold start for the start timeout after a wake, not a wedge. Only
+        # that long -- stages wake hourly, so the wake grace would shield a
+        # processor that never starts forever.
+        cold_start = timedelta(seconds=config.gpu.start_timeout_seconds)
         now = datetime.now(timezone.utc)
-        waiting = set()
+        waiting, starting = set(), set()
         for (name, task_queue), woken in zip(
             targets, (await asyncio.to_thread(_stamps)).values()
         ):
-            if woken is not None and now - woken < grace:
+            if woken is None:
+                continue
+            if now - woken < cold_start:
+                starting.add(name)
+            if now - woken < grace:
                 if not await self._queue_used_since(task_queue, woken):
                     waiting.add(name)
+
+        # Asked *after* "used since the wake?": a child that lands between the
+        # two questions then reads as busy, never as used-but-not-busy.
+        busy = set()
+        # Each queue once, however many Deployments serve it.
+        for task_queue in dict.fromkeys(q for _, q in targets):
+            if await self._task_queue_busy(config.idle_cooldown_minutes, task_queue):
+                busy.add(task_queue)
 
         def _sweep() -> list[tuple[str, str]]:
             """(deployment, outcome) pairs; one client for the whole pass."""
@@ -386,11 +400,13 @@ class NrpActivities:
                 if name in waiting:
                     outcomes.append((name, "just-woken"))
                     continue
-                if task_queue in busy and not deployment_is_wedged(
-                    apps, config.namespace, name
-                ):
-                    outcomes.append((name, "busy"))
-                    continue
+                if task_queue in busy:
+                    if not deployment_is_wedged(apps, config.namespace, name):
+                        outcomes.append((name, "busy"))
+                        continue
+                    if name in starting:
+                        outcomes.append((name, "starting"))
+                        continue
                 deleted = delete_deployment(apps, config.namespace, name)
                 if not deleted:
                     outcomes.append((name, "absent"))
@@ -408,6 +424,14 @@ class NrpActivities:
                     config.namespace,
                     name,
                     config.wake_grace_minutes,
+                )
+            elif outcome == "starting":
+                activity.logger.info(
+                    "processor %s/%s has work but no Ready pod yet, within %ds of "
+                    "its wake; leaving it to finish starting",
+                    config.namespace,
+                    name,
+                    config.gpu.start_timeout_seconds,
                 )
             elif outcome == "busy":
                 activity.logger.info(
