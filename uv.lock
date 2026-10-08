@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = "==3.13.*"
 resolution-markers = [
     "sys_platform == 'win32'",
@@ -698,7 +698,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.10.0" },
     { name = "pymupdf", specifier = ">=1.24.0" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "synology-filestation", url = "https://github.com/UCSD-E4E/synology-filestation/releases/download/synology-filestation-fuse-v0.9.0/synology_filestation-0.9.0-cp310-abi3-manylinux_2_34_x86_64.whl" },
+    { name = "synology-filestation", url = "https://github.com/UCSD-E4E/synology-filestation/releases/download/synology-filestation-fuse-v0.10.0/synology_filestation-0.10.0-cp310-abi3-manylinux_2_34_x86_64.whl" },
     { name = "temporalio", specifier = ">=1.15.0" },
 ]
 
@@ -2389,10 +2389,10 @@ wheels = [
 
 [[package]]
 name = "synology-filestation"
-version = "0.9.0"
-source = { url = "https://github.com/UCSD-E4E/synology-filestation/releases/download/synology-filestation-fuse-v0.9.0/synology_filestation-0.9.0-cp310-abi3-manylinux_2_34_x86_64.whl" }
+version = "0.10.0"
+source = { url = "https://github.com/UCSD-E4E/synology-filestation/releases/download/synology-filestation-fuse-v0.10.0/synology_filestation-0.10.0-cp310-abi3-manylinux_2_34_x86_64.whl" }
 wheels = [
-    { url = "https://github.com/UCSD-E4E/synology-filestation/releases/download/synology-filestation-fuse-v0.9.0/synology_filestation-0.9.0-cp310-abi3-manylinux_2_34_x86_64.whl", hash = "sha256:27397c0f2f2a27bf5e245a393c5d62c1ecf3f41e608aca8814412f16084bf7d9" },
+    { url = "https://github.com/UCSD-E4E/synology-filestation/releases/download/synology-filestation-fuse-v0.10.0/synology_filestation-0.10.0-cp310-abi3-manylinux_2_34_x86_64.whl", hash = "sha256:a35c90efc23f7862c5020111696ee102d4aea5b58d00f89c9ed421c7fd3568a6" },
 ]
 
 [package.metadata]

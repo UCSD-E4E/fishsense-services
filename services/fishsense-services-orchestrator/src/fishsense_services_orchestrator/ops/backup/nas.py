@@ -21,6 +21,8 @@ from urllib.parse import urlparse
 
 from synology_filestation import AlreadyExists, Client
 
+from fishsense_services_orchestrator.ingest.nas import log_transport
+
 __all__ = ["NasBackupClient"]
 
 _log = logging.getLogger(__name__)
@@ -46,6 +48,7 @@ class NasBackupClient:
             password,
             https=True,
         )
+        log_transport(self._fs, parsed.hostname)
 
     def upload(self, *, dest_dir: str, src_file_path: str) -> None:
         """Upload `src_file_path` into `dest_dir`, creating the folder first:

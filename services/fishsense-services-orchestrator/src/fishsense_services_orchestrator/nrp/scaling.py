@@ -471,25 +471,22 @@ def apply_deployment(apps, body: dict) -> None:
     )
 
 
-def woken_within(apps, namespace: str, name: str, minutes: int) -> bool:
-    """Whether the orchestrator stood Deployment ``name`` up within the last
-    ``minutes`` (its `WOKEN_AT` stamp). False when it doesn't exist, isn't
-    stamped, or the stamp is unreadable."""
+def woken_at(apps, namespace: str, name: str) -> datetime | None:
+    """When the orchestrator last woke Deployment ``name`` (its `WOKEN_AT`
+    stamp). None when it doesn't exist, isn't stamped, or the stamp is
+    unreadable."""
     try:
         deployment = apps.read_namespaced_deployment(name=name, namespace=namespace)
     except Exception as exc:  # pylint: disable=broad-except
         if _is_not_found(exc):
-            return False
+            return None
         raise
     annotations = getattr(getattr(deployment, "metadata", None), "annotations", None)
     stamp = (annotations or {}).get(WOKEN_AT)
     try:
-        woken = datetime.fromisoformat(stamp) if stamp else None
+        return datetime.fromisoformat(stamp) if stamp else None
     except ValueError:
-        return False
-    return woken is not None and (
-        datetime.now(timezone.utc) - woken < timedelta(minutes=minutes)
-    )
+        return None
 
 
 def delete_deployment(apps, namespace: str, name: str) -> bool:

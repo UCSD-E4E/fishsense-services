@@ -5,7 +5,8 @@
 worker imports its stages; the workflow and activities are registered either
 way. Schedules are created if missing and never updated in place
 (`schedules`), so turning the stage off again means deleting
-`detect-slate-presence` as well.
+`detect-slate-presence` as well -- and so does changing its policy (2026-10:
+SKIP -> BUFFER_ONE): delete it, and the next worker start recreates it.
 
 Enabled, it fires hourly at +42 and drains dive after dive for up to 50
 minutes (`workflow.DETECT_DRAIN_WINDOW`), oldest first across tenants and any
@@ -48,7 +49,10 @@ def slate_detection_schedules(
             every=timedelta(hours=1),
             offset=timedelta(minutes=42),
             run_timeout=DETECT_RUN_TIMEOUT,
-            overlap=ScheduleOverlapPolicy.SKIP,
+            # A drain can run past the next :42; skipped, that firing left the
+            # backlog idle for most of an hour. Buffered, it starts when the
+            # run ends -- never alongside it, so no dive is picked twice.
+            overlap=ScheduleOverlapPolicy.BUFFER_ONE,
         )
     ]
 
