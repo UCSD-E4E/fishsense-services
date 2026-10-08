@@ -137,6 +137,13 @@ def _busy(value: bool):
     return _check
 
 
+def _used(answer: bool):
+    async def _check(_task_queue, _since) -> bool:
+        return answer
+
+    return _check
+
+
 async def test_ensure_running_stands_the_real_deployment_up(config, apis):
     result = await ActivityEnvironment().run(
         NrpActivities(config=config).ensure_per_image_processor_running
@@ -176,7 +183,10 @@ async def test_re_applying_an_unchanged_manifest_rolls_nothing(config, apis):
 
 
 async def test_tear_down_when_idle_deletes_the_real_deployment(config, apis):
-    nrp = NrpActivities(config=config, task_queue_busy=_busy(False))
+    # The wake's work has reached the queue and finished: the grace is spent.
+    nrp = NrpActivities(
+        config=config, task_queue_busy=_busy(False), queue_used_since=_used(True)
+    )
     await ActivityEnvironment().run(nrp.ensure_per_image_processor_running)
 
     result = await ActivityEnvironment().run(nrp.tear_down_idle_processors)
@@ -196,7 +206,9 @@ async def test_tear_down_leaves_a_busy_healthy_deployment_alone(
     below needs no such stub, which is what makes it real.
     """
     monkeypatch.setattr(activities_mod, "deployment_is_wedged", lambda *_a: False)
-    nrp = NrpActivities(config=config, task_queue_busy=_busy(True))
+    nrp = NrpActivities(
+        config=config, task_queue_busy=_busy(True), queue_used_since=_used(True)
+    )
     await ActivityEnvironment().run(nrp.ensure_per_image_processor_running)
 
     result = await ActivityEnvironment().run(nrp.tear_down_idle_processors)
@@ -224,7 +236,9 @@ async def test_tear_down_reclaims_a_wedged_busy_deployment(config, apis):
     unschedulable; in v1's prod the Temporal cert had expired). The sweeper
     must reclaim it anyway."""
     scaling.set_deployment_replicas(apis.apps, config, GPU, 2)
-    nrp = NrpActivities(config=config, task_queue_busy=_busy(True))
+    nrp = NrpActivities(
+        config=config, task_queue_busy=_busy(True), queue_used_since=_used(True)
+    )
 
     result = await ActivityEnvironment().run(nrp.tear_down_idle_processors)
 

@@ -72,11 +72,26 @@ def _everything_up(cluster: FakeCluster, *, ready: bool = True) -> None:
         cluster.stand_up(name, replicas=1, ready=1 if ready else 0)
 
 
-async def _sweep(cluster: FakeCluster, busy: set[str], asked=None) -> bool:
+def _used(queues: set[str], asked: list | None = None):
+    """`queue_used_since`: whether a workflow started on the queue after the
+    wake; `asked` records (queue, since) pairs."""
+
+    async def _check(task_queue: str, since: datetime) -> bool:
+        if asked is not None:
+            asked.append((task_queue, since))
+        return task_queue in queues
+
+    return _check
+
+
+async def _sweep(
+    cluster: FakeCluster, busy: set[str], asked=None, used: set[str] = frozenset()
+) -> bool:
     activities = NrpActivities(
         config=config(),
         kubernetes=cluster.kubernetes,
         task_queue_busy=_busy(busy, asked),
+        queue_used_since=_used(set(used)),
     )
     return await ActivityEnvironment().run(activities.tear_down_idle_processors)
 
@@ -253,7 +268,10 @@ async def test_a_processor_woken_moments_ago_is_left_while_its_parent_stages():
     recent one alone."""
     cluster = FakeCluster()
     activities = NrpActivities(
-        config=config(), kubernetes=cluster.kubernetes, task_queue_busy=_busy(set())
+        config=config(),
+        kubernetes=cluster.kubernetes,
+        task_queue_busy=_busy(set()),
+        queue_used_since=_used(set()),
     )
     await ActivityEnvironment().run(activities.ensure_light_processor_running)
 
@@ -276,3 +294,72 @@ async def test_a_wake_older_than_the_grace_is_torn_down():
     await _sweep(cluster, busy=set())
 
     assert not cluster.exists(LIGHT)
+
+
+def _woken(cluster: FakeCluster, name: str, minutes_ago: float) -> datetime:
+    at = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
+    cluster.deployments[name] = {
+        "metadata": {"name": name, "annotations": {WOKEN_AT: at.isoformat()}},
+        "spec": {"replicas": 1},
+    }
+    cluster.ready[name] = 1
+    return at
+
+
+async def test_a_recent_wake_whose_work_has_run_and_cooled_is_torn_down():
+    """Every wake re-stamps the Deployment, and stages wake hourly, so a grace
+    that protected any recent wake kept the GPU and light processors up for a
+    day and a half (2026-10-06/07). The grace is for a parent still staging,
+    before its child reaches the queue: once the queue has had work since the
+    wake and has cooled, the wake was used, and the processor is idle."""
+    cluster = FakeCluster()
+    _woken(cluster, LIGHT, minutes_ago=30)
+
+    await _sweep(cluster, busy=set(), used={PROCESSOR_LIGHT_TASK_QUEUE})
+
+    assert not cluster.exists(LIGHT)
+
+
+async def test_a_recent_wake_whose_child_has_not_arrived_is_left():
+    cluster = FakeCluster()
+    _woken(cluster, LIGHT, minutes_ago=30)
+
+    await _sweep(cluster, busy=set(), used=set())
+
+    assert cluster.exists(LIGHT)
+
+
+async def test_the_grace_asks_about_work_since_the_wake_itself():
+    cluster = FakeCluster()
+    at = _woken(cluster, LIGHT, minutes_ago=30)
+    asked: list = []
+    activities = NrpActivities(
+        config=config(),
+        kubernetes=cluster.kubernetes,
+        task_queue_busy=_busy(set()),
+        queue_used_since=_used(set(), asked),
+    )
+    await ActivityEnvironment().run(activities.tear_down_idle_processors)
+
+    assert (PROCESSOR_LIGHT_TASK_QUEUE, at) in asked
+
+
+async def test_a_processor_left_for_its_wake_says_so(caplog):
+    """It used to be the one outcome the sweeper didn't log, which is how the
+    processors stayed up unnoticed."""
+    cluster = FakeCluster()
+    _woken(cluster, LIGHT, minutes_ago=5)
+
+    with caplog.at_level("INFO"):
+        await _sweep(cluster, busy=set(), used=set())
+
+    assert any(
+        "woken" in r.getMessage() and LIGHT in r.getMessage() for r in caplog.records
+    )
+
+
+def test_work_since_a_wake_is_any_workflow_started_on_the_queue_after_it():
+    since = datetime(2026, 10, 7, 21, 42, 5, tzinfo=timezone.utc)
+    assert sut.build_used_since_query("processor_light", since) == (
+        'TaskQueue = "processor_light" and StartTime > "2026-10-07T21:42:05Z"'
+    )

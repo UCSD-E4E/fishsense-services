@@ -52,7 +52,7 @@ from fishsense_services_orchestrator.nrp.scaling import (
     read_gpu_state,
     readiness,
     set_deployment_replicas,
-    woken_within,
+    woken_at,
     write_gpu_state,
 )
 
@@ -60,6 +60,8 @@ __all__ = ["NrpActivities", "build_busy_query", "task_queue_busy"]
 
 #: (cooldown_minutes, task_queue) -> is it busy?
 BusyCheck = Callable[[int, str], Awaitable[bool]]
+#: (task queue, since) -> whether a workflow started on it after `since`.
+UsedSinceCheck = Callable[[str, datetime], Awaitable[bool]]
 
 
 def build_busy_query(cooldown_minutes: int, task_queue: str) -> str:
@@ -92,6 +94,26 @@ async def task_queue_busy(
     return False
 
 
+def build_used_since_query(task_queue: str, since: datetime) -> str:
+    """Temporal list-filter matching any workflow started on ``task_queue``
+    after ``since``: a wake's work has reached the queue."""
+    stamp = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return f'TaskQueue = "{task_queue}" and StartTime > "{stamp}"'
+
+
+async def queue_used_since(client: Client, task_queue: str, since: datetime) -> bool:
+    """True iff a workflow started on ``task_queue`` after ``since``."""
+    async for _ in client.list_workflows(
+        query=build_used_since_query(task_queue, since)
+    ):
+        return True
+    return False
+
+
+async def _used_through_the_worker_client(task_queue: str, since: datetime) -> bool:
+    return await queue_used_since(activity.client(), task_queue, since)
+
+
 async def _busy_through_the_worker_client(
     cooldown_minutes: int, task_queue: str
 ) -> bool:
@@ -107,12 +129,14 @@ class NrpActivities:
         config: ScalingConfig | None,
         kubernetes: Callable[[str], Kubernetes] = kubernetes_apis,
         task_queue_busy: BusyCheck = _busy_through_the_worker_client,
+        queue_used_since: UsedSinceCheck = _used_through_the_worker_client,
         poll_interval_seconds: float = 10,
     ) -> None:
         #: None when scaling is off: every activity no-ops.
         self.config = config
         self._kubernetes = kubernetes
         self._task_queue_busy = task_queue_busy
+        self._queue_used_since = queue_used_since
         #: How often the GPU wake re-reads a Deployment while waiting for a
         #: pod to go Ready. Tests set it to 0.
         self._poll_interval_seconds = poll_interval_seconds
@@ -334,16 +358,32 @@ class NrpActivities:
             if await self._task_queue_busy(config.idle_cooldown_minutes, task_queue):
                 busy.add(task_queue)
 
+        # A recent wake is spared while its work hasn't reached the queue yet:
+        # its parent may still be staging raws, and its pods may not be Ready
+        # (`WOKEN_AT`). Only that long. Every wake re-stamps the Deployment and
+        # stages wake hourly, so sparing any recent wake kept the GPU and light
+        # processors up for a day and a half (2026-10-06/07); once the queue
+        # has had work since the wake, idleness decides.
+        def _stamps() -> dict[str, datetime | None]:
+            apps = self._apis().apps
+            return {name: woken_at(apps, config.namespace, name) for name, _ in targets}
+
+        grace = timedelta(minutes=config.wake_grace_minutes)
+        now = datetime.now(timezone.utc)
+        waiting = set()
+        for (name, task_queue), woken in zip(
+            targets, (await asyncio.to_thread(_stamps)).values()
+        ):
+            if woken is not None and now - woken < grace:
+                if not await self._queue_used_since(task_queue, woken):
+                    waiting.add(name)
+
         def _sweep() -> list[tuple[str, str]]:
             """(deployment, outcome) pairs; one client for the whole pass."""
             apps = self._apis().apps
             outcomes = []
             for name, task_queue in targets:
-                # Before idleness: a fresh wake's child may not be on the
-                # queue yet, and its pods may not be Ready (`WOKEN_AT`).
-                if woken_within(
-                    apps, config.namespace, name, config.wake_grace_minutes
-                ):
+                if name in waiting:
                     outcomes.append((name, "just-woken"))
                     continue
                 if task_queue in busy and not deployment_is_wedged(
@@ -361,7 +401,15 @@ class NrpActivities:
         outcomes = await asyncio.to_thread(_sweep)
 
         for name, outcome in outcomes:
-            if outcome == "busy":
+            if outcome == "just-woken":
+                activity.logger.info(
+                    "processor %s/%s was woken within %d minutes and no work has "
+                    "reached its queue since; leaving it up for its parent",
+                    config.namespace,
+                    name,
+                    config.wake_grace_minutes,
+                )
+            elif outcome == "busy":
                 activity.logger.info(
                     "task queue for %s/%s still busy or within %d-minute cooldown "
                     "and the worker is healthy; leaving it up",
