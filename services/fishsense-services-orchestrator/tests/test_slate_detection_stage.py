@@ -7,7 +7,7 @@ classifier). Pinned here:
   until someone turns it on. The workflow and activities are registered
   either way, so the parent can be run by hand;
 * enabled, the detect parent fires hourly at +42 -- before stage 9 at +45,
-  which draws and queues the frames it finds -- skipping on overlap, with a
+  which draws and queues the frames it finds -- buffering one firing on overlap, with a
   run timeout covering every step at its longest;
 * the API store's threshold is the contract's (the API does not import the
   contracts, so the two are pinned equal here).
@@ -68,8 +68,16 @@ def test_enabled_it_detects_hourly_before_stage_9():
         timedelta(hours=1),
         timedelta(minutes=42),
     )
-    assert schedule.overlap == ScheduleOverlapPolicy.SKIP
     assert schedule.run_timeout == wf.DETECT_RUN_TIMEOUT
+
+
+def test_a_firing_during_a_drain_runs_as_soon_as_it_ends():
+    """A run drains for 50 minutes and then finishes its last dive, which can
+    run past the next :42; skipped, that firing left the backlog idle for most
+    of an hour (2026-10-07). One is buffered instead: it starts when the run
+    ends, never alongside it, so two runs still never pick the same dive."""
+    (schedule,) = slate_detection_schedules(SlateDetectionSettings(enabled=True))
+    assert schedule.overlap == ScheduleOverlapPolicy.BUFFER_ONE
 
 
 def test_the_stores_threshold_is_the_contracts():
