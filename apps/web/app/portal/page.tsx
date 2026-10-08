@@ -45,7 +45,7 @@ export default async function PortalPage() {
           the portal.
         </p>
         <p className="mt-2 text-sm text-slate-500">
-          {explainDenial(access.reason, tenantSlug())}
+          {explainDenial(access.reason, tenantSlug(), session.otherTenants)}
         </p>
         <form
           action={async () => {

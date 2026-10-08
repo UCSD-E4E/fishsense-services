@@ -123,6 +123,13 @@ describe("explainDenial", () => {
     expect(explainDenial("not-a-member", "lab")).toMatch(/not a member of the lab tenant/);
   });
 
+  it("tells a partner which tenant is theirs, and not to ask for the lab's", () => {
+    const text = explainDenial("not-a-member", "lab", ["Conservation Angler"]);
+    expect(text).toMatch(/belongs to Conservation Angler/);
+    expect(text).toMatch(/lab tenant/);
+    expect(text).not.toMatch(/ask one to add you/);
+  });
+
   it("does not blame the user for an outage", () => {
     expect(explainDenial("unavailable", "lab")).toMatch(/could not confirm/);
   });

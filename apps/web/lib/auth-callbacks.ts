@@ -17,7 +17,12 @@
  */
 import type { Account, Profile, Session, User } from "next-auth";
 import type { JWT } from "next-auth/jwt";
-import { getMyMembership, type Membership } from "./fishsense-api";
+import {
+  getMyMembership,
+  getMyTenants,
+  type Membership,
+  type TenantMembership,
+} from "./fishsense-api";
 import { refreshTokens, type RefreshedTokens } from "./oidc";
 
 /** Refresh this many seconds early, so a token is not spent as it expires. */
@@ -25,6 +30,7 @@ export const EXPIRY_SKEW_SECONDS = 30;
 
 export type AuthDeps = {
   membership: (accessToken: string) => Promise<Membership | null>;
+  tenants: (accessToken: string) => Promise<TenantMembership[]>;
   refresh: (refreshToken: string) => Promise<RefreshedTokens>;
   /** Seconds since the epoch. */
   now: () => number;
@@ -32,6 +38,7 @@ export type AuthDeps = {
 
 const defaultDeps: AuthDeps = {
   membership: getMyMembership,
+  tenants: getMyTenants,
   refresh: refreshTokens,
   now: () => Math.floor(Date.now() / 1000),
 };
@@ -55,12 +62,26 @@ async function withMembership(token: JWT, accessToken: string, deps: AuthDeps) {
     token.role = membership?.role ?? null;
     token.isAdmin = membership?.isAdmin === true;
     delete token.membershipError;
+    delete token.otherTenants;
+    if (membership === null) token.otherTenants = await otherTenants(accessToken, deps);
   } catch (error) {
     // Fail closed: signing in still works, and the portal says why it is
     // shut, but no rights are assumed from an unanswered question.
     token.role = null;
     token.isAdmin = false;
     token.membershipError = error instanceof Error ? error.message : "unavailable";
+  }
+}
+
+/**
+ * The names of the tenants a non-member of this one is in (a partner's org),
+ * for the portal's explanation only -- so an unanswered question is `[]`.
+ */
+async function otherTenants(accessToken: string, deps: AuthDeps): Promise<string[]> {
+  try {
+    return (await deps.tenants(accessToken)).map((t) => t.name);
+  } catch {
+    return [];
   }
 }
 
@@ -146,5 +167,6 @@ export async function sessionCallback({ session, token }: SessionCallbackArgs): 
   if (typeof token.membershipError === "string") {
     session.membershipError = token.membershipError;
   }
+  if (Array.isArray(token.otherTenants)) session.otherTenants = token.otherTenants;
   return session;
 }

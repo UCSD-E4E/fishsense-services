@@ -17,6 +17,8 @@ declare module "next-auth" {
     error?: string;
     /** Why the role could not be read, when it could not. */
     membershipError?: string;
+    /** For a non-member of the tenant: the names of the tenants they are in. */
+    otherTenants?: string[];
     user: {
       id?: string;
       groups: string[];
@@ -34,5 +36,6 @@ declare module "next-auth/jwt" {
     isAdmin?: boolean;
     error?: string;
     membershipError?: string;
+    otherTenants?: string[];
   }
 }

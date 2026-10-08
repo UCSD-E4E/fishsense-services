@@ -64,12 +64,24 @@ export function accessTokenIsFresh(
 
 type Denial = Extract<PortalAccess, { ok: false }>["reason"];
 
-/** What the portal's dead end says to a user it turned away, and why. */
-export function explainDenial(reason: Denial, tenant: string): string {
+/**
+ * What the portal's dead end says to a user it turned away, and why.
+ * `otherTenants` names the tenants a non-member is in instead -- a partner's
+ * org, joined automatically through its invite -- so they aren't sent to an
+ * operator for a membership they shouldn't have.
+ */
+export function explainDenial(
+  reason: Denial,
+  tenant: string,
+  otherTenants: readonly string[] = [],
+): string {
   switch (reason) {
     case "not-an-admin":
       return `This account is a member, but the portal needs the admin role in the ${tenant} tenant. If you were recently made an admin, sign out and back in — your role is read when you sign in. Otherwise, ask an operator.`;
     case "not-a-member":
+      if (otherTenants.length > 0) {
+        return `This account belongs to ${otherTenants.join(", ")}. This portal manages the ${tenant} tenant's data, which your account is not part of.`;
+      }
       return `This account is not a member of the ${tenant} tenant. Memberships are granted by an operator; ask one to add you, then sign out and back in.`;
     case "unavailable":
       return "The FishSense API could not confirm your role, so access is denied until it can. Sign out and back in in a moment; if it persists, the API may be down.";
