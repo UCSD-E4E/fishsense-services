@@ -213,3 +213,63 @@ def test_the_new_methods_are_read_only(monkeypatch):
     fake_fs.upload.assert_not_called()
     fake_fs.upload_bytes.assert_not_called()
     fake_fs.create_folder.assert_not_called()
+
+
+# ── the transport (v2): SMB, or a loud fallback to FileStation ────────
+
+
+def _fs(transport="smb", reason=None, detail=None):
+    fake_fs = MagicMock()
+    fake_fs.transport = transport
+    fake_fs.transport_reason = reason
+    fake_fs.transport_detail = detail
+    return fake_fs
+
+
+def test_the_client_says_which_transport_it_got(monkeypatch):
+    client = _client_with(monkeypatch, _fs("smb"))
+    assert client.transport == "smb"
+
+
+def test_falling_back_to_filestation_is_a_warning_with_its_reason(monkeypatch, caplog):
+    """FileStation alone broke the NAS under v1, and v2 ran on it silently
+    for weeks while every SMB probe failed (2026-10-07). A fallback is never
+    quiet."""
+    with caplog.at_level("INFO"):
+        _client_with(monkeypatch, _fs("http", "auth_failed", "logon failure"))
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert "http" in warnings[0].getMessage()
+    assert "auth_failed" in warnings[0].getMessage()
+    assert "logon failure" in warnings[0].getMessage()
+
+
+def test_smb_is_logged_at_info(monkeypatch, caplog):
+    with caplog.at_level("INFO"):
+        _client_with(monkeypatch, _fs("smb"))
+    assert not [r for r in caplog.records if r.levelname == "WARNING"]
+    assert any("smb" in r.getMessage() for r in caplog.records)
+
+
+def test_md5_is_computed_by_the_nas(monkeypatch):
+    fake_fs = _fs()
+    fake_fs.md5.return_value = "9d7018f9585f7bc319ea845d9621b73e"
+    client = _client_with(monkeypatch, fake_fs)
+
+    assert client.md5(file_path="/d/x.ORF") == "9d7018f9585f7bc319ea845d9621b73e"
+    fake_fs.md5.assert_called_once_with("/d/x.ORF")
+    fake_fs.download.assert_not_called()
+    fake_fs.download_to.assert_not_called()
+
+
+def test_the_backup_client_warns_on_a_fallback_too(monkeypatch, caplog):
+    from fishsense_services_orchestrator.ops.backup import nas as backup
+
+    monkeypatch.setattr(
+        backup.Client, "login", lambda *a, **kw: _fs("http", "cooldown", None)
+    )
+    with caplog.at_level("INFO"):
+        backup.NasBackupClient(
+            nas_url="https://nas.example.com:6021", username="u", password="p"
+        )
+    assert [r for r in caplog.records if r.levelname == "WARNING"]

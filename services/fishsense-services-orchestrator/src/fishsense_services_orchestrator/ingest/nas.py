@@ -25,6 +25,7 @@ Operations:
   * `exists(file_path)` — idempotency HEAD-equivalent for archive.
   * `list_dir(folder_path)` — enumerate a dive folder (ingest).
   * `download_range(file_path, offset, length)` — ranged read (ingest).
+  * `md5(file_path)` — a hash computed by the NAS (v2: path repair).
 
 The last two exist for ingest, which has to discover what is in a dive folder
 and read each frame's EXIF header. Both are thin mappings onto methods the
@@ -50,6 +51,28 @@ from synology_filestation import (
 )
 
 _log = logging.getLogger(__name__)
+
+
+def log_transport(fs: Client, host: str) -> str:
+    """Log which transport a logged-in client prefers, and return it.
+
+    v2: the client prefers SMB and falls back to FileStation, silently.
+    FileStation alone broke the NAS under v1, and v2 ran on it unnoticed while
+    every SMB probe failed (2026-10-07), so a fallback is a WARNING with the
+    client's reason.
+    """
+    transport = fs.transport
+    if transport == "smb":
+        _log.info("nas client transport=smb host=%s", host)
+    else:
+        _log.warning(
+            "nas client transport=%s host=%s, not smb: reason=%s detail=%s",
+            transport,
+            host,
+            fs.transport_reason,
+            fs.transport_detail,
+        )
+    return transport
 
 
 @dataclass(frozen=True)
@@ -108,6 +131,7 @@ class NasClient:
             password,
             https=True,
         )
+        self.transport: str = log_transport(self._fs, parsed.hostname)
 
     def download_to(self, *, src_path: str, dest_dir: str) -> None:
         """Download the NAS file at `src_path` into local `dest_dir`.
@@ -164,6 +188,12 @@ class NasClient:
         FileStation's fragile shared download backend.
         """
         return self._fs.download(file_path, offset=offset, length=length)
+
+    def md5(self, *, file_path: str) -> str:
+        """The md5 of `file_path`, as lowercase hex, computed by the NAS
+        (`SYNO.FileStation.MD5`): nothing is downloaded. It holds a transfer
+        slot for as long as the NAS takes to read the file."""
+        return self._fs.md5(file_path)
 
     def exists(self, *, file_path: str) -> bool:
         """Return True if `file_path` exists on the NAS, False otherwise.
