@@ -1,4 +1,5 @@
 // Ported from fishsense-lite@77e8f8e5 apps/fishsense-lite-web/app/page.tsx.
+import Link from "next/link";
 import Image from "next/image";
 import { getActiveProjects } from "@/lib/active-projects";
 import { buildSections, type Section, type SectionLink } from "@/lib/sections";
@@ -47,14 +48,24 @@ export default async function HomePage() {
             unoptimized
             className="h-12 w-auto dark:invert dark:hue-rotate-180"
           />
-          <h1 className="text-4xl font-semibold tracking-tight">E4E FishSense</h1>
+          <h1 className="text-4xl font-semibold tracking-tight">
+            E4E FishSense
+          </h1>
         </div>
-        <a
-          href="/portal"
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
-        >
-          Sign in
-        </a>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/captures"
+            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+          >
+            Mobile captures
+          </Link>
+          <a
+            href="/portal"
+            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+          >
+            Sign in
+          </a>
+        </div>
       </header>
       {active.unavailable.length > 0 && <UnavailableNotice />}
       {active.degraded > 0 && <DegradedNotice count={active.degraded} />}
@@ -84,8 +95,8 @@ function DegradedNotice({ count }: { count: number }) {
     >
       <span className="font-medium">Some projects could not be loaded.</span>{" "}
       Label Studio did not answer for {count} labeling{" "}
-      {count === 1 ? "project" : "projects"}, so this list is incomplete.
-      Reload in a moment to see the rest.
+      {count === 1 ? "project" : "projects"}, so this list is incomplete. Reload
+      in a moment to see the rest.
     </div>
   );
 }
