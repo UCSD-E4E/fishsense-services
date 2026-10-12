@@ -128,8 +128,14 @@ def _match(keys: list[jwt.PyJWK], kid: str | None) -> jwt.PyJWK | None:
     return next((key for key in keys if key.key_id == kid), None)
 
 
+class Validator(Protocol):
+    def validate(self, token: str) -> Principal:
+        """The caller the token proves, or `InvalidToken`."""
+
+
 class TokenValidator:
     def __init__(self, *, issuer: str, audiences: tuple[str, ...], keys: KeySource):
+        self.issuer = issuer
         self._issuer = issuer
         self._audiences = list(audiences)
         self._keys = keys
@@ -148,6 +154,34 @@ class TokenValidator:
         except jwt.PyJWTError as error:
             raise InvalidToken(str(error)) from error
         return Principal(sub=claims["sub"], org=_org(claims.get("org")))
+
+
+class MultiIssuerValidator:
+    """Tokens from several issuers, each checked as its own issuer alone.
+
+    Authentik's issuer is per application, and the web (a confidential
+    client) and the mobile app (a public client with PKCE) are separate
+    applications. The token's ``iss`` is read unverified only to pick the
+    validator; that validator then checks the signature against *its*
+    issuer's keys, and the issuer and audience against its own, so naming
+    another issuer can't borrow that issuer's trust.
+
+    ``sub`` is the same person under both: the providers use
+    ``hashed_user_id``, Authentik's per-user uid.
+    """
+
+    def __init__(self, validators: list[TokenValidator]) -> None:
+        self._by_issuer = {v.issuer: v for v in validators}
+
+    def validate(self, token: str) -> Principal:
+        try:
+            issuer = jwt.decode(token, options={"verify_signature": False}).get("iss")
+        except jwt.PyJWTError as error:
+            raise InvalidToken(str(error)) from error
+        validator = self._by_issuer.get(issuer) if isinstance(issuer, str) else None
+        if validator is None:
+            raise InvalidToken(f"unknown issuer {issuer!r}")
+        return validator.validate(token)
 
 
 def _org(claim: object) -> str | None:

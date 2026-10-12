@@ -24,7 +24,12 @@ REQUIRED = {
 
 @pytest.fixture
 def env(monkeypatch):
-    for name in list(REQUIRED) + ["FISHSENSE_OIDC_JWKS_URL"]:
+    for name in list(REQUIRED) + [
+        "FISHSENSE_OIDC_JWKS_URL",
+        "FISHSENSE_OIDC_MOBILE_ISSUER",
+        "FISHSENSE_OIDC_MOBILE_AUDIENCES",
+        "FISHSENSE_OIDC_MOBILE_JWKS_URL",
+    ]:
         monkeypatch.delenv(name, raising=False)
 
     def set_env(**values: str) -> None:
@@ -77,3 +82,32 @@ def test_the_database_password_never_appears_in_the_settings_repr(env):
     env(**REQUIRED)
 
     assert DB_PASSWORD not in repr(Settings())
+
+
+MOBILE_ISSUER = "https://auth.example.test/application/o/fishsense-mobile/"
+
+
+def test_the_mobile_issuer_is_optional(env):
+    env(**REQUIRED)
+
+    assert Settings().oidc_mobile_issuer is None
+
+
+def test_the_mobile_issuer_comes_with_its_own_audiences_and_jwks(env):
+    env(
+        **REQUIRED,
+        FISHSENSE_OIDC_MOBILE_ISSUER=MOBILE_ISSUER,
+        FISHSENSE_OIDC_MOBILE_AUDIENCES="fishsense-mobile",
+    )
+
+    settings = Settings()
+
+    assert settings.oidc_mobile_audiences == ("fishsense-mobile",)
+    assert settings.oidc_mobile_jwks_url == f"{MOBILE_ISSUER}jwks/"
+
+
+def test_a_mobile_issuer_without_audiences_is_refused(env):
+    env(**REQUIRED, FISHSENSE_OIDC_MOBILE_ISSUER=MOBILE_ISSUER)
+
+    with pytest.raises(ValidationError):
+        Settings()

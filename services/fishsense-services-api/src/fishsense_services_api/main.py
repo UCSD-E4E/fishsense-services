@@ -10,7 +10,11 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from fishsense_services_api.app import create_app
-from fishsense_services_api.auth import JwksKeySource, TokenValidator
+from fishsense_services_api.auth import (
+    JwksKeySource,
+    MultiIssuerValidator,
+    TokenValidator,
+)
 from fishsense_services_api.settings import Settings
 
 
@@ -19,16 +23,30 @@ def create_app_from_env() -> FastAPI:
     engine = create_async_engine(
         settings.database_url.get_secret_value(), pool_pre_ping=True
     )
-    validator = TokenValidator(
-        issuer=settings.oidc_issuer,
-        audiences=settings.oidc_audiences,
-        keys=JwksKeySource(
-            settings.oidc_jwks_url,
-            cache_seconds=settings.jwks_cache_seconds,
-            refetch_cooldown_seconds=settings.jwks_refetch_cooldown_seconds,
-        ),
-    )
-    app = create_app(engine=engine, validator=validator)
+
+    def _issuer(issuer: str, audiences: tuple[str, ...], jwks_url: str):
+        return TokenValidator(
+            issuer=issuer,
+            audiences=audiences,
+            keys=JwksKeySource(
+                jwks_url,
+                cache_seconds=settings.jwks_cache_seconds,
+                refetch_cooldown_seconds=settings.jwks_refetch_cooldown_seconds,
+            ),
+        )
+
+    validators = [
+        _issuer(settings.oidc_issuer, settings.oidc_audiences, settings.oidc_jwks_url)
+    ]
+    if settings.oidc_mobile_issuer is not None:
+        validators.append(
+            _issuer(
+                settings.oidc_mobile_issuer,
+                settings.oidc_mobile_audiences,
+                settings.oidc_mobile_jwks_url,
+            )
+        )
+    app = create_app(engine=engine, validator=MultiIssuerValidator(validators))
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:

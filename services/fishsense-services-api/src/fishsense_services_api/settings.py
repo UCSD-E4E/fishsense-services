@@ -23,24 +23,51 @@ class Settings(BaseSettings):
     oidc_audiences: Annotated[tuple[str, ...], NoDecode]
     #: Defaults to Authentik's standard location, ``{issuer}jwks/``.
     oidc_jwks_url: str | None = None
+    #: The mobile app's own Authentik application (a public client with
+    #: PKCE): Authentik's issuer is per application, so it is a second issuer
+    #: with its own audiences and keys. Unset, the API accepts web tokens only.
+    oidc_mobile_issuer: str | None = None
+    oidc_mobile_audiences: Annotated[tuple[str, ...], NoDecode] = ()
+    #: Defaults to ``{mobile issuer}jwks/``.
+    oidc_mobile_jwks_url: str | None = None
     jwks_cache_seconds: float = 300
     jwks_refetch_cooldown_seconds: float = 30
 
     @field_validator("oidc_audiences", mode="before")
     @classmethod
     def _split_audiences(cls, value: object) -> object:
-        if isinstance(value, str):
-            value = [part.strip() for part in value.split(",")]
-        audiences = tuple(a for a in value if a)
+        audiences = _split(value)
         if not audiences:
             raise ValueError("at least one audience is required")
         return audiences
 
+    @field_validator("oidc_mobile_audiences", mode="before")
+    @classmethod
+    def _split_mobile_audiences(cls, value: object) -> object:
+        return _split(value)
+
     @model_validator(mode="after")
     def _default_jwks_url(self) -> "Settings":
         if self.oidc_jwks_url is None:
-            self.oidc_jwks_url = f"{self.oidc_issuer.rstrip('/')}/jwks/"
+            self.oidc_jwks_url = _jwks_under(self.oidc_issuer)
+        if self.oidc_mobile_issuer is not None:
+            if not self.oidc_mobile_audiences:
+                raise ValueError(
+                    "FISHSENSE_OIDC_MOBILE_ISSUER needs FISHSENSE_OIDC_MOBILE_AUDIENCES"
+                )
+            if self.oidc_mobile_jwks_url is None:
+                self.oidc_mobile_jwks_url = _jwks_under(self.oidc_mobile_issuer)
         return self
+
+
+def _split(value: object) -> object:
+    if isinstance(value, str):
+        value = [part.strip() for part in value.split(",")]
+    return tuple(a for a in value if a)
+
+
+def _jwks_under(issuer: str) -> str:
+    return f"{issuer.rstrip('/')}/jwks/"
 
 
 class MigrationSettings(BaseSettings):

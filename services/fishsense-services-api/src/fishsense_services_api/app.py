@@ -26,7 +26,7 @@ from fishsense_services_api.auth import (
     InvalidToken,
     KeysUnavailable,
     Principal,
-    TokenValidator,
+    Validator,
 )
 from fishsense_services_api.db import principal_transaction, tenant_transaction
 from fishsense_services_api.memberships import (
@@ -63,7 +63,7 @@ class Device(BaseModel):
     serial: str
 
 
-def create_app(*, engine: AsyncEngine, validator: TokenValidator) -> FastAPI:
+def create_app(*, engine: AsyncEngine, validator: Validator) -> FastAPI:
     app = FastAPI(title="FishSense Services API")
     bearer = HTTPBearer(auto_error=False)
 

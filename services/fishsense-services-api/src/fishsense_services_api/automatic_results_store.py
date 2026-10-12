@@ -477,8 +477,14 @@ async def automatic_species_captures(
         {"t": tenant_id, "d": dive_id, "sv": species_version},
     )
     return [
-        AutomaticSpeciesCapture(r.id, r.checksum, r.from_v1, r.head_tail_id,
-                                list(r.mask_bbox), r.has_existing)  # fmt: skip
+        AutomaticSpeciesCapture(
+            r.id,
+            r.checksum,
+            r.from_v1,
+            r.head_tail_id,
+            list(r.mask_bbox),
+            r.has_existing,
+        )  # fmt: skip
         for r in rows
     ]
 
@@ -578,8 +584,9 @@ async def automatic_calibration_inputs(
         camera_calibration_id=camera.id,
         camera_matrix=[[float(x) for x in r] for r in camera.camera_matrix],
         candidates=[
-            AutomaticCalibrationCandidate(r.id, r.checksum, r.from_v1, r.laser_x,
-                                          r.laser_y)  # fmt: skip
+            AutomaticCalibrationCandidate(
+                r.id, r.checksum, r.from_v1, r.laser_x, r.laser_y
+            )  # fmt: skip
             for r in rows
             if slate.get(r.id, 0.0) >= SLATE_FRAME_THRESHOLD
         ],
@@ -728,8 +735,16 @@ async def automatic_measure_inputs(
         camera_calibration_id=cal.camera_calibration_id,
         camera_matrix=[[float(x) for x in r] for r in cal.camera_matrix],
         captures=[
-            AutomaticMeasureCapture(r.capture_id, r.id, r.laser_x, r.laser_y,
-                                    r.head_x, r.head_y, r.tail_x, r.tail_y)  # fmt: skip
+            AutomaticMeasureCapture(
+                r.capture_id,
+                r.id,
+                r.laser_x,
+                r.laser_y,
+                r.head_x,
+                r.head_y,
+                r.tail_x,
+                r.tail_y,
+            )  # fmt: skip
             for r in rows
             if slate.get(r.capture_id, 0.0) < SLATE_FRAME_THRESHOLD
         ],

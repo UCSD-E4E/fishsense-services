@@ -30,14 +30,16 @@ def _app_role() -> str:
 
 
 def _tables_with_v1_id() -> list[str]:
-    rows = op.get_bind().execute(text("""
+    rows = op.get_bind().execute(
+        text("""
             SELECT c.table_name FROM information_schema.columns c
             JOIN information_schema.tables t
               ON t.table_schema = c.table_schema AND t.table_name = c.table_name
             WHERE c.table_schema = 'public' AND c.column_name = 'v1_id'
               AND t.table_type = 'BASE TABLE'
             ORDER BY c.table_name
-            """))
+            """)
+    )
     return list(rows.scalars())
 
 

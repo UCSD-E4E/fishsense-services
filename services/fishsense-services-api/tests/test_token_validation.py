@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 from fishsense_services_api.auth import (
     InvalidToken,
+    MultiIssuerValidator,
     Principal,
     StaticKeySource,
     TokenValidator,
@@ -140,3 +141,77 @@ def test_a_null_org_claim_has_no_org(validator):
 def test_an_org_claim_that_is_not_a_name_has_no_org(validator, org):
     """Fails closed to "no org": only a non-empty string can join a tenant."""
     assert validator.validate(_token(org=org)).org is None
+
+
+# The mobile app signs in through its own Authentik application (a public
+# client with PKCE), and Authentik's issuer is per application
+# (`/application/o/<slug>/`). So the API accepts tokens from more than one
+# issuer -- each checked against that issuer's own keys and audiences only.
+
+MOBILE_ISSUER = "https://auth.example.test/application/o/fishsense-mobile/"
+MOBILE_KID = "authentik-mobile-signing-key"
+MOBILE_KEY = _rsa_key()
+
+
+@pytest.fixture
+def issuers() -> MultiIssuerValidator:
+    return MultiIssuerValidator(
+        [
+            TokenValidator(
+                issuer=ISSUER,
+                audiences=(WEB_CLIENT,),
+                keys=StaticKeySource({KID: SIGNING_KEY.public_key()}),
+            ),
+            TokenValidator(
+                issuer=MOBILE_ISSUER,
+                audiences=(MOBILE_CLIENT,),
+                keys=StaticKeySource({MOBILE_KID: MOBILE_KEY.public_key()}),
+            ),
+        ]
+    )
+
+
+def _mobile_token(**overrides) -> str:
+    claims = {"iss": MOBILE_ISSUER, "aud": MOBILE_CLIENT, **overrides}
+    return _token(key=MOBILE_KEY, kid=MOBILE_KID, **claims)
+
+
+def test_each_issuers_token_is_accepted(issuers):
+    assert issuers.validate(_token()).sub == "hashed-user-id-123"
+    assert issuers.validate(_mobile_token()).sub == "hashed-user-id-123"
+
+
+def test_the_mobile_issuers_org_claim_is_carried(issuers):
+    assert issuers.validate(_mobile_token(org="conservation-angler")).org == (
+        "conservation-angler"
+    )
+
+
+def test_an_audience_counts_only_for_its_own_issuer(issuers):
+    """The web client's id is not a valid audience for a mobile-issued token."""
+    with pytest.raises(InvalidToken):
+        issuers.validate(_mobile_token(aud=WEB_CLIENT))
+
+
+def test_a_token_naming_another_issuer_is_checked_against_that_issuers_keys(
+    issuers,
+):
+    """`iss` is read unverified only to choose the keys; a token signed by
+    the web issuer's key that claims the mobile issuer fails the signature."""
+    with pytest.raises(InvalidToken):
+        issuers.validate(_token(iss=MOBILE_ISSUER, aud=MOBILE_CLIENT))
+
+
+def test_an_unknown_issuer_is_rejected(issuers):
+    with pytest.raises(InvalidToken):
+        issuers.validate(_token(iss="https://evil.example.test/"))
+
+
+def test_a_token_with_no_issuer_is_rejected(issuers):
+    with pytest.raises(InvalidToken):
+        issuers.validate(_token(iss=None))
+
+
+def test_garbage_is_rejected_by_the_issuers_too(issuers):
+    with pytest.raises(InvalidToken):
+        issuers.validate("not.a.token")
