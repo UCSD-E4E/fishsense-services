@@ -322,15 +322,8 @@ async def species_prediction_state(
 
     predictions = [
         CurrentSpeciesPrediction(
-            r.id,
-            r.capture_id,
-            r.status,
-            r.predicted_choice,
-            r.top1_probability,
-            r.margin,
-            r.top5,
-            r.predictor_version,
-            r.model_id,
+            r.id, r.capture_id, r.status, r.predicted_choice, r.top1_probability,
+            r.margin, r.top5, r.predictor_version, r.model_id,
         )  # fmt: skip
         for r in await conn.execute(
             text("""

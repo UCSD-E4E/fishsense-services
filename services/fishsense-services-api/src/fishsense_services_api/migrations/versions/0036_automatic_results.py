@@ -201,8 +201,8 @@ def _tables() -> None:
                 REFERENCES camera_calibrations (tenant_id, id),
             CONSTRAINT automatic_laser_calibrations_accepted_check CHECK (
                 outcome <> 'accepted'
-                OR ({_three_vector("laser_position")}
-                    AND {_three_vector("laser_axis")})),
+                OR ({_three_vector('laser_position')}
+                    AND {_three_vector('laser_axis')})),
             CONSTRAINT automatic_laser_calibrations_refusal_reason_check
                 CHECK ((outcome = 'refused') = (refusal_reason IS NOT NULL))
         )

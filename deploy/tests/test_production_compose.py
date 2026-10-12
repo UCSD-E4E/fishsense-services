@@ -375,8 +375,12 @@ def test_the_api_accepts_the_mobile_clients_tokens():
     mobile = renders()[f"{TENANT_RUN}/secrets/api-mobile.env"]
 
     assert f"{TENANT_RUN}/secrets/api-mobile.env" in env_files(api)
-    assert mobile.sources["FISHSENSE_OIDC_MOBILE_ISSUER"] == [("oidc/mobile", "issuer_url")]
-    assert mobile.sources["FISHSENSE_OIDC_MOBILE_AUDIENCES"] == [("oidc/mobile", "client_id")]
+    assert mobile.sources["FISHSENSE_OIDC_MOBILE_ISSUER"] == [
+        ("oidc/mobile", "issuer_url")
+    ]
+    assert mobile.sources["FISHSENSE_OIDC_MOBILE_AUDIENCES"] == [
+        ("oidc/mobile", "client_id")
+    ]
 
 
 def test_the_api_reads_each_tenants_own_store():
@@ -391,10 +395,17 @@ def test_the_api_reads_each_tenants_own_store():
 
     assert "secret/data/tenants/fishsense/object_stores" in stores.contents
     assert ".Data.data.stores_json" in stores.contents
-    assert (f"{TENANT_RUN}/object-stores", f"{TENANT_RUN}/object-stores") in volumes(api)
+    assert (f"{TENANT_RUN}/object-stores", f"{TENANT_RUN}/object-stores") in volumes(
+        api
+    )
     assert not mounts(api, f"{TENANT_RUN}/secrets")
-    assert env["FISHSENSE_TENANT_STORES_FILE"] == f"{TENANT_RUN}/object-stores/stores.json"
-    assert env["FISHSENSE_OBJECT_STORE_ENDPOINT_URL"] == env["FISHSENSE_OBJECT_STORE_PUBLIC_URL"]
+    assert (
+        env["FISHSENSE_TENANT_STORES_FILE"] == f"{TENANT_RUN}/object-stores/stores.json"
+    )
+    assert (
+        env["FISHSENSE_OBJECT_STORE_ENDPOINT_URL"]
+        == env["FISHSENSE_OBJECT_STORE_PUBLIC_URL"]
+    )
     assert "0" in [str(g) for g in api.get("group_add", [])]
 
 

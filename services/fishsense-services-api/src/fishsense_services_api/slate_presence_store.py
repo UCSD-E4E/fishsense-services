@@ -317,13 +317,8 @@ async def slate_presence(
     )
     return [
         CurrentSlatePresence(
-            r.id,
-            r.capture_id,
-            r.status,
-            r.probability,
-            r.model_version,
-            r.weights_sha256,
-            r.created_at,
+            r.id, r.capture_id, r.status, r.probability, r.model_version,
+            r.weights_sha256, r.created_at,
         )  # fmt: skip
         for r in rows
     ]

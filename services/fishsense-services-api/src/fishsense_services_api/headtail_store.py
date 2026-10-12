@@ -733,16 +733,8 @@ async def headtail_populate_state(
     ]
     predictions = [
         CurrentHeadTailPrediction(
-            r.capture_id,
-            r.status,
-            r.head_x,
-            r.head_y,
-            r.tail_x,
-            r.tail_y,
-            r.width,
-            r.height,
-            r.silhouette_ratio,
-            r.rejected_low_confidence,
+            r.capture_id, r.status, r.head_x, r.head_y, r.tail_x, r.tail_y,
+            r.width, r.height, r.silhouette_ratio, r.rejected_low_confidence,
             r.predictor_version,
         )  # fmt: skip
         for r in await conn.execute(
@@ -756,9 +748,8 @@ async def headtail_populate_state(
         )
     ]
     labels = [
-        LiveHeadTailLabel(
-            r.id, r.capture_id, r.ls_project_id, r.ls_task_id, r.completed
-        )  # fmt: skip
+        LiveHeadTailLabel(r.id, r.capture_id, r.ls_project_id, r.ls_task_id,
+                          r.completed)  # fmt: skip
         for r in await conn.execute(
             text("""
                 SELECT h.id, h.capture_id, h.ls_project_id, h.ls_task_id, h.completed

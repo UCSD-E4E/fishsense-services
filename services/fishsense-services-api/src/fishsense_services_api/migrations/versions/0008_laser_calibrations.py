@@ -95,8 +95,8 @@ def upgrade() -> None:
                 CHECK (producer IS NOT NULL OR v1_id IS NOT NULL),
             CONSTRAINT laser_calibrations_accepted_geometry_check CHECK (
                 outcome <> 'accepted'
-                OR ({_three_vector("laser_position")}
-                    AND {_three_vector("laser_axis")})
+                OR ({_three_vector('laser_position')}
+                    AND {_three_vector('laser_axis')})
             ),
             CONSTRAINT laser_calibrations_refusal_reason_check
                 CHECK (outcome <> 'refused' OR refusal_reason IS NOT NULL)
