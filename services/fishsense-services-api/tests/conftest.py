@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from testcontainers.community.postgres import PostgresContainer
 
 from fishsense_services_api.migrations import upgrade
+from garage import Garage
 from research_seed import (
     RESEARCH_GROUP,
     RESEARCH_LOGIN,
@@ -26,6 +27,8 @@ from research_seed import (
 )
 
 TIERS = {"unit", "integration", "e2e"}
+#: Fixtures that start a container: a test reaching one is `integration`.
+DOCKER_FIXTURES = {"postgres", "garage"}
 
 
 @pytest.hookimpl(tryfirst=True)  # before `-m` deselects anything
@@ -34,16 +37,15 @@ def pytest_collection_modifyitems(config, items):
 
     A test whose fixtures reach the Postgres container is ``integration``; one
     marked ``integration``/``e2e`` explicitly keeps that; everything else is
-    ``unit``. A test marked ``unit`` that reaches Postgres is an error, so the
+    ``unit``. A test marked ``unit`` that reaches Docker (Postgres or
+    Garage) is an error, so the
     unit tier can't quietly start needing Docker.
     """
     for item in items:
         declared = {mark.name for mark in item.iter_markers()} & TIERS
-        if "postgres" in item.fixturenames:
+        if DOCKER_FIXTURES & set(item.fixturenames):
             if "unit" in declared:
-                raise pytest.UsageError(
-                    f"{item.nodeid} is marked unit but uses Postgres"
-                )
+                raise pytest.UsageError(f"{item.nodeid} is marked unit but uses Docker")
             item.add_marker(pytest.mark.integration)
         elif not declared:
             item.add_marker(pytest.mark.unit)
@@ -173,3 +175,10 @@ async def clean_tables(request: pytest.FixtureRequest) -> AsyncIterator[None]:
     owner_engine: AsyncEngine = request.getfixturevalue("owner_engine")
     async with owner_engine.begin() as conn:
         await conn.execute(text("TRUNCATE tenants, users CASCADE"))
+
+
+@pytest.fixture(scope="session")
+def garage(tmp_path_factory) -> Garage:
+    """A real Garage (S3); each test makes the tenant buckets it needs."""
+    with Garage(tmp_path_factory.mktemp("garage")) as server:
+        yield server
