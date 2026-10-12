@@ -8,3 +8,5 @@ build/
 
 # Agent worktrees (parallel ports); each works on its own pushed branch.
 .claude/worktrees/
+# Per-person Claude Code settings (local permissions); never shared.
+.claude/settings.local.json
