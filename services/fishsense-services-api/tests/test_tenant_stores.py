@@ -209,3 +209,54 @@ def test_an_empty_rendered_file_is_no_stores(tmp_path):
     )
 
     assert stores.tenants == set()
+
+
+# The stores are optional: whatever is wrong with them, only mobile sync may
+# stop -- never the API (code review of #63).
+
+
+def _load(path):
+    return TenantStores.from_file(
+        path,
+        endpoint_url="http://garage.test",
+        public_endpoint_url="http://garage.test",
+        region=REGION,
+    )
+
+
+def test_a_missing_file_is_no_stores(tmp_path, caplog):
+    """The container can start before vault-agent first renders the file."""
+    with caplog.at_level("WARNING"):
+        stores = _load(tmp_path / "not-rendered-yet.json")
+
+    assert stores.tenants == set()
+    assert any("not-rendered-yet.json" in r.getMessage() for r in caplog.records)
+
+
+def test_a_malformed_file_is_no_stores_and_says_so(tmp_path, caplog):
+    rendered = tmp_path / "stores.json"
+    rendered.write_text('{"lab": {"bucket": ')
+
+    with caplog.at_level("ERROR"):
+        stores = _load(rendered)
+
+    assert stores.tenants == set()
+    assert any("stores.json" in r.getMessage() for r in caplog.records)
+
+
+def test_an_incomplete_entry_is_skipped_and_the_rest_kept(tmp_path, caplog):
+    rendered = tmp_path / "stores.json"
+    rendered.write_text(
+        json.dumps(
+            {
+                "lab": {"bucket": "b", "access_key_id": "k", "secret_access_key": "s"},
+                "partner": {"bucket": "p", "access_key_id": "k"},
+            }
+        )
+    )
+
+    with caplog.at_level("ERROR"):
+        stores = _load(rendered)
+
+    assert stores.tenants == {"lab"}
+    assert any("partner" in r.getMessage() for r in caplog.records)

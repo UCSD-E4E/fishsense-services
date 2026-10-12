@@ -987,6 +987,8 @@ class Measurement(Base):
     core_version: Mapped[str | None] = mapped_column(Text)
     model_version: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
+    #: When a device measured (0038); NULL for the server's. Orders current.
+    measured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class LaserDepthRefusal(Base):
@@ -1366,5 +1368,4 @@ class DeviceMeasurementPoints(Base):
     snout_y: Mapped[float] = mapped_column(Double)
     fork_x: Mapped[float] = mapped_column(Double)
     fork_y: Mapped[float] = mapped_column(Double)
-    measured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created_at()

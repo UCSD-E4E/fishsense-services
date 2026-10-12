@@ -12,10 +12,14 @@ Each request goes through the same four steps before touching tenant data:
 4. run the tenant work in a tenant-scoped transaction, under RLS.
 """
 
+import math
 import uuid
 from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -74,6 +78,16 @@ def create_app(
     """``stores``: each tenant's own bucket; None means no tenant has one, so
     no tenant can sync mobile captures."""
     app = FastAPI(title="FishSense Services API")
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid(_: Request, error: RequestValidationError) -> JSONResponse:
+        # FastAPI's own 422, except that it echoes the offending input, and
+        # a NaN or Infinity there (which JSON can't hold) crashed it into a 500.
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={"detail": _json_safe(jsonable_encoder(error.errors()))},
+        )
+
     if stores is None:
         stores = TenantStores(
             endpoint_url="http://unset.invalid",
@@ -196,6 +210,17 @@ async def _first_sight(conn, principal: Principal) -> None:
     await provision_user(conn, principal.sub)
     if principal.org is not None:
         await join_claimed_tenant(conn)
+
+
+def _json_safe(value):
+    """`value` with every NaN or Infinity spelled as text."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    return value
 
 
 def _is_unique_violation(error: IntegrityError) -> bool:

@@ -6,7 +6,7 @@ the RLS policies on users, memberships and tenants are the backstop.
 """
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -22,6 +22,8 @@ ADMIN_ROLE = "admin"
 class Membership:
     tenant_id: uuid.UUID
     role: str
+    #: The caller's own user row, so a route needn't look it up again.
+    user_id: uuid.UUID | None = field(default=None, compare=False)
 
     @property
     def is_admin(self) -> bool:
@@ -39,7 +41,7 @@ async def resolve_membership(
     row = (
         await conn.execute(
             text("""
-                SELECT m.tenant_id, m.role
+                SELECT m.tenant_id, m.role, u.id AS user_id
                 FROM memberships m
                 JOIN users u ON u.id = m.user_id
                 JOIN tenants t ON t.id = m.tenant_id
@@ -48,7 +50,9 @@ async def resolve_membership(
             {"sub": sub, "slug": tenant_slug},
         )
     ).one_or_none()
-    return None if row is None else Membership(tenant_id=row.tenant_id, role=row.role)
+    if row is None:
+        return None
+    return Membership(tenant_id=row.tenant_id, role=row.role, user_id=row.user_id)
 
 
 async def join_claimed_tenant(conn: AsyncConnection) -> None:

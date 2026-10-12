@@ -24,9 +24,15 @@ as it arrived, so a field this schema doesn't model yet is still kept.
   Generic over device kinds.
 * ``device_measurement_points`` -- the snout and fork pixels behind each
   ``source = 'device'`` measurement, whether the phone found them (``auto``)
-  or the user placed them (``manual``), and when; keyed by the app's own
-  measurement uuid, so a re-sent version is a no-op. A redone selection is a
-  new measurement row, never an edit; current is the latest (§9.13).
+  or the user placed them (``manual``); keyed by the app's own measurement
+  uuid, so a re-sent version is a no-op. A redone selection is a new
+  measurement row, never an edit.
+* ``measurements.measured_at`` -- when a device measured (NULL for the
+  server's). **Current is the latest *measured*** (§9.13): a version that
+  reaches the server late (a stale retry) must not displace a newer one, so
+  ``current_measurements`` orders by ``measured_at`` before ``seq``. The view
+  is 0028's, with only that ORDER BY changed; for server rows, all NULL, the
+  order is ``seq`` as before.
 
 All tenant-scoped under forced RLS; the three new tables are append-only for
 the app role (SELECT, INSERT), like ``measurements``.
@@ -35,6 +41,9 @@ Revision ID: 0038
 Revises: 0037
 """
 
+import importlib.util
+from pathlib import Path
+
 from alembic import context, op
 
 revision = "0038"
@@ -42,6 +51,41 @@ down_revision = "0037"
 
 ACTIVE_TENANT = "NULLIF(current_setting('app.tenant_id', true), '')::uuid"
 SHA256 = "'^[0-9a-f]{64}$'"
+
+
+def _migration(filename: str):
+    """A sibling migration's module, for the view text it defines."""
+    spec = importlib.util.spec_from_file_location(
+        f"_fishsense_migration_{Path(filename).stem}",
+        Path(__file__).with_name(filename),
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+#: 0028's `current_measurements`, whose text this migration changes in two
+#: places only: its ORDER BY, and `m.*` spelled out as the columns it meant
+#: before 0038 -- so the view's columns stay exactly as they were (no
+#: `measured_at` among them), and the downgrade can drop the column again.
+CURRENT_MEASUREMENTS_0028 = _migration("0028_measurement_views.py").CURRENT_MEASUREMENTS
+assert CURRENT_MEASUREMENTS_0028.count("m.seq DESC") == 1
+assert CURRENT_MEASUREMENTS_0028.count(" m.*") == 1
+
+
+def _current_measurements(*, by_measured_at: bool) -> str:
+    columns = op.get_bind().exec_driver_sql("""
+        SELECT column_name FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'measurements'
+          AND column_name <> 'measured_at'
+        ORDER BY ordinal_position
+        """).scalars()
+    view = CURRENT_MEASUREMENTS_0028.replace(
+        " m.*", " " + ", ".join(f"m.{c}" for c in columns)
+    )
+    if by_measured_at:
+        view = view.replace("m.seq DESC", "m.measured_at DESC NULLS LAST, m.seq DESC")
+    return view
 
 
 def _app_role() -> str:
@@ -157,7 +201,6 @@ def upgrade() -> None:
             snout_y double precision NOT NULL,
             fork_x double precision NOT NULL,
             fork_y double precision NOT NULL,
-            measured_at timestamptz NOT NULL,
             created_at timestamptz NOT NULL DEFAULT now(),
             PRIMARY KEY (tenant_id, measurement_id),
             UNIQUE (tenant_id, client_measurement_uuid),
@@ -167,8 +210,14 @@ def upgrade() -> None:
         """)
     _append_only("device_measurement_points", app_role)
 
+    op.execute("ALTER TABLE measurements ADD COLUMN measured_at timestamptz")
+    op.execute(_current_measurements(by_measured_at=True))
+
 
 def downgrade() -> None:
+    op.execute(_current_measurements(by_measured_at=False))
+    op.execute("ALTER TABLE measurements DROP COLUMN measured_at")
+    op.execute(CURRENT_MEASUREMENTS_0028)
     op.execute("DROP TABLE device_measurement_points")
     op.execute("DROP TABLE capture_objects")
     op.execute("DROP TABLE mobile_captures")

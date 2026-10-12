@@ -22,6 +22,7 @@ capture, and only that user may sync it.
 """
 
 import hashlib
+import json
 import struct
 import time
 import urllib.error
@@ -520,3 +521,84 @@ async def test_the_lossless_frame_is_kept_when_the_app_sends_it(tenants, client)
     assert response.status_code == 201, response.text
     roles = {f["role"] for f in response.json()["files"]}
     assert "rgb_lossless" in roles
+
+
+# -- code review of #63 ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        pytest.param(
+            {"measurements": [_version(length=float("inf"))]}, id="infinite-length"
+        ),
+        pytest.param(
+            {"intrinsics": [float("nan")] + [1.0] * 8}, id="nan-in-intrinsics"
+        ),
+        pytest.param({"vendor_extra": float("nan")}, id="nan-in-an-unmodeled-field"),
+    ],
+)
+async def test_a_number_that_is_not_finite_is_refused(tenants, client, change):
+    """JSON has no NaN or Infinity; one would have failed the database write
+    (a 500) or stored an infinite length. Sent as text, as a client that
+    writes Python's `NaN` / `Infinity` tokens would."""
+    capture = uuid.uuid4()
+    await _upload(client, capture)
+
+    response = await client.put(
+        f"/tenants/lab/mobile/captures/{capture}",
+        content=json.dumps(_commit_body(**change)),
+        headers={**_bearer(ALICE), "Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 422
+
+
+async def test_the_same_photo_under_another_uuid_is_409_naming_the_first(
+    tenants, client
+):
+    first = uuid.uuid4()
+    await _sync(client, first)
+    second = uuid.uuid4()
+    await _upload(client, second)
+
+    response = await client.put(
+        f"/tenants/lab/mobile/captures/{second}",
+        json=_commit_body(),
+        headers=_bearer(ALICE),
+    )
+
+    assert response.status_code == 409
+    assert str(first) in response.json()["detail"]
+
+
+async def test_a_changed_recommit_is_409_not_silently_ignored(tenants, client):
+    capture = uuid.uuid4()
+    await _sync(client, capture)
+
+    response = await client.put(
+        f"/tenants/lab/mobile/captures/{capture}",
+        json=_commit_body(
+            intrinsics=[1500.0, 0.0, 960.0, 0.0, 1500.0, 720.0, 0.0, 0.0, 1.0]
+        ),
+        headers=_bearer(ALICE),
+    )
+
+    assert response.status_code == 409
+
+
+async def test_a_resent_version_answers_with_what_is_stored(tenants, client):
+    capture = uuid.uuid4()
+    await _sync(client, capture)
+    version = _version(origin="manual", length=0.45)
+    path = f"/tenants/lab/mobile/captures/{capture}/measurements"
+    await client.post(path, json=version, headers=_bearer(ALICE))
+
+    again = await client.post(path, json=version, headers=_bearer(ALICE))
+    changed = await client.post(
+        path, json={**version, "length_m": 0.99}, headers=_bearer(ALICE)
+    )
+
+    assert again.status_code == 200
+    assert again.json()["length_m"] == 0.45
+    assert changed.status_code == 409

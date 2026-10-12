@@ -28,6 +28,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 __all__ = [
+    "Appended",
     "CaptureConflict",
     "CaptureDetail",
     "CaptureFile",
@@ -38,6 +39,7 @@ __all__ = [
     "NoSuchCapture",
     "StoredMeasurement",
     "append_device_measurement",
+    "committed_by",
     "commit_capture",
     "list_mobile_captures",
     "mobile_capture",
@@ -138,6 +140,13 @@ class StoredMeasurement:
 
 
 @dataclass(frozen=True)
+class Appended:
+    created: bool
+    #: The version as stored (on a re-send, the one already there).
+    measurement: StoredMeasurement
+
+
+@dataclass(frozen=True)
 class CaptureSummary:
     client_capture_uuid: uuid.UUID
     captured_at: datetime
@@ -196,16 +205,27 @@ async def commit_capture(
     capture: MobileCapture,
     measurements: Sequence[DeviceMeasurement],
 ) -> Committed:
+    # A phone's retry can race its own first attempt: one at a time per uuid,
+    # so the loser finds the capture kept rather than colliding with it.
+    await _lock(conn, tenant_id, capture.client_capture_uuid)
     existing = await _committed(conn, tenant_id, capture.client_capture_uuid)
     if existing is not None:
-        capture_id, uploaded_by, files = existing
-        if uploaded_by != capture.uploaded_by:
+        if existing.uploaded_by != capture.uploaded_by:
             raise CaptureConflict("this capture was committed by another user")
-        if files != {(f.role, f.sha256, f.size) for f in capture.files}:
+        if existing.files != {
+            (f.role, f.sha256, f.size) for f in capture.files
+        } or _as_kept(existing.manifest) != _as_kept(capture.manifest):
             raise CaptureConflict("a committed capture is immutable")
-        for measurement in measurements:
-            await _append(conn, tenant_id, capture_id, measurement)
-        return Committed(capture_id=capture_id, created=False)
+        for measurement in sorted(measurements, key=_measured_order):
+            await _append(conn, tenant_id, existing.capture_id, measurement)
+        return Committed(capture_id=existing.capture_id, created=False)
+
+    # One photo, one capture: two uuids racing with the same photo wait here
+    # (always after the uuid lock, so two commits can't deadlock).
+    await _lock(conn, tenant_id, f"photo:{capture.rgb.sha256}")
+    duplicate = await _canonical_photo(conn, tenant_id, capture.rgb.sha256)
+    if duplicate is not None:
+        raise CaptureConflict(f"this photo is already capture {duplicate}")
 
     device_id = await _device(conn, tenant_id, capture.device_install_id)
     capture_id = (
@@ -298,7 +318,7 @@ async def commit_capture(
                 "content_type": f.content_type,
             },
         )
-    for measurement in measurements:
+    for measurement in sorted(measurements, key=_measured_order):
         await _append(conn, tenant_id, capture_id, measurement)
     return Committed(capture_id=capture_id, created=True)
 
@@ -309,15 +329,32 @@ async def append_device_measurement(
     client_capture_uuid: uuid.UUID,
     uploaded_by: uuid.UUID,
     measurement: DeviceMeasurement,
-) -> bool:
-    """Append a measurement version; False if this version is already there."""
+) -> Appended:
+    """Append a measurement version. Re-sending it is a no-op
+    (``created=False``); its uuid on another capture, or with other values,
+    is a :class:`CaptureConflict`."""
+    await _lock(conn, tenant_id, client_capture_uuid)
     existing = await _committed(conn, tenant_id, client_capture_uuid)
     if existing is None:
         raise NoSuchCapture(str(client_capture_uuid))
-    capture_id, capturer, _ = existing
-    if capturer != uploaded_by:
+    if existing.uploaded_by != uploaded_by:
         raise CaptureConflict("only the user who took a capture may measure it")
-    return await _append(conn, tenant_id, capture_id, measurement)
+    return await _append(conn, tenant_id, existing.capture_id, measurement)
+
+
+async def committed_by(
+    conn: AsyncConnection, tenant_id: uuid.UUID, client_capture_uuid: uuid.UUID
+) -> uuid.UUID | None:
+    """Who committed this capture, or None if it isn't committed."""
+    return (
+        await conn.execute(
+            text("""
+                SELECT uploaded_by FROM captures
+                WHERE tenant_id = :tenant_id AND client_capture_uuid = :client_uuid
+                """),
+            {"tenant_id": tenant_id, "client_uuid": client_capture_uuid},
+        )
+    ).scalar_one_or_none()
 
 
 async def list_mobile_captures(
@@ -398,16 +435,12 @@ async def mobile_capture(
         {"tenant_id": tenant_id, "capture_id": row.id},
     )
     measurements = await conn.execute(
-        text("""
-            SELECT p.client_measurement_uuid, p.measured_at, m.length_m,
-                p.snout_x, p.snout_y, p.fork_x, p.fork_y, p.origin, m.algorithm,
-                m.algorithm_version, m.core_version, m.model_version
-            FROM measurements m
-            JOIN device_measurement_points p
-              ON p.tenant_id = m.tenant_id AND p.measurement_id = m.id
+        text(f"""
+            SELECT {_VERSION_COLUMNS}
+            {_VERSION_FROM}
             WHERE m.tenant_id = :tenant_id AND m.capture_id = :capture_id
               AND m.source = 'device'
-            ORDER BY m.seq
+            ORDER BY m.measured_at, m.seq
             """),
         {"tenant_id": tenant_id, "capture_id": row.id},
     )
@@ -448,31 +481,85 @@ async def mobile_capture(
             )
             for f in files
         ),
-        measurements=tuple(
-            StoredMeasurement(
-                client_measurement_uuid=m.client_measurement_uuid,
-                measured_at=m.measured_at,
-                length_m=m.length_m,
-                snout=(m.snout_x, m.snout_y),
-                fork=(m.fork_x, m.fork_y),
-                origin=m.origin,
-                algorithm=m.algorithm,
-                algorithm_version=m.algorithm_version,
-                core_version=m.core_version,
-                model_version=m.model_version,
-            )
-            for m in measurements
-        ),
+        measurements=tuple(_stored(m) for m in measurements),
     )
+
+
+#: A device measurement version: the measurement and its points.
+_VERSION_COLUMNS = """p.client_measurement_uuid, m.measured_at, m.length_m,
+                p.snout_x, p.snout_y, p.fork_x, p.fork_y, p.origin, m.algorithm,
+                m.algorithm_version, m.core_version, m.model_version"""
+_VERSION_FROM = """FROM measurements m
+            JOIN device_measurement_points p
+              ON p.tenant_id = m.tenant_id AND p.measurement_id = m.id"""
+
+
+def _stored(row) -> StoredMeasurement:
+    return StoredMeasurement(
+        client_measurement_uuid=row.client_measurement_uuid,
+        measured_at=row.measured_at,
+        length_m=row.length_m,
+        snout=(row.snout_x, row.snout_y),
+        fork=(row.fork_x, row.fork_y),
+        origin=row.origin,
+        algorithm=row.algorithm,
+        algorithm_version=row.algorithm_version,
+        core_version=row.core_version,
+        model_version=row.model_version,
+    )
+
+
+def _as_received(m: DeviceMeasurement) -> StoredMeasurement:
+    return StoredMeasurement(
+        client_measurement_uuid=m.client_measurement_uuid,
+        measured_at=m.measured_at,
+        length_m=m.length_m,
+        snout=m.snout,
+        fork=m.fork,
+        origin=m.origin,
+        algorithm=m.algorithm,
+        algorithm_version=m.algorithm_version,
+        core_version=m.core_version,
+        model_version=m.model_version,
+    )
+
+
+def _measured_order(m: DeviceMeasurement):
+    return m.measured_at
+
+
+def _as_kept(manifest: dict) -> dict:
+    """What makes a capture this capture: everything but its measurement
+    versions, which a retry may carry more of (they are appended)."""
+    return {k: v for k, v in manifest.items() if k != "measurements"}
+
+
+async def _lock(conn: AsyncConnection, tenant_id: uuid.UUID, subject) -> None:
+    """Serialize writes to one capture (a uuid) or one photo until this
+    transaction ends."""
+    await conn.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"mobile-capture:{tenant_id}:{subject}"},
+    )
+
+
+@dataclass(frozen=True)
+class _Existing:
+    capture_id: uuid.UUID
+    uploaded_by: uuid.UUID
+    files: set[tuple[str, str, int]]
+    manifest: dict
 
 
 async def _committed(
     conn: AsyncConnection, tenant_id: uuid.UUID, client_capture_uuid: uuid.UUID
-) -> tuple[uuid.UUID, uuid.UUID, set[tuple[str, str, int]]] | None:
+) -> _Existing | None:
     row = (
         await conn.execute(
             text("""
-                SELECT c.id, c.uploaded_by FROM captures c
+                SELECT c.id, c.uploaded_by, mc.manifest FROM captures c
+                JOIN mobile_captures mc
+                  ON mc.tenant_id = c.tenant_id AND mc.capture_id = c.id
                 WHERE c.tenant_id = :tenant_id
                   AND c.client_capture_uuid = :client_uuid
                 """),
@@ -488,7 +575,28 @@ async def _committed(
             """),
         {"tenant_id": tenant_id, "capture_id": row.id},
     )
-    return row.id, row.uploaded_by, {(f.role, f.sha256, f.size_bytes) for f in files}
+    return _Existing(
+        capture_id=row.id,
+        uploaded_by=row.uploaded_by,
+        files={(f.role, f.sha256, f.size_bytes) for f in files},
+        manifest=row.manifest,
+    )
+
+
+async def _canonical_photo(
+    conn: AsyncConnection, tenant_id: uuid.UUID, sha256: str
+) -> uuid.UUID | None:
+    """The capture (by its client uuid) already holding this exact photo."""
+    return (
+        await conn.execute(
+            text("""
+                SELECT client_capture_uuid FROM captures
+                WHERE tenant_id = :tenant_id AND is_canonical
+                  AND checksum_algorithm = 'sha256' AND checksum = :sha256
+                """),
+            {"tenant_id": tenant_id, "sha256": sha256},
+        )
+    ).scalar_one_or_none()
 
 
 async def _device(conn: AsyncConnection, tenant_id: uuid.UUID, install_id: str):
@@ -519,18 +627,28 @@ async def _append(
     tenant_id: uuid.UUID,
     capture_id: uuid.UUID,
     m: DeviceMeasurement,
-) -> bool:
+) -> Appended:
     seen = (
         await conn.execute(
-            text("""
-                SELECT 1 FROM device_measurement_points
-                WHERE tenant_id = :tenant_id AND client_measurement_uuid = :key
+            text(f"""
+                SELECT m.capture_id, {_VERSION_COLUMNS}
+                {_VERSION_FROM}
+                WHERE p.tenant_id = :tenant_id AND p.client_measurement_uuid = :key
                 """),
             {"tenant_id": tenant_id, "key": m.client_measurement_uuid},
         )
-    ).first()
+    ).one_or_none()
     if seen is not None:
-        return False
+        stored = _stored(seen)
+        if seen.capture_id != capture_id:
+            raise CaptureConflict(
+                f"measurement {m.client_measurement_uuid} is another capture's"
+            )
+        if stored != _as_received(m):
+            raise CaptureConflict(
+                f"measurement {m.client_measurement_uuid} was sent with other values"
+            )
+        return Appended(created=False, measurement=stored)
     fish_id = (
         await conn.execute(
             text("""
@@ -545,9 +663,10 @@ async def _append(
             text("""
                 INSERT INTO measurements (tenant_id, capture_id, fish_id, source,
                     length_m, algorithm, algorithm_version, core_version,
-                    model_version)
+                    model_version, measured_at)
                 VALUES (:tenant_id, :capture_id, :fish_id, 'device', :length_m,
-                    :algorithm, :algorithm_version, :core_version, :model_version)
+                    :algorithm, :algorithm_version, :core_version, :model_version,
+                    :measured_at)
                 RETURNING id
                 """),
             {
@@ -559,16 +678,16 @@ async def _append(
                 "algorithm_version": m.algorithm_version,
                 "core_version": m.core_version,
                 "model_version": m.model_version,
+                "measured_at": m.measured_at,
             },
         )
     ).scalar_one()
     await conn.execute(
         text("""
             INSERT INTO device_measurement_points (tenant_id, measurement_id,
-                client_measurement_uuid, origin, snout_x, snout_y, fork_x, fork_y,
-                measured_at)
+                client_measurement_uuid, origin, snout_x, snout_y, fork_x, fork_y)
             VALUES (:tenant_id, :measurement_id, :key, :origin, :snout_x,
-                :snout_y, :fork_x, :fork_y, :measured_at)
+                :snout_y, :fork_x, :fork_y)
             """),
         {
             "tenant_id": tenant_id,
@@ -579,7 +698,6 @@ async def _append(
             "snout_y": m.snout[1],
             "fork_x": m.fork[0],
             "fork_y": m.fork[1],
-            "measured_at": m.measured_at,
         },
     )
-    return True
+    return Appended(created=True, measurement=_as_received(m))

@@ -31,6 +31,7 @@ field this API doesn't model yet isn't lost.
 
 import asyncio
 import base64
+import math
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -41,7 +42,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from fishsense_services_api.auth import Principal
-from fishsense_services_api.db import principal_transaction, tenant_transaction
+from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.memberships import Membership
 from fishsense_services_api.mobile_capture_store import (
     CaptureConflict,
@@ -50,8 +51,10 @@ from fishsense_services_api.mobile_capture_store import (
     DeviceMeasurement,
     MobileCapture,
     NoSuchCapture,
+    StoredMeasurement,
     append_device_measurement,
     commit_capture,
+    committed_by,
     list_mobile_captures,
     mobile_capture,
 )
@@ -60,7 +63,6 @@ from fishsense_services_api.tenant_stores import (
     TenantObjects,
     TenantStores,
 )
-from fishsense_services_api.users import provision_user
 
 MB = 1 << 20
 
@@ -85,6 +87,12 @@ ROLES: dict[str, _Role] = {
 REQUIRED_ROLES = frozenset({"rgb_jpeg", "depth_f32", "confidence_u8"})
 Role = Literal["rgb_jpeg", "rgb_lossless", "depth_f32", "confidence_u8", "mask_u8"]
 Sha256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+
+
+class _Finite(BaseModel):
+    """JSON has no NaN or Infinity, and neither may a measurement."""
+
+    model_config = ConfigDict(allow_inf_nan=False)
 
 
 class DeclaredFile(BaseModel):
@@ -127,12 +135,12 @@ class UploadGrant(BaseModel):
     uploads: list[Upload]
 
 
-class Point(BaseModel):
+class Point(_Finite):
     x: float
     y: float
 
 
-class MeasurementVersion(BaseModel):
+class MeasurementVersion(_Finite):
     client_measurement_uuid: uuid.UUID
     measured_at: datetime
     length_m: float = Field(gt=0)
@@ -152,7 +160,7 @@ class DeviceInfo(BaseModel):
     info: str | None = None
 
 
-class Location(BaseModel):
+class Location(_Finite):
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
     horizontal_accuracy_m: float | None = Field(default=None, ge=0)
@@ -177,11 +185,11 @@ class MaskGeometry(BaseModel):
     height: int = Field(gt=0)
 
 
-class CaptureCommit(BaseModel):
+class CaptureCommit(_Finite):
     """Everything the app recorded about one capture. Fields this API doesn't
     model are allowed, and kept in the manifest."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", allow_inf_nan=False)
 
     captured_at: datetime
     #: Who was signed in on the phone when it took the capture.
@@ -205,6 +213,8 @@ class CaptureCommit(BaseModel):
     @model_validator(mode="after")
     def _adds_up(self) -> "CaptureCommit":
         _distinct_roles(self.files)
+        if not _finite(self.model_extra):
+            raise ValueError("a field holds NaN or Infinity, which JSON doesn't")
         sizes = {f.role: f.size for f in self.files}
         missing = REQUIRED_ROLES - sizes.keys()
         if missing:
@@ -299,10 +309,6 @@ def add_mobile_routes(
     Member = Annotated[Membership, Depends(membership)]
     Caller = Annotated[Principal, Depends(authenticate)]
 
-    async def user_id(principal: Principal) -> uuid.UUID:
-        async with principal_transaction(engine, principal.sub) as conn:
-            return await provision_user(conn, principal.sub)
-
     def tenant_objects(slug: str) -> TenantObjects:
         try:
             return stores.for_tenant(slug)
@@ -328,14 +334,12 @@ def add_mobile_routes(
         client_capture_uuid: uuid.UUID,
         body: UploadRequest,
         member: Member,
-        principal: Caller,
     ) -> UploadGrant:
         objects = tenant_objects(slug)
-        caller = await user_id(principal)
         async with tenant_transaction(engine, member.tenant_id) as conn:
-            existing = await mobile_capture(conn, member.tenant_id, client_capture_uuid)
-        if existing is not None:
-            if existing.uploaded_by != caller:
+            capturer = await committed_by(conn, member.tenant_id, client_capture_uuid)
+        if capturer is not None:
+            if capturer != member.user_id:
                 raise HTTPException(
                     status.HTTP_409_CONFLICT, "another user committed this capture"
                 )
@@ -375,7 +379,7 @@ def add_mobile_routes(
         files = await _verified(objects, client_capture_uuid, body.files)
         capture = MobileCapture(
             client_capture_uuid=client_capture_uuid,
-            uploaded_by=await user_id(principal),
+            uploaded_by=member.user_id,
             captured_at=body.captured_at,
             device_install_id=body.device.install_id,
             device_model=body.device.model,
@@ -429,26 +433,24 @@ def add_mobile_routes(
         client_capture_uuid: uuid.UUID,
         body: MeasurementVersion,
         member: Member,
-        principal: Caller,
         response: Response,
     ) -> MeasurementView:
-        caller = await user_id(principal)
         try:
             async with tenant_transaction(engine, member.tenant_id) as conn:
-                created = await append_device_measurement(
+                appended = await append_device_measurement(
                     conn,
                     member.tenant_id,
                     client_capture_uuid,
-                    caller,
+                    member.user_id,
                     _measurement(body),
                 )
         except NoSuchCapture:
             raise HTTPException(status.HTTP_404_NOT_FOUND) from None
         except CaptureConflict as error:
             raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from None
-        if created:
+        if appended.created:
             response.status_code = status.HTTP_201_CREATED
-        return MeasurementView(**body.model_dump())
+        return _measurement_view(appended.measurement)
 
     @app.get(
         "/tenants/{slug}/mobile/captures",
@@ -557,22 +559,34 @@ def _measurement(m: MeasurementVersion) -> DeviceMeasurement:
     )
 
 
+def _measurement_view(m: StoredMeasurement) -> MeasurementView:
+    return MeasurementView(
+        client_measurement_uuid=m.client_measurement_uuid,
+        measured_at=m.measured_at,
+        length_m=m.length_m,
+        snout=Point(x=m.snout[0], y=m.snout[1]),
+        fork=Point(x=m.fork[0], y=m.fork[1]),
+        origin=m.origin,
+        algorithm=m.algorithm,
+        algorithm_version=m.algorithm_version,
+        core_version=m.core_version,
+        model_version=m.model_version,
+    )
+
+
+def _finite(value) -> bool:
+    """Whether a JSON-shaped value holds no NaN or Infinity anywhere."""
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if isinstance(value, dict):
+        return all(_finite(v) for v in value.values())
+    if isinstance(value, (list, tuple)):
+        return all(_finite(v) for v in value)
+    return True
+
+
 def _view(detail: CaptureDetail, objects: TenantObjects | None) -> CaptureView:
-    measurements = [
-        MeasurementView(
-            client_measurement_uuid=m.client_measurement_uuid,
-            measured_at=m.measured_at,
-            length_m=m.length_m,
-            snout=Point(x=m.snout[0], y=m.snout[1]),
-            fork=Point(x=m.fork[0], y=m.fork[1]),
-            origin=m.origin,
-            algorithm=m.algorithm,
-            algorithm_version=m.algorithm_version,
-            core_version=m.core_version,
-            model_version=m.model_version,
-        )
-        for m in detail.measurements
-    ]
+    measurements = [_measurement_view(m) for m in detail.measurements]
     location = (
         None
         if detail.latitude is None

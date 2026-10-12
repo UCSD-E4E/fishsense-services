@@ -13,6 +13,7 @@ version (§9.6), never an edit; current is the latest per (capture, fish,
 source) (§9.13).
 """
 
+import asyncio
 import uuid
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -78,7 +79,9 @@ def _measurement(*, origin="auto", length=0.42, at=T0, key=None) -> DeviceMeasur
     )
 
 
-def _capture(user_id, *, client_uuid=None, files=None, at=T0, install="install-1"):
+def _capture(
+    user_id, *, client_uuid=None, files=None, at=T0, install="install-1", manifest=None
+):
     client_uuid = client_uuid or uuid.uuid4()
     return MobileCapture(
         client_capture_uuid=client_uuid,
@@ -114,7 +117,7 @@ def _capture(user_id, *, client_uuid=None, files=None, at=T0, install="install-1
                 _file("mask_u8", "d"),
             )
         ),
-        manifest={"as": "received", "unmodeled_field": 1},
+        manifest=manifest or {"as": "received", "unmodeled_field": 1},
     )
 
 
@@ -258,12 +261,13 @@ async def test_a_redone_selection_is_a_new_version_and_becomes_current(
     redone = _measurement(origin="manual", length=0.45, at=T0 + timedelta(minutes=3))
 
     async with tenant_transaction(app_engine, tenants["lab"]) as conn:
-        created = await append_device_measurement(
+        appended = await append_device_measurement(
             conn, tenants["lab"], capture.client_capture_uuid, alice, redone
         )
         found = await mobile_capture(conn, tenants["lab"], capture.client_capture_uuid)
 
-    assert created
+    assert appended.created
+    assert appended.measurement.length_m == 0.45
     assert [(m.origin, m.length_m) for m in found.measurements] == [
         ("auto", 0.42),
         ("manual", 0.45),
@@ -288,7 +292,7 @@ async def test_appending_the_same_version_again_is_a_no_op(
         )
         found = await mobile_capture(conn, tenants["lab"], capture.client_capture_uuid)
 
-    assert (first, again) == (True, False)
+    assert (first.created, again.created) == (True, False)
     assert len(found.measurements) == 1
 
 
@@ -394,3 +398,180 @@ async def test_another_tenant_sees_none_of_them(tenants, app_engine, owner_engin
             await mobile_capture(conn, tenants["partner"], capture.client_capture_uuid)
             is None
         )
+
+
+# -- code review of #63 ---------------------------------------------------------------
+
+
+def _rgb_only(digest: str):
+    return (
+        _file("rgb_jpeg", digest),
+        _file("depth_f32", "b"),
+        _file("confidence_u8", "c"),
+    )
+
+
+async def test_the_same_photo_under_another_uuid_names_the_first_capture(
+    tenants, app_engine, owner_engine
+):
+    """A byte-identical photo is one capture: a second uuid for it is a
+    conflict naming the first, not a 500 the phone retries forever."""
+    alice = await _user_id(owner_engine, ALICE)
+    first = _capture(alice, files=_rgb_only("7"))
+    await _commit(app_engine, tenants["lab"], first)
+
+    with pytest.raises(CaptureConflict, match=str(first.client_capture_uuid)):
+        await _commit(app_engine, tenants["lab"], _capture(alice, files=_rgb_only("7")))
+
+
+async def test_concurrent_commits_of_one_capture_both_succeed(
+    tenants, app_engine, owner_engine
+):
+    """A phone's retry can race its own first attempt: one keeps the
+    capture, the other finds it kept -- neither fails."""
+    alice = await _user_id(owner_engine, ALICE)
+    for digest in "89":
+        capture = _capture(alice, files=_rgb_only(digest))
+        version = _measurement()
+        results = await asyncio.gather(
+            _commit(app_engine, tenants["lab"], capture, [version]),
+            _commit(app_engine, tenants["lab"], capture, [version]),
+        )
+        assert sorted(r.created for r in results) == [False, True]
+
+    async with owner_engine.connect() as conn:
+        assert (
+            await conn.execute(text("SELECT count(*) FROM measurements"))
+        ).scalar_one() == 2
+
+
+async def test_concurrent_appends_of_one_version_both_succeed(
+    tenants, app_engine, owner_engine
+):
+    alice = await _user_id(owner_engine, ALICE)
+    capture = _capture(alice)
+    await _commit(app_engine, tenants["lab"], capture)
+    redone = _measurement(origin="manual")
+
+    async def append():
+        async with tenant_transaction(app_engine, tenants["lab"]) as conn:
+            return await append_device_measurement(
+                conn, tenants["lab"], capture.client_capture_uuid, alice, redone
+            )
+
+    results = await asyncio.gather(append(), append())
+
+    assert sorted(r.created for r in results) == [False, True]
+
+
+async def test_a_changed_capture_under_a_committed_uuid_is_a_conflict(
+    tenants, app_engine, owner_engine
+):
+    """A committed capture is immutable: the same files with other metadata
+    (a corrected intrinsics, say) is refused, not silently ignored."""
+    alice = await _user_id(owner_engine, ALICE)
+    capture = _capture(alice, manifest={"intrinsics": [1400.0]})
+    await _commit(app_engine, tenants["lab"], capture)
+    corrected = _capture(
+        alice,
+        client_uuid=capture.client_capture_uuid,
+        manifest={"intrinsics": [1500.0]},
+    )
+
+    with pytest.raises(CaptureConflict, match="immutable"):
+        await _commit(app_engine, tenants["lab"], corrected)
+
+
+async def test_a_retry_carrying_more_versions_is_not_a_change(
+    tenants, app_engine, owner_engine
+):
+    """The versions travel in the request but are appended, not compared: a
+    retry after a redone selection is the same capture."""
+    alice = await _user_id(owner_engine, ALICE)
+    first = _measurement()
+    capture = _capture(alice, manifest={"x": 1, "measurements": ["v1"]})
+    await _commit(app_engine, tenants["lab"], capture, [first])
+    retry = _capture(
+        alice,
+        client_uuid=capture.client_capture_uuid,
+        manifest={"x": 1, "measurements": ["v1", "v2"]},
+    )
+
+    again = await _commit(
+        app_engine,
+        tenants["lab"],
+        retry,
+        [first, _measurement(origin="manual", at=T0 + timedelta(minutes=1))],
+    )
+
+    assert not again.created
+
+
+async def test_a_measurement_uuid_belongs_to_one_capture(
+    tenants, app_engine, owner_engine
+):
+    alice = await _user_id(owner_engine, ALICE)
+    a = _capture(alice, files=_rgb_only("a"))
+    b = _capture(alice, files=_rgb_only("b"))
+    version = _measurement()
+    await _commit(app_engine, tenants["lab"], a, [version])
+    await _commit(app_engine, tenants["lab"], b)
+
+    with pytest.raises(CaptureConflict):
+        async with tenant_transaction(app_engine, tenants["lab"]) as conn:
+            await append_device_measurement(
+                conn, tenants["lab"], b.client_capture_uuid, alice, version
+            )
+
+
+async def test_a_measurement_uuid_resent_with_other_values_is_a_conflict(
+    tenants, app_engine, owner_engine
+):
+    alice = await _user_id(owner_engine, ALICE)
+    capture = _capture(alice)
+    version = _measurement()
+    await _commit(app_engine, tenants["lab"], capture, [version])
+
+    with pytest.raises(CaptureConflict):
+        async with tenant_transaction(app_engine, tenants["lab"]) as conn:
+            await append_device_measurement(
+                conn,
+                tenants["lab"],
+                capture.client_capture_uuid,
+                alice,
+                replace(version, length_m=0.99),
+            )
+
+
+async def test_current_is_the_latest_measured_not_the_latest_received(
+    tenants, app_engine, owner_engine
+):
+    """A version that arrives late (a stale retry) doesn't displace a newer
+    one: everywhere "current" is read -- the capture, the list, and the
+    shared `current_measurements` view (§9.13)."""
+    alice = await _user_id(owner_engine, ALICE)
+    capture = _capture(alice)
+    newer = _measurement(origin="manual", length=0.45, at=T0 + timedelta(minutes=5))
+    older = _measurement(origin="auto", length=0.42, at=T0)
+    await _commit(app_engine, tenants["lab"], capture, [newer])
+
+    async with tenant_transaction(app_engine, tenants["lab"]) as conn:
+        await append_device_measurement(
+            conn, tenants["lab"], capture.client_capture_uuid, alice, older
+        )
+        found = await mobile_capture(conn, tenants["lab"], capture.client_capture_uuid)
+        listed = await list_mobile_captures(conn, tenants["lab"], limit=10)
+        view = (
+            await conn.execute(
+                text(
+                    "SELECT length_m FROM current_measurements "
+                    "WHERE capture_id = :id AND source = 'device'"
+                ),
+                {"id": found.capture_id},
+            )
+        ).scalar_one()
+
+    assert [m.length_m for m in found.measurements] == [0.42, 0.45]
+    assert found.current_measurement.length_m == 0.45
+    assert listed[0].length_m == 0.45
+    assert view == 0.45

@@ -21,6 +21,7 @@ the browser call (a signature covers the host); the API's own HEADs go to the
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,6 +38,8 @@ __all__ = [
     "TenantStore",
     "TenantStores",
 ]
+
+logger = logging.getLogger(__name__)
 
 #: How long a presigned upload or read stays valid.
 DEFAULT_EXPIRES_SECONDS = 3600
@@ -149,21 +152,15 @@ class TenantStores:
     def from_file(
         cls, path: Path, *, endpoint_url: str, public_endpoint_url: str, region: str
     ) -> TenantStores:
-        text = Path(path).read_text()
-        # Empty until the stores are seeded (a soft render): no tenant has one.
-        rendered = json.loads(text) if text.strip() else {}
+        """The stores in the rendered file. They are optional: a file that is
+        missing (not rendered yet), empty (not seeded), malformed, or holds an
+        incomplete entry costs only the stores it can't give -- logged, never
+        raised -- so it can stop mobile sync but never the API."""
         return cls(
             endpoint_url=endpoint_url,
             public_endpoint_url=public_endpoint_url,
             region=region,
-            stores={
-                slug: TenantStore(
-                    bucket=entry["bucket"],
-                    access_key_id=entry["access_key_id"],
-                    secret_access_key=entry["secret_access_key"],
-                )
-                for slug, entry in rendered.items()
-            },
+            stores=_read_stores(Path(path)),
         )
 
     def __repr__(self) -> str:
@@ -203,3 +200,41 @@ class TenantStores:
                 response_checksum_validation="when_required",
             ),
         )
+
+
+def _read_stores(path: Path) -> dict[str, TenantStore]:
+    try:
+        text = path.read_text()
+    except FileNotFoundError:
+        logger.warning("no tenant stores at %s yet: no tenant can sync", path)
+        return {}
+    if not text.strip():
+        return {}  # the soft render, not seeded yet
+    try:
+        rendered = json.loads(text)
+        if not isinstance(rendered, dict):
+            raise ValueError("not an object")
+    except ValueError as error:
+        logger.error(
+            "tenant stores at %s are not a JSON object (%s): no tenant can sync",
+            path,
+            error,
+        )
+        return {}
+    stores = {}
+    for slug, entry in rendered.items():
+        try:
+            stores[slug] = TenantStore(
+                bucket=entry["bucket"],
+                access_key_id=entry["access_key_id"],
+                secret_access_key=entry["secret_access_key"],
+            )
+        except (KeyError, TypeError):
+            logger.error(
+                "tenant store %r in %s needs bucket, access_key_id and"
+                " secret_access_key: %r can't sync",
+                slug,
+                path,
+                slug,
+            )
+    return stores
