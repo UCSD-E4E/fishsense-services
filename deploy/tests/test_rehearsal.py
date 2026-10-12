@@ -37,8 +37,13 @@ def _env(text: str) -> dict[str, str]:
 
 
 def test_the_renderer_produces_every_variable_the_templates_name():
+    # The soft renders, seeded: each then renders every variable it names.
     rendered = sut.render_secrets(
-        SECRETS_NIX.read_text(), {"nrp_orchestrator": {"kubeconfig": "k"}}
+        SECRETS_NIX.read_text(),
+        {
+            "nrp_orchestrator": {"kubeconfig": "k"},
+            "oidc/mobile": {"client_id": "m", "issuer_url": "https://i/"},
+        },
     )
 
     for destination, render in renders().items():

@@ -193,3 +193,19 @@ def test_stores_load_from_the_rendered_file(tmp_path):
     assert stores.tenants == {"conservation-angler"}
     assert "never-printed" not in repr(stores)
     assert "never-printed" not in repr(stores.for_tenant("conservation-angler"))
+
+
+def test_an_empty_rendered_file_is_no_stores(tmp_path):
+    """Until krg-infra seeds the stores, the soft render is empty: the API
+    starts, and no tenant can sync."""
+    rendered = tmp_path / "stores.json"
+    rendered.write_text("\n")
+
+    stores = TenantStores.from_file(
+        rendered,
+        endpoint_url="http://garage.test",
+        public_endpoint_url="http://garage.test",
+        region=REGION,
+    )
+
+    assert stores.tenants == set()

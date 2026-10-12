@@ -39,6 +39,11 @@
 #   oidc/web-service-account { username, password }   # svc_fishsense's app password (krg-infra #550)
 #   oidc/web        { client_id, client_secret, issuer_url }   (#438)
 #   oidc/analytics  { client_id, client_secret, issuer_url }   (#438)
+#   oidc/mobile     { client_id, issuer_url }  # the mobile app's public client (PKCE);
+#                   # SOFT -- docs/handoff/krg-infra
+#   object_stores   { stores_json }  # each tenant's own Garage bucket + key, as JSON
+#                   # {slug: {bucket, access_key_id, secret_access_key}};
+#                   # SOFT -- docs/handoff/krg-infra
 # No longer read: api {username, password} (v1's basic-auth service account) and
 # oidc/proxy-outpost-token (v2 has no forwardAuth outpost). Leave them for v1's
 # rollback; retire after the 48 h window.
@@ -46,7 +51,8 @@
 # ⚠️ vault-agent is FAIL-CLOSED (errorOnMissingKey): a referenced path/field that
 # isn't seeded takes the whole stack down rather than starting empty -- including
 # the fishsense.vm cert, so the inner Traefik too. Seed every path above before
-# the first v2 converge. Only the NRP kubeconfig is soft (below).
+# the first v2 converge. Only the NRP kubeconfig, the mobile client and the
+# tenant stores are soft (below): the stack runs without them.
 #
 # Rotating one: `bao kv patch`, then `systemctl restart openbao-agent.service`,
 # then recreate the consumers -- env_file is read at create time (v1's
@@ -92,8 +98,8 @@
     {
       # The API: the app role, and the issuer + audience of the tokens it
       # accepts -- the web's confidential client (oidc/web), whose client id is
-      # the `aud` of the tokens the web sends. Add the mobile client's id to
-      # the audiences when it exists.
+      # the `aud` of the tokens the web sends. The mobile app's issuer is its
+      # own render (api-mobile.env, below).
       destination = "/run/tenant/secrets/api.env";
       contents = ''
         {{ with secret "secret/data/tenants/fishsense/generated/services_db" }}FISHSENSE_DATABASE_URL=postgresql+asyncpg://fishsense_app:{{ .Data.data.app_password | urlquery }}@postgres:5432/fishsense_services{{ end }}
@@ -183,6 +189,32 @@
       errorOnMissingKey = false;
       contents = ''
         {{ with secret "secret/data/tenants/fishsense/nrp_orchestrator" }}{{ .Data.data.kubeconfig }}{{ end }}
+      '';
+    }
+    {
+      # The mobile app's own Authentik application (a public client with
+      # PKCE; krg-infra, docs/handoff/krg-infra): Authentik's issuer is per
+      # application, so the API takes it as a second issuer whose audience is
+      # the mobile client id. SOFT: until it is seeded the file is empty and the
+      # API accepts the web's tokens only, as before.
+      destination = "/run/tenant/secrets/api-mobile.env";
+      errorOnMissingKey = false;
+      contents = ''
+        {{ with secret "secret/data/tenants/fishsense/oidc/mobile" }}FISHSENSE_OIDC_MOBILE_ISSUER={{ .Data.data.issuer_url }}
+        FISHSENSE_OIDC_MOBILE_AUDIENCES={{ .Data.data.client_id }}{{ end }}
+      '';
+    }
+    {
+      # Each tenant's own Garage bucket and key (PLAN.md §9.11), as the JSON
+      # the API reads: {slug: {bucket, access_key_id, secret_access_key}}.
+      # krg-infra provisions the buckets and keys and writes this one secret
+      # (docs/handoff/krg-infra), so no list permission is needed. Rendered to
+      # its own directory, mounted read-only into the API alone. SOFT: empty
+      # until seeded, and then no tenant can sync mobile captures.
+      destination = "/run/tenant/object-stores/stores.json";
+      errorOnMissingKey = false;
+      contents = ''
+        {{ with secret "secret/data/tenants/fishsense/object_stores" }}{{ .Data.data.stores_json }}{{ end }}
       '';
     }
   ];

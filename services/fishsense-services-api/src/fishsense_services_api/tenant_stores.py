@@ -149,7 +149,9 @@ class TenantStores:
     def from_file(
         cls, path: Path, *, endpoint_url: str, public_endpoint_url: str, region: str
     ) -> TenantStores:
-        rendered = json.loads(Path(path).read_text())
+        text = Path(path).read_text()
+        # Empty until the stores are seeded (a soft render): no tenant has one.
+        rendered = json.loads(text) if text.strip() else {}
         return cls(
             endpoint_url=endpoint_url,
             public_endpoint_url=public_endpoint_url,

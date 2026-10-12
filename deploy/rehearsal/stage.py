@@ -61,6 +61,13 @@ PLACEHOLDERS = {
         "issuer_url",
     ): "https://auth.example.invalid/application/o/fishsense-analytics/",
     ("oidc/analytics", "client_id"): "fishsense-analytics-rehearsal",
+    (
+        "oidc/mobile",
+        "issuer_url",
+    ): "https://auth.example.invalid/application/o/fishsense-mobile/",
+    ("oidc/mobile", "client_id"): "fishsense-mobile-rehearsal",
+    # No tenant has a bucket in a rehearsal: no tenant can sync.
+    ("object_stores", "stores_json"): "{}",
 }
 
 
