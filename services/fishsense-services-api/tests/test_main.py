@@ -40,6 +40,10 @@ def client_factory(monkeypatch, app_url, owner_engine, issuer):
         "FISHSENSE_OIDC_MOBILE_ISSUER",
         "FISHSENSE_OIDC_MOBILE_AUDIENCES",
         "FISHSENSE_OIDC_MOBILE_JWKS_URL",
+        "FISHSENSE_TENANT_STORES_FILE",
+        "FISHSENSE_OBJECT_STORE_ENDPOINT_URL",
+        "FISHSENSE_OBJECT_STORE_PUBLIC_URL",
+        "FISHSENSE_OBJECT_STORE_REGION",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("FISHSENSE_DATABASE_URL", app_url)
@@ -111,3 +115,33 @@ async def test_the_booted_app_accepts_the_mobile_issuers_tokens(
         )
 
     assert response.status_code == 404
+
+
+async def test_the_booted_app_signs_uploads_into_the_tenants_bucket(
+    monkeypatch, client_factory, issuer, seed_memberships, tmp_path
+):
+    """The tenant stores come from the rendered file, and uploads are signed
+    for the public endpoint the phone will call."""
+    await seed_memberships({"s": {"lab": "member"}})
+    stores = tmp_path / "tenant-stores.json"
+    stores.write_text(
+        '{"lab": {"bucket": "fishsense-tenant-lab", "access_key_id": "GK1",'
+        ' "secret_access_key": "s"}}'
+    )
+    monkeypatch.setenv("FISHSENSE_TENANT_STORES_FILE", str(stores))
+    monkeypatch.setenv(
+        "FISHSENSE_OBJECT_STORE_ENDPOINT_URL", "http://garage.internal:3900"
+    )
+    monkeypatch.setenv("FISHSENSE_OBJECT_STORE_PUBLIC_URL", "https://s3.example.test")
+
+    async with client_factory() as client:
+        response = await client.post(
+            "/tenants/lab/mobile/captures/00000000-0000-4000-8000-000000000001/uploads",
+            json={"files": [{"role": "rgb_jpeg", "sha256": "0" * 64, "size": 1}]},
+            headers=_bearer(issuer),
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["uploads"][0]["url"].startswith(
+        "https://s3.example.test/fishsense-tenant-lab/mobile/captures/"
+    )

@@ -29,6 +29,10 @@ def env(monkeypatch):
         "FISHSENSE_OIDC_MOBILE_ISSUER",
         "FISHSENSE_OIDC_MOBILE_AUDIENCES",
         "FISHSENSE_OIDC_MOBILE_JWKS_URL",
+        "FISHSENSE_TENANT_STORES_FILE",
+        "FISHSENSE_OBJECT_STORE_ENDPOINT_URL",
+        "FISHSENSE_OBJECT_STORE_PUBLIC_URL",
+        "FISHSENSE_OBJECT_STORE_REGION",
     ]:
         monkeypatch.delenv(name, raising=False)
 
@@ -111,3 +115,25 @@ def test_a_mobile_issuer_without_audiences_is_refused(env):
 
     with pytest.raises(ValidationError):
         Settings()
+
+
+def test_tenant_stores_are_optional(env):
+    env(**REQUIRED)
+
+    assert Settings().tenant_stores_file is None
+
+
+def test_tenant_stores_need_both_endpoints(env, tmp_path):
+    stores = tmp_path / "tenant-stores.json"
+    stores.write_text("{}")
+    env(**REQUIRED, FISHSENSE_TENANT_STORES_FILE=str(stores))
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+    env(
+        FISHSENSE_OBJECT_STORE_ENDPOINT_URL="http://garage:3900",
+        FISHSENSE_OBJECT_STORE_PUBLIC_URL="https://s3.example.test",
+    )
+    settings = Settings()
+    assert settings.object_store_region == "garage"

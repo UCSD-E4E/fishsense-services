@@ -232,14 +232,222 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{slug}/mobile/captures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Captures */
+        get: operations["list_mobile_captures"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/mobile/captures/{client_capture_uuid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Capture */
+        get: operations["get_mobile_capture"];
+        /** Commit */
+        put: operations["commit_mobile_capture"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/mobile/captures/{client_capture_uuid}/measurements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add Version */
+        post: operations["add_mobile_measurement_version"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/mobile/captures/{client_capture_uuid}/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request Uploads */
+        post: operations["request_mobile_capture_uploads"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * CaptureCommit
+         * @description Everything the app recorded about one capture. Fields this API doesn't
+         *     model are allowed, and kept in the manifest.
+         */
+        CaptureCommit: {
+            /** App Version */
+            app_version: string;
+            /** Camera Pose */
+            camera_pose?: number[] | null;
+            /**
+             * Captured At
+             * Format: date-time
+             */
+            captured_at: string;
+            /** Captured By Sub */
+            captured_by_sub: string;
+            confidence: components["schemas"]["ConfidenceGeometry"];
+            /** Core Version */
+            core_version?: string | null;
+            depth: components["schemas"]["DepthGeometry"];
+            device: components["schemas"]["DeviceInfo"];
+            /** Files */
+            files: components["schemas"]["DeclaredFile"][];
+            /** Intrinsics */
+            intrinsics: number[];
+            location?: components["schemas"]["Location"] | null;
+            mask?: components["schemas"]["MaskGeometry"] | null;
+            /**
+             * Measurements
+             * @default []
+             */
+            measurements: components["schemas"]["MeasurementVersion"][];
+            /** Model Version */
+            model_version?: string | null;
+            /** Orientation */
+            orientation?: ("portrait" | "landscape") | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /** CapturePage */
+        CapturePage: {
+            /** Captures */
+            captures: components["schemas"]["CaptureSummaryView"][];
+            /** Next */
+            next: string | null;
+        };
+        /** CaptureSummaryView */
+        CaptureSummaryView: {
+            /**
+             * Captured At
+             * Format: date-time
+             */
+            captured_at: string;
+            /**
+             * Client Capture Uuid
+             * Format: uuid
+             */
+            client_capture_uuid: string;
+            /** Latitude */
+            latitude: number | null;
+            /** Length M */
+            length_m: number | null;
+            /** Longitude */
+            longitude: number | null;
+            /** Place Name */
+            place_name: string | null;
+            /** Rgb Url */
+            rgb_url: string | null;
+        };
+        /** CaptureView */
+        CaptureView: {
+            /** App Version */
+            app_version: string;
+            /** Camera Pose */
+            camera_pose: number[] | null;
+            /**
+             * Captured At
+             * Format: date-time
+             */
+            captured_at: string;
+            /**
+             * Client Capture Uuid
+             * Format: uuid
+             */
+            client_capture_uuid: string;
+            confidence: components["schemas"]["ConfidenceGeometry"];
+            /** Core Version */
+            core_version: string | null;
+            current_measurement: components["schemas"]["MeasurementView"] | null;
+            depth: components["schemas"]["DepthGeometry"];
+            device: components["schemas"]["DeviceInfo"];
+            /** Files */
+            files: components["schemas"]["FileView"][];
+            /** Intrinsics */
+            intrinsics: number[];
+            location: components["schemas"]["Location"] | null;
+            /** Manifest */
+            manifest: {
+                [key: string]: unknown;
+            };
+            mask: components["schemas"]["MaskGeometry"] | null;
+            /** Measurements */
+            measurements: components["schemas"]["MeasurementView"][];
+            /** Model Version */
+            model_version: string | null;
+            /** Orientation */
+            orientation: string | null;
+        };
         /** Cleared */
         Cleared: {
             /** Cleared */
             cleared: number;
+        };
+        /** ConfidenceGeometry */
+        ConfidenceGeometry: {
+            /** Height */
+            height: number;
+            /** Row Bytes */
+            row_bytes?: number | null;
+            /** Width */
+            width: number;
+        };
+        /** DeclaredFile */
+        DeclaredFile: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "rgb_jpeg" | "rgb_lossless" | "depth_f32" | "confidence_u8" | "mask_u8";
+            /** Sha256 */
+            sha256: string;
+            /** Size */
+            size: number;
+        };
+        /** DepthGeometry */
+        DepthGeometry: {
+            /** Height */
+            height: number;
+            /** Row Bytes */
+            row_bytes: number;
+            /** Width */
+            width: number;
         };
         /** Device */
         Device: {
@@ -266,6 +474,15 @@ export interface components {
             /** Serial */
             serial: string;
         };
+        /** DeviceInfo */
+        DeviceInfo: {
+            /** Info */
+            info?: string | null;
+            /** Install Id */
+            install_id: string;
+            /** Model */
+            model?: string | null;
+        };
         /** Dive */
         Dive: {
             /** Calibration Source Number */
@@ -289,6 +506,19 @@ export interface components {
             /** Slate Template Number */
             slate_template_number: number | null;
         };
+        /** FileView */
+        FileView: {
+            /** Content Type */
+            content_type: string;
+            /** Role */
+            role: string;
+            /** Sha256 */
+            sha256: string;
+            /** Size */
+            size: number;
+            /** Url */
+            url: string | null;
+        };
         /** Flagged */
         Flagged: {
             /** Flagged */
@@ -298,6 +528,81 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** Location */
+        Location: {
+            /** Horizontal Accuracy M */
+            horizontal_accuracy_m?: number | null;
+            /** Latitude */
+            latitude: number;
+            /** Longitude */
+            longitude: number;
+            /** Place Name */
+            place_name?: string | null;
+        };
+        /** MaskGeometry */
+        MaskGeometry: {
+            /** Height */
+            height: number;
+            /** Width */
+            width: number;
+        };
+        /** MeasurementVersion */
+        MeasurementVersion: {
+            /** Algorithm */
+            algorithm: string;
+            /** Algorithm Version */
+            algorithm_version: string;
+            /**
+             * Client Measurement Uuid
+             * Format: uuid
+             */
+            client_measurement_uuid: string;
+            /** Core Version */
+            core_version?: string | null;
+            fork: components["schemas"]["Point"];
+            /** Length M */
+            length_m: number;
+            /**
+             * Measured At
+             * Format: date-time
+             */
+            measured_at: string;
+            /** Model Version */
+            model_version?: string | null;
+            /**
+             * Origin
+             * @enum {string}
+             */
+            origin: "auto" | "manual";
+            snout: components["schemas"]["Point"];
+        };
+        /** MeasurementView */
+        MeasurementView: {
+            /** Algorithm */
+            algorithm: string;
+            /** Algorithm Version */
+            algorithm_version: string;
+            /**
+             * Client Measurement Uuid
+             * Format: uuid
+             */
+            client_measurement_uuid: string;
+            /** Core Version */
+            core_version: string | null;
+            fork: components["schemas"]["Point"];
+            /** Length M */
+            length_m: number;
+            /**
+             * Measured At
+             * Format: date-time
+             */
+            measured_at: string;
+            /** Model Version */
+            model_version: string | null;
+            /** Origin */
+            origin: string;
+            snout: components["schemas"]["Point"];
         };
         /** MyMembership */
         MyMembership: {
@@ -316,6 +621,45 @@ export interface components {
             role: string;
             /** Slug */
             slug: string;
+        };
+        /** Point */
+        Point: {
+            /** X */
+            x: number;
+            /** Y */
+            y: number;
+        };
+        /** Upload */
+        Upload: {
+            /** Headers */
+            headers: {
+                [key: string]: string;
+            };
+            /**
+             * Method
+             * @default PUT
+             * @constant
+             */
+            method: "PUT";
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "rgb_jpeg" | "rgb_lossless" | "depth_f32" | "confidence_u8" | "mask_u8";
+            /** Url */
+            url: string;
+        };
+        /** UploadGrant */
+        UploadGrant: {
+            /** Already Committed */
+            already_committed: boolean;
+            /** Uploads */
+            uploads: components["schemas"]["Upload"][];
+        };
+        /** UploadRequest */
+        UploadRequest: {
+            /** Files */
+            files: components["schemas"]["DeclaredFile"][];
         };
         /** ValidationError */
         ValidationError: {
@@ -737,6 +1081,198 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MyMembership"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_mobile_captures: {
+        parameters: {
+            query?: {
+                limit?: number;
+                before?: string | null;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapturePage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_mobile_capture: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+                client_capture_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptureView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    commit_mobile_capture: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+                client_capture_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CaptureCommit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptureView"];
+                };
+            };
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptureView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_mobile_measurement_version: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_capture_uuid: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MeasurementVersion"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeasurementView"];
+                };
+            };
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeasurementView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_mobile_capture_uploads: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+                client_capture_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadGrant"];
                 };
             };
             /** @description Validation Error */

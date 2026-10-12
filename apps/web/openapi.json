@@ -1,6 +1,402 @@
 {
   "components": {
     "schemas": {
+      "CaptureCommit": {
+        "additionalProperties": true,
+        "description": "Everything the app recorded about one capture. Fields this API doesn't\nmodel are allowed, and kept in the manifest.",
+        "properties": {
+          "app_version": {
+            "title": "App Version",
+            "type": "string"
+          },
+          "camera_pose": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 16,
+                "minItems": 16,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Camera Pose"
+          },
+          "captured_at": {
+            "format": "date-time",
+            "title": "Captured At",
+            "type": "string"
+          },
+          "captured_by_sub": {
+            "title": "Captured By Sub",
+            "type": "string"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/ConfidenceGeometry"
+          },
+          "core_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Core Version"
+          },
+          "depth": {
+            "$ref": "#/components/schemas/DepthGeometry"
+          },
+          "device": {
+            "$ref": "#/components/schemas/DeviceInfo"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/DeclaredFile"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "intrinsics": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 9,
+            "minItems": 9,
+            "title": "Intrinsics",
+            "type": "array"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Location"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mask": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MaskGeometry"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "measurements": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/MeasurementVersion"
+            },
+            "title": "Measurements",
+            "type": "array"
+          },
+          "model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Version"
+          },
+          "orientation": {
+            "anyOf": [
+              {
+                "enum": [
+                  "portrait",
+                  "landscape"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orientation"
+          }
+        },
+        "required": [
+          "captured_at",
+          "captured_by_sub",
+          "device",
+          "app_version",
+          "intrinsics",
+          "depth",
+          "confidence",
+          "files"
+        ],
+        "title": "CaptureCommit",
+        "type": "object"
+      },
+      "CapturePage": {
+        "properties": {
+          "captures": {
+            "items": {
+              "$ref": "#/components/schemas/CaptureSummaryView"
+            },
+            "title": "Captures",
+            "type": "array"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next"
+          }
+        },
+        "required": [
+          "captures",
+          "next"
+        ],
+        "title": "CapturePage",
+        "type": "object"
+      },
+      "CaptureSummaryView": {
+        "properties": {
+          "captured_at": {
+            "format": "date-time",
+            "title": "Captured At",
+            "type": "string"
+          },
+          "client_capture_uuid": {
+            "format": "uuid",
+            "title": "Client Capture Uuid",
+            "type": "string"
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "length_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Length M"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          },
+          "place_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Place Name"
+          },
+          "rgb_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rgb Url"
+          }
+        },
+        "required": [
+          "client_capture_uuid",
+          "captured_at",
+          "latitude",
+          "longitude",
+          "place_name",
+          "length_m",
+          "rgb_url"
+        ],
+        "title": "CaptureSummaryView",
+        "type": "object"
+      },
+      "CaptureView": {
+        "properties": {
+          "app_version": {
+            "title": "App Version",
+            "type": "string"
+          },
+          "camera_pose": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Camera Pose"
+          },
+          "captured_at": {
+            "format": "date-time",
+            "title": "Captured At",
+            "type": "string"
+          },
+          "client_capture_uuid": {
+            "format": "uuid",
+            "title": "Client Capture Uuid",
+            "type": "string"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/ConfidenceGeometry"
+          },
+          "core_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Core Version"
+          },
+          "current_measurement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeasurementView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "depth": {
+            "$ref": "#/components/schemas/DepthGeometry"
+          },
+          "device": {
+            "$ref": "#/components/schemas/DeviceInfo"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/FileView"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "intrinsics": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Intrinsics",
+            "type": "array"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Location"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "manifest": {
+            "additionalProperties": true,
+            "title": "Manifest",
+            "type": "object"
+          },
+          "mask": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MaskGeometry"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "measurements": {
+            "items": {
+              "$ref": "#/components/schemas/MeasurementView"
+            },
+            "title": "Measurements",
+            "type": "array"
+          },
+          "model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Version"
+          },
+          "orientation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orientation"
+          }
+        },
+        "required": [
+          "client_capture_uuid",
+          "captured_at",
+          "device",
+          "app_version",
+          "core_version",
+          "model_version",
+          "location",
+          "orientation",
+          "intrinsics",
+          "camera_pose",
+          "depth",
+          "confidence",
+          "mask",
+          "files",
+          "measurements",
+          "current_measurement",
+          "manifest"
+        ],
+        "title": "CaptureView",
+        "type": "object"
+      },
       "Cleared": {
         "properties": {
           "cleared": {
@@ -12,6 +408,96 @@
           "cleared"
         ],
         "title": "Cleared",
+        "type": "object"
+      },
+      "ConfidenceGeometry": {
+        "properties": {
+          "height": {
+            "exclusiveMinimum": 0.0,
+            "title": "Height",
+            "type": "integer"
+          },
+          "row_bytes": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Row Bytes"
+          },
+          "width": {
+            "exclusiveMinimum": 0.0,
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "width",
+          "height"
+        ],
+        "title": "ConfidenceGeometry",
+        "type": "object"
+      },
+      "DeclaredFile": {
+        "properties": {
+          "role": {
+            "enum": [
+              "rgb_jpeg",
+              "rgb_lossless",
+              "depth_f32",
+              "confidence_u8",
+              "mask_u8"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size": {
+            "minimum": 0.0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "role",
+          "sha256",
+          "size"
+        ],
+        "title": "DeclaredFile",
+        "type": "object"
+      },
+      "DepthGeometry": {
+        "properties": {
+          "height": {
+            "exclusiveMinimum": 0.0,
+            "title": "Height",
+            "type": "integer"
+          },
+          "row_bytes": {
+            "exclusiveMinimum": 0.0,
+            "title": "Row Bytes",
+            "type": "integer"
+          },
+          "width": {
+            "exclusiveMinimum": 0.0,
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "width",
+          "height",
+          "row_bytes"
+        ],
+        "title": "DepthGeometry",
         "type": "object"
       },
       "Device": {
@@ -70,6 +556,43 @@
           "serial"
         ],
         "title": "DeviceCreate",
+        "type": "object"
+      },
+      "DeviceInfo": {
+        "properties": {
+          "info": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Info"
+          },
+          "install_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Install Id",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "required": [
+          "install_id"
+        ],
+        "title": "DeviceInfo",
         "type": "object"
       },
       "Dive": {
@@ -149,6 +672,46 @@
         "title": "Dive",
         "type": "object"
       },
+      "FileView": {
+        "properties": {
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "role",
+          "sha256",
+          "size",
+          "content_type",
+          "url"
+        ],
+        "title": "FileView",
+        "type": "object"
+      },
       "Flagged": {
         "properties": {
           "flagged": {
@@ -173,6 +736,218 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "Location": {
+        "properties": {
+          "horizontal_accuracy_m": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Horizontal Accuracy M"
+          },
+          "latitude": {
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Longitude",
+            "type": "number"
+          },
+          "place_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Place Name"
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude"
+        ],
+        "title": "Location",
+        "type": "object"
+      },
+      "MaskGeometry": {
+        "properties": {
+          "height": {
+            "exclusiveMinimum": 0.0,
+            "title": "Height",
+            "type": "integer"
+          },
+          "width": {
+            "exclusiveMinimum": 0.0,
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "width",
+          "height"
+        ],
+        "title": "MaskGeometry",
+        "type": "object"
+      },
+      "MeasurementVersion": {
+        "properties": {
+          "algorithm": {
+            "title": "Algorithm",
+            "type": "string"
+          },
+          "algorithm_version": {
+            "title": "Algorithm Version",
+            "type": "string"
+          },
+          "client_measurement_uuid": {
+            "format": "uuid",
+            "title": "Client Measurement Uuid",
+            "type": "string"
+          },
+          "core_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Core Version"
+          },
+          "fork": {
+            "$ref": "#/components/schemas/Point"
+          },
+          "length_m": {
+            "exclusiveMinimum": 0.0,
+            "title": "Length M",
+            "type": "number"
+          },
+          "measured_at": {
+            "format": "date-time",
+            "title": "Measured At",
+            "type": "string"
+          },
+          "model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Version"
+          },
+          "origin": {
+            "enum": [
+              "auto",
+              "manual"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "snout": {
+            "$ref": "#/components/schemas/Point"
+          }
+        },
+        "required": [
+          "client_measurement_uuid",
+          "measured_at",
+          "length_m",
+          "snout",
+          "fork",
+          "origin",
+          "algorithm",
+          "algorithm_version"
+        ],
+        "title": "MeasurementVersion",
+        "type": "object"
+      },
+      "MeasurementView": {
+        "properties": {
+          "algorithm": {
+            "title": "Algorithm",
+            "type": "string"
+          },
+          "algorithm_version": {
+            "title": "Algorithm Version",
+            "type": "string"
+          },
+          "client_measurement_uuid": {
+            "format": "uuid",
+            "title": "Client Measurement Uuid",
+            "type": "string"
+          },
+          "core_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Core Version"
+          },
+          "fork": {
+            "$ref": "#/components/schemas/Point"
+          },
+          "length_m": {
+            "title": "Length M",
+            "type": "number"
+          },
+          "measured_at": {
+            "format": "date-time",
+            "title": "Measured At",
+            "type": "string"
+          },
+          "model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Version"
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
+          "snout": {
+            "$ref": "#/components/schemas/Point"
+          }
+        },
+        "required": [
+          "client_measurement_uuid",
+          "measured_at",
+          "length_m",
+          "snout",
+          "fork",
+          "origin",
+          "algorithm",
+          "algorithm_version",
+          "core_version",
+          "model_version"
+        ],
+        "title": "MeasurementView",
         "type": "object"
       },
       "MyMembership": {
@@ -219,6 +994,101 @@
           "is_admin"
         ],
         "title": "MyTenant",
+        "type": "object"
+      },
+      "Point": {
+        "properties": {
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "title": "Point",
+        "type": "object"
+      },
+      "Upload": {
+        "properties": {
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Headers",
+            "type": "object"
+          },
+          "method": {
+            "const": "PUT",
+            "default": "PUT",
+            "title": "Method",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "rgb_jpeg",
+              "rgb_lossless",
+              "depth_f32",
+              "confidence_u8",
+              "mask_u8"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "url",
+          "headers"
+        ],
+        "title": "Upload",
+        "type": "object"
+      },
+      "UploadGrant": {
+        "properties": {
+          "already_committed": {
+            "title": "Already Committed",
+            "type": "boolean"
+          },
+          "uploads": {
+            "items": {
+              "$ref": "#/components/schemas/Upload"
+            },
+            "title": "Uploads",
+            "type": "array"
+          }
+        },
+        "required": [
+          "already_committed",
+          "uploads"
+        ],
+        "title": "UploadGrant",
+        "type": "object"
+      },
+      "UploadRequest": {
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/DeclaredFile"
+            },
+            "minItems": 1,
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "title": "UploadRequest",
         "type": "object"
       },
       "ValidationError": {
@@ -1025,6 +1895,342 @@
           }
         ],
         "summary": "Get My Membership"
+      }
+    },
+    "/tenants/{slug}/mobile/captures": {
+      "get": {
+        "operationId": "list_mobile_captures",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapturePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Captures"
+      }
+    },
+    "/tenants/{slug}/mobile/captures/{client_capture_uuid}": {
+      "get": {
+        "operationId": "get_mobile_capture",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "client_capture_uuid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Client Capture Uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Capture"
+      },
+      "put": {
+        "operationId": "commit_mobile_capture",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "client_capture_uuid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Client Capture Uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaptureCommit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Commit"
+      }
+    },
+    "/tenants/{slug}/mobile/captures/{client_capture_uuid}/measurements": {
+      "post": {
+        "operationId": "add_mobile_measurement_version",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_capture_uuid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Client Capture Uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MeasurementVersion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeasurementView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeasurementView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Add Version"
+      }
+    },
+    "/tenants/{slug}/mobile/captures/{client_capture_uuid}/uploads": {
+      "post": {
+        "operationId": "request_mobile_capture_uploads",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "client_capture_uuid",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Client Capture Uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadGrant"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Request Uploads"
       }
     }
   }

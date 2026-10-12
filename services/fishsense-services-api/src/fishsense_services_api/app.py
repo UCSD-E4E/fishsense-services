@@ -35,7 +35,9 @@ from fishsense_services_api.memberships import (
     list_memberships,
     resolve_membership,
 )
+from fishsense_services_api.mobile_api import add_mobile_routes
 from fishsense_services_api.portal_api import add_portal_routes
+from fishsense_services_api.tenant_stores import TenantStores
 from fishsense_services_api.users import provision_user
 
 UNIQUE_VIOLATION = "23505"  # Postgres SQLSTATE
@@ -63,8 +65,22 @@ class Device(BaseModel):
     serial: str
 
 
-def create_app(*, engine: AsyncEngine, validator: Validator) -> FastAPI:
+def create_app(
+    *,
+    engine: AsyncEngine,
+    validator: Validator,
+    stores: TenantStores | None = None,
+) -> FastAPI:
+    """``stores``: each tenant's own bucket; None means no tenant has one, so
+    no tenant can sync mobile captures."""
     app = FastAPI(title="FishSense Services API")
+    if stores is None:
+        stores = TenantStores(
+            endpoint_url="http://unset.invalid",
+            public_endpoint_url="http://unset.invalid",
+            region="unset",
+            stores={},
+        )
     bearer = HTTPBearer(auto_error=False)
 
     # Deliberately sync: FastAPI runs it in a threadpool, so a JWKS fetch
@@ -165,6 +181,13 @@ def create_app(*, engine: AsyncEngine, validator: Validator) -> FastAPI:
         return Device(**row._mapping)
 
     add_portal_routes(app, engine=engine, membership=membership)
+    add_mobile_routes(
+        app,
+        engine=engine,
+        membership=membership,
+        authenticate=authenticate,
+        stores=stores,
+    )
     return app
 
 

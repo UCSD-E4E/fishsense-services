@@ -16,6 +16,7 @@ from fishsense_services_api.auth import (
     TokenValidator,
 )
 from fishsense_services_api.settings import Settings
+from fishsense_services_api.tenant_stores import TenantStores
 
 
 def create_app_from_env() -> FastAPI:
@@ -46,7 +47,17 @@ def create_app_from_env() -> FastAPI:
                 settings.oidc_mobile_jwks_url,
             )
         )
-    app = create_app(engine=engine, validator=MultiIssuerValidator(validators))
+    stores = None
+    if settings.tenant_stores_file is not None:
+        stores = TenantStores.from_file(
+            settings.tenant_stores_file,
+            endpoint_url=settings.object_store_endpoint_url,
+            public_endpoint_url=settings.object_store_public_url,
+            region=settings.object_store_region,
+        )
+    app = create_app(
+        engine=engine, validator=MultiIssuerValidator(validators), stores=stores
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:

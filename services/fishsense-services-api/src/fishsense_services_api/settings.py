@@ -5,6 +5,7 @@ rather than failing on its first request. Secrets are ``SecretStr``: they never
 appear in a repr, a log line or a traceback.
 """
 
+from pathlib import Path
 from typing import Annotated
 
 from pydantic import SecretStr, field_validator, model_validator
@@ -32,6 +33,15 @@ class Settings(BaseSettings):
     oidc_mobile_jwks_url: str | None = None
     jwks_cache_seconds: float = 300
     jwks_refetch_cooldown_seconds: float = 30
+    #: Each tenant's own bucket and key (tenant_stores.py), rendered as JSON
+    #: ``{slug: {bucket, access_key_id, secret_access_key}}``. Unset, no
+    #: tenant has storage, so none can sync mobile captures.
+    tenant_stores_file: Path | None = None
+    #: Garage as the API reaches it (HEADs at commit).
+    object_store_endpoint_url: str | None = None
+    #: Garage as phones and browsers reach it; presigned URLs are signed for it.
+    object_store_public_url: str | None = None
+    object_store_region: str = "garage"
 
     @field_validator("oidc_audiences", mode="before")
     @classmethod
@@ -57,6 +67,13 @@ class Settings(BaseSettings):
                 )
             if self.oidc_mobile_jwks_url is None:
                 self.oidc_mobile_jwks_url = _jwks_under(self.oidc_mobile_issuer)
+        if self.tenant_stores_file is not None and not (
+            self.object_store_endpoint_url and self.object_store_public_url
+        ):
+            raise ValueError(
+                "FISHSENSE_TENANT_STORES_FILE needs FISHSENSE_OBJECT_STORE_ENDPOINT_URL"
+                " and FISHSENSE_OBJECT_STORE_PUBLIC_URL"
+            )
         return self
 
 
