@@ -92,6 +92,8 @@ Sync only on Wi-Fi, or when the user taps "Sync now". A session is large. For ea
 | 422 | the payload contradicts itself (sizes vs geometry, ranges) | a bug in the app; report the body |
 | 5xx, network | outage | back off, retry later |
 
+**Sync works from US networks only.** The storage endpoint (`s3.e4e.ucsd.edu`) accepts HTTPS from US addresses only, so a phone abroad sees its uploads refused at the network level (a connection failure, not an HTTP error). Treat it like being offline: keep the capture queued, and tell the user sync will resume once they're back in the US.
+
 ## 5. API reference
 
 Base URL: `https://api.fishsense.e4e.ucsd.edu`, with `Authorization: Bearer <access token>`. The OpenAPI 3.1 document is `apps/web/openapi.json` in fishsense-services. Generate the Dart client from it (PLAN.md §3), so the app and the API can't drift apart.

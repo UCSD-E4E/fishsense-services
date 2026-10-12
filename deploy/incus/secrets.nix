@@ -41,7 +41,7 @@
 #   oidc/analytics  { client_id, client_secret, issuer_url }   (#438)
 #   oidc/mobile     { client_id, issuer_url }  # the mobile app's public client (PKCE);
 #                   # SOFT -- docs/handoff/krg-infra
-#   object_stores   { stores_json }  # each tenant's own Garage bucket + key, as JSON
+#   generated/object_stores { stores_json }  # each tenant's own Garage bucket + key, as JSON
 #                   # {slug: {bucket, access_key_id, secret_access_key}};
 #                   # SOFT -- docs/handoff/krg-infra
 # No longer read: api {username, password} (v1's basic-auth service account) and
@@ -208,13 +208,14 @@
       # Each tenant's own Garage bucket and key (PLAN.md §9.11), as the JSON
       # the API reads: {slug: {bucket, access_key_id, secret_access_key}}.
       # krg-infra provisions the buckets and keys and writes this one secret
-      # (docs/handoff/krg-infra), so no list permission is needed. Rendered to
+      # (krg-infra #566, derived from the per-tenant keys), so no list permission
+      # is needed. Rendered to
       # its own directory, mounted read-only into the API alone. SOFT: empty
       # until seeded, and then no tenant can sync mobile captures.
       destination = "/run/tenant/object-stores/stores.json";
       errorOnMissingKey = false;
       contents = ''
-        {{ with secret "secret/data/tenants/fishsense/object_stores" }}{{ .Data.data.stores_json }}{{ end }}
+        {{ with secret "secret/data/tenants/fishsense/generated/object_stores" }}{{ .Data.data.stores_json }}{{ end }}
       '';
     }
   ];

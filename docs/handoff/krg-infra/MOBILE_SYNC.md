@@ -8,18 +8,13 @@
 
 The services side is built: fishsense-services PR "feat: FishSense Mobile sync and display", design in PLAN.md §9.6, §9.11 and §9.19. Until the steps below are done, the API keeps accepting web tokens only and no tenant can sync. Nothing breaks, **except** for the ordering rule in step 0.
 
-## 0. Before the services release converges: create both OpenBao paths
+> **Status:** implemented in **KastnerRG/krg-infra#566**, with one change agreed: the stores secret is `tenants/fishsense/generated/object_stores`, under krg-deploy's `tenants/+/generated` glob, not `tenants/fishsense/object_stores`. fishsense-services follows that path.
 
-The slot's vault-agent renders `oidc/mobile` and `object_stores` as **soft** renders. Soft mode tolerates a missing *field*, but not a missing *path*. If either path is absent when a fishsense-services release with mobile sync converges, the API's render never appears and the API won't start.
+## 0. Order: krg-infra #566 is applied before the services release converges
 
-So create both paths first. They can start empty, and steps 1 and 2 fill them:
+The slot's vault-agent renders `oidc/mobile` and `generated/object_stores` as **soft** renders. Soft mode tolerates a missing *field*, but not a missing *path*. If either path is absent when a fishsense-services release with mobile sync converges, the API's render never appears and the API won't start.
 
-```bash
-bao kv put secret/tenants/fishsense/oidc/mobile client_id= issuer_url=
-bao kv put secret/tenants/fishsense/object_stores stores_json=
-```
-
-Empty values are safe. An empty `issuer_url` means no mobile issuer. An empty `stores_json` means no tenant has a store, so none can sync.
+krg-infra#566 creates both paths with their real values, so **apply it first**. No hand-made `bao kv put` is needed, and none should be done.
 
 ## 1. An Authentik application for the mobile app
 
@@ -80,7 +75,7 @@ The tenants today:
 ```hcl
 resource "vault_kv_secret_v2" "fishsense_object_stores" {
   mount = "secret"
-  name  = "tenants/fishsense/object_stores"
+  name  = "tenants/fishsense/generated/object_stores"   # as built in krg-infra#566
   data_json = jsonencode({
     stores_json = jsonencode({
       for slug, key in garage_key.fishsense_tenant : slug => {
@@ -93,18 +88,20 @@ resource "vault_kv_secret_v2" "fishsense_object_stores" {
 }
 ```
 
-(Use whatever resource provisions the e4e Garage's buckets and keys today. The shape of `stores_json` is the contract.)
+(As built, #566 derives this from every `fishsense-tenant-<slug>` key in `spec/e4e-nas/garage.yml` and its credential at `e4e-nas/garage-keys/<key>`. The shape of `stores_json` is the contract.)
 
 **Adding a tenant later** takes three steps:
 
-1. add its bucket, key and `stores_json` entry here;
+1. add its `fishsense-tenant-<slug>` bucket and key to `spec/e4e-nas/garage.yml` (#566 derives the `stores_json` entry);
 2. `fishsense-services-api add-tenant` on the slot;
 3. restart `openbao-agent` and recreate the `api` container, which reads the file at start.
 
 ## 3. Facts the services side relies on, to confirm
 
 1. **`https://s3.e4e.ucsd.edu` is reachable from the public internet.** Phones `PUT` their files there through presigned URLs, and browsers load images from it. The orchestrator already uses this endpoint, but only from the slot.
+   - *Answered in #566:* **from the US only.** The NAS firewall rule `geoip-US-web` allows 443 from US addresses only, so a phone abroad can't upload until it's back in the US. Widening it is an owner decision, not made here.
 2. **Garage enforces `x-amz-checksum-sha256` on a presigned PUT, and returns it on `HEAD` with `x-amz-checksum-mode: ENABLED`.** This is the upload integrity check (PLAN.md §9.19). It was verified on Garage **v2.1.0** in the services tests. Please confirm the e4e Garage's version, or run the check below against it.
+   - *Answered in #566:* the e4e Garage runs **v2.3.0**. Run the acceptance check below after apply to confirm it on the real instance.
 3. No CORS rule is needed. The app's PUTs are native, not a browser's, and `<img>` GETs need no CORS.
 
 ## Acceptance checks

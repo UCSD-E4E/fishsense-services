@@ -393,7 +393,8 @@ def test_the_api_reads_each_tenants_own_store():
     env = service_env(api)
     stores = renders()[f"{TENANT_RUN}/object-stores/stores.json"]
 
-    assert "secret/data/tenants/fishsense/object_stores" in stores.contents
+    # krg-infra #566: a platform-derived secret, under its `generated` glob.
+    assert "secret/data/tenants/fishsense/generated/object_stores" in stores.contents
     assert ".Data.data.stores_json" in stores.contents
     assert (f"{TENANT_RUN}/object-stores", f"{TENANT_RUN}/object-stores") in volumes(
         api
