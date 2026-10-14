@@ -228,17 +228,22 @@ async def test_every_operation_has_an_explicit_operation_id(offline_client):
     ids = [op["operationId"] for path in spec["paths"].values() for op in path.values()]
 
     assert sorted(ids) == [
+        "add_mobile_measurement_version",
         "clear_dive_calibration_refusal",
         "clear_dive_calibration_source",
         "clear_dive_calibration_target",
         "clear_needs_reprocess",
+        "commit_mobile_capture",
         "create_device",
+        "get_mobile_capture",
         "get_my_membership",
         "list_devices",
         "list_dives",
         "list_label_studio_project_ids",
+        "list_mobile_captures",
         "list_my_memberships",
         "raise_needs_reprocess",
+        "request_mobile_capture_uploads",
         "set_dive_calibration_source",
         "set_dive_calibration_target",
     ]

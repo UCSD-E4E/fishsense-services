@@ -10,8 +10,13 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from fishsense_services_api.app import create_app
-from fishsense_services_api.auth import JwksKeySource, TokenValidator
+from fishsense_services_api.auth import (
+    JwksKeySource,
+    MultiIssuerValidator,
+    TokenValidator,
+)
 from fishsense_services_api.settings import Settings
+from fishsense_services_api.tenant_stores import TenantStores
 
 
 def create_app_from_env() -> FastAPI:
@@ -19,16 +24,40 @@ def create_app_from_env() -> FastAPI:
     engine = create_async_engine(
         settings.database_url.get_secret_value(), pool_pre_ping=True
     )
-    validator = TokenValidator(
-        issuer=settings.oidc_issuer,
-        audiences=settings.oidc_audiences,
-        keys=JwksKeySource(
-            settings.oidc_jwks_url,
-            cache_seconds=settings.jwks_cache_seconds,
-            refetch_cooldown_seconds=settings.jwks_refetch_cooldown_seconds,
-        ),
+
+    def _issuer(issuer: str, audiences: tuple[str, ...], jwks_url: str):
+        return TokenValidator(
+            issuer=issuer,
+            audiences=audiences,
+            keys=JwksKeySource(
+                jwks_url,
+                cache_seconds=settings.jwks_cache_seconds,
+                refetch_cooldown_seconds=settings.jwks_refetch_cooldown_seconds,
+            ),
+        )
+
+    validators = [
+        _issuer(settings.oidc_issuer, settings.oidc_audiences, settings.oidc_jwks_url)
+    ]
+    if settings.oidc_mobile_issuer is not None:
+        validators.append(
+            _issuer(
+                settings.oidc_mobile_issuer,
+                settings.oidc_mobile_audiences,
+                settings.oidc_mobile_jwks_url,
+            )
+        )
+    stores = None
+    if settings.tenant_stores_file is not None:
+        stores = TenantStores.from_file(
+            settings.tenant_stores_file,
+            endpoint_url=settings.object_store_endpoint_url,
+            public_endpoint_url=settings.object_store_public_url,
+            region=settings.object_store_region,
+        )
+    app = create_app(
+        engine=engine, validator=MultiIssuerValidator(validators), stores=stores
     )
-    app = create_app(engine=engine, validator=validator)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:

@@ -24,7 +24,16 @@ REQUIRED = {
 
 @pytest.fixture
 def env(monkeypatch):
-    for name in list(REQUIRED) + ["FISHSENSE_OIDC_JWKS_URL"]:
+    for name in list(REQUIRED) + [
+        "FISHSENSE_OIDC_JWKS_URL",
+        "FISHSENSE_OIDC_MOBILE_ISSUER",
+        "FISHSENSE_OIDC_MOBILE_AUDIENCES",
+        "FISHSENSE_OIDC_MOBILE_JWKS_URL",
+        "FISHSENSE_TENANT_STORES_FILE",
+        "FISHSENSE_OBJECT_STORE_ENDPOINT_URL",
+        "FISHSENSE_OBJECT_STORE_PUBLIC_URL",
+        "FISHSENSE_OBJECT_STORE_REGION",
+    ]:
         monkeypatch.delenv(name, raising=False)
 
     def set_env(**values: str) -> None:
@@ -77,3 +86,54 @@ def test_the_database_password_never_appears_in_the_settings_repr(env):
     env(**REQUIRED)
 
     assert DB_PASSWORD not in repr(Settings())
+
+
+MOBILE_ISSUER = "https://auth.example.test/application/o/fishsense-mobile/"
+
+
+def test_the_mobile_issuer_is_optional(env):
+    env(**REQUIRED)
+
+    assert Settings().oidc_mobile_issuer is None
+
+
+def test_the_mobile_issuer_comes_with_its_own_audiences_and_jwks(env):
+    env(
+        **REQUIRED,
+        FISHSENSE_OIDC_MOBILE_ISSUER=MOBILE_ISSUER,
+        FISHSENSE_OIDC_MOBILE_AUDIENCES="fishsense-mobile",
+    )
+
+    settings = Settings()
+
+    assert settings.oidc_mobile_audiences == ("fishsense-mobile",)
+    assert settings.oidc_mobile_jwks_url == f"{MOBILE_ISSUER}jwks/"
+
+
+def test_a_mobile_issuer_without_audiences_is_refused(env):
+    env(**REQUIRED, FISHSENSE_OIDC_MOBILE_ISSUER=MOBILE_ISSUER)
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_tenant_stores_are_optional(env):
+    env(**REQUIRED)
+
+    assert Settings().tenant_stores_file is None
+
+
+def test_tenant_stores_need_both_endpoints(env, tmp_path):
+    stores = tmp_path / "tenant-stores.json"
+    stores.write_text("{}")
+    env(**REQUIRED, FISHSENSE_TENANT_STORES_FILE=str(stores))
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+    env(
+        FISHSENSE_OBJECT_STORE_ENDPOINT_URL="http://garage:3900",
+        FISHSENSE_OBJECT_STORE_PUBLIC_URL="https://s3.example.test",
+    )
+    settings = Settings()
+    assert settings.object_store_region == "garage"

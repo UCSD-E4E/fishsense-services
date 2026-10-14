@@ -7,6 +7,7 @@ engine and a key source shows up here.
 
 import time
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import httpx
 import jwt
@@ -32,17 +33,38 @@ def issuer(jwks) -> str:
 
 
 @pytest.fixture
-async def client(monkeypatch, app_url, owner_engine, issuer) -> AsyncIterator:
-    monkeypatch.delenv("FISHSENSE_OIDC_JWKS_URL", raising=False)
+def client_factory(monkeypatch, app_url, owner_engine, issuer):
+    """Boots the app from the environment as it stands when called."""
+    for name in (
+        "FISHSENSE_OIDC_JWKS_URL",
+        "FISHSENSE_OIDC_MOBILE_ISSUER",
+        "FISHSENSE_OIDC_MOBILE_AUDIENCES",
+        "FISHSENSE_OIDC_MOBILE_JWKS_URL",
+        "FISHSENSE_TENANT_STORES_FILE",
+        "FISHSENSE_OBJECT_STORE_ENDPOINT_URL",
+        "FISHSENSE_OBJECT_STORE_PUBLIC_URL",
+        "FISHSENSE_OBJECT_STORE_REGION",
+    ):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("FISHSENSE_DATABASE_URL", app_url)
     monkeypatch.setenv("FISHSENSE_OIDC_ISSUER", issuer)
-    monkeypatch.setenv("FISHSENSE_OIDC_AUDIENCES", f"{AUDIENCE},fishsense-mobile")
+    monkeypatch.setenv("FISHSENSE_OIDC_AUDIENCES", AUDIENCE)
 
-    app = create_app_from_env()
-    async with app.router.lifespan_context(app):
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
-            yield c
+    @asynccontextmanager
+    async def _client() -> AsyncIterator[httpx.AsyncClient]:
+        app = create_app_from_env()
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+                yield c
+
+    return _client
+
+
+@pytest.fixture
+async def client(client_factory) -> AsyncIterator:
+    async with client_factory() as c:
+        yield c
 
 
 def _bearer(issuer: str, key=SIGNING_KEY) -> dict[str, str]:
@@ -72,3 +94,54 @@ async def test_health_needs_no_token(client):
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+async def test_the_booted_app_accepts_the_mobile_issuers_tokens(
+    monkeypatch, client_factory, jwks
+):
+    mobile_issuer = f"{jwks.base_url}/application/o/fishsense-mobile/"
+    monkeypatch.setenv("FISHSENSE_OIDC_MOBILE_ISSUER", mobile_issuer)
+    monkeypatch.setenv("FISHSENSE_OIDC_MOBILE_AUDIENCES", "fishsense-mobile")
+
+    async with client_factory() as client:
+        now = int(time.time())
+        claims = {"iss": mobile_issuer, "aud": "fishsense-mobile", "sub": "s",
+                  "iat": now, "exp": now + 60}  # fmt: skip
+        token = jwt.encode(
+            claims, SIGNING_KEY, algorithm="RS256", headers={"kid": "k1"}
+        )
+        response = await client.get(
+            "/tenants/lab/devices", headers={"Authorization": f"Bearer {token}"}
+        )
+
+    assert response.status_code == 404
+
+
+async def test_the_booted_app_signs_uploads_into_the_tenants_bucket(
+    monkeypatch, client_factory, issuer, seed_memberships, tmp_path
+):
+    """The tenant stores come from the rendered file, and uploads are signed
+    for the public endpoint the phone will call."""
+    await seed_memberships({"s": {"lab": "member"}})
+    stores = tmp_path / "tenant-stores.json"
+    stores.write_text(
+        '{"lab": {"bucket": "fishsense-tenant-lab", "access_key_id": "GK1",'
+        ' "secret_access_key": "s"}}'
+    )
+    monkeypatch.setenv("FISHSENSE_TENANT_STORES_FILE", str(stores))
+    monkeypatch.setenv(
+        "FISHSENSE_OBJECT_STORE_ENDPOINT_URL", "http://garage.internal:3900"
+    )
+    monkeypatch.setenv("FISHSENSE_OBJECT_STORE_PUBLIC_URL", "https://s3.example.test")
+
+    async with client_factory() as client:
+        response = await client.post(
+            "/tenants/lab/mobile/captures/00000000-0000-4000-8000-000000000001/uploads",
+            json={"files": [{"role": "rgb_jpeg", "sha256": "0" * 64, "size": 1}]},
+            headers=_bearer(issuer),
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["uploads"][0]["url"].startswith(
+        "https://s3.example.test/fishsense-tenant-lab/mobile/captures/"
+    )

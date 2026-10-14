@@ -133,11 +133,27 @@ services:
   # ── API → api.fishsense.e4e.ucsd.edu (bearer tokens, validated in-app) ─────────────────
   api:
     image: ghcr.io/ucsd-e4e/fishsense-services-api:v0.5.0
+    # Group 0 reads the root-only tenant-stores render (as the orchestrator
+    # reads its renders); the image runs as uid 10001, not root.
+    group_add: ["0"]
     restart: unless-stopped
     # FISHSENSE_DATABASE_URL (app role), FISHSENSE_OIDC_ISSUER / _AUDIENCES (the
     # web's Authentik client: its tokens are the ones the API accepts).
     env_file:
       - /run/tenant/secrets/api.env
+      # The mobile app's issuer and client id (SOFT: empty until seeded).
+      - /run/tenant/secrets/api-mobile.env
+    environment:
+      # Each tenant's own bucket and key (PLAN.md §9.11). Empty until
+      # krg-infra seeds it: then no tenant can sync mobile captures.
+      FISHSENSE_TENANT_STORES_FILE: /run/tenant/object-stores/stores.json
+      # The e4e Garage is public HTTPS, reached the same way by the API's
+      # checks and by the phones and browsers its presigned URLs are for.
+      FISHSENSE_OBJECT_STORE_ENDPOINT_URL: https://s3.e4e.ucsd.edu
+      FISHSENSE_OBJECT_STORE_PUBLIC_URL: https://s3.e4e.ucsd.edu
+      FISHSENSE_OBJECT_STORE_REGION: garage
+    volumes:
+      - /run/tenant/object-stores:/run/tenant/object-stores:ro
     expose: ["8000"]
     depends_on:
       migrate:

@@ -193,6 +193,8 @@ done
 | `generated/services_db` | `owner_password`, `app_password`, `backup_password`, `analytics_password`, `smoke_password` | platform (tofu, krg-infra #554) — **do not seed** | db-bootstrap (all), migrate (owner, backup), api + orchestrator (app), backup (backup), superset (analytics), smoke (smoke) |
 | `oidc/web-service-account` | `username`, `password` | platform (tofu, krg-infra #550) — **do not seed** | web |
 | `nrp_orchestrator` | `kubeconfig` | **new** — *soft* render: the field may be empty, the **path must exist** | orchestrator, nrp-temporal-cert-sync |
+| `oidc/mobile` | `client_id`, `issuer_url` | platform (krg-infra #566) — **do not seed**; *soft* render, but the **path must exist** before a release with mobile sync converges: apply krg-infra #566 first | api (second issuer) |
+| `generated/object_stores` | `stores_json` | platform (krg-infra #566, derived from each tenant's Garage key) — **do not seed**; *soft* render, but the **path must exist** before a release with mobile sync converges: apply krg-infra #566 first | api (each tenant's bucket and key) |
 | `model_weights` | `access_key`, `secret_key` | **new** — not rendered on the slot | the NRP processor's Secret (§1.4) |
 
 v1's `api {username, password}`, `nrp {kubeconfig}` and `oidc/proxy-outpost-token`

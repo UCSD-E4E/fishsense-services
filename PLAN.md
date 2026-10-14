@@ -464,7 +464,9 @@ Everything except the reference tables above carries `tenant_id`.
 - **Mobile** — authenticated app sync from local SQLite: image + LiDAR depth +
   on-device measurement. Raw + depth → Garage; `Capture` + mobile `CaptureExtension` +
   device measurement recorded. Raw retained so we **recompute/validate** the device's
-  measurement.
+  measurement. ***Built 2026-10-11*** (§9.6): the API side, the tenant buckets (§9.11)
+  and a member-facing `/captures` page; the app and krg-infra sides are handed off
+  (`docs/handoff/`).
 
 ### 4.5 Processing pipeline
 - **Database ownership** *(decided 2026-09-30)*: **one package owns the database**:
@@ -925,6 +927,11 @@ Grouped by when they need answering. Each has: **the decision**, *what it blocks
   can reach the API without going through Traefik.
 
 **9.11 — Cross-tenant principals: processor & object store** — *object store decided 2026-09-27 for cutover; the processor question is still open*
+- ***Bucket-per-tenant, built 2026-10-11*** for mobile sync, the first partner upload: each
+  tenant has its own Garage bucket and a key granted on it alone (provisioned by krg-infra,
+  `docs/handoff/krg-infra/MOBILE_SYNC.md`); the API presigns with the tenant's key, and a
+  tenant without one can't upload. The lab's existing pipeline (scratch and JPEGs in the
+  shared bucket) is unchanged; moving it is a later migration.
 - **Decided for cutover:** one shared bucket, with isolation enforced in the app. Every key is under the tenant's prefix, and only the orchestrator issues keys. At cutover there is one tenant (`lab`). **Bucket-per-tenant is due before the first partner upload**, and the prefix layout is chosen so it moves bucket-for-prefix.
 - The processor holds one service identity, handles every tenant's payloads, and runs on
   infrastructure we don't own (NRP, later phones). What stops it writing tenant B's
@@ -985,7 +992,23 @@ overridable); built in migration 0013*
 - *Revisit at the phone-cluster move:* HA topology + target RPO/RTO. *(e4e Garage durability
   is separate and owner-tracked — §4.6.)*
 
-**9.6 — Mobile sync protocol** — *shape decided; one blocking decision open*
+**9.6 — Mobile sync protocol** — *decided and built 2026-10-11 (API side); the app side is handed off (`docs/handoff/fishsense-mobile/SYNC.md`)*
+- ***Built:*** `POST /tenants/{slug}/mobile/captures/{uuid}/uploads` (presigned PUTs into the
+  tenant's own bucket, each signed for the file's declared SHA-256 and size) → the app
+  PUTs straight to Garage → `PUT /tenants/{slug}/mobile/captures/{uuid}` (commit: every
+  file read back and checked, sizes checked against the geometry, then kept) →
+  `POST …/measurements` (a redone selection, a new version). Idempotent on the app's
+  UUIDs. Migration 0038 keeps everything the app saved: `mobile_captures` (the mobile
+  CaptureExtension, with the commit request as received), `capture_objects` (every file
+  with its checksum), `device_measurement_points` (snout/fork, `auto` or `manual`).
+  Single presigned PUTs, not multipart: a capture is a few MB.
+- ***Decided 2026-10-11, revised 2026-10-14 (owner):*** **syncing requires a sign-in;
+  capturing doesn't.** Each capture records who took it (`captured_by_sub`) -- or, if taken
+  signed out, the account that first syncs it -- and only that user may sync it. **Sync everything
+  the app saves** -- this is scientific data and must be reproducible -- so the
+  blocking decision below is settled as **(a)**: the app keeps the **lossless frame** it
+  measured on (`rgb_lossless`), and the **mask is synced** (overriding "do not sync it").
+  Older builds without the lossless frame still sync.
 - **Direction: one-way per data class — no conflict resolution needed.**
   - *mobile → server*: captures + form responses = **append-only immutable facts**. A redone
     two-point selection is a **new append-only measurement version**, not a conflict.
@@ -1075,7 +1098,12 @@ overridable)*
 - Label the views: prod's views compute p90 **per fish**; the paper's p90 is **per (dive,
   model) cell after the cohort rule**. Dashboard numbers must not be mistaken for the paper's.
 
-**9.19 — Upload integrity** — *open*
+**9.19 — Upload integrity** — *decided 2026-10-11: SHA-256, signed into the upload*
+- ***Decided:*** the client declares each file's **SHA-256** and size; the presigned PUT
+  signs `x-amz-checksum-sha256` and `content-length`, so Garage refuses any other bytes, and
+  commit reads both back with `HEAD` (`ChecksumMode`). Verified against Garage v2.1.0;
+  krg-infra confirms the e4e Garage's version. Mobile captures use `sha256`; v1's ORFs keep
+  md5.
 - The API never sees bytes, and a multipart ETag isn't a content hash, so "commit (checksums
   verified)" needs a verifier: S3 additional-checksum headers (check that our Garage version
   supports them) or processor-side verification. Keep v1's content-checksum contract (md5 of
@@ -1111,7 +1139,7 @@ overridable)*
 - Segmentation **masks** (storage, format, model version), **pose** per frame (from mask
   aspect ratio, independent of the error), **frames-per-animal**, **diver/volunteer
   identity** (a privacy question for partner tenants). None exist in v1. Mobile already
-  produces masks (§9.6 says don't sync them — revisit if P2's pose analysis needs them).
+  produces masks, and they are synced since 2026-10-11 (§9.6).
 
 ### C. Decide late — post-parity
 

@@ -270,6 +270,12 @@ class Capture(Base):
         ),
         # A dive's captures, per dive (0029).
         Index("captures_tenant_id_dive_id_idx", "tenant_id", "dive_id"),
+        # A mobile capture's id from the app: the sync's idempotency key (0038).
+        UniqueConstraint(
+            "tenant_id",
+            "client_capture_uuid",
+            name="captures_client_capture_uuid_key",
+        ),
     )
 
     id: Mapped[uuid.UUID] = _id()
@@ -287,6 +293,11 @@ class Capture(Base):
     )
     is_canonical: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime] = _created_at()
+    client_capture_uuid: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    uploaded_by: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("users.id"))
+    latitude: Mapped[float | None] = mapped_column(Double)
+    longitude: Mapped[float | None] = mapped_column(Double)
+    horizontal_accuracy_m: Mapped[float | None] = mapped_column(Double)
 
 
 class CameraCalibration(Base):
@@ -976,6 +987,8 @@ class Measurement(Base):
     core_version: Mapped[str | None] = mapped_column(Text)
     model_version: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
+    #: When a device measured (0038); NULL for the server's. Orders current.
+    measured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class LaserDepthRefusal(Base):
@@ -1266,4 +1279,93 @@ class AutomaticMeasurement(Base):
     algorithm: Mapped[str] = mapped_column(Text)
     algorithm_version: Mapped[str] = mapped_column(Text)
     core_version: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class MobileCapture(Base):
+    """The mobile CaptureExtension (0038): what the phone recorded with a
+    capture, and the commit request as received. Append-only."""
+
+    __tablename__ = "mobile_captures"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "fish_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "capture_id"], ["captures.tenant_id", "captures.id"]
+        ),
+        ForeignKeyConstraint(["tenant_id", "fish_id"], ["fish.tenant_id", "fish.id"]),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("tenants.id", ondelete="CASCADE"), primary_key=True
+    )
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    fish_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    device_model: Mapped[str | None] = mapped_column(Text)
+    device_info: Mapped[str | None] = mapped_column(Text)
+    app_version: Mapped[str | None] = mapped_column(Text)
+    core_version: Mapped[str | None] = mapped_column(Text)
+    model_version: Mapped[str | None] = mapped_column(Text)
+    place_name: Mapped[str | None] = mapped_column(Text)
+    orientation: Mapped[str | None] = mapped_column(Text)
+    intrinsics: Mapped[list[float]] = mapped_column(ARRAY(Double))
+    camera_pose: Mapped[list[float] | None] = mapped_column(ARRAY(Double))
+    depth_width: Mapped[int] = mapped_column(Integer)
+    depth_height: Mapped[int] = mapped_column(Integer)
+    depth_row_bytes: Mapped[int] = mapped_column(Integer)
+    confidence_width: Mapped[int] = mapped_column(Integer)
+    confidence_height: Mapped[int] = mapped_column(Integer)
+    mask_width: Mapped[int | None] = mapped_column(Integer)
+    mask_height: Mapped[int | None] = mapped_column(Integer)
+    manifest: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class CaptureObject(Base):
+    """Every stored file of a capture, by role, with its verified SHA-256 and
+    size (0038). Append-only."""
+
+    __tablename__ = "capture_objects"
+    __table_args__ = (
+        UniqueConstraint("bucket", "object_key"),
+        ForeignKeyConstraint(
+            ["tenant_id", "capture_id"], ["captures.tenant_id", "captures.id"]
+        ),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("tenants.id", ondelete="CASCADE"), primary_key=True
+    )
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    role: Mapped[str] = mapped_column(Text, primary_key=True)
+    bucket: Mapped[str] = mapped_column(Text)
+    object_key: Mapped[str] = mapped_column(Text)
+    sha256: Mapped[str] = mapped_column(Text)
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
+    content_type: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class DeviceMeasurementPoints(Base):
+    """The snout/fork pixels behind a ``source = 'device'`` measurement, found
+    by the phone or placed by the user (0038). Append-only."""
+
+    __tablename__ = "device_measurement_points"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "client_measurement_uuid"),
+        ForeignKeyConstraint(
+            ["tenant_id", "measurement_id"],
+            ["measurements.tenant_id", "measurements.id"],
+        ),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("tenants.id", ondelete="CASCADE"), primary_key=True
+    )
+    measurement_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    client_measurement_uuid: Mapped[uuid.UUID] = mapped_column(Uuid)
+    origin: Mapped[str] = mapped_column(Text)
+    snout_x: Mapped[float] = mapped_column(Double)
+    snout_y: Mapped[float] = mapped_column(Double)
+    fork_x: Mapped[float] = mapped_column(Double)
+    fork_y: Mapped[float] = mapped_column(Double)
     created_at: Mapped[datetime] = _created_at()

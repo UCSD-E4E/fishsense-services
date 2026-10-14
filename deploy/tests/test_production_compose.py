@@ -267,13 +267,20 @@ def test_every_env_file_is_a_render_and_every_render_is_used():
     assert rendered_env_files == used
 
 
-def test_only_the_nrp_kubeconfig_render_is_soft():
-    """Soft (errorOnMissingKey=false) means "render empty": right for the NRP
-    kubeconfig, whose absence must not take down the fishsense.vm cert and
-    with it the whole slot (v1 secrets.nix). Wrong for anything the stack
-    needs to start, which must fail closed."""
+def test_only_optional_renders_are_soft():
+    """Soft (errorOnMissingKey=false) means "render empty": right for what the
+    stack runs without -- the NRP kubeconfig (v1 secrets.nix), and the mobile
+    client and the tenant stores, which krg-infra seeds after this deploys
+    (docs/handoff/krg-infra): until then the API accepts web tokens only and
+    no tenant can sync. Their absence must not take down the fishsense.vm
+    cert and with it the whole slot. Wrong for anything the stack needs to
+    start, which must fail closed."""
     soft = {d for d, r in renders().items() if r.soft}
-    assert soft == {f"{TENANT_RUN}/nrp/kubeconfig"}
+    assert soft == {
+        f"{TENANT_RUN}/nrp/kubeconfig",
+        f"{TENANT_RUN}/secrets/api-mobile.env",
+        f"{TENANT_RUN}/object-stores/stores.json",
+    }
 
 
 def test_no_secret_is_committed_in_the_compose():
@@ -359,6 +366,48 @@ def test_the_api_accepts_the_webs_tokens():
     web = renders()[f"{TENANT_RUN}/secrets/web.env"].sources
     assert api["FISHSENSE_OIDC_AUDIENCES"] == web["AUTH_AUTHENTIK_ID"]
     assert api["FISHSENSE_OIDC_ISSUER"] == web["AUTH_AUTHENTIK_ISSUER"]
+
+
+def test_the_api_accepts_the_mobile_clients_tokens():
+    """The mobile app is its own Authentik application (a public client),
+    so its own issuer, with its client id as the audience (PLAN.md §9.6)."""
+    api = services()["api"]
+    mobile = renders()[f"{TENANT_RUN}/secrets/api-mobile.env"]
+
+    assert f"{TENANT_RUN}/secrets/api-mobile.env" in env_files(api)
+    assert mobile.sources["FISHSENSE_OIDC_MOBILE_ISSUER"] == [
+        ("oidc/mobile", "issuer_url")
+    ]
+    assert mobile.sources["FISHSENSE_OIDC_MOBILE_AUDIENCES"] == [
+        ("oidc/mobile", "client_id")
+    ]
+
+
+def test_the_api_reads_each_tenants_own_store():
+    """Bucket-per-tenant (PLAN.md §9.11): the API presigns each tenant's
+    uploads with that tenant's key, from the stores krg-infra provisions. The
+    render is root-only, so the API reads it as group 0 (as the orchestrator
+    reads its renders); only that directory is mounted, not the other
+    services' secrets."""
+    api = services()["api"]
+    env = service_env(api)
+    stores = renders()[f"{TENANT_RUN}/object-stores/stores.json"]
+
+    # krg-infra #566: a platform-derived secret, under its `generated` glob.
+    assert "secret/data/tenants/fishsense/generated/object_stores" in stores.contents
+    assert ".Data.data.stores_json" in stores.contents
+    assert (f"{TENANT_RUN}/object-stores", f"{TENANT_RUN}/object-stores") in volumes(
+        api
+    )
+    assert not mounts(api, f"{TENANT_RUN}/secrets")
+    assert (
+        env["FISHSENSE_TENANT_STORES_FILE"] == f"{TENANT_RUN}/object-stores/stores.json"
+    )
+    assert (
+        env["FISHSENSE_OBJECT_STORE_ENDPOINT_URL"]
+        == env["FISHSENSE_OBJECT_STORE_PUBLIC_URL"]
+    )
+    assert "0" in [str(g) for g in api.get("group_add", [])]
 
 
 # --- the backup ------------------------------------------------------------------------

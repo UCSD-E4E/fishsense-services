@@ -41,6 +41,11 @@ One org, one tenant (`org_claim` is unique). The lab claims no org.
 
 3. Send the org the link. Their people enroll, verify their email, and sign in.
 
+4. **For FishSense Mobile sync,** the tenant also needs its own Garage bucket and key
+   (krg-infra: `docs/handoff/krg-infra/MOBILE_SYNC.md` §2, "Adding a tenant later").
+   Until then its members can sign in to the app and see the web, but syncing a
+   capture answers 409 "this tenant has no storage of its own yet".
+
 Do step 2 before the link goes out: until a tenant claims the org, its accounts
 sign in but belong to no tenant (they join on their next request once it does).
 

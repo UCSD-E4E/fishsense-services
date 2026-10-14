@@ -5,6 +5,7 @@ rather than failing on its first request. Secrets are ``SecretStr``: they never
 appear in a repr, a log line or a traceback.
 """
 
+from pathlib import Path
 from typing import Annotated
 
 from pydantic import SecretStr, field_validator, model_validator
@@ -23,24 +24,67 @@ class Settings(BaseSettings):
     oidc_audiences: Annotated[tuple[str, ...], NoDecode]
     #: Defaults to Authentik's standard location, ``{issuer}jwks/``.
     oidc_jwks_url: str | None = None
+    #: The mobile app's own Authentik application (a public client with
+    #: PKCE): Authentik's issuer is per application, so it is a second issuer
+    #: with its own audiences and keys. Unset, the API accepts web tokens only.
+    oidc_mobile_issuer: str | None = None
+    oidc_mobile_audiences: Annotated[tuple[str, ...], NoDecode] = ()
+    #: Defaults to ``{mobile issuer}jwks/``.
+    oidc_mobile_jwks_url: str | None = None
     jwks_cache_seconds: float = 300
     jwks_refetch_cooldown_seconds: float = 30
+    #: Each tenant's own bucket and key (tenant_stores.py), rendered as JSON
+    #: ``{slug: {bucket, access_key_id, secret_access_key}}``. Unset, no
+    #: tenant has storage, so none can sync mobile captures.
+    tenant_stores_file: Path | None = None
+    #: Garage as the API reaches it (HEADs at commit).
+    object_store_endpoint_url: str | None = None
+    #: Garage as phones and browsers reach it; presigned URLs are signed for it.
+    object_store_public_url: str | None = None
+    object_store_region: str = "garage"
 
     @field_validator("oidc_audiences", mode="before")
     @classmethod
     def _split_audiences(cls, value: object) -> object:
-        if isinstance(value, str):
-            value = [part.strip() for part in value.split(",")]
-        audiences = tuple(a for a in value if a)
+        audiences = _split(value)
         if not audiences:
             raise ValueError("at least one audience is required")
         return audiences
 
+    @field_validator("oidc_mobile_audiences", mode="before")
+    @classmethod
+    def _split_mobile_audiences(cls, value: object) -> object:
+        return _split(value)
+
     @model_validator(mode="after")
     def _default_jwks_url(self) -> "Settings":
         if self.oidc_jwks_url is None:
-            self.oidc_jwks_url = f"{self.oidc_issuer.rstrip('/')}/jwks/"
+            self.oidc_jwks_url = _jwks_under(self.oidc_issuer)
+        if self.oidc_mobile_issuer is not None:
+            if not self.oidc_mobile_audiences:
+                raise ValueError(
+                    "FISHSENSE_OIDC_MOBILE_ISSUER needs FISHSENSE_OIDC_MOBILE_AUDIENCES"
+                )
+            if self.oidc_mobile_jwks_url is None:
+                self.oidc_mobile_jwks_url = _jwks_under(self.oidc_mobile_issuer)
+        if self.tenant_stores_file is not None and not (
+            self.object_store_endpoint_url and self.object_store_public_url
+        ):
+            raise ValueError(
+                "FISHSENSE_TENANT_STORES_FILE needs FISHSENSE_OBJECT_STORE_ENDPOINT_URL"
+                " and FISHSENSE_OBJECT_STORE_PUBLIC_URL"
+            )
         return self
+
+
+def _split(value: object) -> object:
+    if isinstance(value, str):
+        value = [part.strip() for part in value.split(",")]
+    return tuple(a for a in value if a)
+
+
+def _jwks_under(issuer: str) -> str:
+    return f"{issuer.rstrip('/')}/jwks/"
 
 
 class MigrationSettings(BaseSettings):
