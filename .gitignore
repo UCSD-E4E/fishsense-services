@@ -10,3 +10,8 @@ build/
 .claude/worktrees/
 # Per-person Claude Code settings (local permissions); never shared.
 .claude/settings.local.json
+
+# direnv: nix-direnv's cache, and the local env files .envrc loads.
+.direnv/
+.env
+.envrc.local
