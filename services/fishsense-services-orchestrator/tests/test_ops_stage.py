@@ -30,6 +30,7 @@ from fishsense_services_orchestrator.ops.labeling_configs.workflow import (
 from fishsense_services_orchestrator.ops.paths.workflow import (
     RepairMovedCapturePathsWorkflow,
 )
+from fishsense_services_orchestrator.ops.regroup.workflow import RegroupDiveWorkflow
 from fishsense_services_orchestrator.registry import Deps, stages
 from fishsense_services_orchestrator.schedules import ensure_schedules
 
@@ -47,6 +48,7 @@ def test_the_ops_stage_serves_its_workflows():
         VerifyAllDivesChecksumsWorkflow,
         ReconcileLabelingConfigsWorkflow,
         RepairMovedCapturePathsWorkflow,
+        RegroupDiveWorkflow,
     }
 
 
@@ -61,6 +63,7 @@ def test_its_activities_build_from_the_nas_and_label_studio_settings(monkeypatch
         "select_canonical_dive_numbers",
         "reconcile_labeling_configs",
         "repair_moved_capture_paths",
+        "regroup_dive",
     }
 
 
