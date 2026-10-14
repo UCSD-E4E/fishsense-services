@@ -58,6 +58,7 @@ __all__ = [
     "SlateDetectionUnavailable",
     "SlatePresenceCatalog",
     "SlatePresenceRow",
+    "current_presence_is",
     "detector_slate_frame",
     "next_dive_for_slate_detection",
     "persist_slate_presence",
@@ -73,24 +74,40 @@ __all__ = [
 SLATE_PRESENCE_THRESHOLD = 0.5
 
 
+def current_presence_is(condition: str, alias: str = "sp_p") -> str:
+    """Capture `c`'s current prediction -- its latest row, as
+    `current_slate_presence` defines it -- satisfies `condition` (SQL over
+    `alias`).
+
+    Read as one index lookup per frame (`(tenant_id, capture_id, seq)`,
+    newest first), never through the view. Correlated with `c`, the view is
+    a DISTINCT ON over every prediction, and Postgres rebuilt it -- sorting
+    the whole table -- once per row of the outer query. On 2026-10-14, with
+    316 of 317 dives scored, that put the slate cohort past the app role's
+    30 s statement timeout every hour; while most dives were unscored the
+    first dive tried qualified, which hid it.
+    """
+    return f"""EXISTS (
+        SELECT 1 FROM (
+            SELECT latest.* FROM slate_presence_predictions latest
+            WHERE latest.tenant_id = c.tenant_id AND latest.capture_id = c.id
+            ORDER BY latest.seq DESC
+            LIMIT 1
+        ) {alias}
+        WHERE {condition}
+    )"""
+
+
 def detector_slate_frame(threshold: float = SLATE_PRESENCE_THRESHOLD) -> str:
     """Capture `c`'s current prediction says slate. A literal threshold, so
     the predicate can be spelled into a view."""
-    return f"""EXISTS (
-        SELECT 1 FROM current_slate_presence sp_p
-        WHERE sp_p.tenant_id = c.tenant_id AND sp_p.capture_id = c.id
-          AND sp_p.probability >= {float(threshold)!r}
-    )"""
+    return current_presence_is(f"sp_p.probability >= {float(threshold)!r}")
 
 
 def _fresh(version: str) -> str:
     """Capture `c` has a current prediction at `version`, abstentions
     included."""
-    return f"""EXISTS (
-        SELECT 1 FROM current_slate_presence p
-        WHERE p.tenant_id = c.tenant_id AND p.capture_id = c.id
-          AND p.model_version = {version}
-    )"""
+    return current_presence_is(f"p.model_version = {version}", alias="p")
 
 
 def slate_detection_cohort(version: str) -> str:

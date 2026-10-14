@@ -43,6 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from fishsense_services_api.camera_sql import RECTIFIABLE_DIVE
 from fishsense_services_api.service_principal import ServicePrincipal
+from fishsense_services_api.slate_presence_store import detector_slate_frame
 
 __all__ = [
     "AUTOMATIC_PRODUCER",
@@ -132,11 +133,7 @@ _FRAME_DONE = """EXISTS (
 #: Capture `c` is one the slate-presence detector currently calls a slate
 #: (0035). The same rule as `slate_frames`, in SQL, so the cohort and the
 #: inputs agree.
-_DETECTOR_SLATE = f"""EXISTS (
-    SELECT 1 FROM current_slate_presence sp
-    WHERE sp.tenant_id = c.tenant_id AND sp.capture_id = c.id
-      AND sp.probability >= {SLATE_FRAME_THRESHOLD}
-)"""
+_DETECTOR_SLATE = detector_slate_frame(SLATE_FRAME_THRESHOLD)
 
 #: Dive `d` has a human measurement: any `measurements` row on its captures.
 _HUMAN_MEASURED = """EXISTS (
