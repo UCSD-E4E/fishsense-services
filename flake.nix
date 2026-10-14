@@ -147,14 +147,19 @@
     # stands the processor up: `kubectl`, the OIDC `kubelogin` (int128/kubelogin →
     # `kubectl oidc-login`, which NRP's CILogon kubeconfig requires — NOT the Azure
     # `kubelogin`) for the one-time deploy/nrp/deployer-rbac.yaml apply and the
-    # processor's Secrets. Pinned to the nixpkgs the slot builds from.
+    # processor's Secrets. Pinned to the nixpkgs the slot builds from. Plus Node 24
+    # (CI's `node-version`) for the web portal in apps/web, uv for the Python
+    # workspace, and the Temporal CLI. direnv loads all of this on `cd` (`.envrc`).
     devShells.${system}.default = pkgs.mkShell {
       packages = [
         pkgs.kubectl
         pkgs.kubelogin-oidc
+        pkgs.nodejs_24
+        pkgs.uv
+        pkgs.temporal-cli
       ];
       shellHook = ''
-        echo "fishsense dev shell: kubectl + kubelogin-oidc (kubectl oidc-login)"
+        echo "fishsense dev shell: kubectl + kubelogin-oidc (kubectl oidc-login) + node 24 + uv + temporal"
         echo "NRP login: kubectl get pods  (opens a CILogon browser window the first time)"
       '';
     };
