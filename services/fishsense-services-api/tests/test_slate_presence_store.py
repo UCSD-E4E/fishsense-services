@@ -53,11 +53,13 @@ from fishsense_services_api.slate_presence_store import (
     SlateDetectionUnavailable,
     SlatePresenceCatalog,
     SlatePresenceRow,
+    detector_slate_frame,
     next_dive_for_slate_detection,
     persist_slate_presence,
     slate_detection_inputs,
     slate_frames,
     slate_presence,
+    slate_detection_cohort,
 )
 
 V = 1  # SLATE_DETECTOR_VERSION, which the orchestrator passes in
@@ -598,3 +600,150 @@ async def test_the_catalog_acts_only_in_tenants_it_is_a_member_of(
     assert len(await catalog.slate_presence(lab, candidate.dive_id)) == 1
     with pytest.raises(PermissionError):
         await catalog.next_dive_for_slate_detection(reef, model_version=V)
+
+
+# -- the cohort with the backlog done -------------------------------------------
+
+
+async def _a_finished_backlog(owner_engine, lab, *, dives=40, frames=25):
+    """Every frame of `dives` dives scored, and one dive with none: the cohort
+    as it stood on 2026-10-14 (316 of 317 dives done), at test scale. Returns
+    the unscored dive."""
+    device = (await device_with_camera(owner_engine, lab))[0]
+    ids = []
+    for n in range(dives + 1):
+        d = await dive(owner_engine, lab, device=device, created_at=later(n))
+        ids.append(d)
+        async with owner_engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO captures (tenant_id, dive_id, source_path, "
+                    "captured_at, checksum, is_canonical) "
+                    "SELECT :t, :d, :path || '/P' || g || '.ORF', :at, "
+                    "md5(:path || '/' || g), true FROM generate_series(1, :n) g"
+                ),
+                {"t": lab, "d": d, "path": str(d), "at": T0, "n": frames},
+            )
+    *scored, unscored = ids
+    template = await _predicted(
+        owner_engine,
+        lab,
+        await _one(owner_engine, "SELECT id FROM captures WHERE dive_id = :d "
+                   "LIMIT 1", d=scored[0]),
+    )  # fmt: skip
+    async with owner_engine.begin() as conn:
+        columns = [
+            name
+            for (name,) in await conn.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'slate_presence_predictions' "
+                    "AND column_name NOT IN ('id', 'seq', 'capture_id', "
+                    "'created_at') ORDER BY ordinal_position"
+                )
+            )
+        ]
+        listed = ", ".join(columns)
+        copied = ", ".join(f"p.{name}" for name in columns)
+        await conn.execute(
+            text(
+                f"INSERT INTO slate_presence_predictions (capture_id, {listed}) "
+                f"SELECT c.id, {copied} FROM slate_presence_predictions p "
+                "JOIN captures c ON c.tenant_id = p.tenant_id "
+                "WHERE p.id = :template AND c.dive_id <> :unscored "
+                "AND c.id <> p.capture_id"
+            ),
+            {"template": template, "unscored": unscored},
+        )
+        await conn.execute(text("ANALYZE captures, dives, slate_presence_predictions"))
+    return unscored
+
+
+def _nodes(plan):
+    yield plan
+    for child in plan.get("Plans", []):
+        yield from _nodes(child)
+
+
+async def _plan(app_engine, lab, sql, **params):
+    async with tenant_transaction(app_engine, lab) as conn:
+        (plan,) = (
+            await conn.execute(text(f"EXPLAIN (FORMAT JSON) {sql}"), params)
+        ).scalar_one()
+    return list(_nodes(plan["Plan"]))
+
+
+def _relations(node) -> set[str]:
+    return {n["Relation Name"] for n in _nodes(node) if "Relation Name" in n}
+
+
+def _reads_each_frames_latest_row(nodes) -> bool:
+    """Every read of the predictions is an index lookup, and nothing
+    de-duplicates the predictions (`current_slate_presence`'s DISTINCT ON is
+    a `Unique` over them). Other views' DISTINCT ONs, e.g. over the camera
+    calibrations, are not the question."""
+    reads = [n for n in nodes if n.get("Relation Name") == "slate_presence_predictions"]
+    return (
+        bool(reads)
+        and all(n["Node Type"] in ("Index Scan", "Index Only Scan") for n in reads)
+        and not any(
+            n["Node Type"] == "Unique" and "slate_presence_predictions" in _relations(n)
+            for n in nodes
+        )
+    )
+
+
+async def test_the_last_unscored_dive_is_found_when_every_other_is_done(
+    owner_engine, app_engine
+):
+    lab = await tenant(owner_engine)
+    unscored = await _a_finished_backlog(owner_engine, lab)
+
+    assert await _next(app_engine, lab) == unscored
+
+
+async def test_the_cohort_looks_up_each_frames_latest_prediction(
+    owner_engine, app_engine
+):
+    """2026-10-14: with 316 of 317 dives scored, the cohort ran past the app
+    role's 30 s statement timeout (and past 2 minutes) every hour. Postgres
+    rebuilt the whole `current_slate_presence` view -- sorting all 69,020
+    predictions -- once per dive it tried, and it had to try every finished
+    dive before the last one. While most dives were unscored the first dive
+    it tried qualified, which hid it. Each frame's latest row is one index
+    lookup instead."""
+    lab = await tenant(owner_engine)
+    await _a_finished_backlog(owner_engine, lab)
+
+    nodes = await _plan(
+        app_engine,
+        lab,
+        "SELECT d.id FROM dives d WHERE d.tenant_id = :tenant "
+        f"AND {slate_detection_cohort(':version')} "
+        "ORDER BY d.created_at, d.id LIMIT 1",
+        tenant=lab,
+        version=V,
+    )
+
+    assert _reads_each_frames_latest_row(nodes), [
+        (n["Node Type"], sorted(_relations(n))) for n in nodes
+    ]
+
+
+async def test_the_detector_slate_predicate_looks_up_each_frames_latest_prediction(
+    owner_engine, app_engine
+):
+    """The same lookup, for the slate-label draw and the automatic chain."""
+    lab = await tenant(owner_engine)
+    await _a_finished_backlog(owner_engine, lab)
+
+    nodes = await _plan(
+        app_engine,
+        lab,
+        "SELECT d.id FROM dives d WHERE d.tenant_id = :tenant AND EXISTS ("
+        "SELECT 1 FROM captures c WHERE c.tenant_id = d.tenant_id "
+        f"AND c.dive_id = d.id AND {detector_slate_frame()})",
+        tenant=lab,
+    )
+
+    assert _reads_each_frames_latest_row(nodes)
