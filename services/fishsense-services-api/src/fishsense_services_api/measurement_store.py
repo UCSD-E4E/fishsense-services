@@ -358,6 +358,29 @@ async def _refuse(
     )
 
 
+async def new_real_fish(
+    conn: AsyncConnection, tenant_id: uuid.UUID, names: tuple[str, str]
+) -> uuid.UUID:
+    """A new real fish of the species named `(common, scientific)`; the one
+    definition stage 14 and the regroup (`regroup_store`) both create with."""
+    common, scientific = names
+    species_id = (
+        await conn.execute(
+            text("SELECT ensure_species(:scientific, :common)"),
+            {"scientific": scientific, "common": common},
+        )
+    ).scalar_one()
+    return (
+        await conn.execute(
+            text("""
+                INSERT INTO fish (tenant_id, species_id) VALUES (:tenant, :species)
+                RETURNING id
+                """),
+            {"tenant": tenant_id, "species": species_id},
+        )
+    ).scalar_one()
+
+
 async def _real_fish(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
@@ -378,22 +401,7 @@ async def _real_fish(
     ).scalar_one()
     if bound is not None:
         return bound, False
-    common, scientific = names
-    species_id = (
-        await conn.execute(
-            text("SELECT ensure_species(:scientific, :common)"),
-            {"scientific": scientific, "common": common},
-        )
-    ).scalar_one()
-    fish_id = (
-        await conn.execute(
-            text("""
-                INSERT INTO fish (tenant_id, species_id) VALUES (:tenant, :species)
-                RETURNING id
-                """),
-            {"tenant": tenant_id, "species": species_id},
-        )
-    ).scalar_one()
+    fish_id = await new_real_fish(conn, tenant_id, names)
     await conn.execute(
         text("""
             UPDATE dive_frame_clusters SET fish_id = :fish, updated_at = now()

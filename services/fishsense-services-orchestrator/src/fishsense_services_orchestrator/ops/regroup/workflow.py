@@ -39,6 +39,7 @@ _REGROUP_RETRY = RetryPolicy(
         "NotAMember",
         "RegroupPlanMismatch",
         "ClustersChanged",
+        "RegroupRefused",
     ],
 )
 

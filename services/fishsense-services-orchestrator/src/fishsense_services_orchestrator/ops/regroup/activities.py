@@ -12,7 +12,8 @@ dive that already has label-studio clusters. This re-runs it:
   fish would change and the plan's digest;
 * **an apply names the digest it reviewed**, and is refused if the dive no
   longer plans to it; the store also refuses clusters changed between this
-  plan and its write, under stage 6.1's per-dive lock;
+  plan and its write, under stage 6.1's per-dive lock and stage 14's;
+* every refusal is final: a retry would plan the same thing;
 * nothing is measured here. A frame whose cluster now points at another fish
   has a stale binding, and the hourly stage 14 measures it again on a
   high-priority dive.
@@ -41,10 +42,18 @@ from fishsense_services_orchestrator.ops.regroup.contracts import (
 )
 from fishsense_services_orchestrator.ops.regroup.plan import plan_regroup
 
-__all__ = ["CLUSTERS_CHANGED_TYPE", "PLAN_MISMATCH_TYPE", "RegroupActivities"]
+__all__ = [
+    "CLUSTERS_CHANGED_TYPE",
+    "PLAN_MISMATCH_TYPE",
+    "REFUSED_TYPE",
+    "RegroupActivities",
+]
 
 PLAN_MISMATCH_TYPE = "RegroupPlanMismatch"
 CLUSTERS_CHANGED_TYPE = "ClustersChanged"
+#: The store refused the clusters themselves (another dive's capture, a
+#: repeated capture, a fish not the tenant's): a retry would plan the same.
+REFUSED_TYPE = "RegroupRefused"
 
 
 class RegroupCatalogLike(Protocol):
@@ -128,6 +137,10 @@ class RegroupActivities:
                 except ClustersChanged as exc:
                     raise ApplicationError(
                         str(exc), type=CLUSTERS_CHANGED_TYPE, non_retryable=True
+                    ) from exc
+                except ValueError as exc:  # InvalidClusters, ForeignCapture
+                    raise ApplicationError(
+                        str(exc), type=REFUSED_TYPE, non_retryable=True
                     ) from exc
             report.applied = True
         activity.logger.info(

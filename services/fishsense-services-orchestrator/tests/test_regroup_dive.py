@@ -28,6 +28,7 @@ from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
 from temporalio.worker import Worker
 
+from fishsense_services_api.clustering_store import ForeignCapture, InvalidClusters
 from fishsense_services_api.regroup_store import ClustersChanged
 from fishsense_services_orchestrator.ops.regroup.activities import RegroupActivities
 from fishsense_services_orchestrator.ops.regroup.contracts import RegroupReport
@@ -41,9 +42,10 @@ DIVE = uuid.UUID("11111111-2222-4333-8444-555555555555")
 
 
 class FakeCatalog:
-    def __init__(self, facts, *, changed=False):
+    def __init__(self, facts, *, changed=False, refuse=None):
         self.facts = facts
         self.changed = changed
+        self.refuse = refuse
         self.writes: list[tuple] = []
 
     async def member_tenants(self):
@@ -61,6 +63,8 @@ class FakeCatalog:
     ):
         if self.changed:
             raise ClustersChanged("changed")
+        if self.refuse is not None:
+            raise self.refuse
         self.writes.append((tenant_id, dive_id, list(clusters), expected_fingerprint))
         return [k.fish_id for k in clusters]
 
@@ -129,6 +133,22 @@ async def test_clusters_changed_since_the_plan_are_refused():
         await _run(catalog, 341, True, plan_regroup(facts).sha256)
 
     assert refused.value.type == "ClustersChanged"
+    assert refused.value.non_retryable
+
+
+@pytest.mark.parametrize(
+    "refusal",
+    [ForeignCapture("not captures of the dive"), InvalidClusters("repeats"),
+     ValueError("not real fish of the tenant")],
+)  # fmt: skip
+async def test_every_store_refusal_is_not_retried(refusal):
+    facts = _dive_341()
+    catalog = FakeCatalog(facts, refuse=refusal)
+
+    with pytest.raises(ApplicationError) as refused:
+        await _run(catalog, 341, True, plan_regroup(facts).sha256)
+
+    assert refused.value.type == "RegroupRefused"
     assert refused.value.non_retryable
 
 

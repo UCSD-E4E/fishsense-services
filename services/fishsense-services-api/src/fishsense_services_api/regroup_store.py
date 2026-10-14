@@ -38,7 +38,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from fishsense_services_api.checksum_store import dive_by_number
-from fishsense_services_api.clustering_store import ForeignCapture
+from fishsense_services_api.clustering_store import ForeignCapture, InvalidClusters
+from fishsense_services_api.laser_depth_store import lock_dive
+from fishsense_services_api.measurement_store import new_real_fish
 from fishsense_services_api.service_principal import ServicePrincipal
 from fishsense_services_api.species_store import (
     SpeciesLabelRow,
@@ -47,6 +49,7 @@ from fishsense_services_api.species_store import (
 
 __all__ = [
     "ClustersChanged",
+    "FishInfo",
     "LabelStudioCluster",
     "MeasuredCapture",
     "NewCluster",
@@ -86,6 +89,13 @@ class MeasuredCapture:
 
 
 @dataclass(frozen=True)
+class FishInfo:
+    #: v1's fish id, for a migrated fish.
+    number: int
+    scientific_name: str | None
+
+
+@dataclass(frozen=True)
 class RegroupFacts:
     priority: str
     #: Capture ids per prediction cluster, clusters and members in capture order.
@@ -98,6 +108,10 @@ class RegroupFacts:
     fingerprint: str
     #: Every capture of the dive's number, for the report.
     capture_numbers: dict[uuid.UUID, int]
+    #: The dive's canonical captures: the only ones a cluster is written with.
+    canonical: frozenset[uuid.UUID]
+    #: Every real fish a label-studio cluster or a measurement of the dive names.
+    fish: dict[uuid.UUID, FishInfo]
 
 
 @dataclass(frozen=True)
@@ -169,9 +183,24 @@ async def regroup_facts(
             """),
         {"tenant": tenant_id, "dive": dive_id},
     )
-    numbers = await conn.execute(
-        text("SELECT id, number FROM captures WHERE tenant_id = :t AND dive_id = :d"),
-        {"t": tenant_id, "d": dive_id},
+    numbers = (
+        await conn.execute(
+            text("""
+                SELECT id, number, is_canonical FROM captures
+                WHERE tenant_id = :t AND dive_id = :d
+                """),
+            {"t": tenant_id, "d": dive_id},
+        )
+    ).all()
+    measured = measured.all()
+    named = {k.fish_id for k in clusters if k.fish_id} | {r.fish_id for r in measured}
+    fish = await conn.execute(
+        text("""
+            SELECT f.id, f.number, s.scientific_name FROM fish f
+            LEFT JOIN species s ON s.id = f.species_id
+            WHERE f.tenant_id = :t AND f.id = ANY(:ids) AND f.species_id IS NOT NULL
+            """),
+        {"t": tenant_id, "ids": list(named)},
     )
     return RegroupFacts(
         priority=priority,
@@ -191,28 +220,9 @@ async def regroup_facts(
         ],
         fingerprint=clusters_fingerprint(clusters),
         capture_numbers={r.id: r.number for r in numbers},
+        canonical=frozenset(r.id for r in numbers if r.is_canonical),
+        fish={r.id: FishInfo(r.number, r.scientific_name) for r in fish},
     )
-
-
-async def _new_fish(
-    conn: AsyncConnection, tenant_id: uuid.UUID, names: tuple[str, str]
-) -> uuid.UUID:
-    common, scientific = names
-    species_id = (
-        await conn.execute(
-            text("SELECT ensure_species(:scientific, :common)"),
-            {"scientific": scientific, "common": common},
-        )
-    ).scalar_one()
-    return (
-        await conn.execute(
-            text("""
-                INSERT INTO fish (tenant_id, species_id) VALUES (:tenant, :species)
-                RETURNING id
-                """),
-            {"tenant": tenant_id, "species": species_id},
-        )
-    ).scalar_one()
 
 
 async def replace_label_studio_clusters(
@@ -230,6 +240,9 @@ async def replace_label_studio_clusters(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": f"label-studio-clusters:{dive_id}"},
     )
+    # Stage 14 reads a frame's cluster and binds it under this lock: a cluster
+    # must not be deleted between the two (PR #72 review).
+    await lock_dive(conn, "measure-fish", dive_id)
     current = await _label_studio_clusters(conn, tenant_id, dive_id)
     if clusters_fingerprint(current) != expected_fingerprint:
         raise ClustersChanged(
@@ -265,6 +278,8 @@ async def replace_label_studio_clusters(
     )
     if unknown := named - real:
         raise ValueError(f"not real fish of the tenant: {sorted(map(str, unknown))}")
+    if any(len(set(k.captures)) != len(k.captures) for k in clusters):
+        raise InvalidClusters(f"a capture repeats within a cluster of {dive_id}")
 
     await conn.execute(
         text("""
@@ -281,7 +296,7 @@ async def replace_label_studio_clusters(
             continue
         fish_id = cluster.fish_id
         if fish_id is None and cluster.new_fish_names is not None:
-            fish_id = await _new_fish(conn, tenant_id, cluster.new_fish_names)
+            fish_id = await new_real_fish(conn, tenant_id, cluster.new_fish_names)
         cluster_id = (
             await conn.execute(
                 text("""

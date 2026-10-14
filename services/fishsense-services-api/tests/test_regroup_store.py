@@ -23,6 +23,7 @@ Pinned here:
 * the catalog acts only as a member.
 """
 
+import asyncio
 import uuid
 
 import pytest
@@ -38,6 +39,7 @@ from depth_measure_seed import (
     measurement,
     tenant,
 )
+from fishsense_services_api.clustering_store import InvalidClusters
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.measurement_store import measurement_work
 from fishsense_services_api.regroup_store import (
@@ -144,6 +146,26 @@ async def test_facts_name_the_clusters_and_the_current_bindings(
     )
     assert by_capture[stray].fish_scientific_name == "Sparisoma viride"
     assert facts.fingerprint == clusters_fingerprint(facts.label_studio_clusters)
+    assert facts.canonical == {hog_frame, stray, parrot_frame}
+    assert facts.fish[parrotfish].number == await _number(
+        owner_engine, "fish", parrotfish
+    )
+    assert facts.fish[hogfish].scientific_name == "Lachnolaimus maximus"
+
+
+async def test_facts_know_a_cluster_fish_no_measurement_names(owner_engine, app_engine):
+    lab, dive_id, *_rest = await _dive_341(owner_engine)
+    unmeasured = await fish(
+        owner_engine, lab,
+        species=await _species(owner_engine, "Epinephelus striatus", "Nassau Grouper"),
+    )  # fmt: skip
+    duplicate = await capture(owner_engine, lab, dive_id, canonical=False)
+    await cluster(owner_engine, lab, dive_id, [duplicate], fish_id=unmeasured)
+
+    facts = await _in(app_engine, lab, regroup_facts, dive_id)
+
+    assert facts.fish[unmeasured].scientific_name == "Epinephelus striatus"
+    assert duplicate not in facts.canonical
 
 
 async def test_the_fingerprint_moves_with_any_change_to_the_clusters(
@@ -287,6 +309,51 @@ async def test_replace_refuses_a_capture_of_another_dive(owner_engine, app_engin
         )  # fmt: skip
 
     assert await _label_studio_clusters(owner_engine, dive_id) == before
+
+
+async def test_replace_refuses_a_capture_repeated_within_a_cluster(
+    owner_engine, app_engine
+):
+    lab, dive_id, hogfish, parrotfish, hog_frame, stray, parrot_frame = await _dive_341(
+        owner_engine
+    )
+    facts = await _in(app_engine, lab, regroup_facts, dive_id)
+    before = await _label_studio_clusters(owner_engine, dive_id)
+
+    with pytest.raises(InvalidClusters):
+        await _in(
+            app_engine, lab, replace_label_studio_clusters, dive_id,
+            [NewCluster([hog_frame, stray, hog_frame], fish_id=hogfish),
+             NewCluster([parrot_frame], fish_id=parrotfish)],
+            expected_fingerprint=facts.fingerprint,
+        )  # fmt: skip
+
+    assert await _label_studio_clusters(owner_engine, dive_id) == before
+
+
+async def test_replace_waits_for_stage_14s_lock_on_the_dive(owner_engine, app_engine):
+    """Stage 14 reads a frame's cluster, then binds it under its
+    `measure-fish` lock; a regroup must not delete the cluster in between."""
+    lab, dive_id, hogfish, parrotfish, hog_frame, stray, parrot_frame = await _dive_341(
+        owner_engine
+    )
+    facts = await _in(app_engine, lab, regroup_facts, dive_id)
+
+    async with owner_engine.begin() as holder:
+        await holder.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"),
+            {"k": f"measure-fish:{dive_id}"},
+        )
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(
+                _in(
+                    app_engine, lab, replace_label_studio_clusters, dive_id,
+                    [NewCluster([hog_frame, stray], fish_id=hogfish),
+                     NewCluster([parrot_frame], fish_id=parrotfish)],
+                    expected_fingerprint=facts.fingerprint,
+                ),
+                timeout=1.0,
+            )  # fmt: skip
 
 
 async def test_replace_refuses_a_fish_of_another_tenant(owner_engine, app_engine):

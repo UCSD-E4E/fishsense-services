@@ -32,6 +32,7 @@ from __future__ import annotations
 import uuid
 
 from fishsense_services_api.regroup_store import (
+    FishInfo,
     LabelStudioCluster,
     MeasuredCapture,
     NewCluster,
@@ -67,9 +68,12 @@ def _label(n, content, grouping=None, *, project=1):
     )  # fmt: skip
 
 
-def _facts(prediction, labels, measured, current, *, priority="high"):
+def _facts(prediction, labels, measured, current, *, priority="high",
+           species=None, duplicates=()):  # fmt: skip
     """`measured`: {frame: (fish number, the fish's species content)};
-    `current`: [(fish number or None, [frames])]."""
+    `current`: [(fish number or None, [frames])], later clusters numbered
+    higher; `species`: {fish number: content} for fish no measurement names;
+    `duplicates`: frames that are not canonical."""
     clusters = [
         LabelStudioCluster(
             uuid.UUID(int=3_000_000 + i), i, None if f is None else fish(f),
@@ -78,6 +82,7 @@ def _facts(prediction, labels, measured, current, *, priority="high"):
         for i, (f, members) in enumerate(current)
     ]  # fmt: skip
     frames = {n for c in prediction for n in c}
+    contents = {f: content for f, content in measured.values()} | dict(species or {})
     return RegroupFacts(
         priority=priority,
         prediction_clusters=[[cap(n) for n in c] for c in prediction],
@@ -89,6 +94,8 @@ def _facts(prediction, labels, measured, current, *, priority="high"):
         ],
         fingerprint=clusters_fingerprint(clusters),
         capture_numbers={cap(n): n for n in frames},
+        canonical=frozenset(cap(n) for n in frames - set(duplicates)),
+        fish={fish(f): FishInfo(f, SCIENTIFIC[c]) for f, c in contents.items()},
     )
 
 
@@ -198,3 +205,90 @@ def test_a_dive_stage_14_will_not_measure_is_flagged():
     )  # fmt: skip
 
     assert any("priority" in w for w in plan.warnings)
+
+
+# -- review findings (PR #72) ---------------------------------------------------
+
+
+def test_a_cluster_bound_since_the_apply_keeps_its_fish_before_stage_14():
+    """After an apply, the moved frame's old measurement is a stale binding,
+    so it is not current: the frame's vote is its cluster's fish, and a
+    re-plan is a no-op rather than an unbind."""
+    facts = _facts(
+        prediction=[[300, 301], [302, 303], [434, 437]],
+        labels=[(300, HOG), (301, HOG), (302, HOG, CONTINUE), (303, HOG),
+                (434, PARROT), (437, PARROT)],
+        measured={301: (307, HOG), 434: (305, PARROT), 437: (305, PARROT)},
+        current=[(307, [300, 301, 302, 303]), (305, [434, 437])],
+    )  # fmt: skip
+
+    plan = plan_regroup(facts)
+
+    assert plan.noop
+    assert plan.clusters[0].fish_id == fish(307)
+
+
+def test_a_recalibrated_dive_keeps_every_binding():
+    """A new calibration leaves no measurement current until stage 14 runs;
+    the clusters' fish are still who the frames are."""
+    plan = plan_regroup(
+        _facts(
+            prediction=[[1, 2], [3]],
+            labels=[(1, HOG), (2, HOG), (3, PARROT)],
+            measured={},
+            current=[(7, [1, 2]), (8, [3])],
+            species={7: HOG, 8: PARROT},
+        )
+    )
+
+    assert plan.noop
+    assert [k.fish_id for k in plan.clusters] == [fish(7), fish(8)]
+
+
+def test_a_frame_in_two_prediction_clusters_is_planned_once():
+    plan = plan_regroup(
+        _facts(
+            prediction=[[1, 2], [2, 3]],
+            labels=[(1, HOG), (2, HOG), (3, PARROT)],
+            measured={2: (7, HOG)},
+            current=[(7, [1, 2]), (None, [3])],
+        )
+    )
+
+    planned = [c for k in plan.clusters for c in k.captures]
+    assert planned.count(cap(2)) == 1
+    assert any("more than one prediction cluster" in w for w in plan.warnings)
+
+
+def test_no_move_is_reported_when_the_cluster_cannot_be_bound():
+    """No fish left and no species to make one: the cluster is unbound, which
+    invalidates nothing, so the frame does not move."""
+    plan = plan_regroup(
+        _facts(
+            prediction=[[1], [2]],
+            labels=[(1, HOG), (2, "Fish, Unknown", BREAK)],
+            measured={1: (7, HOG), 2: (7, HOG)},
+            current=[(7, [1, 2])],
+        )
+    )
+
+    assert plan.clusters[1] == NewCluster([cap(2)])
+    assert plan.moves == []
+    assert any("no species name" in w for w in plan.warnings)
+
+
+def test_a_duplicate_frame_is_left_out_so_a_regrouped_dive_is_a_noop():
+    """The store drops a dive's non-canonical duplicates from the clusters it
+    writes (as stage 6.1 does), so the plan must too."""
+    plan = plan_regroup(
+        _facts(
+            prediction=[[1, 2, 3]],
+            labels=[(1, HOG), (2, HOG), (3, HOG)],
+            measured={1: (7, HOG)},
+            current=[(7, [1, 3])],
+            duplicates=[2],
+        )
+    )
+
+    assert plan.noop
+    assert plan.clusters == [NewCluster([cap(1), cap(3)], fish_id=fish(7))]
