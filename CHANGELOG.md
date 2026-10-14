@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.6.0...v0.6.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* **slate-presence:** read each frame's latest prediction by index, not through the view ([b56b0a1](https://github.com/UCSD-E4E/fishsense-services/commit/b56b0a16c788c658edb0244e2aa83f743ee931fb))
+
+
+### Dependencies
+
+* **web:** v4 class names in the mobile captures pages ([236e7ce](https://github.com/UCSD-E4E/fishsense-services/commit/236e7ce1f1aa1d6c13dd4181c0e0b1bca5329118))
+
 ## [0.6.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.5.0...v0.6.0) (2026-10-14)
 
 
