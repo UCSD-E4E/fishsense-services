@@ -602,3 +602,64 @@ async def test_a_resent_version_answers_with_what_is_stored(tenants, client):
     assert again.status_code == 200
     assert again.json()["length_m"] == 0.45
     assert changed.status_code == 409
+
+
+# -- captures from before the app recorded provenance (fishsense-mobile #68) ----------
+#
+# Captures migrated from the app's v7 database have no app / core / model
+# version, and their measurement versions have no algorithm: v7 overwrote
+# edits in place, so whether the phone or the user placed the points is
+# `unknown`. The app sends null for what it doesn't know, never a made-up
+# value, and the server keeps that honestly.
+
+
+def _legacy_version() -> dict:
+    return {
+        **_version(),
+        "origin": "unknown",
+        "algorithm": None,
+        "algorithm_version": None,
+        "core_version": None,
+        "model_version": None,
+    }
+
+
+async def test_a_capture_from_before_provenance_syncs_with_its_unknowns(
+    tenants, client
+):
+    capture = uuid.uuid4()
+    await _upload(client, capture)
+
+    response = await client.put(
+        f"/tenants/lab/mobile/captures/{capture}",
+        json=_commit_body(
+            app_version=None,
+            core_version=None,
+            model_version=None,
+            measurements=[_legacy_version()],
+        ),
+        headers=_bearer(ALICE),
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["app_version"] is None
+    assert body["current_measurement"]["origin"] == "unknown"
+    assert body["current_measurement"]["algorithm"] is None
+
+
+@pytest.mark.parametrize("origin", ["auto", "manual"])
+async def test_a_known_origin_still_names_its_algorithm(tenants, client, origin):
+    """Only `unknown` may leave the algorithm out: a version the phone or
+    the user produced since v8 knows what produced it."""
+    capture = uuid.uuid4()
+    await _upload(client, capture)
+    version = {**_version(origin=origin), "algorithm": None}
+
+    response = await client.put(
+        f"/tenants/lab/mobile/captures/{capture}",
+        json=_commit_body(measurements=[version]),
+        headers=_bearer(ALICE),
+    )
+
+    assert response.status_code == 422

@@ -10,6 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   chooseTenant,
+  describeOrigin,
   formatLength,
   getCapture,
   getCapturePage,
@@ -187,5 +188,17 @@ describe("measurementOverlay", () => {
     expect(
       measurementOverlay({ mask: { width: 1920, height: 1440 } }, null),
     ).toBeNull();
+  });
+});
+
+describe("describeOrigin", () => {
+  it("says who placed the points", () => {
+    expect(describeOrigin("auto")).toBe("found by the phone");
+    expect(describeOrigin("manual")).toBe("placed by the user");
+  });
+
+  it("is honest about a version from before the app recorded it", () => {
+    // fishsense-mobile #68: v7 overwrote edits in place.
+    expect(describeOrigin("unknown")).toBe("not recorded (before app v8)");
   });
 });

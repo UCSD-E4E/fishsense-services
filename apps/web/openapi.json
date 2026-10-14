@@ -6,8 +6,15 @@
         "description": "Everything the app recorded about one capture. Fields this API doesn't\nmodel are allowed, and kept in the manifest.",
         "properties": {
           "app_version": {
-            "title": "App Version",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Version"
           },
           "camera_pose": {
             "anyOf": [
@@ -129,7 +136,6 @@
           "captured_at",
           "captured_by_sub",
           "device",
-          "app_version",
           "intrinsics",
           "depth",
           "confidence",
@@ -249,8 +255,15 @@
       "CaptureView": {
         "properties": {
           "app_version": {
-            "title": "App Version",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Version"
           },
           "camera_pose": {
             "anyOf": [
@@ -806,12 +819,26 @@
       "MeasurementVersion": {
         "properties": {
           "algorithm": {
-            "title": "Algorithm",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Algorithm"
           },
           "algorithm_version": {
-            "title": "Algorithm Version",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Algorithm Version"
           },
           "client_measurement_uuid": {
             "format": "uuid",
@@ -856,7 +883,8 @@
           "origin": {
             "enum": [
               "auto",
-              "manual"
+              "manual",
+              "unknown"
             ],
             "title": "Origin",
             "type": "string"
@@ -871,9 +899,7 @@
           "length_m",
           "snout",
           "fork",
-          "origin",
-          "algorithm",
-          "algorithm_version"
+          "origin"
         ],
         "title": "MeasurementVersion",
         "type": "object"
@@ -881,12 +907,26 @@
       "MeasurementView": {
         "properties": {
           "algorithm": {
-            "title": "Algorithm",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Algorithm"
           },
           "algorithm_version": {
-            "title": "Algorithm Version",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Algorithm Version"
           },
           "client_measurement_uuid": {
             "format": "uuid",

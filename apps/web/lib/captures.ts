@@ -106,3 +106,16 @@ export function measurementOverlay(
     fork: measurement.fork,
   };
 }
+
+/** Who placed a measurement's snout and fork points. */
+export function describeOrigin(origin: string): string {
+  switch (origin) {
+    case "auto":
+      return "found by the phone";
+    case "manual":
+      return "placed by the user";
+    default:
+      // `unknown`: the app's v7 overwrote edits in place (fishsense-mobile #68).
+      return "not recorded (before app v8)";
+  }
+}

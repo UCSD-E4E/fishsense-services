@@ -24,7 +24,8 @@ as it arrived, so a field this schema doesn't model yet is still kept.
   Generic over device kinds.
 * ``device_measurement_points`` -- the snout and fork pixels behind each
   ``source = 'device'`` measurement, whether the phone found them (``auto``)
-  or the user placed them (``manual``); keyed by the app's own measurement
+  or the user placed them (``manual``), or ``unknown`` for a version from
+  before the app recorded which (its v7 overwrote edits in place); keyed by the app's own measurement
   uuid, so a re-sent version is a no-op. A redone selection is a new
   measurement row, never an edit.
 * ``measurements.measured_at`` -- when a device measured (NULL for the
@@ -135,7 +136,7 @@ def upgrade() -> None:
             fish_id uuid NOT NULL,
             device_model text,
             device_info text,
-            app_version text NOT NULL,
+            app_version text,
             core_version text,
             model_version text,
             place_name text,
@@ -196,7 +197,7 @@ def upgrade() -> None:
             client_measurement_uuid uuid NOT NULL,
             origin text NOT NULL
                 CONSTRAINT device_measurement_points_origin_check
-                CHECK (origin IN ('auto', 'manual')),
+                CHECK (origin IN ('auto', 'manual', 'unknown')),
             snout_x double precision NOT NULL,
             snout_y double precision NOT NULL,
             fork_x double precision NOT NULL,

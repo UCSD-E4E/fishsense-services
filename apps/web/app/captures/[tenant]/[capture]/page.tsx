@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
+  describeOrigin,
   formatLength,
   getCapture,
   measurementOverlay,
@@ -101,11 +102,8 @@ export default async function CapturePage({ params }: Props) {
           )}
           {overlay && (
             <figcaption className="px-3 py-2 text-xs text-slate-500">
-              Orange: snout. Green: fork. Points from the{" "}
-              {current?.origin === "manual"
-                ? "user's own selection"
-                : "phone's detection"}
-              .
+              Orange: snout. Green: fork. Points{" "}
+              {current ? describeOrigin(current.origin) : ""}.
             </figcaption>
           )}
         </figure>
@@ -138,13 +136,11 @@ export default async function CapturePage({ params }: Props) {
                     {i === capture.measurements.length - 1 ? " (current)" : ""}
                   </td>
                   <td>{formatLength(m.length_m)}</td>
-                  <td>
-                    {m.origin === "manual"
-                      ? "placed by the user"
-                      : "found by the phone"}
-                  </td>
+                  <td>{describeOrigin(m.origin)}</td>
                   <td className="text-slate-500">
-                    {m.algorithm} {m.algorithm_version}
+                    {m.algorithm
+                      ? `${m.algorithm} ${m.algorithm_version ?? ""}`
+                      : "not recorded"}
                     {m.model_version ? ` · ${m.model_version}` : ""}
                   </td>
                 </tr>
@@ -161,7 +157,7 @@ export default async function CapturePage({ params }: Props) {
         <Field label="Device">
           {capture.device.model ?? capture.device.info ?? "—"}
         </Field>
-        <Field label="App">{capture.app_version}</Field>
+        <Field label="App">{capture.app_version ?? "not recorded"}</Field>
         <Field label="fishsense-core">{capture.core_version ?? "—"}</Field>
         <Field label="Model">{capture.model_version ?? "—"}</Field>
         <Field label="Location">

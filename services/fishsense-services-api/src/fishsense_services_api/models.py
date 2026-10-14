@@ -1302,7 +1302,7 @@ class MobileCapture(Base):
     fish_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     device_model: Mapped[str | None] = mapped_column(Text)
     device_info: Mapped[str | None] = mapped_column(Text)
-    app_version: Mapped[str] = mapped_column(Text)
+    app_version: Mapped[str | None] = mapped_column(Text)
     core_version: Mapped[str | None] = mapped_column(Text)
     model_version: Mapped[str | None] = mapped_column(Text)
     place_name: Mapped[str | None] = mapped_column(Text)

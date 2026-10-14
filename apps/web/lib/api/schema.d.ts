@@ -312,7 +312,7 @@ export interface components {
          */
         CaptureCommit: {
             /** App Version */
-            app_version: string;
+            app_version?: string | null;
             /** Camera Pose */
             camera_pose?: number[] | null;
             /**
@@ -378,7 +378,7 @@ export interface components {
         /** CaptureView */
         CaptureView: {
             /** App Version */
-            app_version: string;
+            app_version: string | null;
             /** Camera Pose */
             camera_pose: number[] | null;
             /**
@@ -550,9 +550,9 @@ export interface components {
         /** MeasurementVersion */
         MeasurementVersion: {
             /** Algorithm */
-            algorithm: string;
+            algorithm?: string | null;
             /** Algorithm Version */
-            algorithm_version: string;
+            algorithm_version?: string | null;
             /**
              * Client Measurement Uuid
              * Format: uuid
@@ -574,15 +574,15 @@ export interface components {
              * Origin
              * @enum {string}
              */
-            origin: "auto" | "manual";
+            origin: "auto" | "manual" | "unknown";
             snout: components["schemas"]["Point"];
         };
         /** MeasurementView */
         MeasurementView: {
             /** Algorithm */
-            algorithm: string;
+            algorithm: string | null;
             /** Algorithm Version */
-            algorithm_version: string;
+            algorithm_version: string | null;
             /**
              * Client Measurement Uuid
              * Format: uuid

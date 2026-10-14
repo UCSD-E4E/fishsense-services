@@ -148,6 +148,7 @@ Base URL: `https://api.fishsense.e4e.ucsd.edu`, with `Authorization: Bearer <acc
 Notes on the commit body:
 
 - `location`, `orientation`, `camera_pose`, `mask` and `measurements` are optional.
+- `app_version`, `core_version` and `model_version` may be null, for a capture from before the app recorded them (v7). Send null, never a made-up value.
 - **Any other field you add is kept.** The server stores the whole body as the capture's manifest, so send anything the app records, even if this list doesn't name it.
 
 **Measurement version** (in `measurements`, or `POST …/measurements`)
@@ -172,6 +173,8 @@ Notes on measurement versions:
 - Points are pixels in the RGB frame, which is the mask's frame (sensor landscape, 1920×1440). Send them as floats, not truncated.
 - `length_m` must be positive. A frame the phone couldn't measure has no measurement version; it still syncs.
 - `origin` is `auto` when the phone found the points (`compute_length`) and `manual` when the user placed them (`recompute_length`).
+- `origin` is `unknown` for a version migrated from v7, which overwrote edits in place. Only an `unknown` version may send `algorithm` and `algorithm_version` as null; an `auto` or `manual` one must name them (422 otherwise).
+- **Captures with no `captured_by_sub`** (from before sign-in) stay unsynced until the owner decides who may sync them (fishsense-mobile #68).
 - The latest version is the current length.
 
 **Reading back** (any member): `GET /tenants/{slug}/mobile/captures?limit=50&before=<next>` and `GET /tenants/{slug}/mobile/captures/{uuid}`. Both include presigned links to every file. They're optional for the app; the web shows them at `https://fishsense.e4e.ucsd.edu/captures`.

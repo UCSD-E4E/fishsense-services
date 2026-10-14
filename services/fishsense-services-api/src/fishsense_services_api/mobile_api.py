@@ -146,11 +146,21 @@ class MeasurementVersion(_Finite):
     length_m: float = Field(gt=0)
     snout: Point
     fork: Point
-    origin: Literal["auto", "manual"]
-    algorithm: str
-    algorithm_version: str
+    #: `auto`: the phone found the points; `manual`: the user placed them;
+    #: `unknown`: a version from before the app recorded which (its v7
+    #: overwrote edits in place).
+    origin: Literal["auto", "manual", "unknown"]
+    #: Null only for an `unknown` version, which predates provenance.
+    algorithm: str | None = None
+    algorithm_version: str | None = None
     core_version: str | None = None
     model_version: str | None = None
+
+    @model_validator(mode="after")
+    def _known_origin_names_its_algorithm(self) -> "MeasurementVersion":
+        if self.origin != "unknown" and not (self.algorithm and self.algorithm_version):
+            raise ValueError(f"an {self.origin} version names its algorithm")
+        return self
 
 
 class DeviceInfo(BaseModel):
@@ -195,7 +205,8 @@ class CaptureCommit(_Finite):
     #: Who was signed in on the phone when it took the capture.
     captured_by_sub: str
     device: DeviceInfo
-    app_version: str
+    #: Null for a capture from before the app recorded it.
+    app_version: str | None = None
     core_version: str | None = None
     model_version: str | None = None
     location: Location | None = None
@@ -253,8 +264,8 @@ class MeasurementView(BaseModel):
     snout: Point
     fork: Point
     origin: str
-    algorithm: str
-    algorithm_version: str
+    algorithm: str | None
+    algorithm_version: str | None
     core_version: str | None
     model_version: str | None
 
@@ -263,7 +274,7 @@ class CaptureView(BaseModel):
     client_capture_uuid: uuid.UUID
     captured_at: datetime
     device: DeviceInfo
-    app_version: str
+    app_version: str | None
     core_version: str | None
     model_version: str | None
     location: Location | None

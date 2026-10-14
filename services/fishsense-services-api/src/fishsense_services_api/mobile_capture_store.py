@@ -77,10 +77,11 @@ class DeviceMeasurement:
     length_m: float
     snout: tuple[float, float]
     fork: tuple[float, float]
-    #: ``auto`` (the phone found the points) or ``manual`` (the user did).
+    #: ``auto`` (the phone found the points), ``manual`` (the user did), or
+    #: ``unknown`` (from before the app recorded which).
     origin: str
-    algorithm: str
-    algorithm_version: str
+    algorithm: str | None
+    algorithm_version: str | None
     core_version: str | None
     model_version: str | None
 
@@ -93,7 +94,7 @@ class MobileCapture:
     device_install_id: str
     device_model: str | None
     device_info: str | None
-    app_version: str
+    app_version: str | None
     core_version: str | None
     model_version: str | None
     latitude: float | None
@@ -133,8 +134,8 @@ class StoredMeasurement:
     snout: tuple[float, float]
     fork: tuple[float, float]
     origin: str
-    algorithm: str
-    algorithm_version: str
+    algorithm: str | None
+    algorithm_version: str | None
     core_version: str | None
     model_version: str | None
 
@@ -172,7 +173,7 @@ class CaptureDetail:
     device_install_id: str
     device_model: str | None
     device_info: str | None
-    app_version: str
+    app_version: str | None
     core_version: str | None
     model_version: str | None
     latitude: float | None
