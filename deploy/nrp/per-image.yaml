@@ -46,6 +46,18 @@ spec:
       # arm64 nodes.
       nodeSelector:
         kubernetes.io/arch: amd64
+      # US nodes only: the NAS -- and Garage on it, the raw scratch and the
+      # model weights -- accepts only US addresses. 2026-10-14 a pod landed on
+      # fiona-prg1.cesnet.cz (Prague) and every Garage connection timed out.
+      # An allow-list, so an unlabelled or new non-US site never fits.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: topology.kubernetes.io/region
+                    operator: In
+                    values: [us-west, us-central, us-east, us-mountain]
       # We're a guest on a shared cluster -- let NRP preempt our pods whenever
       # it needs the capacity. No PodDisruptionBudget on purpose; an evicted
       # activity times out and re-runs (processor activities are idempotent).
