@@ -1,6 +1,22 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* v4 scopes `hover:` to `@media (hover: hover)`, which drops the tap feedback
+   v3 gave on phones -- and triage is used one-handed on one. Keep v3's. */
+@custom-variant hover (&:hover);
+
+@layer base {
+  /* v4's preflight dropped v3's pointer cursor on buttons; keep it. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  /* v3's placeholder color (v4 defaults to half-opacity currentColor). */
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-gray-400);
+  }
+}
 
 :root {
   color-scheme: light dark;

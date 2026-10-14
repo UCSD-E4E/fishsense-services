@@ -55,7 +55,7 @@ export default async function PortalPage() {
         >
           <button
             type="submit"
-            className="mt-6 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
+            className="mt-6 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium shadow-xs transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
           >
             Sign out and retry
           </button>
@@ -87,7 +87,7 @@ export default async function PortalPage() {
           >
             <button
               type="submit"
-              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
+              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium shadow-xs transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
             >
               Sign out
             </button>
@@ -102,7 +102,7 @@ export default async function PortalPage() {
                 this is used one-handed on a phone. */}
             <Link
               href={section.href}
-              className="block h-full rounded-lg border border-slate-200 bg-white p-6 shadow-sm transition hover:border-slate-300 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700"
+              className="block h-full rounded-lg border border-slate-200 bg-white p-6 shadow-xs transition hover:border-slate-300 hover:shadow-md focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700"
             >
               <h2 className="text-lg font-medium">
                 {section.title}

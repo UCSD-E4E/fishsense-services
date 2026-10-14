@@ -74,7 +74,7 @@ function CalibrationRow({ dive, sources, sourceLabel }: RowProps) {
           onChange={(event) =>
             setSelected(event.target.value === "" ? "" : Number(event.target.value))
           }
-          className="w-full max-w-xs rounded-md border border-slate-300 bg-white px-2 py-1 text-sm shadow-sm disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900"
+          className="w-full max-w-xs rounded-md border border-slate-300 bg-white px-2 py-1 text-sm shadow-xs disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900"
         >
           <option value="">— none (self-calibrate) —</option>
           {sources
@@ -95,7 +95,7 @@ function CalibrationRow({ dive, sources, sourceLabel }: RowProps) {
             type="button"
             onClick={save}
             disabled={pending || !dirty || selected === ""}
-            className="rounded-md border border-slate-300 bg-white px-3 py-1 text-sm font-medium shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
+            className="rounded-md border border-slate-300 bg-white px-3 py-1 text-sm font-medium shadow-xs transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
           >
             {pending ? "Saving…" : "Save"}
           </button>
@@ -103,7 +103,7 @@ function CalibrationRow({ dive, sources, sourceLabel }: RowProps) {
             type="button"
             onClick={clear}
             disabled={pending || persisted == null}
-            className="rounded-md border border-slate-300 bg-white px-3 py-1 text-sm font-medium shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
+            className="rounded-md border border-slate-300 bg-white px-3 py-1 text-sm font-medium shadow-xs transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
           >
             Clear
           </button>
@@ -162,7 +162,7 @@ export function CalibrationLinks({ dives }: { dives: Dive[] }) {
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search dives by name or id…"
-          className="w-64 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm shadow-sm dark:border-slate-700 dark:bg-slate-900"
+          className="w-64 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm shadow-xs dark:border-slate-700 dark:bg-slate-900"
         />
         <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
           <input
