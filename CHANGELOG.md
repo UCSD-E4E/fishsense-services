@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.7.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.6.1...v0.7.0) (2026-10-14)
+
+
+### Features
+
+* **ops:** regroup a dive already grouped, in capture order ([22cff41](https://github.com/UCSD-E4E/fishsense-services/commit/22cff413b9ccc79110331b271ccf5666a3bffbf5))
+* **ops:** regroup a dive already grouped, in capture order ([07aa312](https://github.com/UCSD-E4E/fishsense-services/commit/07aa312c9a1c8abeeb7fde0a71f227f04695f6af))
+
+
+### Bug Fixes
+
+* **ops:** regroup keeps bindings no measurement names, and refuses cleanly ([d649c17](https://github.com/UCSD-E4E/fishsense-services/commit/d649c170771de886896a6d235ef8572725c14e43))
+
 ## [0.6.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.6.0...v0.6.1) (2026-10-14)
 
 
