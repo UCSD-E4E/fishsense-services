@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.7.0...v0.7.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* **nrp:** processors run only on US nodes, where Garage is reachable ([03932ba](https://github.com/UCSD-E4E/fishsense-services/commit/03932ba645e32461e859e158bfac887a61c97fc3))
+* **nrp:** processors run only on US nodes, where Garage is reachable ([95ce145](https://github.com/UCSD-E4E/fishsense-services/commit/95ce145ed361c306b0bf3e591263d0d8732d5db5))
+
 ## [0.7.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.6.1...v0.7.0) (2026-10-14)
 
 
