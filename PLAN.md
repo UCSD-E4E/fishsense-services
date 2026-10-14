@@ -1002,8 +1002,9 @@ overridable); built in migration 0013*
   CaptureExtension, with the commit request as received), `capture_objects` (every file
   with its checksum), `device_measurement_points` (snout/fork, `auto` or `manual`).
   Single presigned PUTs, not multipart: a capture is a few MB.
-- ***Decided 2026-10-11 (owner):*** the app **requires a sign-in**, and each capture
-  records who took it (`captured_by_sub`); only that user may sync it. **Sync everything
+- ***Decided 2026-10-11, revised 2026-10-14 (owner):*** **syncing requires a sign-in;
+  capturing doesn't.** Each capture records who took it (`captured_by_sub`) -- or, if taken
+  signed out, the account that first syncs it -- and only that user may sync it. **Sync everything
   the app saves** -- this is scientific data and must be reproducible -- so the
   blocking decision below is settled as **(a)**: the app keeps the **lossless frame** it
   measured on (`rgb_lossless`), and the **mask is synced** (overriding "do not sync it").

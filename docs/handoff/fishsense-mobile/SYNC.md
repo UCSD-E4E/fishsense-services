@@ -7,9 +7,9 @@
 
 ---
 
-## 1. Sign-in (required)
+## 1. Sign-in (required to sync)
 
-The app now **requires a sign-in** before it can be used.
+**Syncing requires a sign-in; capturing doesn't** (owner decision, 2026-10-14). The app can be used signed out, but "Sync now", automatic Wi-Fi sync and any sync status appear only to a signed-in user, and nothing syncs while signed out.
 
 - **Identity provider:** Authentik, OpenID Connect, **authorization code + PKCE** (a public client, no secret). AppAuth (`flutter_appauth`) is the usual route.
   - issuer `https://auth.krg.ucsd.edu/application/o/fishsense-mobile/`
@@ -21,7 +21,11 @@ The app now **requires a sign-in** before it can be used.
 - **Who and which tenant:** after sign-in, call `GET /me/memberships` (§5). It returns the tenants the user belongs to, with slug, name and role.
   - A partner's account joins its org's tenant automatically the first time it calls the API.
   - If there's one tenant, use it. If there are several, let the user pick, and keep the choice.
-- **Bind every capture** to the user and tenant at the moment of capture. Store the `sub` claim from the ID token and the tenant slug on the row. The server refuses a capture whose recorded `sub` isn't the signed-in caller's, so a different login on the same phone can't sync someone else's captures.
+- **Bind every capture** to a user and tenant:
+  - **taken while signed in:** stamp the `sub` claim from the ID token and the tenant slug on the row at capture;
+  - **taken while signed out** (or before v8): the row has no `captured_by_sub`. The signed-in account that first syncs it becomes its capturer: stamp that `sub` and tenant on the row before the upload request, and keep them.
+
+  The server refuses a capture whose recorded `sub` isn't the signed-in caller's, so once a capture has a capturer, a different login on the same phone can't sync it.
 
 ## 2. What to save with each capture (database v8)
 
@@ -174,16 +178,17 @@ Notes on measurement versions:
 - `length_m` must be positive. A frame the phone couldn't measure has no measurement version; it still syncs.
 - `origin` is `auto` when the phone found the points (`compute_length`) and `manual` when the user placed them (`recompute_length`).
 - `origin` is `unknown` for a version migrated from v7, which overwrote edits in place. Only an `unknown` version may send `algorithm` and `algorithm_version` as null; an `auto` or `manual` one must name them (422 otherwise).
-- **Captures with no `captured_by_sub`** (from before sign-in) stay unsynced until the owner decides who may sync them (fishsense-mobile #68).
+- **Captures with no `captured_by_sub`** (taken signed out, or before v8) take the syncing account as their capturer (§1).
 - The latest version is the current length.
 
 **Reading back** (any member): `GET /tenants/{slug}/mobile/captures?limit=50&before=<next>` and `GET /tenants/{slug}/mobile/captures/{uuid}`. Both include presigned links to every file. They're optional for the app; the web shows them at `https://fishsense.e4e.ucsd.edu/captures`.
 
 ## Acceptance checks
 
-1. A fresh install can't be used without a sign-in. After one, it captures offline, with the network off for at least a day.
+1. Signed out, the app captures but offers no sync. Signed in, it captures offline with the network off for at least a day, then syncs.
 2. Every capture row has `client_capture_uuid`, `captured_by_sub`, `tenant_slug`, `install_id`, the three versions, both row strides and the pose, and a lossless PNG on disk.
 3. Sync on Wi-Fi: the capture appears at `/captures` on the web with the same length, and each file downloaded from there has the SHA-256 the app computed.
 4. Kill the app mid-upload and sync again: there's no duplicate, and the capture syncs.
 5. Edit a measurement after syncing: the web shows both versions, with the edit as current.
 6. Sign in as someone else on the same phone: the first user's captures don't sync (403), and stay on the device.
+7. A capture taken signed out syncs under the account that syncs it, and keeps that capturer afterwards.
