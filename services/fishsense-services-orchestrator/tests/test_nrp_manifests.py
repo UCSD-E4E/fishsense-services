@@ -72,13 +72,18 @@ def test_only_the_gpu_deployment_requests_a_gpu():
     (or GPU affinity) there would make it fail for the same reasons."""
     for kind, manifest in LOADED.items():
         limits = _container(manifest.body)["resources"]["limits"]
-        affinity = manifest.body["spec"]["template"]["spec"].get("affinity")
+        gpu_keys = {
+            e["key"]
+            for term in _node_selector_terms(manifest.body)
+            for e in term.get("matchExpressions", [])
+            if e["key"].startswith("nvidia.com/")
+        }
         if kind == manifests.GPU:
             assert limits["nvidia.com/gpu"] == "1"
-            assert affinity
+            assert gpu_keys
         else:
             assert "nvidia.com/gpu" not in limits, kind
-            assert not affinity, kind
+            assert not gpu_keys, kind
 
 
 def test_the_fallback_runs_one_image_at_a_time():
@@ -269,3 +274,54 @@ def test_the_leaf_a_wake_stamps_goes_on_the_pods():
         unstamped["spec"]["template"]["metadata"].get("annotations") or {}
     )
     assert "annotations" not in manifest.body["spec"]["template"]["metadata"]
+
+
+# -- where a pod may run -----------------------------------------------------------
+
+#: NRP's US regions (`topology.kubernetes.io/region`). The NAS -- and Garage on
+#: it, which holds the raw scratch and the model weights -- accepts only US
+#: addresses. NRP also has `pacific`, `latin-america` and `eu` nodes, and some
+#: with no region at all.
+US_REGIONS = {"us-west", "us-central", "us-east", "us-mountain"}
+
+
+def _node_selector_terms(body: dict) -> list[dict]:
+    affinity = body["spec"]["template"]["spec"].get("affinity", {})
+    required = affinity.get("nodeAffinity", {}).get(
+        "requiredDuringSchedulingIgnoredDuringExecution", {}
+    )
+    return required.get("nodeSelectorTerms", [])
+
+
+@pytest.mark.parametrize("kind", sorted(LOADED))
+def test_every_processor_runs_only_in_the_us(kind):
+    """2026-10-14: the GPU pod was scheduled on fiona-prg1.cesnet.cz (Prague),
+    every connection to Garage timed out, and the slate scan's last dive sat
+    unscored. No manifest said where a pod could run; it had worked by luck.
+    Terms are ORed, so every term must carry the rule, or one without it lets
+    the pod run anywhere."""
+    terms = _node_selector_terms(LOADED[kind].body)
+    assert terms, f"{kind}: no required node affinity"
+    for term in terms:
+        regions = [
+            e
+            for e in term.get("matchExpressions", [])
+            if e["key"] == "topology.kubernetes.io/region"
+        ]
+        assert len(regions) == 1, f"{kind}: a term without a region rule"
+        (rule,) = regions
+        assert rule["operator"] == "In", "an allow-list: a new non-US site must not fit"
+        assert set(rule["values"]) == US_REGIONS
+
+
+def test_the_gpu_keeps_its_compute_capability_floor_beside_the_region():
+    """Ampere and newer, or Turing (7.5): each term still says which."""
+    terms = _node_selector_terms(LOADED[manifests.GPU].body)
+    assert [sorted(e["key"] for e in t["matchExpressions"]) for t in terms] == [
+        ["nvidia.com/gpu.compute.major", "topology.kubernetes.io/region"],
+        [
+            "nvidia.com/gpu.compute.major",
+            "nvidia.com/gpu.compute.minor",
+            "topology.kubernetes.io/region",
+        ],
+    ]
