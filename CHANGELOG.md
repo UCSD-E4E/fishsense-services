@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.6.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.5.0...v0.6.0) (2026-10-14)
+
+
+### Features
+
+* **api:** a bucket and key per tenant, with checksum-signed uploads ([d6c853a](https://github.com/UCSD-E4E/fishsense-services/commit/d6c853ad8962b97c4d59b0579c776d6f200ac66e))
+* **api:** accept tokens from the mobile app's own issuer ([bb4c564](https://github.com/UCSD-E4E/fishsense-services/commit/bb4c56419566cf4bfc2a151b52885c26286c8cbe))
+* **api:** FishSense Mobile sync and display endpoints ([9d6c079](https://github.com/UCSD-E4E/fishsense-services/commit/9d6c079c096b19c3a88c0498f5c33e01fc3a1d89))
+* **api:** keep everything a mobile capture saved (migration 0038) ([8d0041d](https://github.com/UCSD-E4E/fishsense-services/commit/8d0041d1a4d6379be1dfcb237f3d1b1f9e466766))
+* **api:** keep pre-v8 mobile captures with their unknowns (fishsense-mobile [#68](https://github.com/UCSD-E4E/fishsense-services/issues/68)) ([70d2be8](https://github.com/UCSD-E4E/fishsense-services/commit/70d2be87a0429e6fed9d0497942b6dc3cc6cab69))
+* **deploy:** render the mobile issuer and each tenant's store for the API ([76c4e99](https://github.com/UCSD-E4E/fishsense-services/commit/76c4e99d9d13f069d90397e6aa14654270114b71))
+* FishSense Mobile sync and display ([6283310](https://github.com/UCSD-E4E/fishsense-services/commit/62833103b779ed4b8a2c0fbf50b08413975c1dce))
+* **web:** show FishSense Mobile captures to every member of a tenant ([4cf030f](https://github.com/UCSD-E4E/fishsense-services/commit/4cf030fac4e6216cd9e2e39eda1a551b690e87bc))
+
+
+### Bug Fixes
+
+* **api:** mobile sync review of [#63](https://github.com/UCSD-E4E/fishsense-services/issues/63) -- conflicts, races, NaN, current ([d2dc947](https://github.com/UCSD-E4E/fishsense-services/commit/d2dc947f0ab3ff5c17e2e4426c17e2484cab1e0d))
+* **deploy:** read the tenant stores from generated/object_stores (krg-infra [#566](https://github.com/UCSD-E4E/fishsense-services/issues/566)) ([f8129d6](https://github.com/UCSD-E4E/fishsense-services/commit/f8129d66c789a12ace7b10e927d507e5d9262657))
+
+
+### Documentation
+
+* add README and CLAUDE.md ([31bf56b](https://github.com/UCSD-E4E/fishsense-services/commit/31bf56b48518b2fdf4b4191880fceb4c1330aa94))
+* add README and CLAUDE.md ([9e9dabd](https://github.com/UCSD-E4E/fishsense-services/commit/9e9dabd4a42505152801b994c266a0c00fb2b18e))
+* mobile sync decisions, and handoffs to krg-infra and fishsense-mobile ([f5c9b49](https://github.com/UCSD-E4E/fishsense-services/commit/f5c9b49b06bcd3ada4065a2eefe5f92642399a69))
+* syncing needs a sign-in, capturing doesn't (owner, 2026-10-14) ([034afce](https://github.com/UCSD-E4E/fishsense-services/commit/034afce586ddc5b3b09ba8d2b49b442149e1b810))
+
 ## [0.5.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.4.0...v0.5.0) (2026-10-08)
 
 
