@@ -13,5 +13,5 @@ build/
 
 # direnv: nix-direnv's cache, and the local env files .envrc loads.
 .direnv/
-.env
-.envrc.local
+/.env
+/.envrc.local

@@ -35,7 +35,7 @@ export default async function CalibrationPage() {
         </div>
         <Link
           href="/portal"
-          className="shrink-0 rounded-md border border-slate-300 bg-white px-3 py-1 text-sm font-medium shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
+          className="shrink-0 rounded-md border border-slate-300 bg-white px-3 py-1 text-sm font-medium shadow-xs transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
         >
           Portal
         </Link>

@@ -55,13 +55,13 @@ export default async function HomePage() {
         <div className="flex items-center gap-3">
           <Link
             href="/captures"
-            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium shadow-xs transition hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
           >
             Mobile captures
           </Link>
           <a
             href="/portal"
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-xs transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
           >
             Sign in
           </a>
@@ -143,7 +143,7 @@ function LinkCard({ link }: { link: SectionLink }) {
       href={link.href}
       target="_blank"
       rel="noreferrer"
-      className="block rounded-lg border border-slate-200 bg-white p-5 shadow-sm transition hover:border-slate-300 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700"
+      className="block rounded-lg border border-slate-200 bg-white p-5 shadow-xs transition hover:border-slate-300 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700"
     >
       <div className="text-base font-medium">{link.title}</div>
       <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">

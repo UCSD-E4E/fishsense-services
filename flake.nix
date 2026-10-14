@@ -150,14 +150,23 @@
     # processor's Secrets. Pinned to the nixpkgs the slot builds from. Plus Node 24
     # (CI's `node-version`) for the web portal in apps/web, uv for the Python
     # workspace, and the Temporal CLI. direnv loads all of this on `cd` (`.envrc`).
+    #
+    # uv uses nixpkgs' Python 3.13, never a downloaded one: python-build-standalone
+    # binaries are dynamically linked against an FHS loader NixOS doesn't have.
+    # The manylinux wheels (numpy, scipy, opencv, torch, ...) still expect the
+    # host's libstdc++ and libz, so LD_LIBRARY_PATH supplies those two.
     devShells.${system}.default = pkgs.mkShell {
       packages = [
         pkgs.kubectl
         pkgs.kubelogin-oidc
         pkgs.nodejs_24
+        pkgs.python313
         pkgs.uv
         pkgs.temporal-cli
       ];
+      UV_PYTHON = "${pkgs.python313}/bin/python3.13";
+      UV_PYTHON_DOWNLOADS = "never";
+      LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [pkgs.stdenv.cc.cc.lib pkgs.zlib];
       shellHook = ''
         echo "fishsense dev shell: kubectl + kubelogin-oidc (kubectl oidc-login) + node 24 + uv + temporal"
         echo "NRP login: kubectl get pods  (opens a CILogon browser window the first time)"

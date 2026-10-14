@@ -85,7 +85,7 @@ export default async function CapturesPage({ searchParams }: Props) {
               <li key={c.client_capture_uuid}>
                 <Link
                   href={`/captures/${tenant.slug}/${c.client_capture_uuid}`}
-                  className="block overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition hover:shadow-md dark:border-slate-800 dark:bg-slate-900"
+                  className="block overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xs transition hover:shadow-md dark:border-slate-800 dark:bg-slate-900"
                 >
                   {c.rgb_url && (
                     // Presigned, short-lived Garage URLs: not for next/image's
@@ -95,7 +95,7 @@ export default async function CapturesPage({ searchParams }: Props) {
                       src={c.rgb_url}
                       alt="Fish capture"
                       loading="lazy"
-                      className="aspect-[4/3] w-full object-cover"
+                      className="aspect-4/3 w-full object-cover"
                     />
                   )}
                   <div className="p-4 text-sm">

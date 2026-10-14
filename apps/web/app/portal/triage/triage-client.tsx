@@ -186,14 +186,14 @@ export function TriageClient({ items, kindLabel, scanned, projects, notWalked }:
           <button
             type="button"
             onClick={onSkip}
-            className="flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
+            className="flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium shadow-xs transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
           >
             Skip
           </button>
           <button
             type="button"
             onClick={onAccept}
-            className="flex-[2] rounded-md border border-emerald-600 bg-emerald-600 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 dark:border-emerald-500 dark:bg-emerald-600 dark:hover:bg-emerald-500"
+            className="flex-2 rounded-md border border-emerald-600 bg-emerald-600 py-2 text-sm font-semibold text-white shadow-xs transition hover:bg-emerald-500 dark:border-emerald-500 dark:bg-emerald-600 dark:hover:bg-emerald-500"
           >
             Accept
           </button>
@@ -201,7 +201,7 @@ export function TriageClient({ items, kindLabel, scanned, projects, notWalked }:
             <button
               type="button"
               onClick={onUndo}
-              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800 text-xs"
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium shadow-xs transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800 text-xs"
             >
               Undo
             </button>
@@ -302,7 +302,7 @@ function Viewer({
   return (
     <div
       ref={stageRef}
-      className="relative aspect-[4/3] max-h-[70vh] w-full touch-none select-none overflow-hidden rounded-md border border-slate-300 bg-black dark:border-slate-800"
+      className="relative aspect-4/3 max-h-[70vh] w-full touch-none select-none overflow-hidden rounded-md border border-slate-300 bg-black dark:border-slate-800"
       onPointerDown={(e) => {
         (e.target as Element).setPointerCapture?.(e.pointerId);
         pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
