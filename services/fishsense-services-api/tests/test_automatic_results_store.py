@@ -767,3 +767,137 @@ async def test_a_late_slate_score_makes_the_calibration_stale(owner_engine, app_
     await presence(owner_engine, lab, c, probability=0.9)
 
     assert await _next(app_engine, lab) == dive_id
+
+
+# -- dives the chain must leave alone, or only calibrate -----------------------------
+
+
+async def test_an_excluded_dive_is_not_in_the_cohort(owner_engine, app_engine):
+    """Some dives produce plausible but wrong results: 466 holds three laser
+    states, 442 was shot overexposed (2026-10-15). An operator excludes them,
+    with a reason."""
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    await capture(owner_engine, lab, dive_id)
+    assert await _next(app_engine, lab) == dive_id
+
+    await exec_(
+        owner_engine,
+        "INSERT INTO automatic_results_exclusions (tenant_id, dive_id, reason) "
+        "VALUES (:t, :d, 'three laser states')",
+        t=lab,
+        d=dive_id,
+    )
+
+    assert await _next(app_engine, lab) is None
+
+
+async def test_an_exclusion_needs_a_reason(owner_engine):
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    with pytest.raises(IntegrityError):
+        await exec_(
+            owner_engine,
+            "INSERT INTO automatic_results_exclusions (tenant_id, dive_id, reason) "
+            "VALUES (:t, :d, '')",
+            t=lab,
+            d=dive_id,
+        )
+
+
+async def _calibration_session(owner_engine, lab):
+    """A session (its slate frames) that a fish dive borrows from."""
+    from _slate_calibration_seed import slate_presence as presence
+
+    session = await _backlog_dive(owner_engine, lab)
+    await _backlog_dive(owner_engine, lab, source_dive=session)
+    slate = await capture(owner_engine, lab, session)
+    other = await capture(owner_engine, lab, session)
+    await presence(owner_engine, lab, slate, probability=0.95)
+    await presence(owner_engine, lab, other, probability=0.05)
+    return session, slate, other
+
+
+async def test_a_calibration_session_runs_only_its_slate_frames(
+    owner_engine, app_engine
+):
+    """Decided 2026-10-15: a session's slate frames feed the label-free fit
+    its borrowers use; nothing in it is segmented or measured as a fish."""
+    from fishsense_services_api.slate_presence_store import slate_frames
+
+    lab = await tenant(owner_engine)
+    session, slate, _ = await _calibration_session(owner_engine, lab)
+
+    inputs = await _in(app_engine, lab, automatic_frames_inputs, session,
+                       headtail_version=1, slate_frames=slate_frames)  # fmt: skip
+
+    assert [f.capture_id for f in inputs.frames] == [slate]
+
+
+async def test_a_calibrated_session_is_done_without_its_other_frames(
+    owner_engine, app_engine
+):
+    lab = await tenant(owner_engine)
+    session, slate, _ = await _calibration_session(owner_engine, lab)
+    # Its borrower is a dive of the backlog too; done with it here.
+    await exec_(
+        owner_engine,
+        "INSERT INTO automatic_results_exclusions (tenant_id, dive_id, reason) "
+        "SELECT tenant_id, id, 'not this test' FROM dives "
+        "WHERE calibration_source_dive_id = :s",
+        s=session,
+    )
+    await _predict(app_engine, lab, session,
+                   AutomaticHeadTailRow(capture_id=slate, status="slate_frame",
+                                        laser_x=2000.0, laser_y=1500.0,
+                                        predictor_version=1))  # fmt: skip
+    assert await _next(app_engine, lab) == session  # its calibration is left
+
+    await _in(app_engine, lab, persist_automatic_calibration, session,
+              _label_free(capture_ids=[slate]))  # fmt: skip
+
+    assert await _next(app_engine, lab) is None
+
+
+async def test_a_session_frame_given_a_fish_is_never_measured_or_named(
+    owner_engine, app_engine
+):
+    """A fish head/tail on a session (written before it was a session, or by
+    the detector's miss) is no species job and no length."""
+    lab = await tenant(owner_engine)
+    session, _, other = await _calibration_session(owner_engine, lab)
+    await calibrate(owner_engine, lab, session)
+    await _predict(app_engine, lab, session, _predicted(other))
+
+    jobs = await _in(app_engine, lab, automatic_species_captures, session,
+                     species_version=1)  # fmt: skip
+    measure = await _in(app_engine, lab, automatic_measure_inputs, session,
+                        algorithm_version="1")  # fmt: skip
+
+    assert jobs == []
+    assert measure.captures == []
+
+
+async def test_a_session_fish_is_no_length_outstanding(owner_engine, app_engine):
+    """Its dive done otherwise, a fish head/tail on a session must not hold
+    the session in the cohort for a length it will never get."""
+    lab = await tenant(owner_engine)
+    session, slate, other = await _calibration_session(owner_engine, lab)
+    await exec_(
+        owner_engine,
+        "INSERT INTO automatic_results_exclusions (tenant_id, dive_id, reason) "
+        "SELECT tenant_id, id, 'not this test' FROM dives "
+        "WHERE calibration_source_dive_id = :s",
+        s=session,
+    )
+    await calibrate(owner_engine, lab, session)
+    await _predict(
+        app_engine, lab, session,
+        AutomaticHeadTailRow(capture_id=slate, status="slate_frame", laser_x=2000.0,
+                             laser_y=1500.0, predictor_version=1),
+        _predicted(other),
+    )  # fmt: skip
+    await _in(app_engine, lab, persist_automatic_calibration, session,
+              _label_free(capture_ids=[slate]))  # fmt: skip
+
+    assert await _next(app_engine, lab) is None

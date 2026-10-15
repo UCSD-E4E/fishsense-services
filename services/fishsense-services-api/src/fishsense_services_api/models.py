@@ -1369,3 +1369,23 @@ class DeviceMeasurementPoints(Base):
     fork_x: Mapped[float] = mapped_column(Double)
     fork_y: Mapped[float] = mapped_column(Double)
     created_at: Mapped[datetime] = _created_at()
+
+
+class AutomaticResultsExclusion(Base):
+    """A dive the automatic-results backlog leaves alone, and why (0039).
+    An operator's decision; the app role only reads it."""
+
+    __tablename__ = "automatic_results_exclusions"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "dive_id"], ["dives.tenant_id", "dives.id"]),
+        CheckConstraint(
+            "btrim(reason) <> ''", name="automatic_results_exclusions_reason_check"
+        ),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("tenants.id", ondelete="CASCADE"), primary_key=True
+    )
+    dive_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    reason: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()

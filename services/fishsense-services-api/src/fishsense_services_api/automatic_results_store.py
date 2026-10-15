@@ -135,6 +135,27 @@ _FRAME_DONE = """EXISTS (
 #: inputs agree.
 _DETECTOR_SLATE = detector_slate_frame(SLATE_FRAME_THRESHOLD)
 
+
+def _calibration_session(tenant: str, dive: str) -> str:
+    """The dive is another dive's calibration source (decided 2026-10-15): its
+    slate frames feed the label-free fit its borrowers use, and nothing in it
+    is segmented, named or measured as a fish."""
+    return f"""EXISTS (
+    SELECT 1 FROM dives borrower
+    WHERE borrower.tenant_id = {tenant}
+      AND borrower.calibration_source_dive_id = {dive}
+      AND borrower.id <> {dive}
+)"""
+
+
+_SESSION = _calibration_session("d.tenant_id", "d.id")
+
+#: An operator listed the dive as one to leave alone (0039).
+_EXCLUDED = """EXISTS (
+    SELECT 1 FROM automatic_results_exclusions x
+    WHERE x.tenant_id = d.tenant_id AND x.dive_id = d.id
+)"""
+
 #: Dive `d` has a human measurement: any `measurements` row on its captures.
 _HUMAN_MEASURED = """EXISTS (
     SELECT 1 FROM measurements m
@@ -142,15 +163,18 @@ _HUMAN_MEASURED = """EXISTS (
     WHERE mc.tenant_id = d.tenant_id AND mc.dive_id = d.id
 )"""
 
-#: A canonical frame with no automatic head/tail at the current version.
+#: A canonical frame with no automatic head/tail at the current version; in
+#: a calibration session, only its slate frames.
 _FRAMES_WORK = f"""EXISTS (
         SELECT 1 FROM captures c
         WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id AND c.is_canonical
           AND NOT {_FRAME_DONE}
+          AND (NOT {_SESSION} OR {_DETECTOR_SLATE})
     )"""
 
-#: A kept mask with no automatic species at the current version.
-_SPECIES_WORK = f"""EXISTS (
+#: A kept mask with no automatic species at the current version (never in a
+#: calibration session).
+_SPECIES_WORK = f"""NOT {_SESSION} AND EXISTS (
         SELECT 1 FROM current_automatic_head_tail_predictions h
         JOIN captures c ON c.tenant_id = h.tenant_id AND c.id = h.capture_id
         WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id AND c.is_canonical
@@ -196,8 +220,8 @@ _CALIBRATION_WORK = """(
     )"""
 
 #: A predicted fish with no current automatic length while a calibration
-#: exists.
-_LENGTHS_WORK = f"""(
+#: exists (never in a calibration session).
+_LENGTHS_WORK = f"""NOT {_SESSION} AND (
         EXISTS (
             SELECT 1 FROM automatic_measurement_calibrations mc
             WHERE mc.tenant_id = d.tenant_id AND mc.dive_id = d.id
@@ -229,7 +253,8 @@ def automatic_results_cohort(*, species: bool = True) -> str:
         work.insert(1, _SPECIES_WORK)
     return f"""{RECTIFIABLE_DIVE}
     AND NOT {_HUMAN_MEASURED}
-    AND ({" OR ".join(work)})"""
+    AND NOT {_EXCLUDED}
+    AND ({" OR ".join(f"({w})" for w in work)})"""
 
 
 #: The cohort with species on, the default.
@@ -338,6 +363,7 @@ async def automatic_frames_inputs(
             FROM captures c
             WHERE c.tenant_id = :t AND c.dive_id = :d AND c.is_canonical
               AND NOT {_FRAME_DONE}
+              AND (NOT {_calibration_session(":t", ":d")} OR {_DETECTOR_SLATE})
             ORDER BY c.number
             """),
         {"t": tenant_id, "d": dive_id, "hv": headtail_version},
@@ -486,6 +512,7 @@ async def automatic_species_captures(
               ON s.tenant_id = c.tenant_id AND s.capture_id = c.id
             WHERE c.tenant_id = :t AND c.dive_id = :d AND c.is_canonical
               AND h.status = 'predicted' AND NOT {_DETECTOR_SLATE}
+              AND NOT {_calibration_session(":t", ":d")}
               AND (s.id IS NULL OR s.automatic_head_tail_prediction_id <> h.id
                    OR s.predictor_version IS DISTINCT FROM :sv)
             ORDER BY c.number
@@ -717,7 +744,7 @@ async def automatic_measure_inputs(
     if cal is None:
         return AutomaticMeasureInputs(None, None, None, [])
     rows = await conn.execute(
-        text("""
+        text(f"""
             SELECT h.capture_id, h.id, h.laser_x, h.laser_y, h.head_x, h.head_y,
                    h.tail_x, h.tail_y
             FROM captures c
@@ -728,6 +755,7 @@ async def automatic_measure_inputs(
              AND m.algorithm_version = :mv
             WHERE c.tenant_id = :t AND c.dive_id = :d AND c.is_canonical
               AND h.status = 'predicted' AND m.id IS NULL
+              AND NOT {_calibration_session(":t", ":d")}
             ORDER BY c.number
             """),
         {"t": tenant_id, "d": dive_id, "mv": algorithm_version},
