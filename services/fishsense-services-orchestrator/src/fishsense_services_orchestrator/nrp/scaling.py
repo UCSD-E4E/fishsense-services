@@ -36,6 +36,7 @@ import json
 import ssl
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any, Final, Mapping
 
@@ -77,17 +78,28 @@ DEFAULT_STATE_CONFIG_MAP: Final = "fishsense-processor-gpu-fallback"
 DEFAULT_MANIFEST_DIR: Final = Path("/app/deploy/nrp")
 
 
+def release_image_tag() -> str:
+    """This release's processor tag. The processor is built from the same
+    commit as this orchestrator and release-please moves both versions
+    together, so it is this package's version -- never a guess like
+    `latest`, and not a second pin a release must move in step (review of
+    v0.6.1)."""
+    return f"v{version('fishsense-services-orchestrator')}"
+
+
 class NrpSettings(BaseSettings):
     """``FISHSENSE_NRP_*``: v1's ``[kubernetes]`` section, plus the release's
     image tag and where the manifests are. Every knob is optional; only the
-    kubeconfig turns scaling on, and then the namespace and tag are required
+    kubeconfig turns scaling on, and then the namespace is required
     (`resolve_scaling_config`)."""
 
     model_config = SettingsConfigDict(env_prefix="FISHSENSE_NRP_")
 
     kubeconfig_path: str | None = None
     namespace: str | None = None
-    #: The release's processor image tag, applied to every Deployment.
+    #: The processor image tag, applied to every Deployment. Defaults to this
+    #: orchestrator's own release (`release_image_tag`); set it only to stand
+    #: up another build (a rehearsal, an integration test).
     image_tag: str | None = None
     manifest_dir: Path = DEFAULT_MANIFEST_DIR
     state_config_map: str = DEFAULT_STATE_CONFIG_MAP
@@ -215,11 +227,6 @@ def resolve_scaling_config(settings: NrpSettings | None = None) -> ScalingConfig
         raise ValueError(
             "FISHSENSE_NRP_NAMESPACE is required when FISHSENSE_NRP_KUBECONFIG_PATH is set"
         )
-    if not settings.image_tag:
-        raise ValueError(
-            "FISHSENSE_NRP_IMAGE_TAG (the release's processor image tag) is "
-            "required when FISHSENSE_NRP_KUBECONFIG_PATH is set"
-        )
 
     by_kind = load_manifests(settings.manifest_dir)
 
@@ -253,7 +260,7 @@ def resolve_scaling_config(settings: NrpSettings | None = None) -> ScalingConfig
     return ScalingConfig(
         kubeconfig_path=settings.kubeconfig_path,
         namespace=settings.namespace,
-        image_tag=settings.image_tag,
+        image_tag=settings.image_tag or release_image_tag(),
         manifests={m.name: m for m in by_kind.values()},
         per_image_deployment=by_kind[kinds.PER_IMAGE].name,
         active_replicas=_clamp(

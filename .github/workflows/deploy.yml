@@ -129,10 +129,10 @@ jobs:
           fi
           echo "deployed compose spec: $deployed_compose"
 
-          # The image pins AND the processor's tag: a converge that landed the
-          # pins but not the tag would stand the processor up at the old release.
+          # The image pins. The NRP processor's tag is the orchestrator's own
+          # release, so it lands with the orchestrator's pin.
           pins() {
-            grep -oE 'ghcr\.io/ucsd-e4e/[a-z-]+:v[0-9]+\.[0-9]+\.[0-9]+|FISHSENSE_NRP_IMAGE_TAG: *v[0-9]+\.[0-9]+\.[0-9]+' "$1" | sort -u
+            grep -oE 'ghcr\.io/ucsd-e4e/[a-z-]+:v[0-9]+\.[0-9]+\.[0-9]+' "$1" | sort -u
           }
           pins "$deployed_compose" > /tmp/deployed-pins.txt
           pins deploy/incus/compose.yml   > /tmp/expected-pins.txt

@@ -61,7 +61,7 @@ V2_SCHEDULES="cluster-dive-frames compute-laser-depths evaluate-laser-auto-accep
 | `analytics.fishsense.e4e.ucsd.edu` | Superset (running) | **down from the switch** (v1's stack unit's `compose down` removes it); v2's runs only if the `superset` profile is turned on (§3 step 5c). The owner leans toward sunsetting it |
 | Postgres | `postgres:17.10`, volume `pgdata` | **the same container and volume**; v2 in a new database `fishsense_services`; v1's `fishsense` untouched (rollback, then archive) |
 | Workers | api-workflow-worker, backup-worker | `orchestrator`, `backup` |
-| NRP | 4 standing Deployments, scaled 0↔N, `kubectl apply -k` from CI | stood up per wake and **deleted** when idle, from the orchestrator image's manifests at `FISHSENSE_NRP_IMAGE_TAG` |
+| NRP | 4 standing Deployments, scaled 0↔N, `kubectl apply -k` from CI | stood up per wake and **deleted** when idle, from the orchestrator image's manifests at the orchestrator's release tag |
 | Temporal | krg-prod, ns `fishsense`, mTLS | the same; v2's queues and schedule ids are distinct (§5) |
 | Secrets | one `app.env` | one render per consumer (`deploy/incus/secrets.nix`) |
 
@@ -496,7 +496,7 @@ c. **Superset on**: commit `COMPOSE_PROFILES=superset` in
 d. Unpause v2's schedules: `for s in $V2_SCHEDULES; do tctl schedule toggle --unpause --schedule-id "$s"; done`.
 e. `dc start web`.
 f. NRP: nothing to roll out. The first stage with work stands the processor up
-   at `FISHSENSE_NRP_IMAGE_TAG` (watch `kubectl -n e4e-fishsense get deploy
+   at the orchestrator's release tag (watch `kubectl -n e4e-fishsense get deploy
    -l app.kubernetes.io/part-of=fishsense`); the hourly sweeper deletes it when
    idle. v1's Deployments stay at 0 (NRP's GC takes them in two weeks; the
    rollback re-applies them).

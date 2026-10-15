@@ -36,7 +36,7 @@ orchestrator), Garage (`s3.e4e.ucsd.edu`), Temporal (krg-prod), Label Studio
 
 | File | What |
 |---|---|
-| `compose.yml` | the interior. Every `fishsense-services-*` pin and `FISHSENSE_NRP_IMAGE_TAG` are one release version (promote.yml → `deploy/bump_pins.py`). |
+| `compose.yml` | the interior. Every `fishsense-services-*` pin is one release version (promote.yml → `deploy/bump_pins.py`); the NRP processor runs at the orchestrator's release. |
 | `secrets.nix` | vault-agent renders, **one env file per consumer**; the OpenBao layout and what to seed. |
 | `workdir.nix` | links the committed config into `/var/lib/krg/fishsense` (compose's project directory). |
 | `prune.nix` | v1's image prune after each converge (the 20 GB disk). |

@@ -46,7 +46,6 @@ services:
       # NRP off: wakes are no-ops, and the processor service below serves.
       FISHSENSE_NRP_KUBECONFIG_PATH: !reset null
       FISHSENSE_NRP_NAMESPACE: !reset null
-      FISHSENSE_NRP_IMAGE_TAG: !reset null
     depends_on:
       temporal:
         condition: service_healthy

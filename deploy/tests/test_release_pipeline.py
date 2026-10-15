@@ -51,13 +51,12 @@ def _bump(tmp_path, version: str) -> str:
     return copy.read_text()
 
 
-def test_the_bump_moves_every_pin_and_the_processor_tag(tmp_path):
+def test_the_bump_moves_every_pin(tmp_path):
     bumped = yaml.safe_load(_bump(tmp_path, "v98.76.54"))["services"]
 
     for name, service in bumped.items():
         if image_version(service["image"]):
             assert image_version(service["image"]) == "v98.76.54", name
-    assert environment(bumped["orchestrator"])["FISHSENSE_NRP_IMAGE_TAG"] == "v98.76.54"
 
 
 def test_the_bump_changes_nothing_else(tmp_path):
@@ -143,7 +142,7 @@ def test_the_compose_pins_are_a_released_or_the_bootstrap_version():
     """Before the first release the pins name the manifest's bootstrap version;
     after it, promote keeps them at most one release behind the manifest."""
     manifest = json.loads((REPO / ".release-please-manifest.json").read_text())["."]
-    pin = environment(services()["orchestrator"])["FISHSENSE_NRP_IMAGE_TAG"]
+    pin = image_version(services()["orchestrator"]["image"])
     assert tuple(map(int, pin[1:].split("."))) <= tuple(map(int, manifest.split(".")))
 
 
