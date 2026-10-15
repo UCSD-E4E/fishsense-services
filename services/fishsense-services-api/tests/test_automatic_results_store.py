@@ -61,6 +61,7 @@ from fishsense_services_api.automatic_results_store import (
     automatic_calibration_inputs,
     automatic_frames_inputs,
     automatic_measure_inputs,
+    automatic_results_cohort,
     automatic_species_captures,
     next_dive_for_automatic_results,
     no_slate_frames,
@@ -901,3 +902,136 @@ async def test_a_session_fish_is_no_length_outstanding(owner_engine, app_engine)
               _label_free(capture_ids=[slate]))  # fmt: skip
 
     assert await _next(app_engine, lab) is None
+
+
+# -- the cohort as the backlog drains -----------------------------------------------
+
+_BIG = {
+    "automatic_head_tail_predictions",
+    "automatic_species_predictions",
+    "automatic_measurements",
+    "slate_presence_predictions",
+}
+
+
+async def _copy_rows(owner_engine, table, template_id, where, params):
+    """Copy one template row of `table` onto every capture `where` selects."""
+    async with owner_engine.begin() as conn:
+        columns = [
+            name
+            for (name,) in await conn.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = :t AND column_name NOT IN "
+                    "('id', 'seq', 'capture_id', 'created_at') "
+                    "ORDER BY ordinal_position"
+                ),
+                {"t": table},
+            )
+        ]
+        listed = ", ".join(columns)
+        copied = ", ".join(f"r.{n}" for n in columns)
+        await conn.execute(
+            text(
+                f"INSERT INTO {table} (capture_id, {listed}) "
+                f"SELECT c.id, {copied} FROM {table} r JOIN captures c "
+                f"ON c.tenant_id = r.tenant_id WHERE r.id = :template "
+                f"AND c.id <> r.capture_id AND {where}"
+            ),
+            {"template": template_id, **params},
+        )
+
+
+async def _a_drained_backlog(owner_engine, app_engine, lab, *, dives=30, frames=30):
+    """`dives` dives done (every frame abstained, slate-scored, a refused
+    calibration), and one with a frame left: the cohort near the end."""
+    from _slate_calibration_seed import slate_presence as presence
+
+    device_id = await device(owner_engine, lab)
+    done = []
+    for _ in range(dives):
+        d = await dive(owner_engine, lab, device_id=device_id, priority="low")
+        done.append(d)
+        for _ in range(frames):
+            await capture(owner_engine, lab, d)
+    first = done[0]
+    template_capture = (
+        await _rows(owner_engine, "SELECT id FROM captures WHERE dive_id = :d "
+                    "LIMIT 1", d=first)
+    )[0]["id"]  # fmt: skip
+    await _predict(app_engine, lab, first,
+                   AutomaticHeadTailRow(capture_id=template_capture,
+                                        status="no_laser_dot", predictor_version=1))  # fmt: skip
+    await presence(owner_engine, lab, template_capture, probability=0.05)
+    (ht,) = await _rows(owner_engine, "SELECT id FROM automatic_head_tail_predictions")
+    (sp,) = await _rows(owner_engine, "SELECT id FROM slate_presence_predictions")
+    every = "c.dive_id = ANY(CAST(:dives AS uuid[]))"
+    for table, row in (("automatic_head_tail_predictions", ht),
+                       ("slate_presence_predictions", sp)):  # fmt: skip
+        await _copy_rows(owner_engine, table, row["id"], every, {"dives": done})
+    for d in done:
+        await _in(app_engine, lab, persist_automatic_calibration, d,
+                  _label_free(outcome="refused", refusal_reason="no_candidates",
+                              laser_position=None, laser_axis=None))  # fmt: skip
+    left = await dive(owner_engine, lab, device_id=device_id, priority="low")
+    await capture(owner_engine, lab, left)
+    await exec_(owner_engine, "ANALYZE")
+    return left
+
+
+def _plan_nodes(plan):
+    yield plan
+    for child in plan.get("Plans", []):
+        yield from _plan_nodes(child)
+
+
+async def test_the_last_dive_is_found_when_the_backlog_has_drained(
+    owner_engine, app_engine
+):
+    lab = await tenant(owner_engine)
+    left = await _a_drained_backlog(owner_engine, app_engine, lab)
+    assert await _next(app_engine, lab) == left
+
+
+async def test_the_cohort_reads_each_frames_latest_rows_by_index(
+    owner_engine, app_engine
+):
+    """2026-10-15 audit: the cohort read every `current_automatic_*` view
+    (and `current_slate_presence`) correlated per frame or per dive -- the
+    shape that took the slate cohort past the app role's 30 s timeout once
+    its backlog drained (2026-10-14). Each frame's latest row is one index
+    lookup, and nothing de-duplicates the big tables wholesale."""
+    lab = await tenant(owner_engine)
+    await _a_drained_backlog(owner_engine, app_engine, lab)
+    async with tenant_transaction(app_engine, lab) as conn:
+        (plan,) = (
+            await conn.execute(
+                text(
+                    "EXPLAIN (FORMAT JSON) SELECT d.id FROM dives d "
+                    f"WHERE d.tenant_id = :t AND {automatic_results_cohort()} "
+                    "ORDER BY d.created_at, d.id LIMIT 1"
+                ),
+                {"t": lab, "hv": 1, "sv": 1, "cv": "1", "mv": "1"},
+            )
+        ).scalar_one()
+    nodes = list(_plan_nodes(plan["Plan"]))
+    # An empty table is read however Postgres likes -- a seq scan of nothing
+    # is free; the drained dives here abstained, so no species or lengths.
+    populated = {
+        t for t in _BIG
+        if (await _rows(owner_engine, f"SELECT 1 AS x FROM {t} LIMIT 1"))
+    }  # fmt: skip
+    assert {
+        "automatic_head_tail_predictions",
+        "slate_presence_predictions",
+    } <= populated
+    big_reads = [n for n in nodes if n.get("Relation Name") in populated]
+    assert big_reads
+    assert all(
+        n["Node Type"] in ("Index Scan", "Index Only Scan") for n in big_reads
+    ), [(n["Node Type"], n["Relation Name"]) for n in big_reads]
+    assert not any(
+        n["Node Type"] == "Unique"
+        and {m.get("Relation Name") for m in _plan_nodes(n)} & _BIG
+        for n in nodes
+    )

@@ -123,11 +123,27 @@ class ForeignHeadTail(InvalidAutomaticResults):
 
 # -- the cohort -------------------------------------------------------------------
 
+
 #: The capture's latest automatic head/tail, `h`, at the version `:hv`.
-_FRAME_DONE = """EXISTS (
-    SELECT 1 FROM current_automatic_head_tail_predictions h
-    WHERE h.tenant_id = c.tenant_id AND h.capture_id = c.id
-      AND h.predictor_version = :hv
+def _latest(table: str, capture: str = "c") -> str:
+    """Capture `capture`'s latest row of `table`, as its `current_*` view
+    picks it, but as one index lookup on (tenant_id, capture_id, seq). Read
+    through the view, correlated per frame or per dive, Postgres rebuilt it --
+    sorting the whole table -- every time: the shape that took the slate
+    cohort past the app role's 30 s timeout once its backlog drained
+    (2026-10-14)."""
+    return f"""(
+        SELECT latest.* FROM {table} latest
+        WHERE latest.tenant_id = {capture}.tenant_id
+          AND latest.capture_id = {capture}.id
+        ORDER BY latest.seq DESC
+        LIMIT 1
+    )"""
+
+
+_FRAME_DONE = f"""EXISTS (
+    SELECT 1 FROM {_latest("automatic_head_tail_predictions")} h
+    WHERE h.predictor_version = :hv
 )"""
 
 #: Capture `c` is one the slate-presence detector currently calls a slate
@@ -175,14 +191,13 @@ _FRAMES_WORK = f"""EXISTS (
 #: A kept mask with no automatic species at the current version (never in a
 #: calibration session).
 _SPECIES_WORK = f"""NOT {_SESSION} AND EXISTS (
-        SELECT 1 FROM current_automatic_head_tail_predictions h
-        JOIN captures c ON c.tenant_id = h.tenant_id AND c.id = h.capture_id
+        SELECT 1 FROM captures c
+        CROSS JOIN LATERAL {_latest("automatic_head_tail_predictions")} h
         WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id AND c.is_canonical
           AND h.status = 'predicted' AND NOT {_DETECTOR_SLATE}
           AND NOT EXISTS (
-              SELECT 1 FROM current_automatic_species_predictions s
-              WHERE s.tenant_id = h.tenant_id AND s.capture_id = h.capture_id
-                AND s.automatic_head_tail_prediction_id = h.id
+              SELECT 1 FROM {_latest("automatic_species_predictions")} s
+              WHERE s.automatic_head_tail_prediction_id = h.id
                 AND s.predictor_version = :sv
           )
     )"""
@@ -199,47 +214,52 @@ _CALIBRATION_WORK = """(
             WHERE a.tenant_id = d.tenant_id AND a.dive_id = d.id
               AND a.algorithm_version = :cv
               -- Stale against new frames, and against a slate score written
-              -- after it: the detector's slate frames are the candidates.
-              AND a.created_at >= greatest(
-                  coalesce((
-                      SELECT max(h.created_at)
-                      FROM current_automatic_head_tail_predictions h
-                      JOIN captures c
-                        ON c.tenant_id = h.tenant_id AND c.id = h.capture_id
-                      WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
-                  ), '-infinity'),
-                  coalesce((
-                      SELECT max(sp.created_at)
-                      FROM current_slate_presence sp
-                      JOIN captures c
-                        ON c.tenant_id = sp.tenant_id AND c.id = sp.capture_id
-                      WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
-                  ), '-infinity')
+              -- after it: the detector's slate frames are the candidates. A
+              -- capture's newest row is its current one (append-only), so
+              -- "any row newer" is "the newest is newer".
+              AND NOT EXISTS (
+                  SELECT 1 FROM captures c
+                  WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+                    AND (
+                      EXISTS (
+                          SELECT 1 FROM automatic_head_tail_predictions h
+                          WHERE h.tenant_id = c.tenant_id AND h.capture_id = c.id
+                            AND h.created_at > a.created_at
+                      )
+                      OR EXISTS (
+                          SELECT 1 FROM slate_presence_predictions sp
+                          WHERE sp.tenant_id = c.tenant_id AND sp.capture_id = c.id
+                            AND sp.created_at > a.created_at
+                      )
+                    )
               )
         )
     )"""
 
 #: A predicted fish with no current automatic length while a calibration
 #: exists (never in a calibration session).
-_LENGTHS_WORK = f"""NOT {_SESSION} AND (
-        EXISTS (
-            SELECT 1 FROM automatic_measurement_calibrations mc
-            WHERE mc.tenant_id = d.tenant_id AND mc.dive_id = d.id
-        )
-        AND EXISTS (
-            SELECT 1 FROM current_automatic_head_tail_predictions h
-            JOIN captures c ON c.tenant_id = h.tenant_id AND c.id = h.capture_id
-            WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id AND c.is_canonical
-              AND h.status = 'predicted'
-              -- A frame the detector now calls a slate is never measured
-              -- (automatic_measure_inputs), so it is no length outstanding.
-              AND NOT {_DETECTOR_SLATE}
-              AND NOT EXISTS (
-                  SELECT 1 FROM current_automatic_measurements m
-                  WHERE m.tenant_id = h.tenant_id AND m.capture_id = h.capture_id
-                    AND m.algorithm_version = :mv
-              )
-        )
+_LENGTHS_WORK = f"""NOT {_SESSION} AND EXISTS (
+        SELECT 1 FROM automatic_measurement_calibrations mc
+        JOIN captures c ON c.tenant_id = mc.tenant_id AND c.dive_id = mc.dive_id
+        CROSS JOIN LATERAL {_latest("automatic_head_tail_predictions")} h
+        WHERE mc.tenant_id = d.tenant_id AND mc.dive_id = d.id AND c.is_canonical
+          AND h.status = 'predicted'
+          -- A frame the detector now calls a slate is never measured
+          -- (automatic_measure_inputs), so it is no length outstanding.
+          AND NOT {_DETECTOR_SLATE}
+          -- current_automatic_measurements: the latest length whose head/tail
+          -- and calibration are still the frame's and the dive's.
+          AND (
+              SELECT m.algorithm_version FROM automatic_measurements m
+              WHERE m.tenant_id = c.tenant_id AND m.capture_id = c.id
+                AND m.automatic_head_tail_prediction_id = h.id
+                AND m.calibration_source = mc.calibration_source
+                AND m.automatic_laser_calibration_id
+                    IS NOT DISTINCT FROM mc.automatic_laser_calibration_id
+                AND m.laser_calibration_id IS NOT DISTINCT FROM mc.laser_calibration_id
+              ORDER BY m.seq DESC
+              LIMIT 1
+          ) IS DISTINCT FROM :mv
     )"""
 
 
