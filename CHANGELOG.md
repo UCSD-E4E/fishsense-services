@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.8.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.7.1...v0.8.0) (2026-10-15)
+
+
+### Features
+
+* **automatic-results:** an exclusion list, and calibration sessions only calibrate ([db9dfdd](https://github.com/UCSD-E4E/fishsense-services/commit/db9dfdd5b82d60c4111d75f5ac417eaab434a9b4))
+* **deploy:** the converge keeps the NRP processor's Secret and its weights ([fa93b65](https://github.com/UCSD-E4E/fishsense-services/commit/fa93b65975a8c982178d863e397395eac1e71170))
+
+
+### Bug Fixes
+
+* **automatic-results:** a failing dive no longer holds the backlog, and the fit is bounded ([4f6e67c](https://github.com/UCSD-E4E/fishsense-services/commit/4f6e67cdd1538a218b890dd7a925d85efd4bc263))
+* **automatic-results:** species runs last and can't cost a dive its lengths ([ca52e1c](https://github.com/UCSD-E4E/fishsense-services/commit/ca52e1c13df430aa3b7cac0dbc91a6ddefe39edb))
+
+
+### Performance Improvements
+
+* **automatic-results:** the cohort reads each frame's latest rows by index ([ae6a0e7](https://github.com/UCSD-E4E/fishsense-services/commit/ae6a0e770805260cf21327bc2c3d4af0b3d46262))
+
 ## [0.7.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.7.0...v0.7.1) (2026-10-14)
 
 
