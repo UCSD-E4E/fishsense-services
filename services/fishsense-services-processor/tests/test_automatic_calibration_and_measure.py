@@ -225,3 +225,54 @@ async def test_a_zero_length_is_refused():
     c = _capture(_dot_at(2.0), head=(2000.0, 1500.0), tail=(2000.0, 1500.0))
     r = await ActivityEnvironment().run(measure_automatic, _measure_input(c))
     assert r.lengths[0].refusal == "zero_length"
+
+
+# -- slate-heavy dives: a bounded fit that keeps heartbeating -----------------------
+
+from fishsense_services_processor.automatic_calibration import (  # noqa: E402
+    activities as cal,
+)
+
+
+def test_a_spread_keeps_the_extremes_and_evenly_covers_the_dot_travel():
+    dots = np.array([_dot_at(z) for z in np.linspace(1.0, 3.0, 50)])
+    picked = cal.spread(dots, 10)
+    assert len(picked) == 10 and len(set(picked)) == 10
+    assert 0 in picked and 49 in picked
+    assert cal.spread(dots[:7], 10) == list(range(7))
+
+
+async def test_a_slate_heavy_dive_is_fitted_on_a_capped_spread(monkeypatch):
+    """2026-10-15 audit: registration is quadratic in frames (100 slate
+    frames are 4,950 pairs) and a calibration session can hold hundreds; the
+    fit takes at most `MAX_CALIBRATION_FRAMES`, spread along the dot's travel
+    so the range the fit needs is kept."""
+    monkeypatch.setattr(cal, "MAX_CALIBRATION_FRAMES", 12)
+    payload, store = _calibration_input(np.linspace(1.0, 3.0, 20))
+
+    r = await _fit(payload, store)
+
+    assert r.outcome == "accepted", r.refusal_reason
+    assert r.candidate_count == 20 and r.frames_used <= 12
+    assert r.size_ratio == pytest.approx(3.0, rel=0.05)
+    assert _angle(r.laser_axis, TRUE_D) < 0.1
+
+
+async def test_a_long_fit_keeps_heartbeating(monkeypatch):
+    """The fit runs in a thread for minutes on a big dive; with no heartbeat
+    the 5-minute heartbeat timeout killed it three times and stuck the dive."""
+    import time
+
+    real = cal._fit
+    monkeypatch.setattr(cal, "HEARTBEAT_EVERY_S", 0.05)
+    monkeypatch.setattr(cal, "_fit", lambda *a: (time.sleep(0.6), real(*a))[1])
+    payload, store = _calibration_input(np.linspace(1.0, 3.0, 10))
+    beats = []
+    env = ActivityEnvironment()
+    env.on_heartbeat = lambda *details: beats.append(details)
+    acts = AutomaticCalibrationActivities(store_factory=lambda: store)
+
+    await env.run(acts.fit_automatic_calibration, payload)
+
+    # One per frame read, and then many while the fit ran.
+    assert len(beats) >= len(payload.frames) + 5

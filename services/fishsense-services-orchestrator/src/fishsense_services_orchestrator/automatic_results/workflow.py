@@ -5,12 +5,15 @@ PAPER.md §6's chain, each on the processor role that owns it:
 
 1. **frames** (GPU): stage the raw frames, then per frame the detector's dot,
    the SAM 3.1 mask at it (score >= 0.5) and its head/tail; persist; clean up;
-2. **species** (GPU): BioCLIP zero-shot on each kept mask, through the species
-   stage's own processor workflow (`PredictSpeciesImagesWorkflow`);
-3. **calibration** (per-image): the label-free size-constancy fit on the
+2. **calibration** (per-image): the label-free size-constancy fit on the
    dive's slate frames; with none, the refusal is written without a processor;
-4. **lengths** (light): at the automatic dot's depth, under the calibration
-   the dive's lengths use now.
+3. **lengths** (light): at the automatic dot's depth, under the calibration
+   the dive's lengths use now;
+4. **species** (GPU): BioCLIP zero-shot on each kept mask, through the species
+   stage's own processor workflow (`PredictSpeciesImagesWorkflow`). **Last,
+   and its failure is logged, not raised**: species never costs a dive its
+   lengths. (2026-10-15 audit: it ran second, with BioCLIP unprovisioned, and
+   its failure failed every dive before a length was written.)
 
 Rules kept from the other parents (`species_predict.workflow`,
 `laser.workflow`): deterministic child ids reused ALLOW_DUPLICATE, and a child
@@ -21,17 +24,31 @@ runs the GPU steps** -- the CPU fallback would run Mask R-CNN, whose lengths
 were never validated, so on `cpu_fallback` or `unavailable` those steps wait
 for a later run and the CPU steps go on with what is there.
 
-`AutomaticResultsParentWorkflow` is the schedule's (the backlog's oldest
-dive); `AutomaticResultsForDiveWorkflow` runs a named dive on demand, as the
-validation harness does for the paper's dives, which are not in the backlog.
+`AutomaticResultsParentWorkflow` is the schedule's: it **drains** the
+backlog, dive after dive, until `AUTOMATIC_DRAIN_WINDOW` has passed since it
+started, the cohort is empty, or it is handed a dive it already took (it
+tells the cohort which). **A dive's failed step does not hold the backlog**
+(2026-10-15 audit: the oldest dive, failing deterministically, was selected
+every hour and starved the rest): the failure is recorded against the dive
+(at three the cohort leaves it for an operator), its raw scratch is cleaned
+up, and the run goes on. `AutomaticResultsForDiveWorkflow` runs a named dive
+on demand, as the validation harness does for the paper's dives, which are
+not in the backlog; it records a failure too, and then fails, so a dive run
+by hand never reads as done when it isn't.
 """
 
+import uuid
 from datetime import timedelta
-from typing import List, Optional
+from typing import Awaitable, Callable, List, Optional
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
-from temporalio.exceptions import WorkflowAlreadyStartedError
+from temporalio.exceptions import (
+    ActivityError,
+    ApplicationError,
+    ChildWorkflowError,
+    WorkflowAlreadyStartedError,
+)
 
 with workflow.unsafe.imports_passed_through():
     import annotated_types  # noqa: F401  pylint: disable=unused-import
@@ -77,6 +94,7 @@ with workflow.unsafe.imports_passed_through():
     )
 
 __all__ = [
+    "AUTOMATIC_DRAIN_WINDOW",
     "AutomaticResultsForDiveWorkflow",
     "AutomaticResultsParentWorkflow",
     "RUN_TIMEOUT",
@@ -90,15 +108,24 @@ _DB_FAIL_FAST = RetryPolicy(
 DB_TIMEOUT = timedelta(minutes=15)
 GPU_CHILD_TIMEOUT = timedelta(hours=6)
 CPU_CHILD_TIMEOUT = timedelta(hours=1)
+#: Above the processor's fit budget (FIT_TIMEOUT, 2 h), so a slow fit is not
+#: cut off by its parent.
+CALIBRATION_CHILD_TIMEOUT = timedelta(hours=2, minutes=15)
 STAGE_TIMEOUT = timedelta(hours=1)
-#: The schedule's run timeout: every step at its longest (two GPU children,
-#: two CPU ones, staging and cleanup, three wakes, nine database steps).
+#: How long after its start a run may begin another dive (the hourly schedule
+#: skips a firing while a run is going).
+AUTOMATIC_DRAIN_WINDOW = timedelta(minutes=50)
+#: The schedule's run timeout: the window, then one dive's every step at its
+#: longest (two GPU children, two CPU ones, staging and cleanup, three wakes,
+#: ten database steps).
 RUN_TIMEOUT = (
-    9 * DB_TIMEOUT
+    AUTOMATIC_DRAIN_WINDOW
+    + 10 * DB_TIMEOUT
     + GPU_WAKE_TIMEOUT
     + 2 * WAKE_TIMEOUT
     + 2 * GPU_CHILD_TIMEOUT
-    + 2 * CPU_CHILD_TIMEOUT
+    + CALIBRATION_CHILD_TIMEOUT
+    + CPU_CHILD_TIMEOUT
     + 2 * STAGE_TIMEOUT
 )
 
@@ -158,23 +185,44 @@ async def _frames(target: AutomaticTarget, gpu: _Gpu) -> None:
     if not inputs.frames or not await gpu.ready():
         return
     staging = StagingTarget(target.tenant_id, target.dive_id)
-    await stage_raw(staging)
-    ran, results = await _child(
-        "PredictAutomaticFramesWorkflow",
-        inputs,
-        child_id=raw_scratch_reader_id("automatic-frames", target.dive_id),
-        task_queue=PROCESSOR_GPU_TASK_QUEUE,
-        timeout=GPU_CHILD_TIMEOUT,
-        result_type=List[AutomaticFrameResult],
-    )
-    if not ran:
-        return
-    if results:
-        await _db("persist_automatic_frames", target, results, result_type=int)
-    await cleanup_raw(staging)
+    # The scratch is this firing's to clean up, whatever happens -- unless
+    # the child is running under another firing, which owns it.
+    owns_scratch = True
+    try:
+        await stage_raw(staging)
+        ran, results = await _child(
+            "PredictAutomaticFramesWorkflow",
+            inputs,
+            child_id=raw_scratch_reader_id("automatic-frames", target.dive_id),
+            task_queue=PROCESSOR_GPU_TASK_QUEUE,
+            timeout=GPU_CHILD_TIMEOUT,
+            result_type=List[AutomaticFrameResult],
+        )
+        if not ran:
+            owns_scratch = False
+            return
+        if results:
+            await _db("persist_automatic_frames", target, results, result_type=int)
+    finally:
+        if owns_scratch:
+            await cleanup_raw(staging)
 
 
 async def _species(target: AutomaticTarget, gpu: _Gpu) -> None:
+    """Species, isolated: a failure (BioCLIP unprovisioned, a GPU out of
+    memory) is logged and the dive keeps its lengths; species work stays
+    outstanding, so a later run retries it."""
+    try:
+        await _species_step(target, gpu)
+    except (ActivityError, ChildWorkflowError) as exc:
+        workflow.logger.warning(
+            "automatic species failed for dive=%s; lengths are kept: %s",
+            target.dive_id,
+            exc.cause or exc,
+        )
+
+
+async def _species_step(target: AutomaticTarget, gpu: _Gpu) -> None:
     inputs: PredictSpeciesImagesInput = await _db(
         "resolve_automatic_species_inputs",
         target,
@@ -217,7 +265,7 @@ async def _calibration(target: AutomaticTarget) -> None:
             plan.payload,
             child_id=f"automatic-calibration-{target.dive_id}",
             task_queue=PROCESSOR_TASK_QUEUE,
-            timeout=CPU_CHILD_TIMEOUT,
+            timeout=CALIBRATION_CHILD_TIMEOUT,
             result_type=AutomaticCalibrationResult,
         )
         if not ran:
@@ -248,12 +296,32 @@ async def _lengths(target: AutomaticTarget) -> None:
         )
 
 
+class StepFailed(Exception):
+    """A dive's step failed; it is recorded against the dive."""
+
+
+async def _step(
+    target: AutomaticTarget, name: str, run: Callable[[], Awaitable[None]]
+) -> None:
+    try:
+        await run()
+    except (ActivityError, ChildWorkflowError) as exc:
+        error = str(exc.cause or exc)
+        workflow.logger.warning(
+            "automatic %s failed for dive=%s: %s", name, target.dive_id, error
+        )
+        await _db("record_automatic_results_failure", target, name, error)
+        raise StepFailed(name) from exc
+
+
 async def _run_for_dive(target: AutomaticTarget) -> None:
+    """Every step; a failed one is recorded and ends the dive (StepFailed)."""
     gpu = _Gpu()
-    await _frames(target, gpu)
+    await _step(target, "frames", lambda: _frames(target, gpu))
+    await _step(target, "calibration", lambda: _calibration(target))
+    await _step(target, "lengths", lambda: _lengths(target))
+    # Isolated: a species failure is logged, and the dive keeps its lengths.
     await _species(target, gpu)
-    await _calibration(target)
-    await _lengths(target)
 
 
 @workflow.defn
@@ -269,23 +337,40 @@ class AutomaticResultsForDiveWorkflow:
 
     @workflow.run
     async def run(self, target: AutomaticTarget) -> AutomaticTarget:
-        await _run_for_dive(target)
+        try:
+            await _run_for_dive(target)
+        except StepFailed as exc:
+            raise ApplicationError(
+                f"automatic {exc} failed for dive {target.dive_id} (recorded)",
+                type="AutomaticStepFailed",
+                non_retryable=True,
+            ) from exc
         return target
 
 
 @workflow.defn
 class AutomaticResultsParentWorkflow:
     # pylint: disable=too-few-public-methods
-    """The backlog's oldest dive across tenants, every step. Returns it, or
-    None when the backlog is empty."""
+    """Drains the backlog, oldest dive first across tenants, every step of
+    each. Returns the last dive taken, or None when there was none."""
 
     @workflow.run
     async def run(self) -> Optional[AutomaticTarget]:
-        target: Optional[AutomaticTarget] = await _db(
-            "select_next_dive_for_automatic_results",
-            result_type=Optional[AutomaticTarget],
-        )
-        if target is None:
-            return None
-        await _run_for_dive(target)
-        return target
+        started = workflow.now()
+        taken: List[uuid.UUID] = []
+        last: Optional[AutomaticTarget] = None
+        while workflow.now() - started < AUTOMATIC_DRAIN_WINDOW:
+            target: Optional[AutomaticTarget] = await _db(
+                "select_next_dive_for_automatic_results",
+                list(taken),
+                result_type=Optional[AutomaticTarget],
+            )
+            if target is None or target.dive_id in taken:
+                break
+            taken.append(target.dive_id)
+            last = target
+            try:
+                await _run_for_dive(target)
+            except StepFailed:
+                continue
+        return last

@@ -61,6 +61,8 @@ from fishsense_services_api.automatic_results_store import (
     automatic_calibration_inputs,
     automatic_frames_inputs,
     automatic_measure_inputs,
+    automatic_results_cohort,
+    record_automatic_results_failure,
     automatic_species_captures,
     next_dive_for_automatic_results,
     no_slate_frames,
@@ -276,6 +278,23 @@ async def test_the_cohort_drains(owner_engine, app_engine):
                           laser_position=None, laser_axis=None))  # fmt: skip
     # Refused and no stored calibration: no length is possible, so no work.
     assert await _next(app_engine, lab) is None
+
+
+async def test_with_species_off_species_is_no_work(owner_engine, app_engine):
+    """Species has its own switch (2026-10-15): off, a dive whose only work
+    left is species leaves the cohort, so it never holds the backlog."""
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    fish_frame = await capture(owner_engine, lab, dive_id)
+    await _predict(app_engine, lab, dive_id, _predicted(fish_frame))
+    await _in(app_engine, lab, persist_automatic_calibration, dive_id,
+              _label_free(outcome="refused", refusal_reason="no_candidates",
+                          laser_position=None, laser_axis=None))  # fmt: skip
+
+    assert await _next(app_engine, lab) == dive_id  # species outstanding
+    off = await _in(app_engine, lab, next_dive_for_automatic_results,
+                    species=False, **VERSIONS)  # fmt: skip
+    assert off is None
 
 
 async def test_a_new_version_reopens_the_frames(owner_engine, app_engine):
@@ -750,3 +769,322 @@ async def test_a_late_slate_score_makes_the_calibration_stale(owner_engine, app_
     await presence(owner_engine, lab, c, probability=0.9)
 
     assert await _next(app_engine, lab) == dive_id
+
+
+# -- dives the chain must leave alone, or only calibrate -----------------------------
+
+
+async def test_an_excluded_dive_is_not_in_the_cohort(owner_engine, app_engine):
+    """Some dives produce plausible but wrong results: 466 holds three laser
+    states, 442 was shot overexposed (2026-10-15). An operator excludes them,
+    with a reason."""
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    await capture(owner_engine, lab, dive_id)
+    assert await _next(app_engine, lab) == dive_id
+
+    await exec_(
+        owner_engine,
+        "INSERT INTO automatic_results_exclusions (tenant_id, dive_id, reason) "
+        "VALUES (:t, :d, 'three laser states')",
+        t=lab,
+        d=dive_id,
+    )
+
+    assert await _next(app_engine, lab) is None
+
+
+async def test_an_exclusion_needs_a_reason(owner_engine):
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    with pytest.raises(IntegrityError):
+        await exec_(
+            owner_engine,
+            "INSERT INTO automatic_results_exclusions (tenant_id, dive_id, reason) "
+            "VALUES (:t, :d, '')",
+            t=lab,
+            d=dive_id,
+        )
+
+
+async def _calibration_session(owner_engine, lab):
+    """A session (its slate frames) that a fish dive borrows from."""
+    from _slate_calibration_seed import slate_presence as presence
+
+    session = await _backlog_dive(owner_engine, lab)
+    await _backlog_dive(owner_engine, lab, source_dive=session)
+    slate = await capture(owner_engine, lab, session)
+    other = await capture(owner_engine, lab, session)
+    await presence(owner_engine, lab, slate, probability=0.95)
+    await presence(owner_engine, lab, other, probability=0.05)
+    return session, slate, other
+
+
+async def test_a_calibration_session_runs_only_its_slate_frames(
+    owner_engine, app_engine
+):
+    """Decided 2026-10-15: a session's slate frames feed the label-free fit
+    its borrowers use; nothing in it is segmented or measured as a fish."""
+    from fishsense_services_api.slate_presence_store import slate_frames
+
+    lab = await tenant(owner_engine)
+    session, slate, _ = await _calibration_session(owner_engine, lab)
+
+    inputs = await _in(app_engine, lab, automatic_frames_inputs, session,
+                       headtail_version=1, slate_frames=slate_frames)  # fmt: skip
+
+    assert [f.capture_id for f in inputs.frames] == [slate]
+
+
+async def test_a_calibrated_session_is_done_without_its_other_frames(
+    owner_engine, app_engine
+):
+    lab = await tenant(owner_engine)
+    session, slate, _ = await _calibration_session(owner_engine, lab)
+    # Its borrower is a dive of the backlog too; done with it here.
+    await exec_(
+        owner_engine,
+        "INSERT INTO automatic_results_exclusions (tenant_id, dive_id, reason) "
+        "SELECT tenant_id, id, 'not this test' FROM dives "
+        "WHERE calibration_source_dive_id = :s",
+        s=session,
+    )
+    await _predict(app_engine, lab, session,
+                   AutomaticHeadTailRow(capture_id=slate, status="slate_frame",
+                                        laser_x=2000.0, laser_y=1500.0,
+                                        predictor_version=1))  # fmt: skip
+    assert await _next(app_engine, lab) == session  # its calibration is left
+
+    await _in(app_engine, lab, persist_automatic_calibration, session,
+              _label_free(capture_ids=[slate]))  # fmt: skip
+
+    assert await _next(app_engine, lab) is None
+
+
+async def test_a_session_frame_given_a_fish_is_never_measured_or_named(
+    owner_engine, app_engine
+):
+    """A fish head/tail on a session (written before it was a session, or by
+    the detector's miss) is no species job and no length."""
+    lab = await tenant(owner_engine)
+    session, _, other = await _calibration_session(owner_engine, lab)
+    await calibrate(owner_engine, lab, session)
+    await _predict(app_engine, lab, session, _predicted(other))
+
+    jobs = await _in(app_engine, lab, automatic_species_captures, session,
+                     species_version=1)  # fmt: skip
+    measure = await _in(app_engine, lab, automatic_measure_inputs, session,
+                        algorithm_version="1")  # fmt: skip
+
+    assert jobs == []
+    assert measure.captures == []
+
+
+async def test_a_session_fish_is_no_length_outstanding(owner_engine, app_engine):
+    """Its dive done otherwise, a fish head/tail on a session must not hold
+    the session in the cohort for a length it will never get."""
+    lab = await tenant(owner_engine)
+    session, slate, other = await _calibration_session(owner_engine, lab)
+    await exec_(
+        owner_engine,
+        "INSERT INTO automatic_results_exclusions (tenant_id, dive_id, reason) "
+        "SELECT tenant_id, id, 'not this test' FROM dives "
+        "WHERE calibration_source_dive_id = :s",
+        s=session,
+    )
+    await calibrate(owner_engine, lab, session)
+    await _predict(
+        app_engine, lab, session,
+        AutomaticHeadTailRow(capture_id=slate, status="slate_frame", laser_x=2000.0,
+                             laser_y=1500.0, predictor_version=1),
+        _predicted(other),
+    )  # fmt: skip
+    await _in(app_engine, lab, persist_automatic_calibration, session,
+              _label_free(capture_ids=[slate]))  # fmt: skip
+
+    assert await _next(app_engine, lab) is None
+
+
+# -- the cohort as the backlog drains -----------------------------------------------
+
+_BIG = {
+    "automatic_head_tail_predictions",
+    "automatic_species_predictions",
+    "automatic_measurements",
+    "slate_presence_predictions",
+}
+
+
+async def _copy_rows(owner_engine, table, template_id, where, params):
+    """Copy one template row of `table` onto every capture `where` selects."""
+    async with owner_engine.begin() as conn:
+        columns = [
+            name
+            for (name,) in await conn.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = :t AND column_name NOT IN "
+                    "('id', 'seq', 'capture_id', 'created_at') "
+                    "ORDER BY ordinal_position"
+                ),
+                {"t": table},
+            )
+        ]
+        listed = ", ".join(columns)
+        copied = ", ".join(f"r.{n}" for n in columns)
+        await conn.execute(
+            text(
+                f"INSERT INTO {table} (capture_id, {listed}) "
+                f"SELECT c.id, {copied} FROM {table} r JOIN captures c "
+                f"ON c.tenant_id = r.tenant_id WHERE r.id = :template "
+                f"AND c.id <> r.capture_id AND {where}"
+            ),
+            {"template": template_id, **params},
+        )
+
+
+async def _a_drained_backlog(owner_engine, app_engine, lab, *, dives=30, frames=30):
+    """`dives` dives done (every frame abstained, slate-scored, a refused
+    calibration), and one with a frame left: the cohort near the end."""
+    from _slate_calibration_seed import slate_presence as presence
+
+    device_id = await device(owner_engine, lab)
+    done = []
+    for _ in range(dives):
+        d = await dive(owner_engine, lab, device_id=device_id, priority="low")
+        done.append(d)
+        for _ in range(frames):
+            await capture(owner_engine, lab, d)
+    first = done[0]
+    template_capture = (
+        await _rows(owner_engine, "SELECT id FROM captures WHERE dive_id = :d "
+                    "LIMIT 1", d=first)
+    )[0]["id"]  # fmt: skip
+    await _predict(app_engine, lab, first,
+                   AutomaticHeadTailRow(capture_id=template_capture,
+                                        status="no_laser_dot", predictor_version=1))  # fmt: skip
+    await presence(owner_engine, lab, template_capture, probability=0.05)
+    (ht,) = await _rows(owner_engine, "SELECT id FROM automatic_head_tail_predictions")
+    (sp,) = await _rows(owner_engine, "SELECT id FROM slate_presence_predictions")
+    every = "c.dive_id = ANY(CAST(:dives AS uuid[]))"
+    for table, row in (("automatic_head_tail_predictions", ht),
+                       ("slate_presence_predictions", sp)):  # fmt: skip
+        await _copy_rows(owner_engine, table, row["id"], every, {"dives": done})
+    for d in done:
+        await _in(app_engine, lab, persist_automatic_calibration, d,
+                  _label_free(outcome="refused", refusal_reason="no_candidates",
+                              laser_position=None, laser_axis=None))  # fmt: skip
+    left = await dive(owner_engine, lab, device_id=device_id, priority="low")
+    await capture(owner_engine, lab, left)
+    await exec_(owner_engine, "ANALYZE")
+    return left
+
+
+def _plan_nodes(plan):
+    yield plan
+    for child in plan.get("Plans", []):
+        yield from _plan_nodes(child)
+
+
+async def test_the_last_dive_is_found_when_the_backlog_has_drained(
+    owner_engine, app_engine
+):
+    lab = await tenant(owner_engine)
+    left = await _a_drained_backlog(owner_engine, app_engine, lab)
+    assert await _next(app_engine, lab) == left
+
+
+async def test_the_cohort_reads_each_frames_latest_rows_by_index(
+    owner_engine, app_engine
+):
+    """2026-10-15 audit: the cohort read every `current_automatic_*` view
+    (and `current_slate_presence`) correlated per frame or per dive -- the
+    shape that took the slate cohort past the app role's 30 s timeout once
+    its backlog drained (2026-10-14). Each frame's latest row is one index
+    lookup, and nothing de-duplicates the big tables wholesale."""
+    lab = await tenant(owner_engine)
+    await _a_drained_backlog(owner_engine, app_engine, lab)
+    async with tenant_transaction(app_engine, lab) as conn:
+        (plan,) = (
+            await conn.execute(
+                text(
+                    "EXPLAIN (FORMAT JSON) SELECT d.id FROM dives d "
+                    f"WHERE d.tenant_id = :t AND {automatic_results_cohort()} "
+                    "ORDER BY d.created_at, d.id LIMIT 1"
+                ),
+                {"t": lab, "hv": 1, "sv": 1, "cv": "1", "mv": "1"},
+            )
+        ).scalar_one()
+    nodes = list(_plan_nodes(plan["Plan"]))
+    # An empty table is read however Postgres likes -- a seq scan of nothing
+    # is free; the drained dives here abstained, so no species or lengths.
+    populated = {
+        t for t in _BIG
+        if (await _rows(owner_engine, f"SELECT 1 AS x FROM {t} LIMIT 1"))
+    }  # fmt: skip
+    assert {
+        "automatic_head_tail_predictions",
+        "slate_presence_predictions",
+    } <= populated
+    big_reads = [n for n in nodes if n.get("Relation Name") in populated]
+    assert big_reads
+    assert all(
+        n["Node Type"] in ("Index Scan", "Index Only Scan") for n in big_reads
+    ), [(n["Node Type"], n["Relation Name"]) for n in big_reads]
+    assert not any(
+        n["Node Type"] == "Unique"
+        and {m.get("Relation Name") for m in _plan_nodes(n)} & _BIG
+        for n in nodes
+    )
+
+
+# -- a dive that keeps failing does not hold the backlog ----------------------------
+
+
+async def test_the_dives_a_run_already_took_are_not_offered_again(
+    owner_engine, app_engine
+):
+    lab = await tenant(owner_engine)
+    older = await _backlog_dive(owner_engine, lab)
+    await capture(owner_engine, lab, older)
+    newer = await _backlog_dive(owner_engine, lab)
+    await capture(owner_engine, lab, newer)
+
+    async def _next_but(*exclude):
+        c = await _in(app_engine, lab, next_dive_for_automatic_results,
+                      exclude=list(exclude), **VERSIONS)  # fmt: skip
+        return None if c is None else c.dive_id
+
+    assert await _next_but() == older
+    assert await _next_but(older) == newer
+    assert await _next_but(older, newer) is None
+
+
+async def test_a_dive_that_failed_three_times_leaves_the_cohort(
+    owner_engine, app_engine
+):
+    """2026-10-15 audit: the oldest dive, failing deterministically (a raw
+    gone from the NAS, an unusable calibration, a bad frame), was selected
+    every hour and starved the rest. Each failure is recorded; at three, the
+    dive waits for an operator (who deletes its failures to retry it)."""
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    await capture(owner_engine, lab, dive_id)
+
+    for n in range(3):
+        assert await _next(app_engine, lab) == dive_id, n
+        await _in(app_engine, lab, record_automatic_results_failure, dive_id,
+                  step="frames", error=f"attempt {n}")  # fmt: skip
+
+    assert await _next(app_engine, lab) is None
+    rows = await _rows(owner_engine, "SELECT step, error FROM "
+                       "automatic_results_failures WHERE dive_id = :d", d=dive_id)  # fmt: skip
+    assert len(rows) == 3 and rows[0]["step"] == "frames"
+
+
+async def test_a_failure_needs_a_known_step(owner_engine, app_engine):
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    with pytest.raises(DBAPIError):
+        await _in(app_engine, lab, record_automatic_results_failure, dive_id,
+                  step="sideways", error="x")  # fmt: skip

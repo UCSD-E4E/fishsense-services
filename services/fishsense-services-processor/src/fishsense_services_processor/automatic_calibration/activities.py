@@ -13,6 +13,14 @@ then the calibration frames' own dots (cscw's fallback).
 
 On the per-image role: it decodes images (a JPEG at a time, keeping only the
 features about the dot), which the light role's memory budget excludes.
+
+**Bounded, and heartbeating** (2026-10-15 audit). Registration is quadratic
+in frames -- 100 slate frames are 4,950 pairs -- and a calibration session
+can hold hundreds, so the fit takes at most `MAX_CALIBRATION_FRAMES`, spread
+evenly along the dot's travel (`spread`) so the range the fit needs is kept;
+the paper's sessions had 17-33. And while the fit runs in its thread the
+activity keeps heartbeating, where it used to go silent for minutes and be
+killed by its heartbeat timeout, three times, sticking the dive.
 """
 
 from __future__ import annotations
@@ -32,7 +40,43 @@ from fishsense_services_contracts.automatic_results import (
 )
 from fishsense_services_processor.automatic_results import size_constancy as sc
 
-__all__ = ["AutomaticCalibrationActivities", "dive_line"]
+__all__ = [
+    "AutomaticCalibrationActivities",
+    "HEARTBEAT_EVERY_S",
+    "MAX_CALIBRATION_FRAMES",
+    "dive_line",
+    "spread",
+]
+
+#: The most slate frames a fit registers (pairs grow as n^2: 40 are 780).
+MAX_CALIBRATION_FRAMES = 40
+#: How often the activity heartbeats while the fit runs in its thread.
+HEARTBEAT_EVERY_S = 30.0
+
+
+def spread(dots, cap: int) -> list[int]:
+    """At most `cap` of `dots`' indices, evenly spaced along the dots' own
+    principal direction (the laser line, along which range varies), the two
+    extremes included; all of them when there are no more than `cap`."""
+    xy = np.asarray(dots, float).reshape(-1, 2)
+    n = len(xy)
+    if n <= cap:
+        return list(range(n))
+    centred = xy - xy.mean(axis=0)
+    _, _, vt = np.linalg.svd(centred, full_matrices=False)
+    order = np.argsort(centred @ vt[0])
+    picks = np.round(np.linspace(0, n - 1, cap)).astype(int)
+    return sorted(int(order[i]) for i in picks)
+
+
+async def _while_heartbeating(fn, *args):
+    """`fn(*args)` in a thread, heartbeating until it returns."""
+    task = asyncio.ensure_future(asyncio.to_thread(fn, *args))
+    while True:
+        done, _ = await asyncio.wait({task}, timeout=HEARTBEAT_EVERY_S)
+        if done:
+            return task.result()
+        activity.heartbeat()
 
 
 def dive_line(dots) -> Optional[tuple[float, float, float]]:
@@ -91,8 +135,14 @@ class AutomaticCalibrationActivities:  # pylint: disable=too-few-public-methods
                 outcome="refused", refusal_reason="no_candidates", **base
             )
         store = self._object_store()
+        chosen = [
+            payload.frames[i]
+            for i in spread(
+                [[f.x, f.y] for f in payload.frames], MAX_CALIBRATION_FRAMES
+            )
+        ]
         features, kept = [], []
-        for frame in payload.frames:
+        for frame in chosen:
             try:
                 jpeg = await store.download_processed_jpeg(frame.jpeg)
                 features.append(
@@ -105,7 +155,7 @@ class AutomaticCalibrationActivities:  # pylint: disable=too-few-public-methods
                     "capture=%s: no features (%s)", frame.capture_id, exc
                 )
             activity.heartbeat()
-        fit = await asyncio.to_thread(_fit, payload, features, kept)
+        fit = await _while_heartbeating(_fit, payload, features, kept)
         activity.logger.info(
             "dive=%s label-free %s (%s): frames=%d pairs=%d ratio=%s",
             payload.dive_id, fit.outcome, fit.refusal_reason, fit.frames_used,

@@ -48,6 +48,10 @@ from fishsense_services_api.slate_presence_store import detector_slate_frame
 __all__ = [
     "AUTOMATIC_PRODUCER",
     "AUTOMATIC_RESULTS_COHORT",
+    "AUTOMATIC_RESULTS_MAX_FAILURES",
+    "AUTOMATIC_RESULTS_STEPS",
+    "automatic_results_cohort",
+    "record_automatic_results_failure",
     "SLATE_FRAME_THRESHOLD",
     "AutomaticCalibrationCandidate",
     "AutomaticCalibrationInputs",
@@ -123,17 +127,66 @@ class ForeignHeadTail(InvalidAutomaticResults):
 
 # -- the cohort -------------------------------------------------------------------
 
+
 #: The capture's latest automatic head/tail, `h`, at the version `:hv`.
-_FRAME_DONE = """EXISTS (
-    SELECT 1 FROM current_automatic_head_tail_predictions h
-    WHERE h.tenant_id = c.tenant_id AND h.capture_id = c.id
-      AND h.predictor_version = :hv
+def _latest(table: str, capture: str = "c") -> str:
+    """Capture `capture`'s latest row of `table`, as its `current_*` view
+    picks it, but as one index lookup on (tenant_id, capture_id, seq). Read
+    through the view, correlated per frame or per dive, Postgres rebuilt it --
+    sorting the whole table -- every time: the shape that took the slate
+    cohort past the app role's 30 s timeout once its backlog drained
+    (2026-10-14)."""
+    return f"""(
+        SELECT latest.* FROM {table} latest
+        WHERE latest.tenant_id = {capture}.tenant_id
+          AND latest.capture_id = {capture}.id
+        ORDER BY latest.seq DESC
+        LIMIT 1
+    )"""
+
+
+_FRAME_DONE = f"""EXISTS (
+    SELECT 1 FROM {_latest("automatic_head_tail_predictions")} h
+    WHERE h.predictor_version = :hv
 )"""
 
 #: Capture `c` is one the slate-presence detector currently calls a slate
 #: (0035). The same rule as `slate_frames`, in SQL, so the cohort and the
 #: inputs agree.
 _DETECTOR_SLATE = detector_slate_frame(SLATE_FRAME_THRESHOLD)
+
+
+def _calibration_session(tenant: str, dive: str) -> str:
+    """The dive is another dive's calibration source (decided 2026-10-15): its
+    slate frames feed the label-free fit its borrowers use, and nothing in it
+    is segmented, named or measured as a fish."""
+    return f"""EXISTS (
+    SELECT 1 FROM dives borrower
+    WHERE borrower.tenant_id = {tenant}
+      AND borrower.calibration_source_dive_id = {dive}
+      AND borrower.id <> {dive}
+)"""
+
+
+_SESSION = _calibration_session("d.tenant_id", "d.id")
+
+#: An operator listed the dive as one to leave alone (0039).
+_EXCLUDED = """EXISTS (
+    SELECT 1 FROM automatic_results_exclusions x
+    WHERE x.tenant_id = d.tenant_id AND x.dive_id = d.id
+)"""
+
+#: A dive's failed runs before the cohort leaves it for an operator (0040).
+AUTOMATIC_RESULTS_MAX_FAILURES = 3
+
+#: The steps a failure is recorded against (0040's check).
+AUTOMATIC_RESULTS_STEPS = ("frames", "calibration", "lengths", "species")
+
+#: The dive failed as often as the cohort allows (0040).
+_FAILED_OUT = f"""(
+    SELECT count(*) FROM automatic_results_failures f
+    WHERE f.tenant_id = d.tenant_id AND f.dive_id = d.id
+) >= {AUTOMATIC_RESULTS_MAX_FAILURES}"""
 
 #: Dive `d` has a human measurement: any `measurements` row on its captures.
 _HUMAN_MEASURED = """EXISTS (
@@ -142,25 +195,32 @@ _HUMAN_MEASURED = """EXISTS (
     WHERE mc.tenant_id = d.tenant_id AND mc.dive_id = d.id
 )"""
 
-_WORK = f"""(
-    EXISTS (
+#: A canonical frame with no automatic head/tail at the current version; in
+#: a calibration session, only its slate frames.
+_FRAMES_WORK = f"""EXISTS (
         SELECT 1 FROM captures c
         WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id AND c.is_canonical
           AND NOT {_FRAME_DONE}
-    )
-    OR EXISTS (
-        SELECT 1 FROM current_automatic_head_tail_predictions h
-        JOIN captures c ON c.tenant_id = h.tenant_id AND c.id = h.capture_id
+          AND (NOT {_SESSION} OR {_DETECTOR_SLATE})
+    )"""
+
+#: A kept mask with no automatic species at the current version (never in a
+#: calibration session).
+_SPECIES_WORK = f"""NOT {_SESSION} AND EXISTS (
+        SELECT 1 FROM captures c
+        CROSS JOIN LATERAL {_latest("automatic_head_tail_predictions")} h
         WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id AND c.is_canonical
           AND h.status = 'predicted' AND NOT {_DETECTOR_SLATE}
           AND NOT EXISTS (
-              SELECT 1 FROM current_automatic_species_predictions s
-              WHERE s.tenant_id = h.tenant_id AND s.capture_id = h.capture_id
-                AND s.automatic_head_tail_prediction_id = h.id
+              SELECT 1 FROM {_latest("automatic_species_predictions")} s
+              WHERE s.automatic_head_tail_prediction_id = h.id
                 AND s.predictor_version = :sv
           )
-    )
-    OR (
+    )"""
+
+#: No current automatic calibration at the current version, or one older than
+#: the dive's newest frame or slate score.
+_CALIBRATION_WORK = """(
         EXISTS (
             SELECT 1 FROM captures c
             WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id AND c.is_canonical
@@ -170,52 +230,72 @@ _WORK = f"""(
             WHERE a.tenant_id = d.tenant_id AND a.dive_id = d.id
               AND a.algorithm_version = :cv
               -- Stale against new frames, and against a slate score written
-              -- after it: the detector's slate frames are the candidates.
-              AND a.created_at >= greatest(
-                  coalesce((
-                      SELECT max(h.created_at)
-                      FROM current_automatic_head_tail_predictions h
-                      JOIN captures c
-                        ON c.tenant_id = h.tenant_id AND c.id = h.capture_id
-                      WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
-                  ), '-infinity'),
-                  coalesce((
-                      SELECT max(sp.created_at)
-                      FROM current_slate_presence sp
-                      JOIN captures c
-                        ON c.tenant_id = sp.tenant_id AND c.id = sp.capture_id
-                      WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
-                  ), '-infinity')
-              )
-        )
-    )
-    OR (
-        EXISTS (
-            SELECT 1 FROM automatic_measurement_calibrations mc
-            WHERE mc.tenant_id = d.tenant_id AND mc.dive_id = d.id
-        )
-        AND EXISTS (
-            SELECT 1 FROM current_automatic_head_tail_predictions h
-            JOIN captures c ON c.tenant_id = h.tenant_id AND c.id = h.capture_id
-            WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id AND c.is_canonical
-              AND h.status = 'predicted'
-              -- A frame the detector now calls a slate is never measured
-              -- (automatic_measure_inputs), so it is no length outstanding.
-              AND NOT {_DETECTOR_SLATE}
+              -- after it: the detector's slate frames are the candidates. A
+              -- capture's newest row is its current one (append-only), so
+              -- "any row newer" is "the newest is newer".
               AND NOT EXISTS (
-                  SELECT 1 FROM current_automatic_measurements m
-                  WHERE m.tenant_id = h.tenant_id AND m.capture_id = h.capture_id
-                    AND m.algorithm_version = :mv
+                  SELECT 1 FROM captures c
+                  WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+                    AND (
+                      EXISTS (
+                          SELECT 1 FROM automatic_head_tail_predictions h
+                          WHERE h.tenant_id = c.tenant_id AND h.capture_id = c.id
+                            AND h.created_at > a.created_at
+                      )
+                      OR EXISTS (
+                          SELECT 1 FROM slate_presence_predictions sp
+                          WHERE sp.tenant_id = c.tenant_id AND sp.capture_id = c.id
+                            AND sp.created_at > a.created_at
+                      )
+                    )
               )
         )
-    )
-)"""
+    )"""
 
-#: The backlog cohort over dive `d`, but for the tenant term the selector adds.
-#: Any priority. `:hv`, `:sv`, `:cv`, `:mv` are the stages' current versions.
-AUTOMATIC_RESULTS_COHORT = f"""{RECTIFIABLE_DIVE}
+#: A predicted fish with no current automatic length while a calibration
+#: exists (never in a calibration session).
+_LENGTHS_WORK = f"""NOT {_SESSION} AND EXISTS (
+        SELECT 1 FROM automatic_measurement_calibrations mc
+        JOIN captures c ON c.tenant_id = mc.tenant_id AND c.dive_id = mc.dive_id
+        CROSS JOIN LATERAL {_latest("automatic_head_tail_predictions")} h
+        WHERE mc.tenant_id = d.tenant_id AND mc.dive_id = d.id AND c.is_canonical
+          AND h.status = 'predicted'
+          -- A frame the detector now calls a slate is never measured
+          -- (automatic_measure_inputs), so it is no length outstanding.
+          AND NOT {_DETECTOR_SLATE}
+          -- current_automatic_measurements: the latest length whose head/tail
+          -- and calibration are still the frame's and the dive's.
+          AND (
+              SELECT m.algorithm_version FROM automatic_measurements m
+              WHERE m.tenant_id = c.tenant_id AND m.capture_id = c.id
+                AND m.automatic_head_tail_prediction_id = h.id
+                AND m.calibration_source = mc.calibration_source
+                AND m.automatic_laser_calibration_id
+                    IS NOT DISTINCT FROM mc.automatic_laser_calibration_id
+                AND m.laser_calibration_id IS NOT DISTINCT FROM mc.laser_calibration_id
+              ORDER BY m.seq DESC
+              LIMIT 1
+          ) IS DISTINCT FROM :mv
+    )"""
+
+
+def automatic_results_cohort(*, species: bool = True) -> str:
+    """The backlog cohort over dive `d`, but for the tenant term the selector
+    adds. Any priority. `:hv`, `:sv`, `:cv`, `:mv` are the stages' current
+    versions (`:sv` unused with `species` off). Species has its own switch
+    (2026-10-15): off, a dive whose only work is species is not in it."""
+    work = [_FRAMES_WORK, _CALIBRATION_WORK, _LENGTHS_WORK]
+    if species:
+        work.insert(1, _SPECIES_WORK)
+    return f"""{RECTIFIABLE_DIVE}
     AND NOT {_HUMAN_MEASURED}
-    AND {_WORK}"""
+    AND NOT {_EXCLUDED}
+    AND NOT {_FAILED_OUT}
+    AND ({" OR ".join(f"({w})" for w in work)})"""
+
+
+#: The cohort with species on, the default.
+AUTOMATIC_RESULTS_COHORT = automatic_results_cohort()
 
 
 @dataclass(frozen=True)
@@ -232,21 +312,45 @@ async def next_dive_for_automatic_results(
     species_version: int,
     calibration_version: str,
     measurement_version: str,
+    species: bool = True,
+    exclude: Sequence[uuid.UUID] = (),
 ) -> AutomaticCandidate | None:
-    """The tenant's oldest dive in the backlog cohort."""
+    """The tenant's oldest dive in the backlog cohort, other than `exclude`
+    (the dives the run already took)."""
     row = (
         await conn.execute(
             text(f"""
                 SELECT d.id, d.created_at FROM dives d
-                WHERE d.tenant_id = :t AND {AUTOMATIC_RESULTS_COHORT}
+                WHERE d.tenant_id = :t AND {automatic_results_cohort(species=species)}
+                  AND NOT d.id = ANY(CAST(:exclude AS uuid[]))
                 ORDER BY d.created_at, d.id
                 LIMIT 1
                 """),
             {"t": tenant_id, "hv": headtail_version, "sv": species_version,
-             "cv": calibration_version, "mv": measurement_version},
+             "cv": calibration_version, "mv": measurement_version,
+             "exclude": list(exclude)},
         )
     ).one_or_none()  # fmt: skip
     return None if row is None else AutomaticCandidate(row.id, row.created_at)
+
+
+async def record_automatic_results_failure(
+    conn: AsyncConnection,
+    tenant_id: uuid.UUID,
+    dive_id: uuid.UUID,
+    *,
+    step: str,
+    error: str,
+) -> None:
+    """A failed run of the dive's `step` (0040); at
+    `AUTOMATIC_RESULTS_MAX_FAILURES` the cohort leaves the dive."""
+    await conn.execute(
+        text(
+            "INSERT INTO automatic_results_failures "
+            "(tenant_id, dive_id, step, error) VALUES (:t, :d, :step, :error)"
+        ),
+        {"t": tenant_id, "d": dive_id, "step": step, "error": error[:4000]},
+    )
 
 
 # -- frames: the GPU stage's input --------------------------------------------------
@@ -319,6 +423,7 @@ async def automatic_frames_inputs(
             FROM captures c
             WHERE c.tenant_id = :t AND c.dive_id = :d AND c.is_canonical
               AND NOT {_FRAME_DONE}
+              AND (NOT {_calibration_session(":t", ":d")} OR {_DETECTOR_SLATE})
             ORDER BY c.number
             """),
         {"t": tenant_id, "d": dive_id, "hv": headtail_version},
@@ -467,6 +572,7 @@ async def automatic_species_captures(
               ON s.tenant_id = c.tenant_id AND s.capture_id = c.id
             WHERE c.tenant_id = :t AND c.dive_id = :d AND c.is_canonical
               AND h.status = 'predicted' AND NOT {_DETECTOR_SLATE}
+              AND NOT {_calibration_session(":t", ":d")}
               AND (s.id IS NULL OR s.automatic_head_tail_prediction_id <> h.id
                    OR s.predictor_version IS DISTINCT FROM :sv)
             ORDER BY c.number
@@ -698,7 +804,7 @@ async def automatic_measure_inputs(
     if cal is None:
         return AutomaticMeasureInputs(None, None, None, [])
     rows = await conn.execute(
-        text("""
+        text(f"""
             SELECT h.capture_id, h.id, h.laser_x, h.laser_y, h.head_x, h.head_y,
                    h.tail_x, h.tail_y
             FROM captures c
@@ -709,6 +815,7 @@ async def automatic_measure_inputs(
              AND m.algorithm_version = :mv
             WHERE c.tenant_id = :t AND c.dive_id = :d AND c.is_canonical
               AND h.status = 'predicted' AND m.id IS NULL
+              AND NOT {_calibration_session(":t", ":d")}
             ORDER BY c.number
             """),
         {"t": tenant_id, "d": dive_id, "mv": algorithm_version},
@@ -781,6 +888,14 @@ class AutomaticResultsCatalog(ServicePrincipal):
     ) -> AutomaticCandidate | None:
         async with self._tenant(tenant_id) as conn:
             return await next_dive_for_automatic_results(conn, tenant_id, **versions)
+
+    async def record_automatic_results_failure(
+        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, *, step: str, error: str
+    ) -> None:
+        async with self._tenant(tenant_id) as conn:
+            await record_automatic_results_failure(
+                conn, tenant_id, dive_id, step=step, error=error
+            )
 
     async def automatic_frames_inputs(
         self, tenant_id: uuid.UUID, dive_id: uuid.UUID, *, headtail_version: int
