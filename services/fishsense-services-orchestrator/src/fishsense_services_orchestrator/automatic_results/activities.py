@@ -159,9 +159,18 @@ def _refuse(target: AutomaticTarget, why: str) -> ApplicationError:
 
 
 class AutomaticResultsActivities:
-    def __init__(self, *, catalog: AutomaticResultsCatalog, store: Any) -> None:
+    def __init__(
+        self,
+        *,
+        catalog: AutomaticResultsCatalog,
+        store: Any,
+        species_enabled: bool = True,
+    ) -> None:
         self._catalog = catalog
         self._store = store
+        #: Species' own switch (2026-10-15): off, no species images, and the
+        #: cohort holds no dive for species work.
+        self._species_enabled = species_enabled
 
     async def _jpeg(self, target: AutomaticTarget, checksum: str, from_v1: bool):
         return await self._store.locate_processed_jpeg(
@@ -178,13 +187,17 @@ class AutomaticResultsActivities:
 
     @activity.defn(name="select_next_dive_for_automatic_results")
     async def select_next_dive_for_automatic_results(
-        self,
+        self, exclude: Optional[List[uuid.UUID]] = None
     ) -> Optional[AutomaticTarget]:
-        """The oldest backlog dive across tenants."""
+        """The oldest backlog dive across tenants, other than those the run
+        already took."""
         best, best_key = None, None
         for tenant_id in await self._catalog.member_tenants():
             candidate = await self._catalog.next_dive_for_automatic_results(
-                tenant_id, **VERSIONS
+                tenant_id,
+                species=self._species_enabled,
+                exclude=exclude or [],
+                **VERSIONS,
             )
             if candidate is None:
                 continue
@@ -193,6 +206,16 @@ class AutomaticResultsActivities:
                 best, best_key = AutomaticTarget(tenant_id, candidate.dive_id), key
         activity.logger.info("next dive for automatic results: %s", best)
         return best
+
+    @activity.defn(name="record_automatic_results_failure")
+    async def record_automatic_results_failure(
+        self, target: AutomaticTarget, step: str, error: str
+    ) -> None:
+        """A dive's failed step; at three failures the cohort leaves the dive
+        for an operator (0040)."""
+        await self._catalog.record_automatic_results_failure(
+            target.tenant_id, target.dive_id, step=step, error=error
+        )
 
     # -- frames (GPU) ---------------------------------------------------------
 
@@ -262,6 +285,13 @@ class AutomaticResultsActivities:
     async def resolve_automatic_species_inputs(
         self, target: AutomaticTarget
     ) -> PredictSpeciesImagesInput:
+        if not self._species_enabled:
+            return PredictSpeciesImagesInput(
+                tenant_id=target.tenant_id,
+                dive_id=target.dive_id,
+                candidates=species_candidates(),
+                images=[],
+            )
         captures = await self._catalog.automatic_species_captures(
             target.tenant_id, target.dive_id, species_version=SPECIES_PREDICTOR_VERSION
         )

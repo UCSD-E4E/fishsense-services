@@ -14,7 +14,12 @@ with workflow.unsafe.imports_passed_through():
         FitAutomaticCalibrationInput,
     )
 
-__all__ = ["FitAutomaticCalibrationWorkflow"]
+__all__ = ["FIT_TIMEOUT", "FitAutomaticCalibrationWorkflow"]
+
+#: The fit's budget, retries included. Pairwise registration is quadratic in
+#: frames, capped at 40 (780 pairs, seconds each at worst); the activity
+#: heartbeats throughout, so this bounds a fit that is slow, not silent.
+FIT_TIMEOUT = timedelta(hours=2)
 
 
 @workflow.defn
@@ -32,9 +37,7 @@ class FitAutomaticCalibrationWorkflow:
         return await workflow.execute_activity(
             "fit_automatic_calibration",
             payload,
-            # Pairwise registration is quadratic in frames: ~30 slate frames
-            # are ~450 pairs, seconds each at worst.
-            schedule_to_close_timeout=timedelta(hours=1),
+            schedule_to_close_timeout=FIT_TIMEOUT,
             heartbeat_timeout=timedelta(minutes=5),
             retry_policy=RetryPolicy(
                 maximum_attempts=3, non_retryable_error_types=["ValueError"]

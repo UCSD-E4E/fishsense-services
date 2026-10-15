@@ -30,8 +30,8 @@
 #                                                # (deploy/nrp/deployer-rbac.yaml). NOT v1's `nrp`:
 #                                                # v1's scales via deployments/scale, v2's creates and
 #                                                # deletes; each side keeps its own through the rollback.
-#   model_weights      { access_key, secret_key }  # NOT rendered here -- the NRP processor's Secret
-#                                                  # (docs/cutover.md); listed so the layout is whole.
+#   model_weights      { access_key, secret_key }  # the NRP processor's Garage weights identity:
+#                                                  # rendered for the processor-secret sync only.
 # PLATFORM writes (tofu — do NOT seed):
 #   generated/services_db { owner_password, app_password, backup_password,
 #                           analytics_password, smoke_password }
@@ -121,6 +121,20 @@
         FISHSENSE_OBJECT_STORE_SECRET_ACCESS_KEY={{ .Data.data.secret_key }}
         FISHSENSE_LABEL_STUDIO_S3_ACCESS_KEY={{ .Data.data.access_key }}
         FISHSENSE_LABEL_STUDIO_S3_SECRET_KEY={{ .Data.data.secret_key }}{{ end }}
+      '';
+    }
+    {
+      # The processor-secret sync (ops.processor_secret_sync): the two Garage
+      # keys the NRP processor is given -- the labels bucket's and
+      # model-weights' -- which it writes into fishsense-processor-secrets on
+      # every converge, uploading any pinned weight that's missing. The
+      # model-weights key is held by this one-shot alone on the slot.
+      destination = "/run/tenant/secrets/processor-secret-sync.env";
+      contents = ''
+        {{ with secret "secret/data/tenants/fishsense/object_store" }}FISHSENSE_OBJECT_STORE_ACCESS_KEY_ID={{ .Data.data.access_key }}
+        FISHSENSE_OBJECT_STORE_SECRET_ACCESS_KEY={{ .Data.data.secret_key }}{{ end }}
+        {{ with secret "secret/data/tenants/fishsense/model_weights" }}FISHSENSE_MODEL_WEIGHTS_ACCESS_KEY_ID={{ .Data.data.access_key }}
+        FISHSENSE_MODEL_WEIGHTS_SECRET_ACCESS_KEY={{ .Data.data.secret_key }}{{ end }}
       '';
     }
     {

@@ -57,7 +57,9 @@ def automatic_results_schedules(
 
 
 def _activities(deps: Deps):
+    settings = AutomaticResultsSettings()
     activities = AutomaticResultsActivities(
+        species_enabled=settings.species_enabled,
         # The slate-presence detector's frames: never measured as fish, and
         # calibration candidates (0035).
         catalog=AutomaticResultsCatalog(
@@ -67,6 +69,7 @@ def _activities(deps: Deps):
     )
     return [
         activities.select_next_dive_for_automatic_results,
+        activities.record_automatic_results_failure,
         activities.resolve_automatic_frames_inputs,
         activities.persist_automatic_frames,
         activities.resolve_automatic_species_inputs,

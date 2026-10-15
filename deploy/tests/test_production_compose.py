@@ -161,7 +161,10 @@ def test_the_database_users_start_only_on_a_migrated_schema(name):
     assert _waits_for(services()[name], "migrate", "service_completed_successfully")
 
 
-@pytest.mark.parametrize("name", ["db-bootstrap", "migrate", "nrp-temporal-cert-sync"])
+@pytest.mark.parametrize(
+    "name",
+    ["db-bootstrap", "migrate", "nrp-temporal-cert-sync", "nrp-processor-secret-sync"],
+)
 def test_one_shots_are_not_restarted(name):
     assert services()[name].get("restart") == "no"
 
@@ -242,6 +245,30 @@ def test_the_cert_sync_forwards_the_orchestrators_own_leaf_to_its_cluster():
         assert env[key] == orchestrator[key], key
     assert sync["image"] == services()["orchestrator"]["image"]
     assert sync["command"][-1] == "fishsense_services_orchestrator.ops.cert_sync"
+
+
+def test_the_processor_secret_sync_keeps_the_processors_secret_on_its_cluster():
+    """2026-10-15: the slot keeps `fishsense-processor-secrets` (and the
+    weights it pins) on every converge, as the cert sync keeps the Temporal
+    leaf: the orchestrator's image, cluster and NRP identity, and its own
+    render of the two Garage keys the processor is given."""
+    orchestrator = environment(services()["orchestrator"])
+    sync = services()["nrp-processor-secret-sync"]
+    env = environment(sync)
+    for key in ("FISHSENSE_NRP_KUBECONFIG_PATH", "FISHSENSE_NRP_NAMESPACE"):
+        assert env[key] == orchestrator[key], key
+    assert sync["image"] == services()["orchestrator"]["image"]
+    assert sync["command"][-1] == (
+        "fishsense_services_orchestrator.ops.processor_secret_sync"
+    )
+    assert f"{TENANT_RUN}/secrets/processor-secret-sync.env" in env_files(sync)
+    # Only the sync holds the model-weights key on the slot.
+    holders = {
+        name
+        for name, service in services().items()
+        if f"{TENANT_RUN}/secrets/processor-secret-sync.env" in env_files(service)
+    }
+    assert holders == {"nrp-processor-secret-sync"}
 
 
 def test_the_cert_sync_timer_restarts_the_compose_container():
