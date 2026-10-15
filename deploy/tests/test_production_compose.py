@@ -383,6 +383,16 @@ def test_the_api_accepts_the_mobile_clients_tokens():
     ]
 
 
+def test_a_half_seeded_mobile_client_renders_nothing():
+    """The mobile render is soft, so a secret holding only one of its keys
+    rendered one variable and "<no value>" for the other, and the API refused
+    to start (review of v0.6.1). Both render together or neither does."""
+    mobile = renders()[f"{TENANT_RUN}/secrets/api-mobile.env"]
+
+    assert mobile.soft
+    assert "{{ if and .Data.data.issuer_url .Data.data.client_id }}" in mobile.contents
+
+
 def test_the_api_reads_each_tenants_own_store():
     """Bucket-per-tenant (PLAN.md §9.11): the API presigns each tenant's
     uploads with that tenant's key, from the stores krg-infra provisions. The

@@ -112,6 +112,7 @@ _RENDER = re.compile(
     re.S,
 )
 _WITH = re.compile(r'\{\{\s*with secret "secret/data/tenants/fishsense/([^"]+)"\s*\}\}')
+_IF = re.compile(r"\{\{\s*if [^}]*\}\}")
 _FIELD = re.compile(r"\.Data\.data\.([a-z_]+)")
 _ASSIGN = re.compile(r"^([A-Z][A-Z0-9_]*)=(.*)$")
 
@@ -131,6 +132,7 @@ def renders() -> dict[str, Render]:
             for opened in _WITH.finditer(line):
                 path = opened.group(1)
             line = _WITH.sub("", line)
+            line = _IF.sub("", line)
             line = line.replace("{{ end }}", "")
             assigned = _ASSIGN.match(line)
             if not assigned:

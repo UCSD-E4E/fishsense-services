@@ -196,12 +196,14 @@
       # PKCE; krg-infra, docs/handoff/krg-infra): Authentik's issuer is per
       # application, so the API takes it as a second issuer whose audience is
       # the mobile client id. SOFT: until it is seeded the file is empty and the
-      # API accepts the web's tokens only, as before.
+      # API accepts the web's tokens only, as before. Both keys render together
+      # or neither does: half-seeded, one would render as "<no value>"
+      # (review of v0.6.1).
       destination = "/run/tenant/secrets/api-mobile.env";
       errorOnMissingKey = false;
       contents = ''
-        {{ with secret "secret/data/tenants/fishsense/oidc/mobile" }}FISHSENSE_OIDC_MOBILE_ISSUER={{ .Data.data.issuer_url }}
-        FISHSENSE_OIDC_MOBILE_AUDIENCES={{ .Data.data.client_id }}{{ end }}
+        {{ with secret "secret/data/tenants/fishsense/oidc/mobile" }}{{ if and .Data.data.issuer_url .Data.data.client_id }}FISHSENSE_OIDC_MOBILE_ISSUER={{ .Data.data.issuer_url }}
+        FISHSENSE_OIDC_MOBILE_AUDIENCES={{ .Data.data.client_id }}{{ end }}{{ end }}
       '';
     }
     {

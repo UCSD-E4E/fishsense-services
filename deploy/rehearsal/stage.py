@@ -48,6 +48,9 @@ _RENDER = re.compile(
     re.S,
 )
 _WITH = re.compile(r'\{\{\s*with secret "secret/data/tenants/fishsense/([^"]+)"\s*\}\}')
+#: A guard on the secret's fields (api-mobile.env): a rehearsal gives every
+#: field, so it always holds.
+_IF = re.compile(r"\{\{\s*if [^}]*\}\}")
 _FIELD = re.compile(r"\{\{\s*\.Data\.data\.([a-z_]+)(\s*\|\s*urlquery)?\s*\}\}")
 
 #: Generated when not given: they are the rehearsal's own, never production's.
@@ -86,7 +89,7 @@ def render_secrets(nix: str, values: dict[str, dict[str, str]]) -> dict[str, str
                 continue
             for opened in _WITH.finditer(line):
                 path = opened.group(1)
-            line = _WITH.sub("", line).replace("{{ end }}", "")
+            line = _IF.sub("", _WITH.sub("", line)).replace("{{ end }}", "")
             if soft and path not in values:
                 continue
 
