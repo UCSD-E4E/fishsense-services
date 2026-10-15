@@ -57,8 +57,7 @@ rules:
     verbs: ["get", "patch"]
   # The Temporal cert sync (ops.cert_sync; v1's deploy/incus/nrp_cert_sync),
   # which runs on the slot with this identity: it WRITES the processor's
-  # Temporal leaf and can READ no other Secret (fishsense-processor-secrets
-  # holds the S3 keys). `create` can't be scoped by name, so it stays
+  # Temporal leaf. `create` can't be scoped by name, so it stays
   # unrestricted -- some new Secret, never an existing one read; `get` and
   # `patch` are pinned to the one name. No `list`: it can't be name-scoped
   # and would hand over every Secret in the namespace.
@@ -68,6 +67,15 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     resourceNames: ["fishsense-data-worker-temporal-certs"]
+    verbs: ["get", "patch"]
+  # The processor-secret sync (ops.processor_secret_sync, 2026-10-15), on the
+  # slot with this identity: it keeps the processor's own Secret -- the Garage
+  # keys and the weights' pins -- reading it (to keep SAM 3.1's recorded pin,
+  # and skip a write when nothing changed) and patching it. Pinned by name;
+  # still no `list`.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["fishsense-processor-secrets"]
     verbs: ["get", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

@@ -232,9 +232,14 @@ kubectl -n e4e-fishsense create secret generic fishsense-processor-secrets \
   --from-literal=FISHSENSE_MODEL_WEIGHTS_ACCESS_KEY_ID="$(bao kv get -field=access_key secret/tenants/fishsense/model_weights)" \
   --from-literal=FISHSENSE_MODEL_WEIGHTS_SECRET_ACCESS_KEY="$(bao kv get -field=secret_key secret/tenants/fishsense/model_weights)" \
   --from-literal=FISHSENSE_SAM3_SHA256="<§1.5>" --from-literal=FISHSENSE_SAM3_SIZE="<§1.5>"
-#    (FISHSENSE_BIOCLIP_* joined it 2026-10-15 for the automatic-results track's species;
-#    deploy/nrp/processor-secret.sh uploads and pins both models.)
 ```
+
+> **Since 2026-10-15 the converge keeps this Secret** (`nrp-processor-secret-sync`,
+> `ops/processor_secret_sync.py`): every pinned weight is made sure of in Garage (BioCLIP fetched
+> from Hugging Face at its pinned revision, sha256-checked) and the Secret is written from the slot's
+> `processor-secret-sync.env` render when anything changed -- as a patch, never a client-side
+> `apply`. The command above is the cutover as run; don't re-run it. It needs the orchestrator's
+> Role to `get`/`patch` the Secret by name (`deploy/nrp/deployer-rbac.yaml`, re-applied once).
 
 The processor's other settings are in the manifests (`deploy/nrp/*.yaml`, baked
 into the orchestrator image): role, krg-prod Temporal, `/certs`, the weights cache.
@@ -260,9 +265,10 @@ into the orchestrator image): role, krg-prod Temporal, `/certs`, the weights cac
   sha256sum sam3.1_multiplex.pt; stat -c %s sam3.1_multiplex.pt   # -> FISHSENSE_SAM3_SHA256 / _SIZE (§1.4c)
   ```
 - **BioCLIP** — not needed at cutover (ships disabled). Since 2026-10-15 the automatic-results
-  track's species step uses it: `processor-secret.sh` uploads BioCLIP 2.5 (ViT-H/14) and BioCLIP 2
-  to `model-weights/bioclip/{2.5-vith14,2}/` from Hugging Face at pinned revisions and writes
-  `FISHSENSE_BIOCLIP_*`. Human Label Studio pre-annotation stays off until its evaluation.
+  track's species step uses it: the converge's `nrp-processor-secret-sync` uploads BioCLIP 2.5
+  (ViT-H/14) and BioCLIP 2 to `model-weights/bioclip/{2.5-vith14,2}/` from Hugging Face at pinned
+  revisions and writes `FISHSENSE_BIOCLIP_*`. Human Label Studio pre-annotation stays off until its
+  evaluation.
 - **Slate presence detector** — ships disabled
   (`FISHSENSE_SLATE_DETECTION_ENABLED`). Before enabling it, upload
   2026-10-03_slate_detector's `runs/final-q1/slate_efficientnet_b0.pt` and add

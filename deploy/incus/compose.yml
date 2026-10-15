@@ -346,6 +346,31 @@ services:
       - /run/tenant/nrp:/run/tenant/nrp:ro
     networks: [interior]
 
+  # ── keep the NRP processor's Secret, and the weights it pins ───────────────────────────
+  # One-shot, on each converge (ops.processor_secret_sync, 2026-10-15). It makes
+  # sure every pinned weight is in Garage's model-weights -- fetching BioCLIP
+  # from Hugging Face at its pinned revision when absent, checked against its
+  # sha256 -- then writes fishsense-processor-secrets (Garage's endpoint and the
+  # two keys from its render, and the weights' pins) when anything changed, as
+  # a patch: never a client-side apply, whose last-applied-configuration
+  # annotation would copy the data out. (Replaced deploy/nrp/processor-secret.sh.)
+  # NRP kubeconfig absent or empty is a clean exit 0, as for the cert sync.
+  nrp-processor-secret-sync:
+    image: ghcr.io/ucsd-e4e/fishsense-services-orchestrator:v0.7.1
+    group_add: ["0"]
+    container_name: fishsense-nrp-processor-secret-sync
+    restart: "no"
+    command: ["python", "-m", "fishsense_services_orchestrator.ops.processor_secret_sync"]
+    env_file:
+      - /run/tenant/secrets/processor-secret-sync.env
+    environment:
+      FISHSENSE_NRP_KUBECONFIG_PATH: /run/tenant/nrp/kubeconfig
+      FISHSENSE_NRP_NAMESPACE: e4e-fishsense
+    volumes:
+      # NRP kubeconfig (SOFT render): absent or empty is a clean exit 0.
+      - /run/tenant/nrp:/run/tenant/nrp:ro
+    networks: [interior]
+
   # ── the post-converge smoke test: GO / NO-GO (profile `ops`, run by hand) ───────────────
   #   docker compose ... run --rm smoke --dive <n>        (docs/cutover.md)
   # The orchestrator's configuration plus the owner's DSN (it reads the schema

@@ -13,7 +13,8 @@ starts:
   zero-shot species on the automatic masks. It runs after lengths and its
   failure never costs a dive its lengths; off, the cohort holds no dive for
   species work. Needs the BioCLIP weights pinned in the processor's secret
-  (``FISHSENSE_BIOCLIP_*``, deploy/nrp/processor-secret.sh).
+  (``FISHSENSE_BIOCLIP_*``), which the converge's processor-secret sync
+  writes (``ops.processor_secret_sync``).
 """
 
 from pydantic_settings import BaseSettings, SettingsConfigDict

@@ -108,6 +108,16 @@ def _cert_sync(env):
         assert getattr(settings, name), name
 
 
+def _processor_secret_sync(env):
+    from fishsense_services_orchestrator.ops.processor_secret_sync import (
+        ProcessorSecretSettings,
+    )
+
+    settings = ProcessorSecretSettings.from_env()
+    for name in ProcessorSecretSettings.model_fields:
+        assert getattr(settings, name), name
+
+
 def _smoke(env):
     from fishsense_services_contracts.object_store import ObjectStoreConnection
     from fishsense_services_orchestrator.labels.label_studio import (
@@ -167,6 +177,7 @@ VALIDATORS: dict[str, Callable[[dict], None]] = {
     "orchestrator": _orchestrator,
     "backup": _backup,
     "nrp-temporal-cert-sync": _cert_sync,
+    "nrp-processor-secret-sync": _processor_secret_sync,
     "smoke": _smoke,
     "web": _web,
     "superset": _superset,

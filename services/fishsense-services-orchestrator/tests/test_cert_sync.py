@@ -458,10 +458,11 @@ def test_it_rolls_exactly_the_deployments_that_mount_the_secret():
     assert sorted(sut.processor_deployments(settings)) == PROCESSORS
 
 
-def test_the_orchestrators_role_may_write_only_that_secret():
-    """The sync runs as the orchestrator's NRP identity: create (RBAC can't
-    scope a create by name) and get/patch pinned to this one Secret -- never
-    `list`, which would hand over every Secret in the namespace (v1's split)."""
+def test_the_orchestrators_role_may_write_only_its_secrets():
+    """The syncs run as the orchestrator's NRP identity: create (RBAC can't
+    scope a create by name) and get/patch pinned by name -- this Secret, and
+    the processor's (ops.processor_secret_sync, 2026-10-15) -- never `list`,
+    which would hand over every Secret in the namespace (v1's split)."""
     docs = list(yaml.safe_load_all((MANIFEST_DIR / "deployer-rbac.yaml").read_text()))
     (role,) = [d for d in docs if d and d["kind"] == "Role"]
     secret_rules = [r for r in role["rules"] if "secrets" in r["resources"]]
@@ -469,8 +470,11 @@ def test_the_orchestrators_role_may_write_only_that_secret():
     unnamed = [r for r in secret_rules if "resourceNames" not in r]
     named = [r for r in secret_rules if "resourceNames" in r]
     assert [sorted(r["verbs"]) for r in unnamed] == [["create"]]
-    assert [(r["resourceNames"], sorted(r["verbs"])) for r in named] == [
-        ([sut.DEFAULT_SECRET_NAME], ["get", "patch"])
+    assert sorted(
+        (tuple(sorted(r["resourceNames"])), tuple(sorted(r["verbs"]))) for r in named
+    ) == [
+        ((sut.DEFAULT_SECRET_NAME,), ("get", "patch")),
+        (("fishsense-processor-secrets",), ("get", "patch")),
     ]
 
 
