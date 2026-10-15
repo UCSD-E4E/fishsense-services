@@ -341,3 +341,21 @@ async def test_no_calibration_is_no_plan():
         automatic_measure_inputs=AutomaticMeasureInputs(None, None, None, [])
     )
     assert await _run(_acts(catalog).resolve_automatic_measure_inputs, TARGET) is None
+
+
+async def test_the_dives_a_run_took_are_excluded_in_every_tenant():
+    taken = [DIVE, uuid.uuid4()]
+    catalog = _Catalog(next_dive_for_automatic_results=None)
+    await _run(_acts(catalog).select_next_dive_for_automatic_results, taken)
+    assert [kw["exclude"] for _, _, kw in catalog.calls] == [taken, taken]
+
+
+async def test_a_failed_step_is_recorded_against_its_dive():
+    catalog = _Catalog(record_automatic_results_failure=None)
+    await _run(
+        _acts(catalog).record_automatic_results_failure, TARGET, "frames", "boom"
+    )
+    assert catalog.calls == [
+        ("record_automatic_results_failure", (TENANT_A, DIVE),
+         {"step": "frames", "error": "boom"}),
+    ]  # fmt: skip

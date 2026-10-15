@@ -30,6 +30,7 @@ from typing import List, Optional
 from temporalio import activity, workflow
 from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.exceptions import ApplicationError
+from temporalio.client import WorkflowFailureError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -62,6 +63,7 @@ from fishsense_services_orchestrator.automatic_results.activities import (
     AutomaticMeasurePlan,
     AutomaticTarget,
 )
+from fishsense_services_orchestrator.automatic_results import workflow as sut
 from fishsense_services_orchestrator.automatic_results.workflow import (
     AutomaticResultsForDiveWorkflow,
     AutomaticResultsParentWorkflow,
@@ -78,6 +80,8 @@ QUEUE = "test-automatic-results"
 K = [[1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0]]
 REF = ObjectRef(bucket="b", key="k")
 EVENTS: list[tuple] = []
+#: What each cohort query was told to exclude, in turn.
+SELECTS: list[tuple] = []
 
 
 def _frames_input(n):
@@ -126,9 +130,20 @@ def _measure_plan(n):
 
 
 def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET):
+    """`selected` is the cohort's answer every time, or a list of answers in
+    turn (None once it runs out)."""
+    cohort = list(selected) if isinstance(selected, list) else None
+
     @activity.defn(name="select_next_dive_for_automatic_results")
-    async def select() -> Optional[AutomaticTarget]:
-        return selected
+    async def select(exclude: List[uuid.UUID]) -> Optional[AutomaticTarget]:
+        SELECTS.append(tuple(exclude))
+        if cohort is None:
+            return selected
+        return cohort.pop(0) if cohort else None
+
+    @activity.defn(name="record_automatic_results_failure")
+    async def failed(t: AutomaticTarget, step: str, error: str) -> None:
+        EVENTS.append(("failed", t.dive_id, step))
 
     @activity.defn(name="resolve_automatic_frames_inputs")
     async def frames_in(t: AutomaticTarget) -> PredictAutomaticFramesInput:
@@ -191,9 +206,9 @@ def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET)
         EVENTS.append(("cleanup",))
         return CleanupRawBytesResult(deleted=1)
 
-    return [select, frames_in, frames_out, species_in, species_out, cal_in, cal_out,
-            measure_in, measure_out, wake_gpu, wake_per_image, wake_light, stage,
-            cleanup]  # fmt: skip
+    return [select, failed, frames_in, frames_out, species_in, species_out, cal_in,
+            cal_out, measure_in, measure_out, wake_gpu, wake_per_image, wake_light,
+            stage, cleanup]  # fmt: skip
 
 
 @activity.defn(name="_record")
@@ -257,6 +272,16 @@ class _Species:  # pylint: disable=too-few-public-methods
         return _species_results(payload)
 
 
+@workflow.defn(name="PredictAutomaticFramesWorkflow")
+class _FailingFrames:  # pylint: disable=too-few-public-methods
+    """A frame no worker can finish (or a raw gone from scratch)."""
+
+    @workflow.run
+    async def run(self, payload: dict) -> list:
+        await _record_child()
+        raise ApplicationError("cannot finish", type="Boom", non_retryable=True)
+
+
 @workflow.defn(name="PredictSpeciesImagesWorkflow")
 class _FailingSpecies:  # pylint: disable=too-few-public-methods
     """BioCLIP unprovisioned: the processor's `BioclipSettingsInvalid`."""
@@ -286,9 +311,11 @@ class _Measure:  # pylint: disable=too-few-public-methods
 
 
 async def _run(
-    workflow_cls=AutomaticResultsForDiveWorkflow, *args, species_fails=False, **stubs
-):
+    workflow_cls=AutomaticResultsForDiveWorkflow, *args, species_fails=False,
+    frames_fail=False, **stubs,
+):  # fmt: skip
     EVENTS.clear()
+    SELECTS.clear()
     async with await WorkflowEnvironment.start_time_skipping(
         data_converter=pydantic_data_converter
     ) as env:
@@ -298,8 +325,8 @@ async def _run(
                               AutomaticResultsParentWorkflow]),
             Worker(env.client, task_queue=PROCESSOR_GPU_TASK_QUEUE,
                    activities=[_record],
-                   workflows=[_Frames, _FailingSpecies if species_fails
-                              else _Species]),
+                   workflows=[_FailingFrames if frames_fail else _Frames,
+                              _FailingSpecies if species_fails else _Species]),
             Worker(env.client, task_queue=PROCESSOR_TASK_QUEUE, activities=[_record],
                    workflows=[_Calibration]),
             Worker(env.client, task_queue=PROCESSOR_LIGHT_TASK_QUEUE,
@@ -376,3 +403,69 @@ async def test_the_parent_runs_the_selected_dive():
 async def test_nothing_selected_is_nothing_done():
     assert await _run(AutomaticResultsParentWorkflow, selected=None) is None
     assert EVENTS == []
+
+
+# -- the backlog drains; a failing dive does not hold it ----------------------------
+
+
+def _target():
+    return AutomaticTarget(TENANT, uuid.uuid4())
+
+
+async def test_one_run_drains_the_backlog():
+    """2026-10-15 audit: one dive per hourly firing put the ~474-dive backlog
+    weeks out. A run takes dive after dive, telling the cohort what it took."""
+    dives = [_target(), _target(), _target()]
+    assert await _run(AutomaticResultsParentWorkflow, selected=dives) == dives[-1]
+    assert SELECTS == [(), (dives[0].dive_id,), (dives[0].dive_id, dives[1].dive_id),
+                       tuple(d.dive_id for d in dives)]  # fmt: skip
+    assert [e for e in EVENTS if e[0] == "persist lengths"] == [
+        ("persist lengths", 1)
+    ] * 3
+
+
+async def test_a_dive_whose_step_fails_is_recorded_cleaned_up_and_passed_over():
+    """A frame no worker can finish, a raw gone from the NAS: the failure is
+    recorded (at three the cohort leaves the dive for an operator), its raw
+    scratch is cleaned up, and the run goes on."""
+    dives = [_target(), _target()]
+    await _run(AutomaticResultsParentWorkflow, selected=dives, frames_fail=True)
+    assert [e for e in EVENTS if e[0] == "failed"] == [
+        ("failed", d.dive_id, "frames") for d in dives
+    ]
+    assert [e[0] for e in EVENTS].count("cleanup") == 2
+    assert not [e for e in EVENTS if e[0] == "persist calibration"]
+
+
+async def test_a_dive_handed_back_twice_ends_the_run():
+    assert await _run(AutomaticResultsParentWorkflow) == TARGET
+    assert len(SELECTS) == 2
+
+
+async def test_no_new_dive_is_started_once_the_drain_window_has_passed():
+    assert sut.AUTOMATIC_DRAIN_WINDOW <= timedelta(minutes=55)
+    assert sut.RUN_TIMEOUT >= sut.AUTOMATIC_DRAIN_WINDOW
+
+
+async def test_a_dive_run_by_hand_records_its_failure_and_fails():
+    """The validation harness runs dives by hand: a failure must not read as
+    a finished dive."""
+    try:
+        await _run(AutomaticResultsForDiveWorkflow, TARGET, frames_fail=True)
+    except WorkflowFailureError:
+        pass
+    else:
+        raise AssertionError("a failed dive run by hand must fail")
+    assert ("failed", DIVE, "frames") in EVENTS
+    assert ("cleanup",) in EVENTS
+
+
+def test_the_calibration_child_outlives_the_fit_it_runs():
+    """The fit may take up to the processor's FIT_TIMEOUT (it heartbeats
+    throughout); the orchestrator must not cut its child off sooner."""
+    from fishsense_services_processor.automatic_calibration.workflow import (
+        FIT_TIMEOUT,
+    )
+
+    assert sut.CALIBRATION_CHILD_TIMEOUT > FIT_TIMEOUT
+    assert sut.RUN_TIMEOUT >= sut.AUTOMATIC_DRAIN_WINDOW + sut.CALIBRATION_CHILD_TIMEOUT

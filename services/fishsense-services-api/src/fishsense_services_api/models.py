@@ -1389,3 +1389,29 @@ class AutomaticResultsExclusion(Base):
     dive_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     reason: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
+
+
+class AutomaticResultsFailure(Base):
+    """A failed automatic run of one of a dive's steps (0040). Append-only;
+    an operator deletes a dive's rows to retry it."""
+
+    __tablename__ = "automatic_results_failures"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        ForeignKeyConstraint(["tenant_id", "dive_id"], ["dives.tenant_id", "dives.id"]),
+        CheckConstraint(
+            "step IN ('frames', 'calibration', 'lengths', 'species')",
+            name="automatic_results_failures_step_check",
+        ),
+        Index(
+            "automatic_results_failures_tenant_id_dive_id_idx", "tenant_id", "dive_id"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    dive_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    step: Mapped[str] = mapped_column(Text)
+    error: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()

@@ -48,6 +48,10 @@ from fishsense_services_api.slate_presence_store import detector_slate_frame
 __all__ = [
     "AUTOMATIC_PRODUCER",
     "AUTOMATIC_RESULTS_COHORT",
+    "AUTOMATIC_RESULTS_MAX_FAILURES",
+    "AUTOMATIC_RESULTS_STEPS",
+    "automatic_results_cohort",
+    "record_automatic_results_failure",
     "SLATE_FRAME_THRESHOLD",
     "AutomaticCalibrationCandidate",
     "AutomaticCalibrationInputs",
@@ -172,6 +176,18 @@ _EXCLUDED = """EXISTS (
     WHERE x.tenant_id = d.tenant_id AND x.dive_id = d.id
 )"""
 
+#: A dive's failed runs before the cohort leaves it for an operator (0040).
+AUTOMATIC_RESULTS_MAX_FAILURES = 3
+
+#: The steps a failure is recorded against (0040's check).
+AUTOMATIC_RESULTS_STEPS = ("frames", "calibration", "lengths", "species")
+
+#: The dive failed as often as the cohort allows (0040).
+_FAILED_OUT = f"""(
+    SELECT count(*) FROM automatic_results_failures f
+    WHERE f.tenant_id = d.tenant_id AND f.dive_id = d.id
+) >= {AUTOMATIC_RESULTS_MAX_FAILURES}"""
+
 #: Dive `d` has a human measurement: any `measurements` row on its captures.
 _HUMAN_MEASURED = """EXISTS (
     SELECT 1 FROM measurements m
@@ -274,6 +290,7 @@ def automatic_results_cohort(*, species: bool = True) -> str:
     return f"""{RECTIFIABLE_DIVE}
     AND NOT {_HUMAN_MEASURED}
     AND NOT {_EXCLUDED}
+    AND NOT {_FAILED_OUT}
     AND ({" OR ".join(f"({w})" for w in work)})"""
 
 
@@ -296,21 +313,44 @@ async def next_dive_for_automatic_results(
     calibration_version: str,
     measurement_version: str,
     species: bool = True,
+    exclude: Sequence[uuid.UUID] = (),
 ) -> AutomaticCandidate | None:
-    """The tenant's oldest dive in the backlog cohort."""
+    """The tenant's oldest dive in the backlog cohort, other than `exclude`
+    (the dives the run already took)."""
     row = (
         await conn.execute(
             text(f"""
                 SELECT d.id, d.created_at FROM dives d
                 WHERE d.tenant_id = :t AND {automatic_results_cohort(species=species)}
+                  AND NOT d.id = ANY(CAST(:exclude AS uuid[]))
                 ORDER BY d.created_at, d.id
                 LIMIT 1
                 """),
             {"t": tenant_id, "hv": headtail_version, "sv": species_version,
-             "cv": calibration_version, "mv": measurement_version},
+             "cv": calibration_version, "mv": measurement_version,
+             "exclude": list(exclude)},
         )
     ).one_or_none()  # fmt: skip
     return None if row is None else AutomaticCandidate(row.id, row.created_at)
+
+
+async def record_automatic_results_failure(
+    conn: AsyncConnection,
+    tenant_id: uuid.UUID,
+    dive_id: uuid.UUID,
+    *,
+    step: str,
+    error: str,
+) -> None:
+    """A failed run of the dive's `step` (0040); at
+    `AUTOMATIC_RESULTS_MAX_FAILURES` the cohort leaves the dive."""
+    await conn.execute(
+        text(
+            "INSERT INTO automatic_results_failures "
+            "(tenant_id, dive_id, step, error) VALUES (:t, :d, :step, :error)"
+        ),
+        {"t": tenant_id, "d": dive_id, "step": step, "error": error[:4000]},
+    )
 
 
 # -- frames: the GPU stage's input --------------------------------------------------
@@ -848,6 +888,14 @@ class AutomaticResultsCatalog(ServicePrincipal):
     ) -> AutomaticCandidate | None:
         async with self._tenant(tenant_id) as conn:
             return await next_dive_for_automatic_results(conn, tenant_id, **versions)
+
+    async def record_automatic_results_failure(
+        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, *, step: str, error: str
+    ) -> None:
+        async with self._tenant(tenant_id) as conn:
+            await record_automatic_results_failure(
+                conn, tenant_id, dive_id, step=step, error=error
+            )
 
     async def automatic_frames_inputs(
         self, tenant_id: uuid.UUID, dive_id: uuid.UUID, *, headtail_version: int

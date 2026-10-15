@@ -62,6 +62,7 @@ from fishsense_services_api.automatic_results_store import (
     automatic_frames_inputs,
     automatic_measure_inputs,
     automatic_results_cohort,
+    record_automatic_results_failure,
     automatic_species_captures,
     next_dive_for_automatic_results,
     no_slate_frames,
@@ -1035,3 +1036,55 @@ async def test_the_cohort_reads_each_frames_latest_rows_by_index(
         and {m.get("Relation Name") for m in _plan_nodes(n)} & _BIG
         for n in nodes
     )
+
+
+# -- a dive that keeps failing does not hold the backlog ----------------------------
+
+
+async def test_the_dives_a_run_already_took_are_not_offered_again(
+    owner_engine, app_engine
+):
+    lab = await tenant(owner_engine)
+    older = await _backlog_dive(owner_engine, lab)
+    await capture(owner_engine, lab, older)
+    newer = await _backlog_dive(owner_engine, lab)
+    await capture(owner_engine, lab, newer)
+
+    async def _next_but(*exclude):
+        c = await _in(app_engine, lab, next_dive_for_automatic_results,
+                      exclude=list(exclude), **VERSIONS)  # fmt: skip
+        return None if c is None else c.dive_id
+
+    assert await _next_but() == older
+    assert await _next_but(older) == newer
+    assert await _next_but(older, newer) is None
+
+
+async def test_a_dive_that_failed_three_times_leaves_the_cohort(
+    owner_engine, app_engine
+):
+    """2026-10-15 audit: the oldest dive, failing deterministically (a raw
+    gone from the NAS, an unusable calibration, a bad frame), was selected
+    every hour and starved the rest. Each failure is recorded; at three, the
+    dive waits for an operator (who deletes its failures to retry it)."""
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    await capture(owner_engine, lab, dive_id)
+
+    for n in range(3):
+        assert await _next(app_engine, lab) == dive_id, n
+        await _in(app_engine, lab, record_automatic_results_failure, dive_id,
+                  step="frames", error=f"attempt {n}")  # fmt: skip
+
+    assert await _next(app_engine, lab) is None
+    rows = await _rows(owner_engine, "SELECT step, error FROM "
+                       "automatic_results_failures WHERE dive_id = :d", d=dive_id)  # fmt: skip
+    assert len(rows) == 3 and rows[0]["step"] == "frames"
+
+
+async def test_a_failure_needs_a_known_step(owner_engine, app_engine):
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    with pytest.raises(DBAPIError):
+        await _in(app_engine, lab, record_automatic_results_failure, dive_id,
+                  step="sideways", error="x")  # fmt: skip

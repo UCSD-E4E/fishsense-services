@@ -187,13 +187,17 @@ class AutomaticResultsActivities:
 
     @activity.defn(name="select_next_dive_for_automatic_results")
     async def select_next_dive_for_automatic_results(
-        self,
+        self, exclude: Optional[List[uuid.UUID]] = None
     ) -> Optional[AutomaticTarget]:
-        """The oldest backlog dive across tenants."""
+        """The oldest backlog dive across tenants, other than those the run
+        already took."""
         best, best_key = None, None
         for tenant_id in await self._catalog.member_tenants():
             candidate = await self._catalog.next_dive_for_automatic_results(
-                tenant_id, species=self._species_enabled, **VERSIONS
+                tenant_id,
+                species=self._species_enabled,
+                exclude=exclude or [],
+                **VERSIONS,
             )
             if candidate is None:
                 continue
@@ -202,6 +206,16 @@ class AutomaticResultsActivities:
                 best, best_key = AutomaticTarget(tenant_id, candidate.dive_id), key
         activity.logger.info("next dive for automatic results: %s", best)
         return best
+
+    @activity.defn(name="record_automatic_results_failure")
+    async def record_automatic_results_failure(
+        self, target: AutomaticTarget, step: str, error: str
+    ) -> None:
+        """A dive's failed step; at three failures the cohort leaves the dive
+        for an operator (0040)."""
+        await self._catalog.record_automatic_results_failure(
+            target.tenant_id, target.dive_id, step=step, error=error
+        )
 
     # -- frames (GPU) ---------------------------------------------------------
 
