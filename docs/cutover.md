@@ -232,7 +232,8 @@ kubectl -n e4e-fishsense create secret generic fishsense-processor-secrets \
   --from-literal=FISHSENSE_MODEL_WEIGHTS_ACCESS_KEY_ID="$(bao kv get -field=access_key secret/tenants/fishsense/model_weights)" \
   --from-literal=FISHSENSE_MODEL_WEIGHTS_SECRET_ACCESS_KEY="$(bao kv get -field=secret_key secret/tenants/fishsense/model_weights)" \
   --from-literal=FISHSENSE_SAM3_SHA256="<§1.5>" --from-literal=FISHSENSE_SAM3_SIZE="<§1.5>"
-#    (FISHSENSE_BIOCLIP_* join it only when BioCLIP is enabled, after its evaluation.)
+#    (FISHSENSE_BIOCLIP_* joined it 2026-10-15 for the automatic-results track's species;
+#    deploy/nrp/processor-secret.sh uploads and pins both models.)
 ```
 
 The processor's other settings are in the manifests (`deploy/nrp/*.yaml`, baked
@@ -258,7 +259,10 @@ into the orchestrator image): role, krg-prod Temporal, `/certs`, the weights cac
   aws s3 cp s3://model-weights/sam3/3.1/sam3.1_multiplex.pt . --endpoint-url https://s3.e4e.ucsd.edu
   sha256sum sam3.1_multiplex.pt; stat -c %s sam3.1_multiplex.pt   # -> FISHSENSE_SAM3_SHA256 / _SIZE (§1.4c)
   ```
-- **BioCLIP** — not needed at cutover (ships disabled).
+- **BioCLIP** — not needed at cutover (ships disabled). Since 2026-10-15 the automatic-results
+  track's species step uses it: `processor-secret.sh` uploads BioCLIP 2.5 (ViT-H/14) and BioCLIP 2
+  to `model-weights/bioclip/{2.5-vith14,2}/` from Hugging Face at pinned revisions and writes
+  `FISHSENSE_BIOCLIP_*`. Human Label Studio pre-annotation stays off until its evaluation.
 - **Slate presence detector** — ships disabled
   (`FISHSENSE_SLATE_DETECTION_ENABLED`). Before enabling it, upload
   2026-10-03_slate_detector's `runs/final-q1/slate_efficientnet_b0.pt` and add

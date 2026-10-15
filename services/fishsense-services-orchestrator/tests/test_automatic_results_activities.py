@@ -105,8 +105,10 @@ class _Store:
         return None
 
 
-def _acts(catalog, store=None):
-    return AutomaticResultsActivities(catalog=catalog, store=store or _Store())
+def _acts(catalog, store=None, **settings):
+    return AutomaticResultsActivities(
+        catalog=catalog, store=store or _Store(), **settings
+    )
 
 
 async def _run(fn, *args):
@@ -126,6 +128,34 @@ async def test_the_oldest_backlog_dive_across_tenants():
     )
     got = await _run(_acts(catalog).select_next_dive_for_automatic_results)
     assert got == AutomaticTarget(TENANT_B, older)
+
+
+async def test_species_on_by_default_is_species_work_in_the_cohort():
+    catalog = _Catalog(next_dive_for_automatic_results=None)
+    await _run(_acts(catalog).select_next_dive_for_automatic_results)
+    assert all(kw["species"] is True for _, _, kw in catalog.calls)
+
+
+async def test_with_species_off_the_cohort_has_no_species_work():
+    """Its own switch (2026-10-15): off, species never holds a dive."""
+    catalog = _Catalog(next_dive_for_automatic_results=None)
+    await _run(
+        _acts(catalog, species_enabled=False).select_next_dive_for_automatic_results
+    )
+    assert [kw["species"] for _, _, kw in catalog.calls] == [False, False]
+
+
+async def test_with_species_off_there_are_no_species_images():
+    catalog = _Catalog(automatic_species_captures=[
+        AutomaticSpeciesCapture(uuid.uuid4(), "cc" * 16, True, uuid.uuid4(),
+                                [1, 2, 30, 40], False),
+    ])  # fmt: skip
+    got = await _run(
+        _acts(catalog, _Store(["cc" * 16]), species_enabled=False)
+        .resolve_automatic_species_inputs, TARGET,
+    )  # fmt: skip
+    assert got.images == []
+    assert not catalog.calls
 
 
 async def test_no_backlog_is_none():

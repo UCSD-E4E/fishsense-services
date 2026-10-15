@@ -5,12 +5,15 @@ PAPER.md §6's chain, each on the processor role that owns it:
 
 1. **frames** (GPU): stage the raw frames, then per frame the detector's dot,
    the SAM 3.1 mask at it (score >= 0.5) and its head/tail; persist; clean up;
-2. **species** (GPU): BioCLIP zero-shot on each kept mask, through the species
-   stage's own processor workflow (`PredictSpeciesImagesWorkflow`);
-3. **calibration** (per-image): the label-free size-constancy fit on the
+2. **calibration** (per-image): the label-free size-constancy fit on the
    dive's slate frames; with none, the refusal is written without a processor;
-4. **lengths** (light): at the automatic dot's depth, under the calibration
-   the dive's lengths use now.
+3. **lengths** (light): at the automatic dot's depth, under the calibration
+   the dive's lengths use now;
+4. **species** (GPU): BioCLIP zero-shot on each kept mask, through the species
+   stage's own processor workflow (`PredictSpeciesImagesWorkflow`). **Last,
+   and its failure is logged, not raised**: species never costs a dive its
+   lengths. (2026-10-15 audit: it ran second, with BioCLIP unprovisioned, and
+   its failure failed every dive before a length was written.)
 
 Rules kept from the other parents (`species_predict.workflow`,
 `laser.workflow`): deterministic child ids reused ALLOW_DUPLICATE, and a child
@@ -31,7 +34,11 @@ from typing import List, Optional
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
-from temporalio.exceptions import WorkflowAlreadyStartedError
+from temporalio.exceptions import (
+    ActivityError,
+    ChildWorkflowError,
+    WorkflowAlreadyStartedError,
+)
 
 with workflow.unsafe.imports_passed_through():
     import annotated_types  # noqa: F401  pylint: disable=unused-import
@@ -175,6 +182,20 @@ async def _frames(target: AutomaticTarget, gpu: _Gpu) -> None:
 
 
 async def _species(target: AutomaticTarget, gpu: _Gpu) -> None:
+    """Species, isolated: a failure (BioCLIP unprovisioned, a GPU out of
+    memory) is logged and the dive keeps its lengths; species work stays
+    outstanding, so a later run retries it."""
+    try:
+        await _species_step(target, gpu)
+    except (ActivityError, ChildWorkflowError) as exc:
+        workflow.logger.warning(
+            "automatic species failed for dive=%s; lengths are kept: %s",
+            target.dive_id,
+            exc.cause or exc,
+        )
+
+
+async def _species_step(target: AutomaticTarget, gpu: _Gpu) -> None:
     inputs: PredictSpeciesImagesInput = await _db(
         "resolve_automatic_species_inputs",
         target,
@@ -251,9 +272,9 @@ async def _lengths(target: AutomaticTarget) -> None:
 async def _run_for_dive(target: AutomaticTarget) -> None:
     gpu = _Gpu()
     await _frames(target, gpu)
-    await _species(target, gpu)
     await _calibration(target)
     await _lengths(target)
+    await _species(target, gpu)
 
 
 @workflow.defn

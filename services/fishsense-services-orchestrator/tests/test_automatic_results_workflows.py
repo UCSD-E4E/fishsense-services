@@ -2,9 +2,12 @@
 
 New in v2. Per dive, in order (cscw-fishsense2027@96a8da07 PAPER.md §6's
 chain): the GPU frames step (dot, SAM 3.1 mask, head/tail) on staged raw
-frames; BioCLIP zero-shot species on the automatic masks (the species stage's
-own processor workflow); the label-free calibration (per-image role); the
-lengths (light role). Pinned as the other parents are:
+frames; the label-free calibration (per-image role); the lengths (light
+role); then BioCLIP zero-shot species on the automatic masks (the species
+stage's own processor workflow). **Species is last and cannot cost a dive its
+lengths** (2026-10-15 audit: it ran second, unprovisioned, and its failure
+failed every dive before a length was written). Pinned as the other parents
+are:
 
 * the GPU is woken only once there is GPU work, and **only a real GPU runs
   it**: the CPU fallback serves the queue with Mask R-CNN, whose lengths were
@@ -26,6 +29,7 @@ from typing import List, Optional
 
 from temporalio import activity, workflow
 from temporalio.contrib.pydantic import pydantic_data_converter
+from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -253,6 +257,18 @@ class _Species:  # pylint: disable=too-few-public-methods
         return _species_results(payload)
 
 
+@workflow.defn(name="PredictSpeciesImagesWorkflow")
+class _FailingSpecies:  # pylint: disable=too-few-public-methods
+    """BioCLIP unprovisioned: the processor's `BioclipSettingsInvalid`."""
+
+    @workflow.run
+    async def run(self, payload: dict) -> list:
+        await _record_child()
+        raise ApplicationError(
+            "BIOCLIP pins missing", type="BioclipSettingsInvalid", non_retryable=True
+        )
+
+
 @workflow.defn(name="FitAutomaticCalibrationWorkflow")
 class _Calibration:  # pylint: disable=too-few-public-methods
     @workflow.run
@@ -269,7 +285,9 @@ class _Measure:  # pylint: disable=too-few-public-methods
         return _measure_result(payload)
 
 
-async def _run(workflow_cls=AutomaticResultsForDiveWorkflow, *args, **stubs):
+async def _run(
+    workflow_cls=AutomaticResultsForDiveWorkflow, *args, species_fails=False, **stubs
+):
     EVENTS.clear()
     async with await WorkflowEnvironment.start_time_skipping(
         data_converter=pydantic_data_converter
@@ -280,7 +298,8 @@ async def _run(workflow_cls=AutomaticResultsForDiveWorkflow, *args, **stubs):
                               AutomaticResultsParentWorkflow]),
             Worker(env.client, task_queue=PROCESSOR_GPU_TASK_QUEUE,
                    activities=[_record],
-                   workflows=[_Frames, _Species]),
+                   workflows=[_Frames, _FailingSpecies if species_fails
+                              else _Species]),
             Worker(env.client, task_queue=PROCESSOR_TASK_QUEUE, activities=[_record],
                    workflows=[_Calibration]),
             Worker(env.client, task_queue=PROCESSOR_LIGHT_TASK_QUEUE,
@@ -302,15 +321,26 @@ async def test_one_dive_every_step_in_order():
         ("child", f"automatic-frames-{DIVE}"),
         ("persist frames", 2),
         ("cleanup",),
-        ("child", f"automatic-species-{DIVE}"),
-        ("persist species", ["decode_failed"]),
         ("wake per-image",),
         ("child", f"automatic-calibration-{DIVE}"),
         ("persist calibration", "accepted", None),
         ("wake light",),
         ("child", f"automatic-measure-{DIVE}"),
         ("persist lengths", 1),
+        ("child", f"automatic-species-{DIVE}"),
+        ("persist species", ["decode_failed"]),
     ]
+
+
+async def test_a_species_failure_costs_the_dive_nothing():
+    """Species last, and its failure logged rather than raised: the dive's
+    calibration and lengths are already written, and the run succeeds."""
+    assert await _run(AutomaticResultsForDiveWorkflow, TARGET, species_fails=True) == (
+        TARGET
+    )
+    assert ("persist lengths", 1) in EVENTS
+    assert ("child", f"automatic-species-{DIVE}") in EVENTS
+    assert not [e for e in EVENTS if e[0] == "persist species"]
 
 
 async def test_the_cpu_fallback_runs_no_gpu_step():

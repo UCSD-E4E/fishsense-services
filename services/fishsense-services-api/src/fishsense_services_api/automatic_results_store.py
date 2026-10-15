@@ -142,13 +142,15 @@ _HUMAN_MEASURED = """EXISTS (
     WHERE mc.tenant_id = d.tenant_id AND mc.dive_id = d.id
 )"""
 
-_WORK = f"""(
-    EXISTS (
+#: A canonical frame with no automatic head/tail at the current version.
+_FRAMES_WORK = f"""EXISTS (
         SELECT 1 FROM captures c
         WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id AND c.is_canonical
           AND NOT {_FRAME_DONE}
-    )
-    OR EXISTS (
+    )"""
+
+#: A kept mask with no automatic species at the current version.
+_SPECIES_WORK = f"""EXISTS (
         SELECT 1 FROM current_automatic_head_tail_predictions h
         JOIN captures c ON c.tenant_id = h.tenant_id AND c.id = h.capture_id
         WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id AND c.is_canonical
@@ -159,8 +161,11 @@ _WORK = f"""(
                 AND s.automatic_head_tail_prediction_id = h.id
                 AND s.predictor_version = :sv
           )
-    )
-    OR (
+    )"""
+
+#: No current automatic calibration at the current version, or one older than
+#: the dive's newest frame or slate score.
+_CALIBRATION_WORK = """(
         EXISTS (
             SELECT 1 FROM captures c
             WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id AND c.is_canonical
@@ -188,8 +193,11 @@ _WORK = f"""(
                   ), '-infinity')
               )
         )
-    )
-    OR (
+    )"""
+
+#: A predicted fish with no current automatic length while a calibration
+#: exists.
+_LENGTHS_WORK = f"""(
         EXISTS (
             SELECT 1 FROM automatic_measurement_calibrations mc
             WHERE mc.tenant_id = d.tenant_id AND mc.dive_id = d.id
@@ -208,14 +216,24 @@ _WORK = f"""(
                     AND m.algorithm_version = :mv
               )
         )
-    )
-)"""
+    )"""
 
-#: The backlog cohort over dive `d`, but for the tenant term the selector adds.
-#: Any priority. `:hv`, `:sv`, `:cv`, `:mv` are the stages' current versions.
-AUTOMATIC_RESULTS_COHORT = f"""{RECTIFIABLE_DIVE}
+
+def automatic_results_cohort(*, species: bool = True) -> str:
+    """The backlog cohort over dive `d`, but for the tenant term the selector
+    adds. Any priority. `:hv`, `:sv`, `:cv`, `:mv` are the stages' current
+    versions (`:sv` unused with `species` off). Species has its own switch
+    (2026-10-15): off, a dive whose only work is species is not in it."""
+    work = [_FRAMES_WORK, _CALIBRATION_WORK, _LENGTHS_WORK]
+    if species:
+        work.insert(1, _SPECIES_WORK)
+    return f"""{RECTIFIABLE_DIVE}
     AND NOT {_HUMAN_MEASURED}
-    AND {_WORK}"""
+    AND ({" OR ".join(work)})"""
+
+
+#: The cohort with species on, the default.
+AUTOMATIC_RESULTS_COHORT = automatic_results_cohort()
 
 
 @dataclass(frozen=True)
@@ -232,13 +250,14 @@ async def next_dive_for_automatic_results(
     species_version: int,
     calibration_version: str,
     measurement_version: str,
+    species: bool = True,
 ) -> AutomaticCandidate | None:
     """The tenant's oldest dive in the backlog cohort."""
     row = (
         await conn.execute(
             text(f"""
                 SELECT d.id, d.created_at FROM dives d
-                WHERE d.tenant_id = :t AND {AUTOMATIC_RESULTS_COHORT}
+                WHERE d.tenant_id = :t AND {automatic_results_cohort(species=species)}
                 ORDER BY d.created_at, d.id
                 LIMIT 1
                 """),

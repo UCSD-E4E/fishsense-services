@@ -278,6 +278,23 @@ async def test_the_cohort_drains(owner_engine, app_engine):
     assert await _next(app_engine, lab) is None
 
 
+async def test_with_species_off_species_is_no_work(owner_engine, app_engine):
+    """Species has its own switch (2026-10-15): off, a dive whose only work
+    left is species leaves the cohort, so it never holds the backlog."""
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    fish_frame = await capture(owner_engine, lab, dive_id)
+    await _predict(app_engine, lab, dive_id, _predicted(fish_frame))
+    await _in(app_engine, lab, persist_automatic_calibration, dive_id,
+              _label_free(outcome="refused", refusal_reason="no_candidates",
+                          laser_position=None, laser_axis=None))  # fmt: skip
+
+    assert await _next(app_engine, lab) == dive_id  # species outstanding
+    off = await _in(app_engine, lab, next_dive_for_automatic_results,
+                    species=False, **VERSIONS)  # fmt: skip
+    assert off is None
+
+
 async def test_a_new_version_reopens_the_frames(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     dive_id = await _backlog_dive(owner_engine, lab)
