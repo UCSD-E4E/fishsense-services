@@ -115,7 +115,9 @@ def test_the_image_tag_is_this_release_by_default():
 
 def test_an_explicit_image_tag_wins():
     """A rehearsal or an integration test stands up its own build."""
-    assert scaling.resolve_scaling_config(settings(image_tag="itest")).image_tag == "itest"
+    assert (
+        scaling.resolve_scaling_config(settings(image_tag="itest")).image_tag == "itest"
+    )
 
 
 def test_the_processor_is_released_with_the_orchestrator():

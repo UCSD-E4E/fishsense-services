@@ -36,7 +36,12 @@ from fishsense_services_api.automatic_validation import (
 )
 from fishsense_services_api.automatic_validation_store import validation_frames
 from fishsense_services_api.db import tenant_transaction
-from fishsense_services_api.migrations import head_revision, upgrade
+from fishsense_services_api.migrations import (
+    current_revision,
+    head_revision,
+    is_known_revision,
+    upgrade,
+)
 from fishsense_services_api.range_trend import (
     DEFAULT_MIN_DEPTH_M,
     DEFAULT_MIN_FRAMES,
@@ -181,11 +186,25 @@ async def _migrate() -> int:
         return 2
     database_url = settings.migration_database_url.get_secret_value()
     try:
-        await upgrade(database_url, app_role=settings.app_role)
+        at = await current_revision(database_url)
+        if at is not None and not is_known_revision(at):
+            # A rollback: an older release's migrate on a schema a newer one
+            # moved. Migrations are additive, so this code runs on it; failing
+            # here would fail the rollback instead (review of v0.6.1).
+            print(
+                f"WARNING: the database is at revision {at}, newer than this"
+                f" release's head {head_revision()} -- a rollback. The schema is"
+                " left as it is; downgrade it with the newer release's image if"
+                " this code can't run on it (deploy/incus/README.md, Rolling back).",
+                file=sys.stderr,
+            )
+        else:
+            await upgrade(database_url, app_role=settings.app_role)
+            at = head_revision()
     except Exception as error:  # report, don't traceback: this is a deploy step
         print(f"migration FAILED -- nothing applied: {error}", file=sys.stderr)
         return 1
-    print(f"schema at revision {head_revision()}")
+    print(f"schema at revision {at}")
 
     violations = await _audit(database_url, settings.app_role)
     if violations:

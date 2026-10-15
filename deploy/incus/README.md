@@ -47,6 +47,20 @@ orchestrator), Garage (`s3.e4e.ucsd.edu`), Temporal (krg-prod), Label Studio
 | `pg_volumes/config/` | v1's `postgres.conf` and `pg_hba.conf`, plus one line for v2's roles. |
 | `superset_volumes/docker/` | v1's Superset bootstrap, and the dashboards-as-code bundle repointed at v2. |
 
+## Rolling back a release
+
+Revert the auto-deploy PR's pins and merge: the converge runs the older
+release's `migrate` against a schema the newer one may have moved. From the
+release after v0.7.1 on, `migrate` leaves a schema newer than its own head as
+it is, warns, and still runs the tenancy audit, so the rollback converges.
+Migrations are additive, so older code runs on the newer schema; if one ever
+isn't, downgrade the schema with the newer release's image first.
+
+A release **at or before v0.7.1** fails on a newer schema ("Can't locate
+revision"), so rolling back to one across a migration needs the schema
+downgraded to that release's head first, with the newer image. That drops the
+newer tables' data: decide it, don't script it.
+
 `deploy/tests/` pins the invariants between these files (the Temporal reload
 list, every setting each service requires, who holds which credential, pinned
 images, v1's volume names, the renders' shape) and runs the bootstrap and
