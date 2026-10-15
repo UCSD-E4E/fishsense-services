@@ -76,16 +76,17 @@ def test_one_release_versions_every_v2_image_and_the_processor():
     """One release version for the monorepo (release-please-config.json): an
     API from one release beside an orchestrator from another is a combination
     nobody tested. The processor's tag, which the orchestrator applies on NRP,
-    is the same version -- it is set here, not baked into the orchestrator,
-    so a release moves it with the rest."""
+    is the orchestrator's own release (nrp/scaling.py `release_image_tag`), so
+    it is not pinned here at all: a pin here could only drift from it (review
+    of v0.6.1)."""
     versions = {
         image_version(s["image"])
         for s in services().values()
         if image_version(s["image"])
     }
-    versions.add(environment(services()["orchestrator"])["FISHSENSE_NRP_IMAGE_TAG"])
 
     assert len(versions) == 1, versions
+    assert "FISHSENSE_NRP_IMAGE_TAG" not in environment(services()["orchestrator"])
 
 
 def test_the_images_the_compose_runs_are_the_ones_ci_builds():
@@ -408,6 +409,16 @@ def test_the_api_accepts_the_mobile_clients_tokens():
     assert mobile.sources["FISHSENSE_OIDC_MOBILE_AUDIENCES"] == [
         ("oidc/mobile", "client_id")
     ]
+
+
+def test_a_half_seeded_mobile_client_renders_nothing():
+    """The mobile render is soft, so a secret holding only one of its keys
+    rendered one variable and "<no value>" for the other, and the API refused
+    to start (review of v0.6.1). Both render together or neither does."""
+    mobile = renders()[f"{TENANT_RUN}/secrets/api-mobile.env"]
+
+    assert mobile.soft
+    assert "{{ if and .Data.data.issuer_url .Data.data.client_id }}" in mobile.contents
 
 
 def test_the_api_reads_each_tenants_own_store():

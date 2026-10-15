@@ -31,11 +31,11 @@
 #     the API must never hold the owner's DSN, nor the orchestrator the backup
 #     role's (PLAN.md §9.10).
 #   * The processor on NRP is stood up and torn down by the orchestrator from the
-#     manifests its image carries, at FISHSENSE_NRP_IMAGE_TAG -- never a standing
+#     manifests its image carries, at its own release's tag -- never a standing
 #     Deployment (PLAN.md §3), and never `kubectl apply` from CI.
 #
-# Every ghcr.io/ucsd-e4e/fishsense-services-* pin and FISHSENSE_NRP_IMAGE_TAG are
-# ONE release version, bumped together by promote.yml (deploy/bump_pins.py).
+# Every ghcr.io/ucsd-e4e/fishsense-services-* pin is ONE release version, bumped
+# together by promote.yml (deploy/bump_pins.py).
 
 services:
   # ── inner edge: TLS on :443 with fishsense.vm, route Host → containers ─────────────────
@@ -245,11 +245,11 @@ services:
       FISHSENSE_OBJECT_STORE_BUCKET: labels-fishsense-lite
       FISHSENSE_OBJECT_STORE_LEGACY_LABELS_PREFIX: fishsense-lite
       # NRP: the processor is stood up per wake and deleted when idle, from the
-      # manifests this image carries (/app/deploy/nrp), at this tag -- the
-      # release's, bumped with the pins above. The kubeconfig is a SOFT render.
+      # manifests this image carries (/app/deploy/nrp), at this image's own
+      # release (nrp/scaling.py release_image_tag). The kubeconfig is a SOFT
+      # render.
       FISHSENSE_NRP_KUBECONFIG_PATH: /run/tenant/nrp/kubeconfig
       FISHSENSE_NRP_NAMESPACE: e4e-fishsense
-      FISHSENSE_NRP_IMAGE_TAG: v0.7.1
       # BioCLIP species pre-annotation ships OFF until the FishSense-frame
       # evaluation (species_predict/settings.py). Explicit, so turning it on is
       # a reviewed diff here.

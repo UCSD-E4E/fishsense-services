@@ -215,3 +215,28 @@ def test_a_token_with_no_issuer_is_rejected(issuers):
 def test_garbage_is_rejected_by_the_issuers_too(issuers):
     with pytest.raises(InvalidToken):
         issuers.validate("not.a.token")
+
+
+def test_two_clients_of_one_issuer_are_both_accepted():
+    """Review of v0.6.1: validators were keyed by issuer, so a mobile client
+    seeded with the web's issuer (Authentik's global issuer mode, or the same
+    URL seeded twice) replaced the web's validator, and every portal token
+    failed its audience. Both clients of one issuer are kept."""
+    same = MultiIssuerValidator(
+        [
+            TokenValidator(
+                issuer=ISSUER,
+                audiences=(WEB_CLIENT,),
+                keys=StaticKeySource({KID: SIGNING_KEY.public_key()}),
+            ),
+            TokenValidator(
+                issuer=ISSUER,
+                audiences=(MOBILE_CLIENT,),
+                keys=StaticKeySource({KID: SIGNING_KEY.public_key()}),
+            ),
+        ]
+    )
+    assert same.validate(_token(aud=WEB_CLIENT)).sub == "hashed-user-id-123"
+    assert same.validate(_token(aud=MOBILE_CLIENT)).sub == "hashed-user-id-123"
+    with pytest.raises(InvalidToken):
+        same.validate(_token(aud="someone-else"))

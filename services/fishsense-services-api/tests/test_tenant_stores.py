@@ -14,6 +14,7 @@ other bytes, and commit reads them back with HEAD.
 import base64
 import hashlib
 import json
+import os
 import urllib.error
 import urllib.request
 
@@ -260,3 +261,65 @@ def test_an_incomplete_entry_is_skipped_and_the_rest_kept(tmp_path, caplog):
 
     assert stores.tenants == {"lab"}
     assert any("partner" in r.getMessage() for r in caplog.records)
+
+
+# vault-agent re-renders the file when krg-infra seeds or rotates a store.
+# The API read it once, at startup, so a store seeded later stayed missing
+# until a restart nobody knew to make (review of v0.6.1).
+
+
+def _render(path, stores, *, tick):
+    path.write_text(json.dumps(stores))
+    # A rewrite inside one mtime tick would look unchanged; real renders are
+    # seconds apart, so step the clock explicitly.
+    os.utime(path, ns=(tick * 1_000_000_000, tick * 1_000_000_000))
+
+
+def test_a_store_seeded_after_startup_is_picked_up(tmp_path):
+    rendered = tmp_path / "stores.json"
+    stores = _load(rendered)
+    assert stores.tenants == set()
+
+    _render(
+        rendered,
+        {"lab": {"bucket": "lab", "access_key_id": "k1", "secret_access_key": "s1"}},
+        tick=1,
+    )
+
+    assert stores.tenants == {"lab"}
+    assert stores.for_tenant("lab").bucket == "lab"
+
+
+def test_a_rotated_key_replaces_the_cached_client(tmp_path):
+    rendered = tmp_path / "stores.json"
+    _render(
+        rendered,
+        {"lab": {"bucket": "old", "access_key_id": "k1", "secret_access_key": "s1"}},
+        tick=1,
+    )
+    stores = _load(rendered)
+    assert stores.for_tenant("lab").bucket == "old"
+
+    _render(
+        rendered,
+        {"lab": {"bucket": "new", "access_key_id": "k2", "secret_access_key": "s2"}},
+        tick=2,
+    )
+
+    assert stores.for_tenant("lab").bucket == "new"
+
+
+def test_a_store_removed_from_the_file_is_gone(tmp_path):
+    rendered = tmp_path / "stores.json"
+    _render(
+        rendered,
+        {"lab": {"bucket": "lab", "access_key_id": "k1", "secret_access_key": "s1"}},
+        tick=1,
+    )
+    stores = _load(rendered)
+    stores.for_tenant("lab")
+
+    _render(rendered, {}, tick=2)
+
+    with pytest.raises(NoTenantStore):
+        stores.for_tenant("lab")

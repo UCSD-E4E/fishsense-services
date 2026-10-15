@@ -110,11 +110,44 @@ def test_the_mobile_issuer_comes_with_its_own_audiences_and_jwks(env):
     assert settings.oidc_mobile_jwks_url == f"{MOBILE_ISSUER}jwks/"
 
 
-def test_a_mobile_issuer_without_audiences_is_refused(env):
-    env(**REQUIRED, FISHSENSE_OIDC_MOBILE_ISSUER=MOBILE_ISSUER)
+# The mobile client is a SOFT render (api-mobile.env): half-seeded in
+# OpenBao, it renders an empty value or consul-template's "<no value>". The
+# API refused to start on that, and crash-looped the web's API with it
+# (review of v0.6.1). Mobile is optional, so a half-configured one is off,
+# loudly, and the web's tokens still work.
 
-    with pytest.raises(ValidationError):
-        Settings()
+
+@pytest.mark.parametrize(
+    "mobile",
+    [
+        {"FISHSENSE_OIDC_MOBILE_ISSUER": MOBILE_ISSUER},
+        {
+            "FISHSENSE_OIDC_MOBILE_ISSUER": MOBILE_ISSUER,
+            "FISHSENSE_OIDC_MOBILE_AUDIENCES": "",
+        },
+        {
+            "FISHSENSE_OIDC_MOBILE_ISSUER": MOBILE_ISSUER,
+            "FISHSENSE_OIDC_MOBILE_AUDIENCES": "<no value>",
+        },
+        {
+            "FISHSENSE_OIDC_MOBILE_ISSUER": "<no value>",
+            "FISHSENSE_OIDC_MOBILE_AUDIENCES": "fishsense-mobile",
+        },
+        {
+            "FISHSENSE_OIDC_MOBILE_ISSUER": "",
+            "FISHSENSE_OIDC_MOBILE_AUDIENCES": "fishsense-mobile",
+        },
+    ],
+)
+def test_a_half_seeded_mobile_client_is_off_not_fatal(env, caplog, mobile):
+    env(**REQUIRED, **mobile)
+
+    with caplog.at_level("WARNING"):
+        settings = Settings()
+
+    assert settings.oidc_mobile_issuer is None
+    assert settings.oidc_mobile_audiences == ()
+    assert any("mobile" in r.getMessage().lower() for r in caplog.records)
 
 
 def test_tenant_stores_are_optional(env):

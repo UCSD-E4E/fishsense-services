@@ -28,6 +28,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from importlib.metadata import version
+
 import pytest
 from kubernetes.client.rest import ApiException
 
@@ -100,11 +102,30 @@ def test_requires_namespace_when_kubeconfig_set():
         scaling.resolve_scaling_config(settings(namespace=None))
 
 
-def test_requires_an_image_tag_when_kubeconfig_set():
+def test_the_image_tag_is_this_release_by_default():
     """v2: the orchestrator applies the manifests itself, with the release's
-    image. Guessing (`latest`) would stand up whatever was pushed last."""
-    with pytest.raises(ValueError, match="IMAGE_TAG"):
-        scaling.resolve_scaling_config(settings(image_tag=None))
+    image -- never a guess (`latest`, whatever was pushed last). The
+    processor is built from the same commit as this orchestrator, so the tag
+    is this package's own version: one fewer pin a release must move in step
+    (review of v0.6.1)."""
+    cfg = scaling.resolve_scaling_config(settings(image_tag=None))
+
+    assert cfg.image_tag == f"v{version('fishsense-services-orchestrator')}"
+
+
+def test_an_explicit_image_tag_wins():
+    """A rehearsal or an integration test stands up its own build."""
+    assert (
+        scaling.resolve_scaling_config(settings(image_tag="itest")).image_tag == "itest"
+    )
+
+
+def test_the_processor_is_released_with_the_orchestrator():
+    """The default holds only while release-please moves both versions
+    together (release-please-config.json's extra-files)."""
+    assert version("fishsense-services-processor") == version(
+        "fishsense-services-orchestrator"
+    )
 
 
 def test_a_missing_manifest_fails_at_startup(tmp_path):

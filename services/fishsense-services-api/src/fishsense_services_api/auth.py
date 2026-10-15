@@ -171,17 +171,29 @@ class MultiIssuerValidator:
     """
 
     def __init__(self, validators: list[TokenValidator]) -> None:
-        self._by_issuer = {v.issuer: v for v in validators}
+        # Several clients may share one issuer (Authentik's global issuer
+        # mode, or one URL seeded for both): keep each, in order, rather than
+        # letting a later one replace an earlier (review of v0.6.1).
+        self._by_issuer: dict[str, list[TokenValidator]] = {}
+        for v in validators:
+            self._by_issuer.setdefault(v.issuer, []).append(v)
 
     def validate(self, token: str) -> Principal:
         try:
             issuer = jwt.decode(token, options={"verify_signature": False}).get("iss")
         except jwt.PyJWTError as error:
             raise InvalidToken(str(error)) from error
-        validator = self._by_issuer.get(issuer) if isinstance(issuer, str) else None
-        if validator is None:
+        validators = self._by_issuer.get(issuer) if isinstance(issuer, str) else None
+        if not validators:
             raise InvalidToken(f"unknown issuer {issuer!r}")
-        return validator.validate(token)
+        error: InvalidToken | None = None
+        for validator in validators:
+            try:
+                return validator.validate(token)
+            except InvalidToken as rejected:
+                error = rejected
+        assert error is not None
+        raise error
 
 
 def _org(claim: object) -> str | None:

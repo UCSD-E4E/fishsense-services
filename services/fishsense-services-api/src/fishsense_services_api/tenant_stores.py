@@ -147,6 +147,10 @@ class TenantStores:
         self._region = region
         self._stores = dict(stores)
         self._objects: dict[str, TenantObjects] = {}
+        #: The rendered file, when the stores came from one, and the stat it
+        #: was last read at.
+        self._path: Path | None = None
+        self._seen: tuple[int, int, int] | None = None
 
     @classmethod
     def from_file(
@@ -155,12 +159,33 @@ class TenantStores:
         """The stores in the rendered file. They are optional: a file that is
         missing (not rendered yet), empty (not seeded), malformed, or holds an
         incomplete entry costs only the stores it can't give -- logged, never
-        raised -- so it can stop mobile sync but never the API."""
-        return cls(
+        raised -- so it can stop mobile sync but never the API.
+
+        The file is re-read whenever it changes: vault-agent re-renders it as
+        krg-infra seeds or rotates a store, and a store seeded after startup
+        must not wait for a restart (review of v0.6.1)."""
+        path = Path(path)
+        seen = _stat(path)
+        stores = cls(
             endpoint_url=endpoint_url,
             public_endpoint_url=public_endpoint_url,
             region=region,
-            stores=_read_stores(Path(path)),
+            stores=_read_stores(path),
+        )
+        stores._path, stores._seen = path, seen
+        return stores
+
+    def _reload_if_changed(self) -> None:
+        if self._path is None:
+            return
+        seen = _stat(self._path)
+        if seen == self._seen:
+            return
+        self._stores = _read_stores(self._path)
+        self._objects = {}  # their keys may have rotated
+        self._seen = seen
+        logger.info(
+            "tenant stores re-read from %s: %s", self._path, sorted(self._stores)
         )
 
     def __repr__(self) -> str:
@@ -168,9 +193,11 @@ class TenantStores:
 
     @property
     def tenants(self) -> set[str]:
+        self._reload_if_changed()
         return set(self._stores)
 
     def for_tenant(self, slug: str) -> TenantObjects:
+        self._reload_if_changed()
         objects = self._objects.get(slug)
         if objects is not None:
             return objects
@@ -200,6 +227,15 @@ class TenantStores:
                 response_checksum_validation="when_required",
             ),
         )
+
+
+def _stat(path: Path) -> tuple[int, int, int] | None:
+    """What changes when the file is rewritten, or None if it isn't there."""
+    try:
+        found = path.stat()
+    except OSError:
+        return None
+    return (found.st_ino, found.st_mtime_ns, found.st_size)
 
 
 def _read_stores(path: Path) -> dict[str, TenantStore]:

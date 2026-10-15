@@ -10,9 +10,9 @@ name: Promote
 #    would pin the compose at a tag that doesn't exist, and the converge fails
 #    on the pull.
 #
-# 2. Opens a deploy PR bumping every pin in deploy/incus/compose.yml AND
-#    FISHSENSE_NRP_IMAGE_TAG — the tag the orchestrator stands the NRP processor
-#    up at (deploy/bump_pins.py). Merging it triggers deploy.yml, which converges
+# 2. Opens a deploy PR bumping every pin in deploy/incus/compose.yml
+#    (deploy/bump_pins.py); the orchestrator stands the NRP processor up at its
+#    own release's tag, so that moves with its pin. Merging it triggers deploy.yml, which converges
 #    the slot. The deploy is intentional — humans review the diff before prod
 #    changes. v1 had a second target here (the data-worker's kustomization,
 #    `kubectl apply -k` from CI); v2 has none: the processor is not a standing
@@ -136,8 +136,8 @@ jobs:
 
             - **Version**: `${{ steps.parse.outputs.version }}` — every
               `ghcr.io/${{ steps.parse.outputs.owner_lc }}/fishsense-services-*`
-              pin in `deploy/incus/compose.yml`, and `FISHSENSE_NRP_IMAGE_TAG`
-              (the processor's tag on NRP)
+              pin in `deploy/incus/compose.yml` (the processor's tag on NRP
+              is the orchestrator's release)
             - **Source SHA**: `${{ steps.parse.outputs.short_sha }}`
 
             Merging this PR triggers `.github/workflows/deploy.yml` —

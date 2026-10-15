@@ -5,11 +5,17 @@ rather than failing on its first request. Secrets are ``SecretStr``: they never
 appear in a repr, a log line or a traceback.
 """
 
+import logging
 from pathlib import Path
 from typing import Annotated
 
 from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
+
+#: What consul-template renders for a key that is missing from its secret.
+_NO_VALUE = "<no value>"
 
 
 class Settings(BaseSettings):
@@ -54,17 +60,30 @@ class Settings(BaseSettings):
     @field_validator("oidc_mobile_audiences", mode="before")
     @classmethod
     def _split_mobile_audiences(cls, value: object) -> object:
-        return _split(value)
+        return tuple(a for a in _split(value) if a != _NO_VALUE)
+
+    @field_validator("oidc_mobile_issuer", mode="before")
+    @classmethod
+    def _unrendered_mobile_issuer(cls, value: object) -> object:
+        if isinstance(value, str) and value.strip() in {"", _NO_VALUE}:
+            return None
+        return value
 
     @model_validator(mode="after")
     def _default_jwks_url(self) -> "Settings":
         if self.oidc_jwks_url is None:
             self.oidc_jwks_url = _jwks_under(self.oidc_issuer)
+        # The mobile client is a soft render: half-seeded, it is off -- loudly
+        # -- and never stops the API the web depends on (review of v0.6.1).
+        if (self.oidc_mobile_issuer is None) != (not self.oidc_mobile_audiences):
+            logger.warning(
+                "the mobile OIDC client needs both FISHSENSE_OIDC_MOBILE_ISSUER and"
+                " FISHSENSE_OIDC_MOBILE_AUDIENCES; only one is set, so mobile"
+                " tokens are refused until both are seeded"
+            )
+            self.oidc_mobile_issuer = None
+            self.oidc_mobile_audiences = ()
         if self.oidc_mobile_issuer is not None:
-            if not self.oidc_mobile_audiences:
-                raise ValueError(
-                    "FISHSENSE_OIDC_MOBILE_ISSUER needs FISHSENSE_OIDC_MOBILE_AUDIENCES"
-                )
             if self.oidc_mobile_jwks_url is None:
                 self.oidc_mobile_jwks_url = _jwks_under(self.oidc_mobile_issuer)
         if self.tenant_stores_file is not None and not (

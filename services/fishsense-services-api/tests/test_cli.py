@@ -60,6 +60,37 @@ async def test_migrate_twice_is_a_no_op(empty_database, monkeypatch):
     assert await _version(empty_database) == head_revision()
 
 
+async def test_migrate_leaves_a_newer_schema_for_a_rollback(
+    empty_database, monkeypatch, capsys
+):
+    """Rolling the pins back to an older release runs that release's migrate
+    against a schema a newer one already moved. Alembic can't find the newer
+    revision and fails, and with it the deploy the rollback was for (review
+    of v0.6.1). Migrations are additive, so the older code runs on the newer
+    schema: migrate leaves it alone, says so loudly, and still audits it."""
+    monkeypatch.setenv("FISHSENSE_MIGRATION_DATABASE_URL", empty_database)
+    assert await main(["migrate"]) == 0
+    engine = create_async_engine(empty_database)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE alembic_version SET version_num = '9999_from_a_newer_release'"
+                )
+            )
+    finally:
+        await engine.dispose()
+    capsys.readouterr()
+
+    assert await main(["migrate"]) == 0
+
+    assert await _version(empty_database) == "9999_from_a_newer_release"
+    out = capsys.readouterr()
+    assert "9999_from_a_newer_release" in out.err
+    assert head_revision() in out.err
+    assert "tenancy audit passed" in out.out
+
+
 async def test_migrate_refuses_a_schema_that_breaks_tenancy(
     empty_database, monkeypatch, capsys
 ):
