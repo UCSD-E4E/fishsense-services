@@ -1,5 +1,6 @@
 import type { Session } from "next-auth";
 import { EXPIRY_SKEW_SECONDS } from "./auth-callbacks";
+import { refreshPath } from "./session-refresh";
 
 /**
  * Authorization for `/portal`.
@@ -60,6 +61,31 @@ export function accessTokenIsFresh(
   const expiresAt = session.accessTokenExpiresAt;
   if (typeof expiresAt !== "number") return false;
   return expiresAt - EXPIRY_SKEW_SECONDS > nowSeconds;
+}
+
+export type CapturesGate = { ok: true } | { ok: false; redirect: string };
+
+/**
+ * The gate for the captures pages: signed in, with a usable token -- any
+ * member of a tenant, not only its admins (the portal's gate). What a user
+ * may see is the API's decision, made on every call with their own token.
+ *
+ * A session whose refresh failed has no usable token, so it signs in again,
+ * as the portal treats it as expired (`portalAccess`), rather than calling the
+ * API with a dead one (review of v0.6.1).
+ */
+export function capturesGate(
+  session: Session | null,
+  path: string,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): CapturesGate {
+  if (!session?.user || session.error) {
+    return { ok: false, redirect: `/api/auth/signin?callbackUrl=${encodeURIComponent(path)}` };
+  }
+  if (!accessTokenIsFresh(session, nowSeconds)) {
+    return { ok: false, redirect: refreshPath(path) };
+  }
+  return { ok: true };
 }
 
 type Denial = Extract<PortalAccess, { ok: false }>["reason"];

@@ -6,7 +6,14 @@
 // fails closed, and it matches exactly (the API does the matching).
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Session } from "next-auth";
-import { accessTokenIsFresh, explainDenial, isPortalAuthorized, portalAccess } from "./authz";
+import {
+  accessTokenIsFresh,
+  capturesGate,
+  explainDenial,
+  isPortalAuthorized,
+  portalAccess,
+} from "./authz";
+import { refreshPath } from "./session-refresh";
 
 const NOW = 1_800_000_000;
 
@@ -136,5 +143,37 @@ describe("explainDenial", () => {
 
   it("asks an expired session to sign in again", () => {
     expect(explainDenial("expired", "lab")).toMatch(/sign in again/i);
+  });
+});
+
+describe("capturesGate", () => {
+  const PATH = "/captures/lab/abc";
+  const SIGN_IN = `/api/auth/signin?callbackUrl=${encodeURIComponent(PATH)}`;
+
+  it("lets a signed-in member with a fresh token through", () => {
+    // Any member, not only admins: the API decides what each one may see.
+    expect(capturesGate(session({ role: "member", isAdmin: false }), PATH, NOW)).toEqual({
+      ok: true,
+    });
+  });
+
+  it("sends a signed-out visitor to sign in", () => {
+    expect(capturesGate(null, PATH, NOW)).toEqual({ ok: false, redirect: SIGN_IN });
+  });
+
+  it("sends a session whose refresh failed to sign in, not through with its stale token", () => {
+    // Review of v0.6.1: the gate let a `session.error` session through, so the
+    // page called the API with a dead token and showed its 401 as an empty
+    // list. The portal treats the same session as expired.
+    expect(
+      capturesGate(session({ error: "RefreshAccessTokenError", accessTokenExpiresAt: NOW - 1 }), PATH, NOW),
+    ).toEqual({ ok: false, redirect: SIGN_IN });
+  });
+
+  it("renews a stale token first", () => {
+    expect(capturesGate(session({ accessTokenExpiresAt: NOW - 1 }), PATH, NOW)).toEqual({
+      ok: false,
+      redirect: refreshPath(PATH),
+    });
   });
 });
