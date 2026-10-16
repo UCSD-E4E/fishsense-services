@@ -65,8 +65,10 @@ from fishsense_services_orchestrator.automatic_results.activities import (
 )
 from fishsense_services_orchestrator.automatic_results import workflow as sut
 from fishsense_services_orchestrator.automatic_results.workflow import (
+    AutomaticDiveReport,
     AutomaticResultsForDiveWorkflow,
     AutomaticResultsParentWorkflow,
+    AutomaticRunReport,
 )
 from fishsense_services_orchestrator.object_store.contracts import (
     CleanupRawBytesResult,
@@ -362,16 +364,19 @@ async def test_one_dive_every_step_in_order():
 async def test_a_species_failure_costs_the_dive_nothing():
     """Species last, and its failure logged rather than raised: the dive's
     calibration and lengths are already written, and the run succeeds."""
-    assert await _run(AutomaticResultsForDiveWorkflow, TARGET, species_fails=True) == (
-        TARGET
-    )
+    report = await _run(AutomaticResultsForDiveWorkflow, TARGET, species_fails=True)
+    assert report == AutomaticDiveReport(TENANT, DIVE, species_failed=True)
     assert ("persist lengths", 1) in EVENTS
     assert ("child", f"automatic-species-{DIVE}") in EVENTS
     assert not [e for e in EVENTS if e[0] == "persist species"]
 
 
 async def test_the_cpu_fallback_runs_no_gpu_step():
-    await _run(AutomaticResultsForDiveWorkflow, TARGET, mode="cpu_fallback")
+    report = await _run(AutomaticResultsForDiveWorkflow, TARGET, mode="cpu_fallback")
+    # Said, not silent (2026-10-15 gap audit): the run reads as done, but
+    # its GPU steps are still owed.
+    assert report.skipped == ["frames: no GPU (cpu_fallback)",
+                              "species: no GPU (cpu_fallback)"]  # fmt: skip
     kinds = [e[0] for e in EVENTS]
     assert "stage" not in kinds and "persist frames" not in kinds
     assert "persist species" not in kinds
@@ -380,8 +385,9 @@ async def test_the_cpu_fallback_runs_no_gpu_step():
 
 
 async def test_no_gpu_work_wakes_no_gpu():
-    await _run(AutomaticResultsForDiveWorkflow, TARGET, frames=0, species=0)
+    report = await _run(AutomaticResultsForDiveWorkflow, TARGET, frames=0, species=0)
     assert ("wake gpu",) not in EVENTS and ("stage",) not in EVENTS
+    assert report.skipped == []  # nothing owed is nothing skipped
 
 
 async def test_no_slate_frame_is_a_refusal_without_a_processor():
@@ -396,13 +402,29 @@ async def test_no_calibration_means_no_lengths():
 
 
 async def test_the_parent_runs_the_selected_dive():
-    assert await _run(AutomaticResultsParentWorkflow) == TARGET
+    report = await _run(AutomaticResultsParentWorkflow)
+    assert report.dives == [AutomaticDiveReport(TENANT, DIVE)]
     assert ("persist lengths", 1) in EVENTS
 
 
 async def test_nothing_selected_is_nothing_done():
-    assert await _run(AutomaticResultsParentWorkflow, selected=None) is None
+    report = await _run(AutomaticResultsParentWorkflow, selected=None)
+    assert report == AutomaticRunReport(dives=[], stopped="backlog empty")
     assert EVENTS == []
+
+
+async def test_a_run_with_no_gpu_says_so_and_stops_draining():
+    """Every backlog dive owes GPU work first (its frames). With no GPU the
+    run walked the whole backlog doing nothing, and read as a quiet success
+    (2026-10-15 gap audit): it stops at the first dive, and says why."""
+    dives = [_target(), _target(), _target()]
+    report = await _run(
+        AutomaticResultsParentWorkflow, selected=dives, mode="cpu_fallback"
+    )
+    assert report.stopped == "no GPU (cpu_fallback)"
+    assert [d.dive_id for d in report.dives] == [dives[0].dive_id]
+    assert report.dives[0].skipped[0] == "frames: no GPU (cpu_fallback)"
+    assert len(SELECTS) == 1
 
 
 # -- the backlog drains; a failing dive does not hold it ----------------------------
@@ -416,7 +438,9 @@ async def test_one_run_drains_the_backlog():
     """2026-10-15 audit: one dive per hourly firing put the ~474-dive backlog
     weeks out. A run takes dive after dive, telling the cohort what it took."""
     dives = [_target(), _target(), _target()]
-    assert await _run(AutomaticResultsParentWorkflow, selected=dives) == dives[-1]
+    report = await _run(AutomaticResultsParentWorkflow, selected=dives)
+    assert [d.dive_id for d in report.dives] == [d.dive_id for d in dives]
+    assert report.stopped == "backlog empty"
     assert SELECTS == [(), (dives[0].dive_id,), (dives[0].dive_id, dives[1].dive_id),
                        tuple(d.dive_id for d in dives)]  # fmt: skip
     assert [e for e in EVENTS if e[0] == "persist lengths"] == [
@@ -429,7 +453,10 @@ async def test_a_dive_whose_step_fails_is_recorded_cleaned_up_and_passed_over():
     recorded (at three the cohort leaves the dive for an operator), its raw
     scratch is cleaned up, and the run goes on."""
     dives = [_target(), _target()]
-    await _run(AutomaticResultsParentWorkflow, selected=dives, frames_fail=True)
+    report = await _run(
+        AutomaticResultsParentWorkflow, selected=dives, frames_fail=True
+    )
+    assert [d.failed for d in report.dives] == ["frames", "frames"]
     assert [e for e in EVENTS if e[0] == "failed"] == [
         ("failed", d.dive_id, "frames") for d in dives
     ]
@@ -438,7 +465,8 @@ async def test_a_dive_whose_step_fails_is_recorded_cleaned_up_and_passed_over():
 
 
 async def test_a_dive_handed_back_twice_ends_the_run():
-    assert await _run(AutomaticResultsParentWorkflow) == TARGET
+    report = await _run(AutomaticResultsParentWorkflow)
+    assert report.stopped == "dive handed back"
     assert len(SELECTS) == 2
 
 
