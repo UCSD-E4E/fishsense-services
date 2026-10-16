@@ -6,6 +6,7 @@ import {
   getCapture,
   measurementOverlay,
   osmLink,
+  placeName,
 } from "@/lib/captures";
 import { requireSignedIn } from "../../guard";
 
@@ -43,6 +44,10 @@ export default async function CapturePage({ params }: Props) {
   const current = capture.current_measurement;
   const overlay = measurementOverlay(capture, current);
   const photo = capture.files.find((f) => f.role === "rgb_jpeg");
+  const place = placeName({
+    place_name: capture.location?.place_name,
+    derived_place_name: capture.derived_place_name,
+  });
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-12">
@@ -53,8 +58,8 @@ export default async function CapturePage({ params }: Props) {
           </h1>
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
             {new Date(capture.captured_at).toLocaleString()}
-            {capture.location?.place_name
-              ? ` · ${capture.location.place_name}`
+            {place
+              ? ` · ${place.name}${place.derived ? " (from coordinates)" : ""}`
               : ""}
           </p>
         </div>

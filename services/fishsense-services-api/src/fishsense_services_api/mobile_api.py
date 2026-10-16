@@ -30,6 +30,7 @@ field this API doesn't model yet isn't lost.
 """
 
 import asyncio
+import logging
 import base64
 import math
 import uuid
@@ -37,13 +38,26 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Query,
+    Response,
+    status,
+)
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from fishsense_services_api.auth import Principal
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.memberships import Membership
+from fishsense_services_api.place_name_store import (
+    needing_place_names,
+    record_place_name,
+)
+from fishsense_services_api.place_names import Geocoder, GeocoderUnavailable
 from fishsense_services_api.mobile_capture_store import (
     CaptureConflict,
     CaptureDetail,
@@ -65,6 +79,11 @@ from fishsense_services_api.tenant_stores import (
 )
 
 MB = 1 << 20
+#: At most this many captures are named per request, so one page view can't
+#: hand the geocoder a backlog.
+MAX_PLACE_NAMES_PER_REQUEST = 20
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -289,6 +308,9 @@ class CaptureView(BaseModel):
     measurements: list[MeasurementView]
     current_measurement: MeasurementView | None
     manifest: dict
+    #: The place name the server derived from the coordinates when the app
+    #: sent none (0041); filled in the background, so it may come later.
+    derived_place_name: str | None = None
 
 
 class CaptureSummaryView(BaseModel):
@@ -299,6 +321,7 @@ class CaptureSummaryView(BaseModel):
     place_name: str | None
     length_m: float | None
     rgb_url: str | None
+    derived_place_name: str | None = None
 
 
 class CapturePage(BaseModel):
@@ -314,8 +337,36 @@ def add_mobile_routes(
     membership,
     authenticate,
     stores: TenantStores,
+    geocoder: Geocoder | None = None,
 ) -> None:
-    """``membership`` and ``authenticate`` are the app's dependencies."""
+    """``membership`` and ``authenticate`` are the app's dependencies;
+    ``geocoder`` names captures the app couldn't (None: no derived names)."""
+
+    async def fill_place_names(
+        tenant_id: uuid.UUID, capture_ids: list[uuid.UUID]
+    ) -> None:
+        """Derive a place name for each capture that needs one. Runs after the
+        response; an outage is logged and retried on a later read."""
+        async with tenant_transaction(engine, tenant_id) as conn:
+            unnamed = await needing_place_names(conn, tenant_id, capture_ids)
+        for capture in unnamed[:MAX_PLACE_NAMES_PER_REQUEST]:
+            try:
+                found = await geocoder.reverse(capture.latitude, capture.longitude)
+            except GeocoderUnavailable as error:
+                logger.warning("geocoder unavailable; place names wait: %s", error)
+                return
+            async with tenant_transaction(engine, tenant_id) as conn:
+                # Another request may have named it meanwhile.
+                if await needing_place_names(conn, tenant_id, [capture.capture_id]):
+                    await record_place_name(conn, tenant_id, capture.capture_id, found)
+
+    def name_later(
+        background: BackgroundTasks,
+        tenant_id: uuid.UUID,
+        capture_ids: list[uuid.UUID],
+    ) -> None:
+        if geocoder is not None and capture_ids:
+            background.add_task(fill_place_names, tenant_id, capture_ids)
 
     Member = Annotated[Membership, Depends(membership)]
     Caller = Annotated[Principal, Depends(authenticate)]
@@ -380,6 +431,7 @@ def add_mobile_routes(
         member: Member,
         principal: Caller,
         response: Response,
+        background: BackgroundTasks,
     ) -> CaptureView:
         if body.captured_by_sub != principal.sub:
             raise HTTPException(
@@ -432,6 +484,8 @@ def add_mobile_routes(
             raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from None
         if committed.created:
             response.status_code = status.HTTP_201_CREATED
+        if detail.place_name is None and detail.derived_place_name is None:
+            name_later(background, member.tenant_id, [detail.capture_id])
         return _view(detail, objects)
 
     @app.post(
@@ -471,6 +525,7 @@ def add_mobile_routes(
     async def list_captures(
         slug: str,
         member: Member,
+        background: BackgroundTasks,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         before: str | None = None,
     ) -> CapturePage:
@@ -481,6 +536,15 @@ def add_mobile_routes(
             )
         objects = readable(slug)
         page, more = found[:limit], len(found) > limit
+        name_later(
+            background,
+            member.tenant_id,
+            [
+                c.capture_id
+                for c in page
+                if c.place_name is None and c.derived_place_name is None
+            ],
+        )
         return CapturePage(
             captures=[
                 CaptureSummaryView(
@@ -491,6 +555,7 @@ def add_mobile_routes(
                     place_name=c.place_name,
                     length_m=c.length_m,
                     rgb_url=objects.presign_get(c.rgb_key) if objects else None,
+                    derived_place_name=c.derived_place_name,
                 )
                 for c in page
             ],
@@ -503,12 +568,17 @@ def add_mobile_routes(
         response_model=CaptureView,
     )
     async def get_capture(
-        slug: str, client_capture_uuid: uuid.UUID, member: Member
+        slug: str,
+        client_capture_uuid: uuid.UUID,
+        member: Member,
+        background: BackgroundTasks,
     ) -> CaptureView:
         async with tenant_transaction(engine, member.tenant_id) as conn:
             detail = await mobile_capture(conn, member.tenant_id, client_capture_uuid)
         if detail is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND)
+        if detail.place_name is None and detail.derived_place_name is None:
+            name_later(background, member.tenant_id, [detail.capture_id])
         return _view(detail, readable(slug))
 
 
@@ -651,6 +721,7 @@ def _view(detail: CaptureDetail, objects: TenantObjects | None) -> CaptureView:
         measurements=measurements,
         current_measurement=measurements[-1] if measurements else None,
         manifest=detail.manifest,
+        derived_place_name=detail.derived_place_name,
     )
 
 

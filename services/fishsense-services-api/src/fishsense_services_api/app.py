@@ -40,6 +40,7 @@ from fishsense_services_api.memberships import (
     resolve_membership,
 )
 from fishsense_services_api.mobile_api import add_mobile_routes
+from fishsense_services_api.place_names import Geocoder
 from fishsense_services_api.portal_api import add_portal_routes
 from fishsense_services_api.tenant_stores import TenantStores
 from fishsense_services_api.users import provision_user
@@ -74,9 +75,11 @@ def create_app(
     engine: AsyncEngine,
     validator: Validator,
     stores: TenantStores | None = None,
+    geocoder: Geocoder | None = None,
 ) -> FastAPI:
     """``stores``: each tenant's own bucket; None means no tenant has one, so
-    no tenant can sync mobile captures."""
+    no tenant can sync mobile captures. ``geocoder``: our own, to name the
+    places of captures the app couldn't; None, no names are derived."""
     app = FastAPI(title="FishSense Services API")
 
     @app.exception_handler(RequestValidationError)
@@ -201,6 +204,7 @@ def create_app(
         membership=membership,
         authenticate=authenticate,
         stores=stores,
+        geocoder=geocoder,
     )
     return app
 

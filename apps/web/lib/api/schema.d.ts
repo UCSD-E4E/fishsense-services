@@ -364,6 +364,8 @@ export interface components {
              * Format: uuid
              */
             client_capture_uuid: string;
+            /** Derived Place Name */
+            derived_place_name?: string | null;
             /** Latitude */
             latitude: number | null;
             /** Length M */
@@ -396,6 +398,8 @@ export interface components {
             core_version: string | null;
             current_measurement: components["schemas"]["MeasurementView"] | null;
             depth: components["schemas"]["DepthGeometry"];
+            /** Derived Place Name */
+            derived_place_name?: string | null;
             device: components["schemas"]["DeviceInfo"];
             /** Files */
             files: components["schemas"]["FileView"][];
