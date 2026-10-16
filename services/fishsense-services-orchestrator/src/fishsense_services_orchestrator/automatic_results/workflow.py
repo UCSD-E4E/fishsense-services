@@ -244,6 +244,17 @@ async def _frames(
             return
         if results:
             await _db("persist_automatic_frames", target, results, result_type=int)
+        # The processor leaves out a frame that failed every try, so one bad
+        # frame no longer costs the dive the rest: those are kept, and the
+        # dive's failure is recorded for the frames still owed (2026-10-15).
+        missing = len(inputs.frames) - len(results or [])
+        if missing:
+            error = f"{missing} of {len(inputs.frames)} frames failed every try"
+            workflow.logger.warning(
+                "automatic frames for dive=%s: %s", target.dive_id, error
+            )
+            await _db("record_automatic_results_failure", target, "frames", error)
+            raise StepFailed("frames")
     finally:
         if owns_scratch:
             await cleanup_raw(staging)

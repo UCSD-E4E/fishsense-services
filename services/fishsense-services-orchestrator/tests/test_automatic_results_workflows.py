@@ -284,6 +284,16 @@ class _FailingFrames:  # pylint: disable=too-few-public-methods
         raise ApplicationError("cannot finish", type="Boom", non_retryable=True)
 
 
+@workflow.defn(name="PredictAutomaticFramesWorkflow")
+class _PartialFrames:  # pylint: disable=too-few-public-methods
+    """One frame failed every try and is left out (the processor's rule)."""
+
+    @workflow.run
+    async def run(self, payload: dict) -> list:
+        await _record_child()
+        return _frame_results(payload)[1:]
+
+
 @workflow.defn(name="PredictSpeciesImagesWorkflow")
 class _FailingSpecies:  # pylint: disable=too-few-public-methods
     """BioCLIP unprovisioned: the processor's `BioclipSettingsInvalid`."""
@@ -314,7 +324,7 @@ class _Measure:  # pylint: disable=too-few-public-methods
 
 async def _run(
     workflow_cls=AutomaticResultsForDiveWorkflow, *args, species_fails=False,
-    frames_fail=False, **stubs,
+    frames_fail=False, frames_partial=False, **stubs,
 ):  # fmt: skip
     EVENTS.clear()
     SELECTS.clear()
@@ -327,7 +337,8 @@ async def _run(
                               AutomaticResultsParentWorkflow]),
             Worker(env.client, task_queue=PROCESSOR_GPU_TASK_QUEUE,
                    activities=[_record],
-                   workflows=[_FailingFrames if frames_fail else _Frames,
+                   workflows=[_FailingFrames if frames_fail
+                              else _PartialFrames if frames_partial else _Frames,
                               _FailingSpecies if species_fails else _Species]),
             Worker(env.client, task_queue=PROCESSOR_TASK_QUEUE, activities=[_record],
                    workflows=[_Calibration]),
@@ -497,3 +508,19 @@ def test_the_calibration_child_outlives_the_fit_it_runs():
 
     assert sut.CALIBRATION_CHILD_TIMEOUT > FIT_TIMEOUT
     assert sut.RUN_TIMEOUT >= sut.AUTOMATIC_DRAIN_WINDOW + sut.CALIBRATION_CHILD_TIMEOUT
+
+
+async def test_the_frames_that_came_back_are_kept_and_the_rest_owed():
+    """One frame no worker could finish no longer costs the dive its other
+    frames (2026-10-15 gap audit): what came back is persisted, the dive's
+    failure is recorded for the frame still owed (three, and the cohort
+    leaves it for an operator), the scratch is cleaned up, and the dive
+    stops there -- a calibration on part of its frames would be stale."""
+    report = await _run(
+        AutomaticResultsParentWorkflow, selected=[TARGET], frames=3, frames_partial=True
+    )
+    assert ("persist frames", 2) in EVENTS
+    assert ("failed", DIVE, "frames") in EVENTS
+    assert ("cleanup",) in EVENTS
+    assert not [e for e in EVENTS if e[0] == "persist calibration"]
+    assert report.dives[0].failed == "frames"

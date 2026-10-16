@@ -21,6 +21,7 @@ here in one activity per frame, with stub models (no GPU, no torch):
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 from pathlib import Path
 from typing import List
 
@@ -329,3 +330,50 @@ async def test_the_workflow_fans_out_one_activity_per_frame():
 
     assert [r.capture_id for r in results] == [f.capture_id for f in frames]
     assert sorted(seen) == sorted(f.capture_id for f in frames)
+
+
+async def test_a_frame_that_keeps_failing_does_not_lose_the_others():
+    """A frame no worker can finish (a crash, an OOM) was retried without
+    limit until the child's timeout killed it, and every other frame of the
+    dive with it (2026-10-15 gap audit). It is tried a bounded number of
+    times, then left out: the rest come back, and the orchestrator records
+    the dive's failure for the frames still owed."""
+    from temporalio import activity
+
+    bad = uuid.uuid4()
+    attempts = []
+
+    @activity.defn(name="predict_automatic_frame")
+    async def stub(payload: PredictAutomaticFrameInput) -> AutomaticFrameResult:
+        if payload.frame.capture_id == bad:
+            attempts.append(1)
+            raise RuntimeError("CUDA out of memory")
+        return AutomaticFrameResult(
+            capture_id=payload.frame.capture_id, status="no_laser_dot",
+            predictor_version=AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
+        )  # fmt: skip
+
+    good = [uuid.uuid4(), uuid.uuid4()]
+    frames = [
+        AutomaticFrame(capture_id=c, raw=ObjectRef(bucket="s", key="r"),
+                       jpeg=_ref("preprocess_headtail_jpeg"))  # fmt: skip
+        for c in (good[0], bad, good[1])
+    ]
+    payload = PredictAutomaticFramesInput(
+        tenant_id=TENANT, dive_id=uuid.uuid4(), camera_matrix=K,
+        distortion_coefficients=[0.0] * 5, frames=frames,
+    )  # fmt: skip
+    async with await WorkflowEnvironment.start_time_skipping(
+        data_converter=pydantic_data_converter
+    ) as env:
+        async with Worker(env.client, task_queue="t-auto", activities=[stub],
+                          workflows=[PredictAutomaticFramesWorkflow]):  # fmt: skip
+            results = await env.client.execute_workflow(
+                PredictAutomaticFramesWorkflow.run, payload,
+                id=f"t-auto-{uuid.uuid4()}", task_queue="t-auto",
+                result_type=List[AutomaticFrameResult],
+                execution_timeout=timedelta(hours=1),
+            )  # fmt: skip
+
+    assert [r.capture_id for r in results] == good
+    assert 1 < len(attempts) <= 5

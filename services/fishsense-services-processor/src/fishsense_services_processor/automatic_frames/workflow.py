@@ -4,6 +4,14 @@ Shaped as the head/tail predict workflow (`headtail_predict.workflow`):
 every frame at once, 15 minutes start-to-close each (a cold pod's first
 activity also pays two weight fetches and two model loads), one result per
 frame, returned to the orchestrator's parent, which persists them.
+
+**A frame that keeps failing is left out, not fatal** (2026-10-15 gap
+audit). Under the default retry policy (no limit) one frame no worker could
+finish -- a crash, an OOM -- retried until the parent's timeout killed this
+workflow, and every other frame's work with it. Each frame now gets
+`FRAME_ATTEMPTS` tries; one that fails them all is missing from the result,
+which the orchestrator persists, recording the dive's failure for the
+frames still owed (its three-strike memory then decides).
 """
 
 import asyncio
@@ -11,6 +19,8 @@ from datetime import timedelta
 from typing import List
 
 from temporalio import workflow
+from temporalio.common import RetryPolicy
+from temporalio.exceptions import ActivityError
 
 with workflow.unsafe.imports_passed_through():
     import annotated_types  # noqa: F401  pylint: disable=unused-import
@@ -22,7 +32,14 @@ with workflow.unsafe.imports_passed_through():
         PredictAutomaticFramesInput,
     )
 
-__all__ = ["PredictAutomaticFramesWorkflow"]
+__all__ = ["FRAME_ATTEMPTS", "PredictAutomaticFramesWorkflow"]
+
+FRAME_ATTEMPTS = 3
+_FRAME_RETRY = RetryPolicy(
+    initial_interval=timedelta(seconds=10),
+    maximum_attempts=FRAME_ATTEMPTS,
+    non_retryable_error_types=["NoGpuForSam3"],
+)
 
 
 @workflow.defn
@@ -37,7 +54,7 @@ class PredictAutomaticFramesWorkflow:
             payload.dive_id,
             len(payload.frames),
         )
-        results = await asyncio.gather(
+        outcomes = await asyncio.gather(
             *[
                 workflow.execute_activity(
                     "predict_automatic_frame",
@@ -48,9 +65,24 @@ class PredictAutomaticFramesWorkflow:
                         laser_region=payload.laser_region,
                     ),
                     start_to_close_timeout=timedelta(minutes=15),
+                    retry_policy=_FRAME_RETRY,
                     result_type=AutomaticFrameResult,
                 )
                 for frame in payload.frames
-            ]
+            ],
+            return_exceptions=True,
         )
-        return list(results)
+        results: List[AutomaticFrameResult] = []
+        for frame, outcome in zip(payload.frames, outcomes):
+            if isinstance(outcome, ActivityError):
+                workflow.logger.warning(
+                    "automatic frame capture=%s failed %d times, left out: %s",
+                    frame.capture_id,
+                    FRAME_ATTEMPTS,
+                    outcome.cause or outcome,
+                )
+            elif isinstance(outcome, BaseException):
+                raise outcome  # cancellation, or a bug: not a frame's failure
+            else:
+                results.append(outcome)
+        return results
