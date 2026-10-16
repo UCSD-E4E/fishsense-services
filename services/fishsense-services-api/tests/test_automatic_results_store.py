@@ -694,6 +694,47 @@ async def test_the_export_names_every_input_and_the_species(owner_engine, app_en
     assert row["capture_number"] is not None and row["dive_number"] is not None
 
 
+async def test_the_export_drops_a_frame_the_detector_calls_a_slate(
+    owner_engine, app_engine
+):
+    """A length written before the detector scored its frame, or before a
+    re-score called it a slate, is a slate measured as a fish: it stays as
+    history, never in the export (2026-10-15 gap audit)."""
+    from _slate_calibration_seed import slate_presence as presence
+
+    lab = await tenant(owner_engine)
+    _, c = await _measured(owner_engine, app_engine, lab)
+    await presence(owner_engine, lab, c, probability=0.2)
+    assert len(await _rows(owner_engine, "SELECT 1 FROM automatic_results_export")) == 1
+
+    await presence(owner_engine, lab, c, probability=0.9)
+
+    assert await _rows(owner_engine, "SELECT 1 FROM automatic_results_export") == []
+
+
+async def test_the_export_flags_a_dive_humans_measured_since(owner_engine, app_engine):
+    """Decided 2026-10-15: a dive humans measure after its automatic run
+    keeps its automatic lengths, flagged, so a reader can prefer the human
+    ones or compare the two."""
+    lab = await tenant(owner_engine)
+    dive_id, _ = await _measured(owner_engine, app_engine, lab)
+    (row,) = await _rows(owner_engine, "SELECT * FROM automatic_results_export")
+    assert row["dive_human_measured"] is False
+
+    (cal,) = await _rows(
+        owner_engine,
+        "SELECT id FROM laser_calibrations WHERE dive_id = :d",
+        d=dive_id,
+    )
+    other = await capture(owner_engine, lab, dive_id)
+    await measurement(
+        owner_engine, lab, other, await fish(owner_engine, lab), cal["id"]
+    )
+
+    (row,) = await _rows(owner_engine, "SELECT * FROM automatic_results_export")
+    assert row["dive_human_measured"] is True
+
+
 async def test_the_research_role_reads_the_export_for_the_lab(
     owner_engine, app_engine, research_engine
 ):
