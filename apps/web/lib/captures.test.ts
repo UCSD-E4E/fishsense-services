@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   chooseTenant,
   describeOrigin,
+  placeName,
   formatLength,
   getCapture,
   getCapturePage,
@@ -200,5 +201,31 @@ describe("describeOrigin", () => {
   it("is honest about a version from before the app recorded it", () => {
     // fishsense-mobile #68: v7 overwrote edits in place.
     expect(describeOrigin("unknown")).toBe("not recorded (before app v8)");
+  });
+});
+
+describe("placeName", () => {
+  it("prefers the name the app recorded", () => {
+    expect(
+      placeName({
+        place_name: "La Jolla Cove",
+        derived_place_name: "San Diego",
+      }),
+    ).toEqual({ name: "La Jolla Cove", derived: false });
+  });
+
+  it("falls back to the name the server derived from the coordinates", () => {
+    expect(
+      placeName({ place_name: null, derived_place_name: "Scripps Pier" }),
+    ).toEqual({
+      name: "Scripps Pier",
+      derived: true,
+    });
+  });
+
+  it("is null when neither has a name", () => {
+    expect(
+      placeName({ place_name: null, derived_place_name: null }),
+    ).toBeNull();
   });
 });

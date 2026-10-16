@@ -15,6 +15,7 @@ import pytest
 from jwks_server import JwksServer, jwk, rsa_key
 
 from fishsense_services_api.main import create_app_from_env
+from fishsense_services_api.place_names import PhotonGeocoder
 
 AUDIENCE = "fishsense-web"
 SIGNING_KEY = rsa_key()
@@ -145,3 +146,40 @@ async def test_the_booted_app_signs_uploads_into_the_tenants_bucket(
     assert response.json()["uploads"][0]["url"].startswith(
         "https://s3.example.test/fishsense-tenant-lab/mobile/captures/"
     )
+
+
+def _captured_create_app(monkeypatch) -> dict:
+    import fishsense_services_api.main as main
+
+    captured: dict = {}
+
+    def fake(**kwargs):
+        captured.update(kwargs)
+        return main.FastAPI()
+
+    monkeypatch.setattr(main, "create_app", fake)
+    return captured
+
+
+def test_the_app_names_places_on_the_configured_geocoder(monkeypatch, app_url, issuer):
+    monkeypatch.setenv("FISHSENSE_DATABASE_URL", app_url)
+    monkeypatch.setenv("FISHSENSE_OIDC_ISSUER", issuer)
+    monkeypatch.setenv("FISHSENSE_OIDC_AUDIENCES", AUDIENCE)
+    monkeypatch.setenv("FISHSENSE_GEOCODER_URL", "http://photon.internal:2322")
+    captured = _captured_create_app(monkeypatch)
+
+    create_app_from_env()
+
+    assert isinstance(captured["geocoder"], PhotonGeocoder)
+
+
+def test_without_a_geocoder_url_no_places_are_named(monkeypatch, app_url, issuer):
+    monkeypatch.setenv("FISHSENSE_DATABASE_URL", app_url)
+    monkeypatch.setenv("FISHSENSE_OIDC_ISSUER", issuer)
+    monkeypatch.setenv("FISHSENSE_OIDC_AUDIENCES", AUDIENCE)
+    monkeypatch.delenv("FISHSENSE_GEOCODER_URL", raising=False)
+    captured = _captured_create_app(monkeypatch)
+
+    create_app_from_env()
+
+    assert captured["geocoder"] is None

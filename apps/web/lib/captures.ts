@@ -119,3 +119,16 @@ export function describeOrigin(origin: string): string {
       return "not recorded (before app v8)";
   }
 }
+
+/** Where a capture was taken, by name: the app's, else the one the server
+ *  derived from its coordinates on our own geocoder (marked as such). */
+export function placeName(capture: {
+  place_name?: string | null;
+  derived_place_name?: string | null;
+}): { name: string; derived: boolean } | null {
+  if (capture.place_name) return { name: capture.place_name, derived: false };
+  if (capture.derived_place_name) {
+    return { name: capture.derived_place_name, derived: true };
+  }
+  return null;
+}

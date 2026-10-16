@@ -157,6 +157,8 @@ class CaptureSummary:
     length_m: float | None
     rgb_key: str
     capture_id: uuid.UUID
+    #: The name the server derived from the coordinates (0041), if any.
+    derived_place_name: str | None = None
 
     @property
     def cursor(self) -> tuple[datetime, uuid.UUID]:
@@ -194,6 +196,8 @@ class CaptureDetail:
     files: tuple[CaptureFile, ...]
     #: Oldest first.
     measurements: tuple[StoredMeasurement, ...]
+    #: The name the server derived from the coordinates (0041), if any.
+    derived_place_name: str | None = None
 
     @property
     def current_measurement(self) -> StoredMeasurement | None:
@@ -367,16 +371,17 @@ async def list_mobile_captures(
 ) -> list[CaptureSummary]:
     """Newest first; ``before`` is the previous page's last ``cursor``."""
     rows = await conn.execute(
-        text("""
+        text(f"""
             SELECT c.id AS capture_id, c.client_capture_uuid, c.captured_at,
                 c.latitude, c.longitude, mc.place_name, c.raw_object_key,
-                cm.length_m
+                cm.length_m, pn.place_name AS derived_place_name
             FROM captures c
             JOIN mobile_captures mc
               ON mc.tenant_id = c.tenant_id AND mc.capture_id = c.id
             LEFT JOIN current_measurements cm
               ON cm.tenant_id = c.tenant_id AND cm.capture_id = c.id
              AND cm.fish_id = mc.fish_id AND cm.source = 'device'
+            {_DERIVED_PLACE_NAME}
             WHERE c.tenant_id = :tenant_id
               AND (CAST(:before_at AS timestamptz) IS NULL
                    OR (c.captured_at, c.id) < (:before_at, :before_id))
@@ -400,6 +405,7 @@ async def list_mobile_captures(
             length_m=row.length_m,
             rgb_key=row.raw_object_key,
             capture_id=row.capture_id,
+            derived_place_name=row.derived_place_name,
         )
         for row in rows
     ]
@@ -410,14 +416,15 @@ async def mobile_capture(
 ) -> CaptureDetail | None:
     row = (
         await conn.execute(
-            text("""
+            text(f"""
                 SELECT c.id, c.client_capture_uuid, c.uploaded_by, c.captured_at,
                     d.serial, c.latitude, c.longitude, c.horizontal_accuracy_m,
-                    mc.*
+                    mc.*, pn.place_name AS derived_place_name
                 FROM captures c
                 JOIN mobile_captures mc
                   ON mc.tenant_id = c.tenant_id AND mc.capture_id = c.id
                 JOIN devices d ON d.tenant_id = c.tenant_id AND d.id = c.device_id
+                {_DERIVED_PLACE_NAME}
                 WHERE c.tenant_id = :tenant_id
                   AND c.client_capture_uuid = :client_uuid
                 """),
@@ -461,6 +468,7 @@ async def mobile_capture(
         horizontal_accuracy_m=row.horizontal_accuracy_m,
         place_name=row.place_name,
         orientation=row.orientation,
+        derived_place_name=row.derived_place_name,
         intrinsics=tuple(row.intrinsics),
         camera_pose=None if row.camera_pose is None else tuple(row.camera_pose),
         depth_width=row.depth_width,
@@ -702,3 +710,11 @@ async def _append(
         },
     )
     return Appended(created=True, measurement=_as_received(m))
+
+
+#: A capture's latest derived place name (0041), as `pn`.
+_DERIVED_PLACE_NAME = """LEFT JOIN LATERAL (
+                SELECT place_name FROM capture_place_names
+                WHERE tenant_id = c.tenant_id AND capture_id = c.id
+                ORDER BY derived_at DESC LIMIT 1
+            ) pn ON true"""

@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = "==3.13.*"
 resolution-markers = [
     "sys_platform == 'win32'",
@@ -593,7 +593,7 @@ provides-extras = ["denoise", "laser-detector", "rectified", "slate"]
 
 [[package]]
 name = "fishsense-services"
-version = "0.7.1"
+version = "0.8.0"
 source = { virtual = "." }
 
 [package.dev-dependencies]
@@ -620,13 +620,14 @@ dev = [
 
 [[package]]
 name = "fishsense-services-api"
-version = "0.7.1"
+version = "0.8.0"
 source = { editable = "services/fishsense-services-api" }
 dependencies = [
     { name = "alembic" },
     { name = "asyncpg" },
     { name = "boto3" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "numpy" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic-settings" },
@@ -641,6 +642,7 @@ requires-dist = [
     { name = "asyncpg", specifier = ">=0.30.0" },
     { name = "boto3", specifier = ">=1.35.0" },
     { name = "fastapi", specifier = ">=0.119.0" },
+    { name = "httpx", specifier = ">=0.28.0" },
     { name = "numpy" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2.0" },
     { name = "pydantic-settings", specifier = ">=2.10.0" },
@@ -651,7 +653,7 @@ requires-dist = [
 
 [[package]]
 name = "fishsense-services-contracts"
-version = "0.7.1"
+version = "0.8.0"
 source = { editable = "services/fishsense-services-contracts" }
 dependencies = [
     { name = "pydantic" },
@@ -668,7 +670,7 @@ requires-dist = [
 
 [[package]]
 name = "fishsense-services-orchestrator"
-version = "0.7.1"
+version = "0.8.0"
 source = { editable = "services/fishsense-services-orchestrator" }
 dependencies = [
     { name = "boto3" },
@@ -709,7 +711,7 @@ dev = [{ name = "fishsense-services-processor", editable = "services/fishsense-s
 
 [[package]]
 name = "fishsense-services-processor"
-version = "0.7.1"
+version = "0.8.0"
 source = { editable = "services/fishsense-services-processor" }
 dependencies = [
     { name = "boto3" },

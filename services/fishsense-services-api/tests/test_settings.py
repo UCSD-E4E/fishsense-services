@@ -33,6 +33,7 @@ def env(monkeypatch):
         "FISHSENSE_OBJECT_STORE_ENDPOINT_URL",
         "FISHSENSE_OBJECT_STORE_PUBLIC_URL",
         "FISHSENSE_OBJECT_STORE_REGION",
+        "FISHSENSE_GEOCODER_URL",
     ]:
         monkeypatch.delenv(name, raising=False)
 
@@ -170,3 +171,21 @@ def test_tenant_stores_need_both_endpoints(env, tmp_path):
     )
     settings = Settings()
     assert settings.object_store_region == "garage"
+
+
+def test_the_geocoder_is_optional(env):
+    env(**REQUIRED)
+
+    assert Settings().geocoder_url is None
+
+
+def test_the_geocoder_is_our_own_photon(env, monkeypatch):
+    """Self-hosted (owner, 2026-10-16): capture locations stay ours."""
+    env(**REQUIRED)
+    monkeypatch.setenv("FISHSENSE_GEOCODER_URL", "http://photon.internal:2322")
+
+    settings = Settings()
+
+    assert settings.geocoder_url == "http://photon.internal:2322"
+    assert settings.geocoder_timeout_seconds == 3.0
+    assert settings.geocoder_radius_km == 25.0
