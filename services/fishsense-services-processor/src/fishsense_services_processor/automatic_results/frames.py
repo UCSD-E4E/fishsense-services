@@ -129,6 +129,10 @@ def automatic_frame_result(
         if kept and r.crop_x is not None
         else None
     )
+    if r.status == "predicted" and score is None:
+        # A kept mask whose score can't be named under the dot passed no gate
+        # we can show: it is no mask under the dot (2026-10-15 gap audit).
+        return AutomaticFrameResult(status="laser_off_all_fish", **base)
     return AutomaticFrameResult(
         status=r.status,
         head_x=r.head_x,

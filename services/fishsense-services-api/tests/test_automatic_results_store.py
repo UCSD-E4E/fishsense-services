@@ -193,6 +193,18 @@ async def test_a_prediction_below_the_sam_gate_is_not_a_prediction(
         await _predict(app_engine, lab, dive_id, _predicted(capture_id, sam_score=0.49))
 
 
+async def test_a_prediction_with_no_sam_score_is_not_a_prediction(
+    owner_engine, app_engine
+):
+    """`sam_score >= 0.5` is NULL, not false, for a NULL score, and a CHECK
+    passes NULL: an unscored mask was a prediction (2026-10-15 gap audit)."""
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    capture_id = await capture(owner_engine, lab, dive_id)
+    with pytest.raises(DBAPIError, match="sam"):
+        await _predict(app_engine, lab, dive_id, _predicted(capture_id, sam_score=None))
+
+
 # -- the backlog cohort -------------------------------------------------------------
 
 

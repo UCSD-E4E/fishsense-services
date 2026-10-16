@@ -140,6 +140,24 @@ def test_the_kept_masks_score_is_the_one_under_the_dot():
     assert r.status == "predicted" and r.sam_score == pytest.approx(0.7)
 
 
+def test_a_kept_mask_whose_score_cannot_be_named_is_not_predicted(monkeypatch):
+    """The gate is SAM's score on the mask under the dot. If the kernel keeps
+    a mask but the score can't be named for it (the kernel's crop and ours
+    disagree), the row carried `predicted` with `sam_score` NULL -- and NULL
+    passed the table's gate (2026-10-15 gap audit). An unscored mask is no
+    mask under the dot: an abstention, with no head/tail."""
+    from fishsense_services_processor.automatic_results import frames
+
+    monkeypatch.setattr(frames._Gated, "score_at", lambda self, point: None)
+
+    r = _result(_Scored([(_mask_at(*DOT), 0.81)]))
+
+    assert r.status == "laser_off_all_fish"
+    assert r.sam_score is None
+    assert (r.head_x, r.head_y, r.tail_x, r.tail_y) == (None, None, None, None)
+    assert r.laser_x == DOT[0]  # the dot itself is still the detector's
+
+
 def test_no_dot_is_an_abstention_and_nothing_is_segmented():
     seg = _Scored([(_mask_at(*DOT), 0.9)])
     r = _result(seg, dot=None)
