@@ -19,12 +19,12 @@ run_e2e.py, score.py, tail/evaluate.py). Decided 2026-10-06:
   changed); a predicted fish with no current automatic length while a
   calibration exists. Every one of those drains: abstentions, refused
   calibrations and refused lengths are rows;
-* **slate frames** come from a slate-presence detector built in parallel,
-  through `SlateFrames` -- ``(conn, tenant, dive) -> [(capture_id, p)]`` --
-  stubbed by `no_slate_frames` until it lands. At ``p >= 0.5``
-  (`SLATE_FRAME_THRESHOLD`) a frame is not measured as a fish and is a
-  candidate for the label-free calibration (the slate is the rigid object the
-  paper validated it on, §4.3);
+* **slate frames** come from the slate-presence detector
+  (`slate_presence_store.slate_frames`, wired in the orchestrator's stage),
+  through `SlateFrames` -- ``(conn, tenant, dive) -> [(capture_id, p)]``.
+  At ``p >= 0.5`` (`SLATE_FRAME_THRESHOLD`) a frame is not measured as a fish
+  and is a candidate for the label-free calibration (the slate is the rigid
+  object the paper validated it on, §4.3);
 * **the processor's output is checked** (PLAN.md §9.11): a row for a capture
   outside the dive, or naming another capture's automatic head/tail, is
   refused and nothing is written.
@@ -99,7 +99,9 @@ SlateFrames = Callable[
 async def no_slate_frames(
     conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
 ) -> list[tuple[uuid.UUID, float]]:
-    """The stub: no detector yet, so no frame is known to show a slate."""
+    """No frame is known to show a slate: the catalog's default, for tests
+    and tools that don't read the detector. Production passes the detector's
+    `slate_frames` (orchestrator `automatic_results.stage`)."""
     del conn, tenant_id, dive_id
     return []
 
@@ -875,7 +877,7 @@ async def persist_automatic_measurements(
 class AutomaticResultsCatalog(ServicePrincipal):
     """The automatic-results track's database side, as the orchestrator's
     service principal. `slate_frames` is the slate-presence detector's store
-    function (stubbed to none until it lands)."""
+    function (`slate_presence_store.slate_frames` in production)."""
 
     def __init__(
         self, engine, *, sub: str, slate_frames: SlateFrames = no_slate_frames

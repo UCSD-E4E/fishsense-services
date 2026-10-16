@@ -27,8 +27,10 @@ differ for the same raw frame (detector, SAM checkpoint, gate, crop, prompt,
 keypointer); `AUTOMATIC_CALIBRATION_VERSION` when the fit would; and
 `AUTOMATIC_MEASUREMENT_VERSION` when a length would. History: 1 (2026-10-06)
 the chain as cscw ran it, with the slate-presence detector stubbed (no frame
-is a slate). **Bump the head/tail version when the detector lands**, so every
-frame is re-classified as fish or slate (a slate frame keeps only its dot).
+is a slate); 2 (2026-10-16) the detector wired (a slate frame keeps only its
+dot), and a kept mask whose SAM score can't be named under the dot is
+``laser_off_all_fish``, not an unscored prediction. No version-1 row was ever
+written in production.
 
 Not in ``MODELS``: integration publishes schemas once for every slice.
 """
@@ -64,7 +66,7 @@ __all__ = [
 ]
 
 #: See the module docstring.
-AUTOMATIC_HEADTAIL_PREDICTOR_VERSION = 1
+AUTOMATIC_HEADTAIL_PREDICTOR_VERSION = 2
 AUTOMATIC_CALIBRATION_VERSION = "1"
 AUTOMATIC_MEASUREMENT_VERSION = "1"
 
