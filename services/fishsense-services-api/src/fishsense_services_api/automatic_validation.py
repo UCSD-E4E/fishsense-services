@@ -14,7 +14,25 @@ cscw-fishsense2027@96a8da07 did:
   dot, auto head/tail) against the manual one (human dot and clicks), **same
   stored calibration**. Paper: median +0.3 %, MAE 5.4 %, 62 % within 5 %, 82 %
   within 10 %, 3.1 % off by over 20 %; and coverage of the frames humans
-  measured, over all ten reef dives: 72 % (red 91 %, green 66 %).
+  measured, over all ten reef dives (below);
+* **calibration** (calibration_analysis/e1j_size_constancy/register.py,
+  Table 3): each session's label-free vanishing point against its stored
+  calibration's, along the dive line, in degrees.
+
+**The paper's own reef frames** (Phase C, 2026-10-18): tail/stage.py's 791,
+as e2e_measurement/tail/frames.csv persisted them -- every frame of the eight
+calibrated dives, and 362 and 366 sampled to 200 each (pandas, seed 0, which
+SQL cannot redraw) -- by v1 image id, which v2 captures carry as `v1_id`
+(`PAPER_REEF_FRAMES`; all 791 found in production, same dives). 289 of them
+were rejected by labellers as not measurable (a head/tail label with no
+points): coverage is over the 502 measured (tail/gate.py), and the rejected
+frames given a length are their own metric. **Coverage, seeded where?** The
+paper's stated 72 % (red 91 %, green 66 %) seeds SAM at the *human* dot
+(tail/coverage.py); the fully automatic chain seeds at the automatic dot, for
+which the paper's own tail/keypoints.csv gives 357/502 = 71.1 % (red 92.2 %,
+green 64.9 %) and a mask on 47/289 = 16.3 % of rejected frames -- derived,
+not stated in the paper. The report compares against the automatic-dot
+numbers and shows the human-dot ones beside them.
 
 Geometry is score.py's (`depth`: the z of the laser ray's point closest to the
 dot's camera ray; `length`: head and tail on the plane at that depth), which
@@ -24,8 +42,10 @@ database (`automatic_validation_store`); the CLI is `validate-automatic`.
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional, Sequence
 
 import numpy as np
@@ -33,10 +53,18 @@ import numpy as np
 __all__ = [
     "LADDER",
     "PAPER",
+    "PAPER_CALIBRATION_SESSIONS",
     "PAPER_POOL_DIVES",
     "PAPER_REEF_CALIBRATED_DIVES",
     "PAPER_REEF_DIVES",
+    "PAPER_REEF_FRAMES",
+    "PAPER_TABLE3",
     "LadderRow",
+    "SessionCalibration",
+    "Table3Row",
+    "calibration_error_deg",
+    "reef_rejected_given_length",
+    "table3",
     "ReefComparison",
     "ValidationFrame",
     "depth",
@@ -64,8 +92,32 @@ PAPER = {
     "pool_coverage": {"A": 1.0, "B": 0.997, "C": 0.92, "D": 1.0, "E": 0.91, "F": 0.91},
     "reef": {"median": 0.003, "mae": 0.054, "within_5": 0.62, "within_10": 0.82,
              "over_20": 0.031},
-    "reef_coverage": {"all": 0.72, "red": 0.91, "green": 0.66},
+    # Seeded at the automatic dot: the fully automatic chain (derived from
+    # tail/keypoints.csv; see the module docstring).
+    "reef_coverage": {"all": 0.711, "red": 0.922, "green": 0.649},
+    "reef_rejected_given_length": 0.163,
+    # Seeded at the human dot: what PAPER.md states (72 %, 91 %, 66 %).
+    "reef_coverage_human_dot": {"all": 0.719, "red": 0.913, "green": 0.661},
+    "reef_rejected_given_length_human_dot": 0.156,
 }  # fmt: skip
+
+#: Table 3 (PAPER.md §4.3, labelfree_tv.csv): each session's label-free
+#: vanishing-point error along the dive line, degrees.
+PAPER_TABLE3 = {62: 0.033, 63: -0.002, 65: 0.025, 71: 0.009, 77: 0.009, 80: 0.007,
+                83: -0.038, 87: -0.031, 94: -0.044, 114: -0.129}  # fmt: skip
+#: register.py's focal length for the error in degrees.
+TABLE3_F_PX = 2850.0
+
+
+def _paper_reef_frames() -> dict[int, tuple[int, bool]]:
+    data = json.loads(
+        (Path(__file__).parent / "automatic_validation_reef_frames.json").read_text()
+    )
+    return {image: (dive, measured) for image, dive, measured in data["frames"]}
+
+
+#: The paper's 791 reef frames: v1 image id -> (dive number, human-measured).
+PAPER_REEF_FRAMES = _paper_reef_frames()
 
 #: Table 4: (config, dot, head/tail, calibration). C's automatic head/tail is
 #: seeded by the *human* dot (production's head/tail predictions are).
@@ -95,7 +147,8 @@ class ValidationFrame:
     green: bool
     camera_matrix: list
     human_dot: Point
-    human_head_tail: HeadTail
+    #: None on a frame the labeller rejected as not measurable.
+    human_head_tail: Optional[HeadTail]
     auto_dot: Optional[Point]
     #: The automatic head/tail seeded at the automatic dot (None: no length).
     auto_head_tail: Optional[HeadTail]
@@ -103,6 +156,9 @@ class ValidationFrame:
     label_free_calibration: Optional[Calibration]
     #: Seeded at the human dot instead (ladder row C), where known.
     auto_head_tail_humandot: Optional[HeadTail] = None
+    #: The labeller rejected it as not measurable (a head/tail label with no
+    #: points): out of coverage's denominator, in its own metric.
+    rejected: bool = False
 
 
 def depth(k, origin, axis, x: float, y: float) -> float:
@@ -214,7 +270,9 @@ class ReefComparison:
 def reef_comparison(frames: Sequence[ValidationFrame]) -> ReefComparison:
     """Fully automatic vs manual length, same stored calibration (evaluate.py),
     on reef frames whose dive has one."""
-    reef = [f for f in frames if f.set == "reef" and f.stored_calibration]
+    reef = [
+        f for f in frames if f.set == "reef" and f.stored_calibration and not f.rejected
+    ]
     rel = []
     for f in reef:
         manual = _length(f, f.human_dot, f.human_head_tail, f.stored_calibration)
@@ -237,7 +295,7 @@ def reef_comparison(frames: Sequence[ValidationFrame]) -> ReefComparison:
 def reef_coverage(frames: Sequence[ValidationFrame]) -> dict[str, Optional[float]]:
     """Share of the reef frames humans measured that got an automatic
     head/tail (a kept mask at the automatic dot), overall and by laser."""
-    reef = [f for f in frames if f.set == "reef"]
+    reef = [f for f in frames if f.set == "reef" and not f.rejected]
 
     def share(group):
         return (
@@ -253,6 +311,70 @@ def reef_coverage(frames: Sequence[ValidationFrame]) -> dict[str, Optional[float
     }
 
 
+def reef_rejected_given_length(frames: Sequence[ValidationFrame]) -> Optional[float]:
+    """Share of the frames labellers rejected that the chain measured anyway."""
+    rejected = [f for f in frames if f.set == "reef" and f.rejected]
+    if not rejected:
+        return None
+    return sum(f.auto_head_tail is not None for f in rejected) / len(rejected)
+
+
+@dataclass(frozen=True)
+class SessionCalibration:
+    """A calibration session's stored laser axis, and its label-free fit as
+    the fit recorded it: `vanishing_px` is register.py's ``tv_fit`` (the
+    vanishing point's position along the dive line) and `line_direction` its
+    ``u`` (`size_constancy.line_direction`, slate_unknown.frame's rule)."""
+
+    dive_number: int
+    camera_matrix: list
+    stored_axis: Optional[Sequence[float]]
+    vanishing_px: Optional[float]
+    line_direction: Optional[Sequence[float]]
+
+
+def calibration_error_deg(session: SessionCalibration) -> Optional[float]:
+    """register.py: ``err_px = tv_fit - v . u``, v the stored calibration's
+    vanishing point (``fx ax/az + cx, fy ay/az + cy``); in degrees at
+    f = 2850 px. None without an accepted fit or a stored axis."""
+    if (
+        session.vanishing_px is None
+        or not session.line_direction
+        or not session.stored_axis
+    ):
+        return None
+    k = np.asarray(session.camera_matrix, float)
+    ax = np.asarray(session.stored_axis, float)
+    v = np.array([k[0, 0] * ax[0] / ax[2] + k[0, 2], k[1, 1] * ax[1] / ax[2] + k[1, 2]])
+    err_px = session.vanishing_px - float(v @ np.asarray(session.line_direction, float))
+    return math.degrees(err_px / TABLE3_F_PX)
+
+
+@dataclass(frozen=True)
+class Table3Row:
+    dive_number: int
+    err_deg: Optional[float]
+    paper_err_deg: Optional[float]
+
+
+def table3(
+    sessions: Sequence[SessionCalibration], expected: Sequence[int] = ()
+) -> list[Table3Row]:
+    """A row per session, and one per `expected` session not among them (no
+    error: no dive, or no accepted fit), so a missing one shows."""
+    errors = {s.dive_number: calibration_error_deg(s) for s in sessions}
+    return [
+        Table3Row(
+            dive_number=n, err_deg=errors.get(n), paper_err_deg=PAPER_TABLE3.get(n)
+        )
+        for n in sorted({*errors, *expected})
+    ]
+
+
+def _deg(v: Optional[float]) -> str:
+    return "    -   " if v is None else f"{v:+7.3f}°"
+
+
 def _pct(v: Optional[float], signed: bool = False) -> str:
     if v is None:
         return "   -  "
@@ -264,6 +386,9 @@ def format_report(
     ladder: Sequence[LadderRow],
     reef: ReefComparison,
     coverage: dict[str, Optional[float]],
+    *,
+    rejected: Optional[float] = None,
+    calibration: Sequence[Table3Row] = (),
 ) -> str:
     """The paper's tables, with its numbers beside ours."""
     lines = [f"automatic-results validation ({source})", "",
@@ -288,9 +413,24 @@ def format_report(
         f"  >20%   {_pct(reef.over_20)} (paper {_pct(p['over_20'])})",
         "",
         "REEF coverage of the frames humans measured",
+        "  (paper: at the automatic dot, from its keypoints.csv; "
+        "stated, at the human dot)",
     ]
     for key in ("all", "red", "green"):
         lines.append(
-            f"  {key:<5} {_pct(coverage[key])} (paper {_pct(PAPER['reef_coverage'][key])})"
+            f"  {key:<5} {_pct(coverage[key])} (paper {_pct(PAPER['reef_coverage'][key])};"
+            f" human dot {_pct(PAPER['reef_coverage_human_dot'][key])})"
         )
+    lines.append(
+        f"  rejected by labellers, given a length anyway {_pct(rejected)} (paper"
+        f" {_pct(PAPER['reef_rejected_given_length'])}; human dot"
+        f" {_pct(PAPER['reef_rejected_given_length_human_dot'])})"
+    )
+    if calibration:
+        lines += ["", "TABLE 3: label-free vanishing point vs stored, along the dive line",
+                  "  session     ours    (paper)"]  # fmt: skip
+        for r in calibration:
+            lines.append(
+                f"  {r.dive_number:>7} {_deg(r.err_deg)} ({_deg(r.paper_err_deg)})"
+            )
     return "\n".join(lines)

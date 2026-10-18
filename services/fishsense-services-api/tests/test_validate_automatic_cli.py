@@ -33,7 +33,14 @@ from fishsense_services_api.automatic_results_store import (
     AutomaticHeadTailRow,
     persist_automatic_head_tails,
 )
-from fishsense_services_api.automatic_validation_store import validation_frames
+from fishsense_services_api.automatic_results_store import (
+    AutomaticCalibrationRow,
+    persist_automatic_calibration,
+)
+from fishsense_services_api.automatic_validation_store import (
+    session_calibrations,
+    validation_frames,
+)
 from fishsense_services_api.cli import main
 from fishsense_services_api.db import tenant_transaction
 from research_seed import references  # noqa: F401  (a fixture)
@@ -155,6 +162,10 @@ async def test_the_cli_prints_the_papers_tables(owner_engine, app_engine, app_ur
     out = capsys.readouterr().out
     assert "POOL (Table 4)" in out and "REEF" in out
     assert "  E    auto  auto" in out
+    # Phase C: Table 3 for the paper's sessions; the reef is the paper's own
+    # frames unless told otherwise.
+    assert "TABLE 3" in out and "rejected by labellers" in out
+    assert "paper's 791 reef frames" in out
 
 
 async def test_the_cli_reads_label_free_calibrations_from_a_file(
@@ -182,3 +193,57 @@ async def test_the_cli_reads_label_free_calibrations_from_a_file(
 async def test_an_unknown_tenant_is_an_error(app_url, monkeypatch, tenant_arg):
     monkeypatch.setenv("FISHSENSE_DATABASE_URL", app_url)
     assert await main(["validate-automatic", "--tenant", tenant_arg]) == 1
+
+
+# -- Phase C (2026-10-18): the paper's own reef frames, rejected ones, Table 3 ------
+
+
+async def test_the_papers_listed_reef_frames_include_the_rejected_ones(
+    owner_engine, app_engine
+):
+    """Given the paper's frame list (v1 image ids), a reef dive's frames are
+    exactly those, and a listed frame whose head/tail label has no points --
+    a labeller's "not measurable" -- is in, as rejected."""
+    lab = await tenant(owner_engine)
+    reef = await _paper_dive(owner_engine, lab, 347)
+    measured = await _labelled(owner_engine, lab, reef, None)
+    rejected = await capture(owner_engine, lab, reef)
+    await laser_label(owner_engine, lab, rejected, x=2048.0, y=1600.0)
+    await exec_(owner_engine, "INSERT INTO head_tail_labels (tenant_id, capture_id, "
+                "source, ls_project_id, completed, superseded) VALUES "
+                "(:t, :c, 'human', 1, true, false)", t=lab, c=rejected)  # fmt: skip
+    unlisted = await _labelled(owner_engine, lab, reef, None)
+    for c, v1 in ((measured, 9001), (rejected, 9002), (unlisted, 9003)):
+        await exec_(owner_engine, "UPDATE captures SET v1_id = :v WHERE id = :c",
+                    v=v1, c=c)  # fmt: skip
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        frames = await validation_frames(
+            conn, lab, pool_dives=[], reef_dives=[347],
+            reef_frames={9001: (347, True), 9002: (347, False)},
+        )  # fmt: skip
+
+    by_rejected = {f.rejected: f for f in frames}
+    assert len(frames) == 2
+    assert by_rejected[True].human_head_tail is None
+    assert by_rejected[False].human_head_tail == (1900.0, 1600.0, 2200.0, 1600.0)
+
+
+async def test_a_sessions_calibrations_are_its_stored_axis_and_its_own_fit(
+    owner_engine, app_engine
+):
+    lab = await tenant(owner_engine)
+    session = await _paper_dive(owner_engine, lab, 62)
+    async with tenant_transaction(app_engine, lab) as conn:
+        await persist_automatic_calibration(conn, lab, session, AutomaticCalibrationRow(
+            outcome="accepted", algorithm_version="1", laser_position=[0.03, -0.1, 0.0],
+            laser_axis=[0.01, 0.03, 0.9995], vanishing_px=-2000.0,
+            line_direction=[-0.29, -0.957], line_offset_px=1500.0, o_mag_m=0.104,
+            frames_used=12, pair_count=40, size_ratio=2.1, se_px=0.9,
+            pair_residual_sd=0.01, capture_ids=[], core_version="4.1.0",
+        ))  # fmt: skip
+        (s,) = await session_calibrations(conn, lab, [62])
+
+    assert s.dive_number == 62
+    assert s.stored_axis is not None
+    assert (s.vanishing_px, list(s.line_direction)) == (-2000.0, [-0.29, -0.957])

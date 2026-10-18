@@ -27,14 +27,21 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from fishsense_services_api.automatic_validation import (
+    PAPER_CALIBRATION_SESSIONS,
     PAPER_POOL_DIVES,
     PAPER_REEF_DIVES,
+    PAPER_REEF_FRAMES,
     format_report,
     pool_ladder,
     reef_comparison,
     reef_coverage,
+    reef_rejected_given_length,
+    table3,
 )
-from fishsense_services_api.automatic_validation_store import validation_frames
+from fishsense_services_api.automatic_validation_store import (
+    session_calibrations,
+    validation_frames,
+)
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.migrations import (
     current_revision,
@@ -102,6 +109,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate.add_argument(
         "--reef-dives", type=int, nargs="*", default=list(PAPER_REEF_DIVES)
+    )
+    validate.add_argument(
+        "--any-reef-frames",
+        action="store_true",
+        help="score every labelled frame of the reef dives, not only the "
+        "paper's 791 (automatic_validation.PAPER_REEF_FRAMES)",
     )
     validate.add_argument(
         "--frame-outputs",
@@ -358,13 +371,27 @@ async def _validate_automatic(args: argparse.Namespace) -> int:
                 reef_dives=args.reef_dives,
                 outputs=outputs,
                 label_free=label_free,
+                reef_frames=None if args.any_reef_frames else PAPER_REEF_FRAMES,
+            )
+            sessions = await session_calibrations(
+                conn, tenant_id, PAPER_CALIBRATION_SESSIONS
             )
     finally:
         await engine.dispose()
     source = "outputs from " + args.frame_outputs if outputs else "the database"
+    source += (
+        "; every labelled reef frame"
+        if args.any_reef_frames
+        else "; the paper's 791 reef frames"
+    )
     print(
         format_report(
-            source, pool_ladder(frames), reef_comparison(frames), reef_coverage(frames)
+            source,
+            pool_ladder(frames),
+            reef_comparison(frames),
+            reef_coverage(frames),
+            rejected=reef_rejected_given_length(frames),
+            calibration=table3(sessions, expected=PAPER_CALIBRATION_SESSIONS),
         )
     )
     return 0

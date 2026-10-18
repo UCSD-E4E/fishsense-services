@@ -23,8 +23,15 @@ from fishsense_services_api.automatic_validation import (
     fish_p90,
     length,
     pool_ladder,
+    PAPER,
+    PAPER_REEF_FRAMES,
+    PAPER_TABLE3,
+    SessionCalibration,
+    calibration_error_deg,
     reef_comparison,
     reef_coverage,
+    reef_rejected_given_length,
+    table3,
 )
 
 K = np.array([[2850.0, 0.0, 2000.0], [0.0, 2850.0, 1500.0], [0.0, 0.0, 1.0]])
@@ -156,3 +163,114 @@ def test_coverage_of_the_frames_humans_measured_by_laser_colour():
     assert c["all"] == pytest.approx(2 / 5)
     assert c["red"] == pytest.approx(1 / 2)
     assert c["green"] == pytest.approx(1 / 3)
+
+
+# -- Phase C (2026-10-18): the paper's own frames, rejected ones, Table 3 -----------
+
+
+def _rejected(green=False, auto=False):
+    f = _reef(1.0, green=green, auto=auto)
+    return ValidationFrame(**{**vars(f), "human_head_tail": None, "rejected": True})
+
+
+def test_the_papers_reef_frames_are_its_own_791():
+    """tail/stage.py's list, as e2e_measurement/tail/frames.csv persisted it
+    (v1 image ids, which v2 captures carry as `v1_id`): all of the calibrated
+    dives' frames, and 362 and 366 sampled to 200 each (pandas, seed 0)."""
+    assert len(PAPER_REEF_FRAMES) == 791
+    by_dive = {}
+    for dive, _ in PAPER_REEF_FRAMES.values():
+        by_dive[dive] = by_dive.get(dive, 0) + 1
+    assert by_dive == {279: 35, 341: 98, 347: 146, 349: 39, 362: 200, 366: 200,
+                       383: 9, 436: 1, 465: 40, 471: 23}  # fmt: skip
+    assert sum(measured for _, measured in PAPER_REEF_FRAMES.values()) == 502
+
+
+def test_coverage_counts_only_the_frames_humans_measured():
+    """The paper's denominator is the 502 measured frames, not 791: 289 were
+    rejected by labellers as not measurable (tail/gate.py)."""
+    frames = [_reef(1.0), _reef(1.5, auto=False), _rejected(), _rejected(auto=True)]
+    assert reef_coverage(frames)["all"] == pytest.approx(1 / 2)
+
+
+def test_a_rejected_frame_given_a_length_is_its_own_metric():
+    """The paper: the pipeline declines 84 % of human-rejected frames."""
+    frames = [_reef(1.0), _rejected(), _rejected(), _rejected(auto=True)]
+    assert reef_rejected_given_length(frames) == pytest.approx(1 / 3)
+
+
+def test_the_reef_comparison_is_over_measured_frames_with_a_stored_calibration():
+    """Paper: 260 automatic lengths of 314 measured calibrated-dive frames."""
+    r = reef_comparison([_reef(1.0), _reef(1.5, auto=False), _rejected(auto=True)])
+    assert (r.frames, r.measured) == (2, 1)
+
+
+def test_the_paper_coverage_targets_say_where_the_mask_was_seeded():
+    """The paper's stated 72 % (red 91, green 66) seeds SAM at the HUMAN dot
+    (tail/coverage.py). The fully automatic chain seeds at the automatic dot:
+    357/502 = 71.1 % (red 92.2, green 64.9), derived from the paper's
+    tail/keypoints.csv (seed == "auto", mask_status == "ok"); it gave a mask
+    on 47/289 = 16.3 % of rejected frames."""
+    assert PAPER["reef_coverage"] == {"all": 0.711, "red": 0.922, "green": 0.649}
+    assert PAPER["reef_coverage_human_dot"] == {"all": 0.719, "red": 0.913,
+                                                "green": 0.661}  # fmt: skip
+    assert PAPER["reef_rejected_given_length"] == pytest.approx(0.163)
+
+
+def _session(err_px):
+    """A session whose fitted vanishing point sits `err_px` from the stored
+    one along the dive line u = (0, -1)."""
+    k = [[2850.0, 0.0, 2000.0], [0.0, 2850.0, 1500.0], [0.0, 0.0, 1.0]]
+    stored = (0.0, -0.3, 1.0)  # v = (2000, 645); v . u = -645
+    return SessionCalibration(dive_number=62, camera_matrix=k, stored_axis=stored,
+                              vanishing_px=-645.0 + err_px,
+                              line_direction=(0.0, -1.0))  # fmt: skip
+
+
+def test_table3s_error_is_the_vanishing_point_offset_along_the_dive_line():
+    """register.py: err_px = tv_fit - v.u, u the dive line's direction
+    oriented to negative y; err_deg = degrees(err_px / 2850)."""
+    assert calibration_error_deg(_session(10.0)) == pytest.approx(
+        np.degrees(10.0 / 2850.0)
+    )
+    assert calibration_error_deg(_session(-5.0)) == pytest.approx(
+        np.degrees(-5.0 / 2850.0)
+    )
+
+
+def test_a_session_with_no_fit_or_no_stored_axis_has_no_error():
+    s = _session(1.0)
+    for missing in ("vanishing_px", "stored_axis", "line_direction"):
+        gone = SessionCalibration(**{**vars(s), missing: None})
+        assert calibration_error_deg(gone) is None, missing
+
+
+def test_table3_puts_the_papers_error_beside_ours():
+    assert PAPER_TABLE3[62] == pytest.approx(0.033)
+    assert PAPER_TABLE3[114] == pytest.approx(-0.129)
+    (row,) = table3([_session(10.0)])
+    assert row.dive_number == 62
+    assert row.err_deg == pytest.approx(np.degrees(10.0 / 2850.0))
+    assert row.paper_err_deg == pytest.approx(0.033)
+
+
+def test_the_report_shows_both_coverage_seeds_rejected_frames_and_table3():
+    from fishsense_services_api.automatic_validation import format_report
+
+    frames = [_reef(1.0), _rejected(auto=True), _rejected()]
+    text = format_report(
+        "test", pool_ladder(frames), reef_comparison(frames), reef_coverage(frames),
+        rejected=reef_rejected_given_length(frames),
+        calibration=table3([_session(10.0)]),
+    )  # fmt: skip
+    assert "automatic dot" in text and "human dot" in text
+    assert "rejected" in text and "50.0%" in text
+    assert "TABLE 3" in text and "+0.033" in text
+
+
+def test_table3_lists_every_expected_session_even_without_a_fit():
+    rows = table3([_session(10.0)], expected=(62, 63))
+    assert [(r.dive_number, r.err_deg is None) for r in rows] == [
+        (62, False),
+        (63, True),
+    ]
