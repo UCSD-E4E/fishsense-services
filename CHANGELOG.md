@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.10.0...v0.10.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* **automatic:** a by-hand run stops at the first dive with no GPU ([3a34e31](https://github.com/UCSD-E4E/fishsense-services/commit/3a34e31c09f504989007cb84e6b7f321f10b7d7c))
+* **automatic:** a by-hand run stops at the first dive with no GPU ([7dd92b7](https://github.com/UCSD-E4E/fishsense-services/commit/7dd92b75be50381c83e9ae542e6cdb8cce366771))
+
 ## [0.10.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.9.0...v0.10.0) (2026-10-18)
 
 
