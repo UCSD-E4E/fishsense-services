@@ -169,28 +169,35 @@ class TestSeed:
             "web-service": "member",
         }
 
-    async def test_every_lite_frame_has_a_current_measurement_with_a_species(
+    async def test_every_lite_frame_is_an_observation_of_the_decoy_or_a_species(
         self, dev_engine, stores
     ):
+        """The frames are Ginny, the decoy: the first ones are labelled as the
+        model they are, with its known length; the rest carry a species, so
+        the UI shows both kinds of fish."""
         await _seed(dev_engine, stores)
 
         async with dev_engine.connect() as conn:
             rows = (
                 await conn.execute(
                     text(
-                        "SELECT m.length_m, s.scientific_name, h.head_x "
-                        "FROM current_measurements m "
-                        "JOIN captures c ON c.id = m.capture_id "
-                        "JOIN dives d ON d.id = c.dive_id "
-                        "JOIN fish f ON f.id = m.fish_id "
-                        "JOIN species s ON s.id = f.species_id "
+                        "SELECT o.length_m, o.fish_model, o.known_length_m, "
+                        "o.scientific_name, h.head_x FROM observations o "
+                        "JOIN measurements m ON m.id = o.measurement_id "
                         "JOIN head_tail_labels h ON h.id = m.head_tail_label_id "
-                        "WHERE m.source = 'server'"
+                        "WHERE o.method = 'laser'"
                     )
                 )
             ).all()
         assert len(rows) == len(FRAMES)
-        assert {r.scientific_name for r in rows} == {dev_seed.LITE_SPECIES[0]}
+        models = [r for r in rows if r.fish_model is not None]
+        species = [r for r in rows if r.scientific_name is not None]
+        assert len(models) == dev_seed.DECOY_FRAMES
+        assert {(r.fish_model, r.known_length_m) for r in models} == {
+            (dev_seed.DECOY_MODEL, dev_seed.DECOY_LENGTH_M)
+        }
+        assert {r.scientific_name for r in species} == {dev_seed.LITE_SPECIES[0]}
+        assert len(species) == len(FRAMES) - dev_seed.DECOY_FRAMES
         # The labels sit where the frame's fish is.
         assert sorted(r.head_x for r in rows) == sorted(f.head[0] for f in FRAMES)
         assert all(0.25 < r.length_m < 0.40 for r in rows)

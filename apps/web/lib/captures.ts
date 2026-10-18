@@ -9,26 +9,12 @@
  */
 import { apiClient, failure, type Schemas } from "./api/client";
 import type { TenantMembership } from "./fishsense-api";
+import { safeSlug, safeUuid } from "./ids";
 
 export type CapturePage = Schemas["CapturePage"];
 export type CaptureSummary = Schemas["CaptureSummaryView"];
 export type Capture = Schemas["CaptureView"];
 export type Measurement = Schemas["MeasurementView"];
-
-const SLUG = /^[a-z0-9][a-z0-9-]*$/;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function safeSlug(slug: string): string {
-  if (!SLUG.test(slug))
-    throw new Error(`Invalid tenant: ${JSON.stringify(slug)}`);
-  return slug;
-}
-
-function safeCapture(id: string): string {
-  if (!UUID.test(id))
-    throw new Error(`Invalid capture id: ${JSON.stringify(id)}`);
-  return id;
-}
 
 /** The tenant to show: the requested one if the user is in it, else their
  *  first; null for a user in none. */
@@ -72,7 +58,7 @@ export async function getCapture(
       params: {
         path: {
           slug: safeSlug(slug),
-          client_capture_uuid: safeCapture(captureId),
+          client_capture_uuid: safeUuid(captureId, "capture"),
         },
       },
     },

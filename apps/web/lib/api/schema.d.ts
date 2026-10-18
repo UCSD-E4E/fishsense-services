@@ -301,6 +301,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{slug}/observations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List */
+        get: operations["list_observations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/observations/{capture_id}/{fish_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get */
+        get: operations["get_observation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -432,6 +466,13 @@ export interface components {
             /** Width */
             width: number;
         };
+        /** Coordinates */
+        Coordinates: {
+            /** Latitude */
+            latitude: number;
+            /** Longitude */
+            longitude: number;
+        };
         /** DeclaredFile */
         DeclaredFile: {
             /**
@@ -487,6 +528,20 @@ export interface components {
             /** Model */
             model?: string | null;
         };
+        /** DevicePointsView */
+        DevicePointsView: {
+            fork: components["schemas"]["Point"];
+            /** Origin */
+            origin: string;
+            snout: components["schemas"]["Point"];
+        };
+        /** DeviceView */
+        DeviceView: {
+            /** Kind */
+            kind: string | null;
+            /** Name */
+            name: string | null;
+        };
         /** Dive */
         Dive: {
             /** Calibration Source Number */
@@ -510,6 +565,13 @@ export interface components {
             /** Slate Template Number */
             slate_template_number: number | null;
         };
+        /** DiveView */
+        DiveView: {
+            /** Name */
+            name: string | null;
+            /** Number */
+            number: number | null;
+        };
         /** FileView */
         FileView: {
             /** Content Type */
@@ -523,6 +585,13 @@ export interface components {
             /** Url */
             url: string | null;
         };
+        /** FishModelView */
+        FishModelView: {
+            /** Known Length M */
+            known_length_m: number | null;
+            /** Name */
+            name: string;
+        };
         /** Flagged */
         Flagged: {
             /** Flagged */
@@ -532,6 +601,18 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** LaserEvidenceView */
+        LaserEvidenceView: {
+            /** Calibration Producer */
+            calibration_producer: string | null;
+            /** Depth M */
+            depth_m: number | null;
+            dot: components["schemas"]["Point"] | null;
+            head: components["schemas"]["Point"] | null;
+            /** Range M */
+            range_m: number | null;
+            tail: components["schemas"]["Point"] | null;
         };
         /** Location */
         Location: {
@@ -626,12 +707,78 @@ export interface components {
             /** Slug */
             slug: string;
         };
+        /** ObservationDetailView */
+        ObservationDetailView: {
+            /** Algorithm */
+            algorithm: string | null;
+            /** Algorithm Version */
+            algorithm_version: string | null;
+            /** Core Version */
+            core_version: string | null;
+            device_points: components["schemas"]["DevicePointsView"] | null;
+            laser: components["schemas"]["LaserEvidenceView"] | null;
+            /**
+             * Measured At
+             * Format: date-time
+             */
+            measured_at: string;
+            /** Model Version */
+            model_version: string | null;
+            observation: components["schemas"]["ObservationView"];
+        };
+        /** ObservationPage */
+        ObservationPage: {
+            /** Next */
+            next: string | null;
+            /** Observations */
+            observations: components["schemas"]["ObservationView"][];
+        };
+        /** ObservationView */
+        ObservationView: {
+            /**
+             * Capture Id
+             * Format: uuid
+             */
+            capture_id: string;
+            /**
+             * Captured At
+             * Format: date-time
+             */
+            captured_at: string;
+            /** Client Capture Uuid */
+            client_capture_uuid: string | null;
+            device: components["schemas"]["DeviceView"];
+            dive: components["schemas"]["DiveView"] | null;
+            /**
+             * Fish Id
+             * Format: uuid
+             */
+            fish_id: string;
+            fish_model: components["schemas"]["FishModelView"] | null;
+            /** Length M */
+            length_m: number | null;
+            location: components["schemas"]["Coordinates"] | null;
+            /** Method */
+            method: string;
+            /** Photo Url */
+            photo_url: string | null;
+            /** Place Name */
+            place_name: string | null;
+            species: components["schemas"]["SpeciesView"] | null;
+        };
         /** Point */
         Point: {
             /** X */
             x: number;
             /** Y */
             y: number;
+        };
+        /** SpeciesView */
+        SpeciesView: {
+            /** Common Name */
+            common_name: string | null;
+            /** Scientific Name */
+            scientific_name: string | null;
         };
         /** Upload */
         Upload: {
@@ -1277,6 +1424,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UploadGrant"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_observations: {
+        parameters: {
+            query?: {
+                device?: ("lite" | "mobile" | "other") | null;
+                limit?: number;
+                before?: string | null;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_observation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+                capture_id: string;
+                fish_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationDetailView"];
                 };
             };
             /** @description Validation Error */

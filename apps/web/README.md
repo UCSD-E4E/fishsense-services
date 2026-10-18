@@ -36,6 +36,8 @@ app/
   portal/guard.ts                   the gate every portal page shares
   portal/calibration/               dive calibration links (server actions)
   portal/triage/                    mobile triage (server actions)
+  fish/                             every measured fish, Lite and Mobile (PLAN §4.9)
+  captures/                         FishSense Mobile captures and their files
   api/auth/[...nextauth]/route.ts   Auth.js
   api/session/refresh/route.ts      renew the access token, then go back
   api/triage/image/[taskId]/route.ts  a task's frame, proxied

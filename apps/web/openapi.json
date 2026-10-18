@@ -477,6 +477,24 @@
         "title": "ConfidenceGeometry",
         "type": "object"
       },
+      "Coordinates": {
+        "properties": {
+          "latitude": {
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "title": "Longitude",
+            "type": "number"
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude"
+        ],
+        "title": "Coordinates",
+        "type": "object"
+      },
       "DeclaredFile": {
         "properties": {
           "role": {
@@ -630,6 +648,59 @@
         "title": "DeviceInfo",
         "type": "object"
       },
+      "DevicePointsView": {
+        "properties": {
+          "fork": {
+            "$ref": "#/components/schemas/Point"
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
+          "snout": {
+            "$ref": "#/components/schemas/Point"
+          }
+        },
+        "required": [
+          "snout",
+          "fork",
+          "origin"
+        ],
+        "title": "DevicePointsView",
+        "type": "object"
+      },
+      "DeviceView": {
+        "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "title": "DeviceView",
+        "type": "object"
+      },
       "Dive": {
         "properties": {
           "calibration_source_number": {
@@ -707,6 +778,38 @@
         "title": "Dive",
         "type": "object"
       },
+      "DiveView": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number"
+          }
+        },
+        "required": [
+          "number",
+          "name"
+        ],
+        "title": "DiveView",
+        "type": "object"
+      },
       "FileView": {
         "properties": {
           "content_type": {
@@ -747,6 +850,31 @@
         "title": "FileView",
         "type": "object"
       },
+      "FishModelView": {
+        "properties": {
+          "known_length_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Known Length M"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "known_length_m"
+        ],
+        "title": "FishModelView",
+        "type": "object"
+      },
       "Flagged": {
         "properties": {
           "flagged": {
@@ -771,6 +899,83 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "LaserEvidenceView": {
+        "properties": {
+          "calibration_producer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calibration Producer"
+          },
+          "depth_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depth M"
+          },
+          "dot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Point"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "head": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Point"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "range_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Range M"
+          },
+          "tail": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Point"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "depth_m",
+          "range_m",
+          "calibration_producer",
+          "dot",
+          "head",
+          "tail"
+        ],
+        "title": "LaserEvidenceView",
         "type": "object"
       },
       "Location": {
@@ -1058,6 +1263,250 @@
         "title": "MyTenant",
         "type": "object"
       },
+      "ObservationDetailView": {
+        "properties": {
+          "algorithm": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Algorithm"
+          },
+          "algorithm_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Algorithm Version"
+          },
+          "core_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Core Version"
+          },
+          "device_points": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DevicePointsView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "laser": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LaserEvidenceView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "measured_at": {
+            "format": "date-time",
+            "title": "Measured At",
+            "type": "string"
+          },
+          "model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Version"
+          },
+          "observation": {
+            "$ref": "#/components/schemas/ObservationView"
+          }
+        },
+        "required": [
+          "observation",
+          "measured_at",
+          "algorithm",
+          "algorithm_version",
+          "core_version",
+          "model_version",
+          "laser",
+          "device_points"
+        ],
+        "title": "ObservationDetailView",
+        "type": "object"
+      },
+      "ObservationPage": {
+        "properties": {
+          "next": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next"
+          },
+          "observations": {
+            "items": {
+              "$ref": "#/components/schemas/ObservationView"
+            },
+            "title": "Observations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "observations",
+          "next"
+        ],
+        "title": "ObservationPage",
+        "type": "object"
+      },
+      "ObservationView": {
+        "properties": {
+          "capture_id": {
+            "format": "uuid",
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "captured_at": {
+            "format": "date-time",
+            "title": "Captured At",
+            "type": "string"
+          },
+          "client_capture_uuid": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Capture Uuid"
+          },
+          "device": {
+            "$ref": "#/components/schemas/DeviceView"
+          },
+          "dive": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiveView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fish_id": {
+            "format": "uuid",
+            "title": "Fish Id",
+            "type": "string"
+          },
+          "fish_model": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FishModelView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "length_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Length M"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Coordinates"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "photo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Url"
+          },
+          "place_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Place Name"
+          },
+          "species": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpeciesView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "capture_id",
+          "fish_id",
+          "method",
+          "length_m",
+          "captured_at",
+          "device",
+          "dive",
+          "species",
+          "fish_model",
+          "location",
+          "place_name",
+          "client_capture_uuid",
+          "photo_url"
+        ],
+        "title": "ObservationView",
+        "type": "object"
+      },
       "Point": {
         "properties": {
           "x": {
@@ -1074,6 +1523,38 @@
           "y"
         ],
         "title": "Point",
+        "type": "object"
+      },
+      "SpeciesView": {
+        "properties": {
+          "common_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Common Name"
+          },
+          "scientific_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scientific Name"
+          }
+        },
+        "required": [
+          "scientific_name",
+          "common_name"
+        ],
+        "title": "SpeciesView",
         "type": "object"
       },
       "Upload": {
@@ -2293,6 +2774,163 @@
           }
         ],
         "summary": "Request Uploads"
+      }
+    },
+    "/tenants/{slug}/observations": {
+      "get": {
+        "operationId": "list_observations",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "device",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "lite",
+                    "mobile",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Device"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObservationPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List "
+      }
+    },
+    "/tenants/{slug}/observations/{capture_id}/{fish_id}": {
+      "get": {
+        "operationId": "get_observation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "capture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Capture Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "fish_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Fish Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObservationDetailView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get"
       }
     }
   }
