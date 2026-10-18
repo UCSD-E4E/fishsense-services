@@ -3,7 +3,8 @@
 PLAN.md §4.9, Phase 1 of §9.26. For any member of the tenant:
 
 * ``GET /tenants/{slug}/observations`` -- newest first, a page at a time;
-  ``?device=lite`` or ``?device=mobile`` narrows it.
+  ``?device=lite``, ``mobile`` or ``other`` narrows it. The three cover every
+  fish once (``other``: any other kind of device, or none).
 * ``GET /tenants/{slug}/observations/{capture_id}/{fish_id}`` -- one fish,
   with the evidence its method rests on.
 
@@ -33,9 +34,6 @@ from fishsense_services_api.tenant_stores import NoTenantStore, TenantStores
 
 __all__ = ["add_observation_routes"]
 
-#: The device kinds each ``?device=`` value means: Lite is every Lite rig.
-DEVICE_KINDS = {"lite": ("lite", "lite_flatport"), "mobile": ("mobile",)}
-
 
 class DeviceView(BaseModel):
     kind: str | None
@@ -48,7 +46,8 @@ class DiveView(BaseModel):
 
 
 class SpeciesView(BaseModel):
-    scientific_name: str
+    #: Either may be missing (0004): a species is named by what it has.
+    scientific_name: str | None
     common_name: str | None
 
 
@@ -155,7 +154,7 @@ def add_observation_routes(
                     scientific_name=found.scientific_name,
                     common_name=found.common_name,
                 )
-                if found.scientific_name is not None
+                if found.scientific_name is not None or found.common_name is not None
                 else None
             ),
             fish_model=(
@@ -183,7 +182,7 @@ def add_observation_routes(
     async def list_(
         slug: str,
         member: Member,
-        device: Literal["lite", "mobile"] | None = None,
+        device: Literal["lite", "mobile", "other"] | None = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         before: str | None = None,
     ) -> ObservationPage:
@@ -194,7 +193,7 @@ def add_observation_routes(
                 member.tenant_id,
                 limit=limit + 1,
                 before=cursor,
-                device_kinds=DEVICE_KINDS[device] if device else None,
+                device=device,
             )
         page, more = found[:limit], len(found) > limit
         return ObservationPage(

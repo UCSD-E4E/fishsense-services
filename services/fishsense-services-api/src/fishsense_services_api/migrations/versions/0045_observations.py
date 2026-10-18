@@ -5,8 +5,13 @@ comes from the image plus a depth source. Until now the two were read
 separately -- Lite only through Superset's views, Mobile only through
 ``/mobile/captures`` -- and nothing showed them together. This view is the
 one read model the API and the web display (Phase 1 of §9.26): one row per
-**current** measurement (``current_measurements``, §9.13) on a canonical
-capture, whichever device took the photo.
+fish in a canonical capture, whichever device took the photo.
+
+* **One row per (capture, fish).** ``current_measurements`` keeps one per
+  *source*, so a fish measured both ways (a server LiDAR recompute beside the
+  phone's own, §9.24) would be two. An observation is the fish: the latest
+  measured of its current measurements wins, §9.13's rule for "current"
+  (``measured_at``, else when written; then ``seq``).
 
 * ``method`` says how the depth was found: ``laser`` for Lite's server
   measurements (laser + calibration), ``lidar`` for a phone's own. Every
@@ -24,6 +29,15 @@ capture, whichever device took the photo.
   bucket, which the API does not read, and Lite photos are to arrive the way
   Mobile's do, into the tenant's bucket (a later phase).
 * The automatic results track keeps its own tables (0036) and is not here.
+
+**What a read costs.** A page sorts the whole tenant's view, so its cost is
+``current_measurements``': on production (3,314 current of 3,319, 134,662
+captures; read-only, 2026-10-18) the view alone takes 280-690 ms and a page
+of this one about 500 ms. Its stale-binding check scans every capture, and
+Superset and ``dive_pipeline_status`` pay the same. Driving the page from a
+keyset over captures instead was slower (985 ms): 69,162 canonical captures
+of which 3,314 are measured, so the walk steps past mostly unmeasured ones.
+Faster pages need a cheaper ``current_measurements``, a change of its own.
 
 ``security_invoker``, like every view (0006): read as the app role, RLS
 scopes it to the active tenant.
@@ -62,7 +76,13 @@ SELECT
     s.common_name,
     fm.name AS fish_model,
     r.known_length_m
-FROM current_measurements m
+FROM (
+    SELECT DISTINCT ON (cm.tenant_id, cm.capture_id, cm.fish_id) cm.*
+    FROM current_measurements cm
+    JOIN measurements mm ON mm.tenant_id = cm.tenant_id AND mm.id = cm.id
+    ORDER BY cm.tenant_id, cm.capture_id, cm.fish_id,
+        COALESCE(mm.measured_at, mm.created_at) DESC, cm.seq DESC
+) m
 JOIN captures c ON c.tenant_id = m.tenant_id AND c.id = m.capture_id
 JOIN fish f ON f.tenant_id = m.tenant_id AND f.id = m.fish_id
 LEFT JOIN dives d ON d.tenant_id = c.tenant_id AND d.id = c.dive_id

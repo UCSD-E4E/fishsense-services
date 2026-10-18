@@ -1539,8 +1539,15 @@
             "title": "Common Name"
           },
           "scientific_name": {
-            "title": "Scientific Name",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scientific Name"
           }
         },
         "required": [
@@ -2791,7 +2798,8 @@
                 {
                   "enum": [
                     "lite",
-                    "mobile"
+                    "mobile",
+                    "other"
                   ],
                   "type": "string"
                 },

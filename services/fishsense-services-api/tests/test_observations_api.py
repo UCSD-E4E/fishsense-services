@@ -20,7 +20,7 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from depth_measure_seed import T0, forget_identities  # noqa: F401  (a fixture)
+from depth_measure_seed import T0, exec_, forget_identities  # noqa: F401
 from fishsense_services_api.app import create_app
 from fishsense_services_api.auth import StaticKeySource, TokenValidator
 from fishsense_services_api.tenant_stores import TenantStore, TenantStores
@@ -225,3 +225,57 @@ class TestDetail:
         )
 
         assert response.status_code == 404
+
+
+class TestKindsOfFish:
+    async def test_a_species_known_only_by_its_common_name_is_still_named(
+        self, client, owner_engine, tenants
+    ):
+        capture_id, fish_id = await lite(owner_engine, tenants["lab"])
+        await exec_(
+            owner_engine,
+            "INSERT INTO species (scientific_name, common_name) VALUES "
+            "(NULL, 'Garibaldi')",
+        )
+        await exec_(
+            owner_engine,
+            "UPDATE fish SET species_id = (SELECT id FROM species WHERE "
+            "common_name = 'Garibaldi') WHERE id = :f",
+            f=fish_id,
+        )
+
+        [found] = (await _get(client, "/tenants/lab/observations")).json()[
+            "observations"
+        ]
+
+        assert found["species"] == {"scientific_name": None, "common_name": "Garibaldi"}
+
+    async def test_every_fish_is_under_exactly_one_device_filter(
+        self, client, owner_engine, app_engine, tenants
+    ):
+        """Lite, Mobile, and everything else (other kinds, or no device):
+        the filters partition the list, so their counts add up."""
+        await lite(owner_engine, tenants["lab"], species=("A b", "C"))
+        await mobile(app_engine, owner_engine, tenants["lab"])
+        scout, _ = await lite(
+            owner_engine, tenants["lab"], species=("A b", "C"), device_name="Scout-1"
+        )
+        await exec_(
+            owner_engine,
+            "UPDATE devices SET kind = 'scout' WHERE id = "
+            "(SELECT device_id FROM captures WHERE id = :c)",
+            c=scout,
+        )
+
+        def ids(body):
+            return {o["capture_id"] for o in body["observations"]}
+
+        everything = ids((await _get(client, "/tenants/lab/observations")).json())
+        parts = [
+            ids((await _get(client, "/tenants/lab/observations", device=d)).json())
+            for d in ("lite", "mobile", "other")
+        ]
+
+        assert [len(p) for p in parts] == [1, 1, 1]
+        assert set().union(*parts) == everything
+        assert str(scout) in parts[2]

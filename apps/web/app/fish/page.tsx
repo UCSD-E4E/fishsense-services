@@ -4,6 +4,7 @@ import { getMyTenants, type TenantMembership } from "@/lib/fishsense-api";
 import {
   deviceFilter,
   fishName,
+  formatError,
   getObservationPage,
   knownLengthError,
   methodLabel,
@@ -25,6 +26,7 @@ const FILTERS: { label: string; device?: Device }[] = [
   { label: "All" },
   { label: "FishSense Lite", device: "lite" },
   { label: "FishSense Mobile", device: "mobile" },
+  { label: "Other devices", device: "other" },
 ];
 
 function href(tenant: string, device?: Device, before?: string): string {
@@ -191,9 +193,4 @@ function FishCard({ slug, observation: o }: { slug: string; observation: Observa
       </div>
     </Link>
   );
-}
-
-function formatError(error: number): string {
-  const percent = (error * 100).toFixed(1);
-  return error > 0 ? `+${percent}%` : `${percent}%`;
 }

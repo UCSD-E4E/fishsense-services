@@ -5,6 +5,7 @@
 // page's calls are made as an Authentik service account
 // (FISHSENSE_API_SERVICE_USERNAME / PASSWORD, an app password), and every
 // API path names the tenant (`tenantSlug`).
+import { isSlug } from "./ids";
 
 function required(name: string): string {
   const value = process.env[name];
@@ -38,9 +39,6 @@ export const env: Env = new Proxy({} as Env, {
   },
 });
 
-/** One path segment of lowercase letters, digits and dashes. */
-const SLUG = /^[a-z0-9][a-z0-9-]*$/;
-
 /**
  * The tenant every API call acts in (PLAN.md §9.10: the active tenant is named
  * in the URL). At cutover there is one tenant, the lab (§9.11), so that is the
@@ -51,7 +49,7 @@ const SLUG = /^[a-z0-9][a-z0-9-]*$/;
  */
 export function tenantSlug(): string {
   const value = process.env.FISHSENSE_TENANT || "lab";
-  if (!SLUG.test(value)) {
+  if (!isSlug(value)) {
     throw new Error(`FISHSENSE_TENANT is not a tenant slug: ${JSON.stringify(value)}`);
   }
   return value;

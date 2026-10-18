@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   deviceFilter,
   fishName,
+  formatError,
   getObservation,
   getObservationPage,
   knownLengthError,
@@ -152,6 +153,7 @@ describe("deviceFilter", () => {
   it("keeps only the filters the API knows", () => {
     expect(deviceFilter("lite")).toBe("lite");
     expect(deviceFilter("mobile")).toBe("mobile");
+    expect(deviceFilter("other")).toBe("other");
     expect(deviceFilter(undefined)).toBeUndefined();
     expect(deviceFilter("../../admin")).toBeUndefined();
   });
@@ -167,6 +169,25 @@ describe("fishName", () => {
       name: "Hogfish",
       detail: "Lachnolaimus maximus",
     });
+  });
+
+  it("names a species by whichever name it has", () => {
+    expect(
+      fishName(
+        observation({
+          fish_model: null,
+          species: { scientific_name: null, common_name: "Garibaldi" },
+        }),
+      ),
+    ).toEqual({ name: "Garibaldi", detail: null });
+    expect(
+      fishName(
+        observation({
+          fish_model: null,
+          species: { scientific_name: "Hypsypops rubicundus", common_name: null },
+        }),
+      ),
+    ).toEqual({ name: "Hypsypops rubicundus", detail: null });
   });
 
   it("names a fish model as one", () => {
@@ -197,6 +218,14 @@ describe("knownLengthError", () => {
       ),
     ).toBeNull();
     expect(knownLengthError(observation({ length_m: null }))).toBeNull();
+  });
+});
+
+describe("formatError", () => {
+  it("signs an error and gives it to a tenth of a percent", () => {
+    expect(formatError(0.0172)).toBe("+1.7%");
+    expect(formatError(-0.0246)).toBe("-2.5%");
+    expect(formatError(0)).toBe("0.0%");
   });
 });
 

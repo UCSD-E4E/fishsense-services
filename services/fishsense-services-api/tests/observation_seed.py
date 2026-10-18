@@ -40,13 +40,23 @@ async def one(owner_engine, sql: str, **params):
 
 
 async def lite(
-    owner_engine, tenant_id, *, species=None, model=None, at=T0, canonical=True
+    owner_engine,
+    tenant_id,
+    *,
+    species=None,
+    model=None,
+    at=T0,
+    canonical=True,
+    device_name="FSL-07",
 ):
     """A measured Lite capture: device FSL-07, its dive, a laser calibration,
     labels, a depth and a current server measurement. Returns the ids."""
     device_id = await device(owner_engine, tenant_id)
     await exec_(
-        owner_engine, "UPDATE devices SET name = 'FSL-07' WHERE id = :d", d=device_id
+        owner_engine,
+        "UPDATE devices SET name = :n WHERE id = :d",
+        n=device_name,
+        d=device_id,
     )
     dive_id = await dive(owner_engine, tenant_id, device_id=device_id)
     await exec_(

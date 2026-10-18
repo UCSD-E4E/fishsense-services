@@ -778,7 +778,7 @@ export interface components {
             /** Common Name */
             common_name: string | null;
             /** Scientific Name */
-            scientific_name: string;
+            scientific_name: string | null;
         };
         /** Upload */
         Upload: {
@@ -1440,7 +1440,7 @@ export interface operations {
     list_observations: {
         parameters: {
             query?: {
-                device?: ("lite" | "mobile") | null;
+                device?: ("lite" | "mobile" | "other") | null;
                 limit?: number;
                 before?: string | null;
             };

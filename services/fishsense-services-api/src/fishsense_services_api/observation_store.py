@@ -5,7 +5,8 @@ so RLS scopes every row to that tenant; the queries also name the tenant, the
 app layer's own line of defence (as every store does).
 
 * :func:`list_observations` -- newest first, a page at a time, optionally
-  only some device kinds.
+  one device group: ``lite``, ``mobile`` or ``other`` (any other kind, or no
+  device), which together cover every fish once.
 * :func:`observation` -- one fish in one capture, with the evidence its
   method rests on: for ``laser``, the laser depth, the calibration's producer
   and the labelled dot, head and tail; for ``lidar``, the phone's snout and
@@ -15,16 +16,14 @@ app layer's own line of defence (as every store does).
 from __future__ import annotations
 
 import uuid
-from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from fishsense_services_api.mobile_capture_store import _DERIVED_PLACE_NAME
-
 __all__ = [
+    "DEVICE_GROUPS",
     "DevicePoints",
     "LaserEvidence",
     "Observation",
@@ -34,6 +33,11 @@ __all__ = [
 ]
 
 Point = tuple[float, float]
+
+#: The device kinds of each named group; ``other`` is every kind not named
+#: here, and a fish with no device.
+DEVICE_GROUPS = {"lite": ("lite", "lite_flatport"), "mobile": ("mobile",)}
+_NAMED_KINDS = [kind for kinds in DEVICE_GROUPS.values() for kind in kinds]
 
 
 @dataclass(frozen=True)
@@ -106,8 +110,12 @@ _COLUMNS = """o.capture_id, o.fish_id, o.method, o.length_m, o.captured_at,
     o.latitude, o.longitude, o.place_name, pn.place_name AS derived_place_name,
     o.client_capture_uuid, o.photo_key"""
 
-#: ``_DERIVED_PLACE_NAME`` joins on capture ``c``.
-_CAPTURE = "JOIN captures c ON c.tenant_id = o.tenant_id AND c.id = o.capture_id"
+#: The name the server derived from the capture's coordinates (0041).
+_DERIVED_PLACE_NAME = """LEFT JOIN LATERAL (
+    SELECT place_name FROM capture_place_names
+    WHERE tenant_id = o.tenant_id AND capture_id = o.capture_id
+    ORDER BY derived_at DESC LIMIT 1
+) pn ON true"""
 
 
 async def list_observations(
@@ -116,18 +124,22 @@ async def list_observations(
     *,
     limit: int,
     before: tuple[datetime, uuid.UUID, uuid.UUID] | None = None,
-    device_kinds: Sequence[str] | None = None,
+    device: str | None = None,
 ) -> list[Observation]:
     """Newest first; ``before`` is the previous page's last ``cursor``;
-    ``device_kinds`` keeps only those kinds (None: every kind)."""
+    ``device`` keeps one of :data:`DEVICE_GROUPS` or ``other`` (None: all)."""
+    if device is not None and device != "other" and device not in DEVICE_GROUPS:
+        raise ValueError(f"no device group {device!r}")
     rows = await conn.execute(
         text(f"""
             SELECT {_COLUMNS}
             FROM observations o
-            {_CAPTURE}
             {_DERIVED_PLACE_NAME}
             WHERE o.tenant_id = :tenant_id
-              AND (CAST(:kinds AS text[]) IS NULL
+              AND (CAST(:device AS text) IS NULL
+                   OR (:device = 'other'
+                       AND (o.device_kind IS NULL
+                            OR o.device_kind <> ALL(CAST(:named AS text[]))))
                    OR o.device_kind = ANY(CAST(:kinds AS text[])))
               AND (CAST(:before_at AS timestamptz) IS NULL
                    OR (o.captured_at, o.capture_id, o.fish_id)
@@ -137,7 +149,9 @@ async def list_observations(
             """),
         {
             "tenant_id": tenant_id,
-            "kinds": list(device_kinds) if device_kinds is not None else None,
+            "device": device,
+            "named": _NAMED_KINDS,
+            "kinds": list(DEVICE_GROUPS.get(device, ())),
             "before_at": before[0] if before else None,
             "before_capture": before[1] if before else None,
             "before_fish": before[2] if before else None,
@@ -167,7 +181,6 @@ async def observation(
                     ht.head_x, ht.head_y, ht.tail_x, ht.tail_y,
                     dp.snout_x, dp.snout_y, dp.fork_x, dp.fork_y, dp.origin
                 FROM observations o
-                {_CAPTURE}
                 {_DERIVED_PLACE_NAME}
                 JOIN measurements m
                   ON m.tenant_id = o.tenant_id AND m.id = o.measurement_id
@@ -177,8 +190,10 @@ async def observation(
                   ON ll.tenant_id = m.tenant_id AND ll.id = m.laser_label_id
                 LEFT JOIN head_tail_labels ht
                   ON ht.tenant_id = m.tenant_id AND ht.id = m.head_tail_label_id
-                -- The depth the length used: named, else the latest from the
-                -- same dot under the same calibration.
+                -- The depth the length used: named, else the latest written
+                -- from the same dot under the same calibration (seq, as
+                -- current_laser_depths has it: rows written in one transaction
+                -- share a created_at).
                 LEFT JOIN LATERAL (
                     SELECT ld.depth_m, ld.range_m FROM laser_depths ld
                     WHERE ld.tenant_id = m.tenant_id
@@ -187,7 +202,7 @@ async def observation(
                                AND ld.capture_id = m.capture_id
                                AND ld.laser_label_id = m.laser_label_id
                                AND ld.laser_calibration_id = m.laser_calibration_id))
-                    ORDER BY ld.id = m.laser_depth_id DESC, ld.created_at DESC
+                    ORDER BY ld.id = m.laser_depth_id DESC, ld.seq DESC
                     LIMIT 1
                 ) depth ON m.source = 'server'
                 LEFT JOIN device_measurement_points dp

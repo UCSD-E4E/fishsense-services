@@ -7,30 +7,20 @@
  * the URL are validated before they go into an API path.
  */
 import { apiClient, failure, type Schemas } from "./api/client";
+import { safeSlug, safeUuid } from "./ids";
 
 export type ObservationPage = Schemas["ObservationPage"];
 export type Observation = Schemas["ObservationView"];
 export type ObservationDetail = Schemas["ObservationDetailView"];
-export type Device = "lite" | "mobile";
-
-const SLUG = /^[a-z0-9][a-z0-9-]*$/;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function safeSlug(slug: string): string {
-  if (!SLUG.test(slug))
-    throw new Error(`Invalid tenant: ${JSON.stringify(slug)}`);
-  return slug;
-}
-
-function safeUuid(id: string, what: string): string {
-  if (!UUID.test(id))
-    throw new Error(`Invalid ${what} id: ${JSON.stringify(id)}`);
-  return id;
-}
+/** `other` is every other kind of device, or none: the three together cover
+ *  every fish once. */
+export type Device = "lite" | "mobile" | "other";
 
 /** The `?device=` filters the API knows; anything else means no filter. */
 export function deviceFilter(value: string | undefined): Device | undefined {
-  return value === "lite" || value === "mobile" ? value : undefined;
+  return value === "lite" || value === "mobile" || value === "other"
+    ? value
+    : undefined;
 }
 
 /** One page of the tenant's fish, newest first. */
@@ -81,11 +71,11 @@ export function fishName(o: Observation): {
   name: string;
   detail: string | null;
 } {
-  if (o.species) {
-    return o.species.common_name
-      ? { name: o.species.common_name, detail: o.species.scientific_name }
-      : { name: o.species.scientific_name, detail: null };
-  }
+  // A species has either name, or both (the API sends none without one).
+  const common = o.species?.common_name ?? null;
+  const scientific = o.species?.scientific_name ?? null;
+  if (common) return { name: common, detail: scientific };
+  if (scientific) return { name: scientific, detail: null };
   if (o.fish_model) return { name: o.fish_model.name, detail: "fish model" };
   return { name: "Unidentified fish", detail: null };
 }
@@ -96,6 +86,12 @@ export function knownLengthError(o: Observation): number | null {
   const known = o.fish_model?.known_length_m;
   if (known == null || o.length_m == null) return null;
   return (o.length_m - known) / known;
+}
+
+/** An error as a fraction, signed, to a tenth of a percent ("+1.7%"). */
+export function formatError(error: number): string {
+  const percent = (error * 100).toFixed(1);
+  return error > 0 ? `+${percent}%` : `${percent}%`;
 }
 
 /** How the depth was found. */

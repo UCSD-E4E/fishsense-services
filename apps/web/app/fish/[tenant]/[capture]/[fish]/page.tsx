@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { describeOrigin, formatLength } from "@/lib/captures";
+import { isSlug, isUuid } from "@/lib/ids";
 import {
   fishName,
+  formatError,
   getObservation,
   knownLengthError,
   methodLabel,
@@ -25,6 +27,8 @@ type Point = { x: number; y: number } | null | undefined;
  */
 export default async function FishDetailPage({ params }: Props) {
   const { tenant, capture, fish } = await params;
+  // A malformed address names no fish: 404, like an unknown one.
+  if (!isSlug(tenant) || !isUuid(capture) || !isUuid(fish)) notFound();
   const session = await requireSignedIn(`/fish/${tenant}/${capture}/${fish}`);
   const detail = await getObservation(session.accessToken ?? "", tenant, capture, fish);
   if (!detail) notFound();
@@ -56,14 +60,21 @@ export default async function FishDetailPage({ params }: Props) {
         </Link>
       </header>
 
+      {o.photo_url && (
+        // Presigned, short-lived Garage URLs: not for next/image's optimizer.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={o.photo_url}
+          alt={name.name}
+          className="mb-8 w-full rounded-lg border border-slate-200 dark:border-slate-800"
+        />
+      )}
+
       {error !== null && (
         <p className="mb-8 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-800 dark:bg-slate-900">
           {o.fish_model?.name} is a fish model of known length{" "}
           {formatLength(o.fish_model?.known_length_m)}: this measurement is{" "}
-          <strong>
-            {error > 0 ? "+" : ""}
-            {(error * 100).toFixed(1)}%
-          </strong>{" "}
+          <strong>{formatError(error)}</strong>{" "}
           against it.
         </p>
       )}
@@ -143,7 +154,9 @@ export default async function FishDetailPage({ params }: Props) {
 
       {!o.photo_url && (
         <p className="text-sm text-slate-500">
-          Photos of FishSense Lite frames aren&apos;t shown here yet.
+          {o.method === "laser"
+            ? "Photos of FishSense Lite frames aren't shown here yet."
+            : "No photo is available for this fish."}
         </p>
       )}
     </main>

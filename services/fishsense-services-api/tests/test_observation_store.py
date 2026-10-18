@@ -16,7 +16,8 @@ from datetime import timedelta
 
 import pytest
 
-from depth_measure_seed import T0, forget_identities  # noqa: F401  (a fixture)
+from depth_measure_seed import T0, exec_, forget_identities  # noqa: F401
+from sqlalchemy import text
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.observation_store import (
     list_observations,
@@ -88,8 +89,8 @@ class TestList:
         )
 
         everything = await _list(app_engine, tenants["lab"])
-        only_lite = await _list(app_engine, tenants["lab"], device_kinds=["lite"])
-        only_phone = await _list(app_engine, tenants["lab"], device_kinds=["mobile"])
+        only_lite = await _list(app_engine, tenants["lab"], device="lite")
+        only_phone = await _list(app_engine, tenants["lab"], device="mobile")
 
         assert [o.capture_id for o in everything] == [phone, lite]
         assert [o.capture_id for o in only_lite] == [lite]
@@ -192,3 +193,74 @@ class TestDetail:
 
         async with tenant_transaction(app_engine, tenants["lab"]) as conn:
             assert await observation(conn, tenants["lab"], capture_id, fish_id) is None
+
+
+class TestOneObservationPerFish:
+    """``current_measurements`` keeps one row per source, so a fish measured
+    both ways would be two rows. An observation is one fish in one capture:
+    the latest measured wins (§9.13's rule for "current")."""
+
+    async def test_a_fish_measured_two_ways_is_one_observation_the_latest(
+        self, owner_engine, app_engine, tenants
+    ):
+        capture_id, fish_id = await _lite(
+            owner_engine, tenants["lab"], species=("A b", "C")
+        )
+        await exec_(
+            owner_engine,
+            "INSERT INTO measurements (tenant_id, capture_id, fish_id, source, "
+            "length_m, measured_at) VALUES (:t, :c, :f, 'device', 0.5, now() + "
+            "interval '1 day')",
+            t=tenants["lab"],
+            c=capture_id,
+            f=fish_id,
+        )
+
+        listed = await _list(app_engine, tenants["lab"])
+
+        assert [(o.capture_id, o.method, o.length_m) for o in listed] == [
+            (capture_id, "lidar", 0.5)
+        ]
+
+
+class TestEvidence:
+    async def test_the_depth_is_the_latest_written_for_its_dot(
+        self, owner_engine, app_engine, tenants
+    ):
+        """Two depths for one dot, written in one transaction (one now()):
+        the latest written is the current one, as ``current_laser_depths``
+        has it (seq), whatever their timestamps."""
+        capture_id, fish_id = await _lite(
+            owner_engine, tenants["lab"], species=("A b", "C")
+        )
+        async with owner_engine.begin() as conn:
+            laser, calibration = (
+                await conn.execute(
+                    text(
+                        "SELECT laser_label_id, laser_calibration_id FROM "
+                        "measurements WHERE capture_id = :c"
+                    ),
+                    {"c": capture_id},
+                )
+            ).one()
+            for depth_m in (2.5, 3.5):
+                await conn.execute(
+                    text(
+                        "INSERT INTO laser_depths (tenant_id, capture_id, "
+                        "laser_label_id, laser_calibration_id, depth_m, range_m, "
+                        "residual_m, core_version, created_at) VALUES (:t, :c, :l, "
+                        ":cal, :d, :d, 0, '4.1.0', '2026-01-01')"
+                    ),
+                    {
+                        "t": tenants["lab"],
+                        "c": capture_id,
+                        "l": laser,
+                        "cal": calibration,
+                        "d": depth_m,
+                    },
+                )
+
+        async with tenant_transaction(app_engine, tenants["lab"]) as conn:
+            found = await observation(conn, tenants["lab"], capture_id, fish_id)
+
+        assert found.laser.depth_m == 3.5
