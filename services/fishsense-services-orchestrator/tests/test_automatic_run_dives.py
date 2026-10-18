@@ -49,11 +49,23 @@ async def _planner(tenant: str, numbers: List[int]) -> dict:
     return _plan()
 
 
+NO_GPU: List[str] = []
+
+
 @workflow.defn(name="AutomaticResultsForDiveWorkflow")
 class _ForDive:  # pylint: disable=too-few-public-methods
     @workflow.run
     async def run(self, target: dict) -> dict:
         RAN.append(workflow.info().workflow_id)
+        if target["dive_id"] in NO_GPU:
+            return {
+                "tenant_id": target["tenant_id"],
+                "dive_id": target["dive_id"],
+                "skipped": ["frames: no GPU (unavailable)"],
+                "failed": None,
+                "species_failed": False,
+                "no_gpu": "unavailable",
+            }
         if target["dive_id"] == str(DIVES[1]):
             raise ApplicationError(
                 "boom", type="AutomaticStepFailed", non_retryable=True
@@ -146,3 +158,21 @@ def test_apply_takes_its_dives_and_digest_from_the_reviewed_report(tmp_path):
     applied.write_text('{"mode": "apply"}')
     with pytest.raises(SystemExit):
         sut.build_request(sut.parse_args(["apply", "--report", str(applied)]))
+
+
+async def test_apply_stops_at_the_first_dive_with_no_gpu():
+    """2026-10-18, the first validation run: the GPU never came up, and
+    each dive waited out the GPU wake, skipped its frames and "completed",
+    so the run walked on through every dive doing nothing. The backlog's
+    drain stops on a GPU skip; so does this."""
+    NO_GPU[:] = [str(DIVES[0])]
+    try:
+        report = await _run(sut.RunAutomaticDivesInput(
+            tenant="lab", numbers=[60, 61, 62], apply=True,
+            expected_plan_sha256=sut.plan_digest(_plan())))  # fmt: skip
+    finally:
+        NO_GPU.clear()
+
+    assert RAN == [f"automatic-results-{DIVES[0]}"]
+    assert report["stopped"] == "no GPU (unavailable)"
+    assert [d["dive_id"] for d in report["dives"]] == [str(DIVES[0])]
