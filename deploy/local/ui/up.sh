@@ -16,7 +16,8 @@ if [[ "${1:-}" == "--reset" ]]; then
   "${compose[@]}" down --volumes
 fi
 "${compose[@]}" up --build --detach --wait api oidc garage
-"${compose[@]}" --profile seed run --rm seed
+# --build: `up --build` builds only what it starts, and seed is not among them.
+"${compose[@]}" --profile seed run --build --rm seed
 
 cd apps/web
 [[ -d node_modules ]] || npm ci

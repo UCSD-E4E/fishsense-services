@@ -67,7 +67,7 @@ from fishsense_services_api.range_trend_store import (
     range_trend_inputs,
 )
 from fishsense_services_api.schema_audit import tenancy_violations
-from fishsense_services_api.tenant_stores import TenantStores, read_stores_file
+from fishsense_services_api.tenant_stores import TenantStores
 from fishsense_services_api.settings import (
     AuditSettings,
     DevSeedSettings,
@@ -149,7 +149,7 @@ def build_parser() -> argparse.ArgumentParser:
     seed = commands.add_parser(
         "dev-seed",
         help="LOCAL ONLY: seed the UI harness's synthetic tenant (compose.ui.yml); "
-        "refuses any database that isn't local",
+        "refuses any database not marked as the harness's",
     )
     seed.add_argument(
         "--frames",
@@ -214,16 +214,24 @@ async def _add_tenant(args: argparse.Namespace) -> int:
 
 
 async def _dev_seed(args: argparse.Namespace) -> int:
+    """Everything is checked -- the frames, the stores file, and that the
+    database is the harness's -- before anything is written anywhere."""
     settings = _settings(DevSeedSettings)
     if settings is None:
         return 2
-    database_url = settings.migration_database_url.get_secret_value()
     try:
-        dev_seed.assert_local_url(database_url)
-    except dev_seed.NotLocal as error:
-        print(f"dev-seed REFUSED: {error}", file=sys.stderr)
-        return 1
-    configured = read_stores_file(settings.tenant_stores_file)
+        frames = dev_seed.load_frames(args.frames)
+    except (OSError, ValueError, KeyError) as error:
+        print(
+            f"dev-seed: can't read the frames in {args.frames}: {error}",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        configured = dev_seed.load_stores(settings.tenant_stores_file)
+    except ValueError as error:
+        print(f"dev-seed: {error}", file=sys.stderr)
+        return 2
     if dev_seed.TENANT not in configured:
         print(
             f"dev-seed: {settings.tenant_stores_file} has no store for tenant"
@@ -231,24 +239,25 @@ async def _dev_seed(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
-    await asyncio.to_thread(
-        dev_seed.bootstrap_garage,
-        settings.dev_garage_admin_url,
-        settings.dev_garage_admin_token.get_secret_value(),
-        configured,
-    )
-    stores = TenantStores(
-        endpoint_url=settings.object_store_endpoint_url,
-        public_endpoint_url=settings.object_store_public_url,
-        region=settings.object_store_region,
-        stores=configured,
-    )
-    engine = create_async_engine(database_url)
+
+    engine = create_async_engine(settings.migration_database_url.get_secret_value())
     try:
-        report = await dev_seed.seed(
-            engine, frames=dev_seed.load_frames(args.frames), stores=stores
+        async with engine.connect() as conn:
+            await dev_seed.assert_dev_database(conn)
+        await asyncio.to_thread(
+            dev_seed.bootstrap_garage,
+            settings.dev_garage_admin_url,
+            settings.dev_garage_admin_token.get_secret_value(),
+            configured,
         )
-    except dev_seed.NotLocal as error:
+        stores = TenantStores(
+            endpoint_url=settings.object_store_endpoint_url,
+            public_endpoint_url=settings.object_store_public_url,
+            region=settings.object_store_region,
+            stores=configured,
+        )
+        report = await dev_seed.seed(engine, frames=frames, stores=stores)
+    except dev_seed.NotDevDatabase as error:
         print(f"dev-seed REFUSED: {error}", file=sys.stderr)
         return 1
     finally:

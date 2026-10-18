@@ -17,10 +17,14 @@ show:
   through presigned URLs into the tenant's Garage bucket, then
   :func:`~fishsense_services_api.mobile_capture_store.commit_capture`.
 
-It writes as the schema owner, so it refuses any database that isn't local:
-a host other than the local stack's (:func:`assert_local_url`), or one
-holding migrated v1 rows, which only production has. It is idempotent: a
-second run finds the seed and changes nothing.
+It writes as the schema owner, so it refuses production
+(:func:`assert_dev_database`). A host can't tell the two apart: production's
+owner DSN names the host ``postgres``, exactly as the local stack's does
+(deploy/incus/secrets.nix; review of #92). So the database must say it is a
+dev database itself, through the server setting ``fishsense.dev_database``,
+which only compose.ui.yml sets. It must also hold no migrated v1 rows, which
+only production has. Both are checked before anything is written. It is
+idempotent: a second run finds the seed and changes nothing.
 
 Coordinates are in the frame's own JPEG pixels, so the UI can draw them
 without knowing a sensor size.
@@ -44,7 +48,6 @@ from pathlib import Path
 import httpx
 import numpy as np
 from sqlalchemy import text
-from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from fishsense_services_api.db import tenant_transaction
@@ -61,16 +64,19 @@ __all__ = [
     "Frame",
     "LITE_SPECIES",
     "MOBILE_CAPTURES",
-    "NotLocal",
+    "NotDevDatabase",
     "SeedReport",
-    "assert_local_url",
+    "assert_dev_database",
     "bootstrap_garage",
     "load_frames",
+    "load_stores",
     "seed",
 ]
 
-#: The local stack's database hosts: compose's service name, or the host.
-LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "postgres"})
+#: The server setting that marks a database as the UI harness's: compose.ui.yml
+#: starts its Postgres with ``-c fishsense.dev_database=true``. Production's
+#: never has it.
+DEV_DATABASE_SETTING = "fishsense.dev_database"
 TENANT = "lab"
 USERS = {"dev-admin": "admin", "dev-member": "member", "web-service": "member"}
 #: (scientific, common): the species the seed's Lite fish are labelled with.
@@ -99,8 +105,8 @@ DEPTH_SIZE = (256, 192)
 _NAMESPACE = uuid.UUID("5d6b8f0e-6a39-4c55-9b0a-3c1f1c7e2d10")
 
 
-class NotLocal(Exception):
-    """The database isn't the local stack's: the seed refuses to touch it."""
+class NotDevDatabase(Exception):
+    """The database isn't the UI harness's: the seed refuses to touch it."""
 
 
 @dataclass(frozen=True)
@@ -122,27 +128,73 @@ class SeedReport:
     mobile_captures: int
 
 
-def assert_local_url(url: str) -> None:
-    """Refuse a database URL whose host isn't the local stack's."""
-    host = make_url(url).host
-    if host not in LOCAL_HOSTS:
-        raise NotLocal(f"refusing to seed {host!r}: not a local database")
+async def assert_dev_database(conn: AsyncConnection) -> None:
+    """Refuse a database that isn't marked as the harness's, or that holds
+    migrated v1 data."""
+    marked = await _scalar(
+        conn, "SELECT current_setting(:name, true)", name=DEV_DATABASE_SETTING
+    )
+    if marked != "true":
+        raise NotDevDatabase(
+            f"refusing to seed: the database is not marked as a dev database"
+            f" ({DEV_DATABASE_SETTING} is not 'true'; compose.ui.yml sets it)"
+        )
+    if await _scalar(
+        conn,
+        "SELECT (SELECT count(*) FROM dives WHERE v1_id IS NOT NULL)"
+        " + (SELECT count(*) FROM captures WHERE v1_id IS NOT NULL)",
+    ):
+        raise NotDevDatabase("refusing to seed: the database holds migrated v1 data")
 
 
 def load_frames(directory: Path) -> list[Frame]:
     """The frames in ``directory``, described by its ``frames.json``:
-    ``[{"file", "head": [x, y], "tail": [x, y], "dot": [x, y]}]``."""
+    ``[{"file", "head": [x, y], "tail": [x, y], "dot": [x, y]}]``. Raises
+    ``OSError`` or ``ValueError`` on anything missing or malformed."""
     entries = json.loads((directory / "frames.json").read_text())
-    return [
-        Frame(
-            name=Path(e["file"]).stem,
-            jpeg=(directory / e["file"]).read_bytes(),
-            head=tuple(e["head"]),
-            tail=tuple(e["tail"]),
-            dot=tuple(e["dot"]),
+    frames = []
+    for entry in entries:
+        points = {}
+        for key in ("head", "tail", "dot"):
+            point = entry.get(key)
+            if not (
+                isinstance(point, list)
+                and len(point) == 2
+                and all(isinstance(v, (int, float)) for v in point)
+            ):
+                raise ValueError(
+                    f"{entry.get('file')}: {key} must be [x, y], not {point!r}"
+                )
+            points[key] = (float(point[0]), float(point[1]))
+        frames.append(
+            Frame(
+                name=Path(entry["file"]).stem,
+                jpeg=(directory / entry["file"]).read_bytes(),
+                **points,
+            )
         )
-        for e in entries
-    ]
+    return frames
+
+
+def load_stores(path: Path) -> dict[str, TenantStore]:
+    """The rendered stores file, read strictly. The API's own reader
+    (``TenantStores.from_file``) forgives a missing or malformed file, since it
+    must never stop the API; here the file is a required input, so anything
+    wrong with it raises, naming the file."""
+    try:
+        rendered = json.loads(Path(path).read_text())
+        return {
+            slug: TenantStore(
+                bucket=entry["bucket"],
+                access_key_id=entry["access_key_id"],
+                secret_access_key=entry["secret_access_key"],
+            )
+            for slug, entry in rendered.items()
+        }
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        raise ValueError(
+            f"can't read the tenant stores in {path}: {error!r}"
+        ) from error
 
 
 async def seed(
@@ -152,14 +204,8 @@ async def seed(
     if len(frames) < MOBILE_CAPTURES:
         # One photo, one capture: the store refuses a photo twice.
         raise ValueError(f"the seed needs at least {MOBILE_CAPTURES} frames")
-    assert_local_url(owner_engine.url.render_as_string(hide_password=False))
     async with owner_engine.begin() as conn:
-        if await _scalar(
-            conn,
-            "SELECT (SELECT count(*) FROM dives WHERE v1_id IS NOT NULL)"
-            " + (SELECT count(*) FROM captures WHERE v1_id IS NOT NULL)",
-        ):
-            raise NotLocal("refusing to seed: this database holds migrated v1 data")
+        await assert_dev_database(conn)
         tenant_id = await _tenant(conn)
         users = {
             sub: await _member(conn, tenant_id, sub, role)
@@ -201,9 +247,15 @@ def bootstrap_garage(
             )
             if response.is_success:
                 return response.json()
-            if response.json().get("code") in ok:
+            try:
+                code = response.json().get("code")
+            except ValueError:  # not JSON: a proxy, the wrong port, not up yet
+                code = None
+            if code in ok:
                 return None
-            raise RuntimeError(f"garage {endpoint}: {response.text}")
+            raise RuntimeError(
+                f"garage {endpoint}: {response.status_code} {response.text[:500]}"
+            )
 
         layout = call("GetClusterLayout")
         if not layout["roles"]:

@@ -10,9 +10,13 @@
 # same address -- the issuer in every token.
 #
 # Dev-only secrets throughout. dev-seed refuses any database that isn't this
-# one.
+# one: its Postgres is started with fishsense.dev_database=true, a setting
+# production's never has (dev_seed.assert_dev_database).
 
 services:
+  postgres:
+    command: ["postgres", "-c", "fishsense.dev_database=true"]
+
   oidc:
     image: ghcr.io/navikt/mock-oauth2-server:2.1.10
     environment:

@@ -5,9 +5,13 @@ users and their roles, a measured Lite dive, and FishSense Mobile captures
 whose files are in Garage. It exists so the UI can be tested locally, phase
 by phase, without production (PLAN.md §4.9, §9.26).
 
-It writes as the schema owner, so above all it must refuse anything that
-isn't a local database: a host that isn't local, or a database that already
-holds migrated (v1) data, the mark of production.
+It writes as the schema owner, so above all it must refuse production. A
+host can't tell them apart: production's owner DSN names the host
+``postgres``, as the local stack's does (deploy/incus/secrets.nix, review of
+#92). So the database must say it is a dev database itself -- the server
+setting ``fishsense.dev_database``, which only compose.ui.yml sets -- and must
+hold no migrated (v1) data. Both are checked before anything is written,
+in Garage or the database.
 """
 
 from __future__ import annotations
@@ -18,8 +22,10 @@ import hashlib
 import urllib.request
 import uuid
 
+import httpx
 import pytest
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from fishsense_services_api import dev_seed
 from fishsense_services_api.cli import main
@@ -53,8 +59,51 @@ def stores(garage) -> TenantStores:
     )
 
 
-async def _seed(owner_engine, stores):
-    return await dev_seed.seed(owner_engine, frames=FRAMES, stores=stores)
+@pytest.fixture
+async def marked(postgres, owner_engine):
+    """The test database, marked as a dev database the way compose.ui.yml
+    marks the harness's (for every session opened from now on)."""
+    database = f'"{postgres.dbname}"'
+    async with owner_engine.begin() as conn:
+        await conn.execute(
+            text(
+                f"ALTER DATABASE {database} SET {dev_seed.DEV_DATABASE_SETTING} = 'true'"
+            )
+        )
+    yield
+    async with owner_engine.begin() as conn:
+        await conn.execute(
+            text(f"ALTER DATABASE {database} RESET {dev_seed.DEV_DATABASE_SETTING}")
+        )
+
+
+@pytest.fixture
+async def dev_engine(marked, owner_url):
+    """The owner, on a marked database (a fresh engine: a session reads the
+    database's settings when it opens)."""
+    engine = create_async_engine(owner_url)
+    yield engine
+    await engine.dispose()
+
+
+@pytest.fixture
+async def unmarked_engine(owner_engine, owner_url):
+    engine = create_async_engine(owner_url)
+    yield engine
+    await engine.dispose()
+
+
+async def _seed(engine, stores):
+    return await dev_seed.seed(engine, frames=FRAMES, stores=stores)
+
+
+def _bucket_exists(garage, bucket: str) -> bool:
+    response = httpx.get(
+        f"{garage.admin_url}/v2/GetBucketInfo",
+        params={"globalAlias": bucket},
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+    )
+    return response.is_success
 
 
 async def _scalar(owner_engine, sql: str, **params):
@@ -62,35 +111,20 @@ async def _scalar(owner_engine, sql: str, **params):
         return (await conn.execute(text(sql), params)).scalar_one()
 
 
-class TestOnlyLocal:
-    @pytest.mark.parametrize(
-        "url",
-        [
-            "postgresql+psycopg://o:p@localhost/fishsense",
-            "postgresql+psycopg://o:p@127.0.0.1:5432/fishsense",
-            "postgresql+psycopg://o:p@postgres/fishsense",
-        ],
-    )
-    def test_a_local_host_is_allowed(self, url):
-        dev_seed.assert_local_url(url)
+class TestOnlyADevDatabase:
+    async def test_an_unmarked_database_is_refused_before_anything_is_written(
+        self, unmarked_engine, stores
+    ):
+        with pytest.raises(dev_seed.NotDevDatabase, match="not marked"):
+            await _seed(unmarked_engine, stores)
 
-    @pytest.mark.parametrize(
-        "url",
-        [
-            "postgresql+psycopg://o:p@fishsense-postgres-1/fishsense_services",
-            "postgresql+psycopg://o:p@db.krg.ucsd.edu/fishsense",
-            "postgresql+psycopg://o:p@10.0.0.5/fishsense",
-        ],
-    )
-    def test_any_other_host_is_refused(self, url):
-        with pytest.raises(dev_seed.NotLocal):
-            dev_seed.assert_local_url(url)
+        assert await _scalar(unmarked_engine, "SELECT count(*) FROM tenants") == 0
 
-    async def test_a_database_holding_migrated_data_is_refused(
-        self, owner_engine, stores, seed_memberships
+    async def test_a_marked_database_holding_migrated_data_is_refused(
+        self, dev_engine, stores, seed_memberships
     ):
         tenants = await seed_memberships({"someone": {"lab": "member"}})
-        async with owner_engine.begin() as conn:
+        async with dev_engine.begin() as conn:
             await conn.execute(
                 text(
                     "INSERT INTO dives (tenant_id, source_path, name, dived_at, v1_id) "
@@ -98,15 +132,25 @@ class TestOnlyLocal:
                 ),
                 {"t": tenants["lab"]},
             )
-        with pytest.raises(dev_seed.NotLocal):
-            await _seed(owner_engine, stores)
+        with pytest.raises(dev_seed.NotDevDatabase, match="migrated"):
+            await _seed(dev_engine, stores)
+
+
+class TestFrames:
+    def test_a_point_must_be_two_numbers(self, tmp_path):
+        (tmp_path / "a.jpg").write_bytes(b"jpeg")
+        entry = {"file": "a.jpg", "head": [1, 2], "tail": [3], "dot": [5, 6]}
+        (tmp_path / "frames.json").write_text(json.dumps([entry]))
+
+        with pytest.raises(ValueError, match="tail"):
+            dev_seed.load_frames(tmp_path)
 
 
 class TestSeed:
-    async def test_each_dev_user_has_their_role(self, owner_engine, stores):
-        await _seed(owner_engine, stores)
+    async def test_each_dev_user_has_their_role(self, dev_engine, stores):
+        await _seed(dev_engine, stores)
 
-        async with owner_engine.connect() as conn:
+        async with dev_engine.connect() as conn:
             roles = dict(
                 (
                     await conn.execute(
@@ -126,11 +170,11 @@ class TestSeed:
         }
 
     async def test_every_lite_frame_has_a_current_measurement_with_a_species(
-        self, owner_engine, stores
+        self, dev_engine, stores
     ):
-        await _seed(owner_engine, stores)
+        await _seed(dev_engine, stores)
 
-        async with owner_engine.connect() as conn:
+        async with dev_engine.connect() as conn:
             rows = (
                 await conn.execute(
                     text(
@@ -152,12 +196,12 @@ class TestSeed:
         assert all(0.25 < r.length_m < 0.40 for r in rows)
 
     async def test_mobile_captures_are_listed_and_their_files_are_in_garage(
-        self, owner_engine, app_engine, stores
+        self, dev_engine, app_engine, stores
     ):
-        await _seed(owner_engine, stores)
+        await _seed(dev_engine, stores)
 
         tenant_id = await _scalar(
-            owner_engine, "SELECT id FROM tenants WHERE slug = 'lab'"
+            dev_engine, "SELECT id FROM tenants WHERE slug = 'lab'"
         )
         async with tenant_transaction(app_engine, tenant_id) as conn:
             captures = await list_mobile_captures(conn, tenant_id, limit=50)
@@ -169,15 +213,15 @@ class TestSeed:
             with urllib.request.urlopen(objects.presign_get(capture.rgb_key)) as got:
                 assert got.read() in {f.jpeg for f in FRAMES}
 
-    async def test_seeding_twice_changes_nothing(self, owner_engine, stores):
-        await _seed(owner_engine, stores)
+    async def test_seeding_twice_changes_nothing(self, dev_engine, stores):
+        await _seed(dev_engine, stores)
         counts = "SELECT (SELECT count(*) FROM captures), (SELECT count(*) FROM measurements)"
-        async with owner_engine.connect() as conn:
+        async with dev_engine.connect() as conn:
             before = (await conn.execute(text(counts))).one()
 
-        report = await _seed(owner_engine, stores)
+        report = await _seed(dev_engine, stores)
 
-        async with owner_engine.connect() as conn:
+        async with dev_engine.connect() as conn:
             after = (await conn.execute(text(counts))).one()
         assert after == before
         assert report.created is False
@@ -190,6 +234,7 @@ def fresh_garage(tmp_path_factory):
         yield server
 
 
+@pytest.mark.integration  # fresh_garage starts a container of its own
 class TestBootstrapGarage:
     """A fresh local Garage gets the tenant's bucket under the stores file's
     own key, so the API's presigned URLs work against it."""
@@ -228,9 +273,17 @@ class TestBootstrapGarage:
         with urllib.request.urlopen(objects.presign_get("probe")) as got:
             assert got.read() == body
 
+    def test_an_error_that_is_not_json_is_reported_as_it_came(self, garage):
+        # Garage's S3 port answers the admin path with XML, not JSON.
+        with pytest.raises(
+            RuntimeError, match="GetClusterLayout.*403|GetClusterLayout.*40"
+        ):
+            dev_seed.bootstrap_garage(garage.endpoint_url, ADMIN_TOKEN, {})
+
 
 class TestCommand:
-    """``fishsense-services-api dev-seed``: compose.ui.yml's one-shot seeder."""
+    """``fishsense-services-api dev-seed``: compose.ui.yml's one-shot seeder.
+    Everything it is given is checked before Garage is touched."""
 
     @pytest.fixture
     def frames_dir(self, tmp_path):
@@ -249,20 +302,20 @@ class TestCommand:
         return tmp_path
 
     @pytest.fixture
-    def environment(self, monkeypatch, tmp_path, garage, owner_url):
-        store = TenantStore(
-            bucket="fishsense-tenant-command",
-            access_key_id="GK0000000000000000000000c0",
-            secret_access_key="0" * 62 + "c0",
-        )
+    def bucket(self):
+        return f"fishsense-tenant-command-{uuid.uuid4().hex[:8]}"
+
+    @pytest.fixture
+    def environment(self, monkeypatch, tmp_path, garage, owner_url, bucket):
+        suffix = uuid.uuid4().hex[:6]
         stores_file = tmp_path / "tenant-stores.json"
         stores_file.write_text(
             json.dumps(
                 {
                     "lab": {
-                        "bucket": store.bucket,
-                        "access_key_id": store.access_key_id,
-                        "secret_access_key": store.secret_access_key,
+                        "bucket": bucket,
+                        "access_key_id": "GK" + "0" * 18 + suffix,
+                        "secret_access_key": "0" * 58 + suffix,
                     }
                 }
             )
@@ -277,23 +330,41 @@ class TestCommand:
         }.items():
             monkeypatch.setenv(f"FISHSENSE_{name}", value)
 
-    async def test_it_refuses_a_database_that_is_not_local(
-        self, environment, frames_dir, monkeypatch, capsys
+    async def test_it_refuses_an_unmarked_database_before_touching_garage(
+        self, environment, frames_dir, owner_engine, garage, bucket, capsys
     ):
-        monkeypatch.setenv(
-            "FISHSENSE_MIGRATION_DATABASE_URL",
-            "postgresql+psycopg://o:p@fishsense-postgres-1/fishsense_services",
-        )
-
         assert await main(["dev-seed", "--frames", str(frames_dir)]) == 1
-        assert "not a local database" in capsys.readouterr().err
+
+        assert "not marked" in capsys.readouterr().err
+        assert not _bucket_exists(garage, bucket)
+
+    async def test_missing_frames_are_refused_before_touching_garage(
+        self, environment, marked, tmp_path, garage, bucket, capsys
+    ):
+        missing = tmp_path / "no-frames-here"
+
+        assert await main(["dev-seed", "--frames", str(missing)]) == 2
+
+        assert "frames" in capsys.readouterr().err
+        assert not _bucket_exists(garage, bucket)
+
+    async def test_a_missing_stores_file_is_named(
+        self, environment, marked, frames_dir, tmp_path, monkeypatch, capsys
+    ):
+        missing = tmp_path / "not-rendered.json"
+        monkeypatch.setenv("FISHSENSE_TENANT_STORES_FILE", str(missing))
+
+        assert await main(["dev-seed", "--frames", str(frames_dir)]) == 2
+
+        assert str(missing) in capsys.readouterr().err
 
     async def test_it_seeds_garage_and_the_database(
-        self, environment, frames_dir, owner_engine, capsys
+        self, environment, marked, frames_dir, owner_engine, garage, bucket, capsys
     ):
         assert await main(["dev-seed", "--frames", str(frames_dir)]) == 0
 
         assert await _scalar(owner_engine, "SELECT count(*) FROM mobile_captures") == (
             dev_seed.MOBILE_CAPTURES
         )
+        assert _bucket_exists(garage, bucket)
         assert "3 Lite" in capsys.readouterr().out

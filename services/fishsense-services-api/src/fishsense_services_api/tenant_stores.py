@@ -37,7 +37,6 @@ __all__ = [
     "TenantObjects",
     "TenantStore",
     "TenantStores",
-    "read_stores_file",
 ]
 
 logger = logging.getLogger(__name__)
@@ -237,12 +236,6 @@ def _stat(path: Path) -> tuple[int, int, int] | None:
     except OSError:
         return None
     return (found.st_ino, found.st_mtime_ns, found.st_size)
-
-
-def read_stores_file(path: Path) -> dict[str, TenantStore]:
-    """The usable stores in the rendered file, read once, as
-    :meth:`TenantStores.from_file` reads it (``dev-seed`` provisions them)."""
-    return _read_stores(Path(path))
 
 
 def _read_stores(path: Path) -> dict[str, TenantStore]:
