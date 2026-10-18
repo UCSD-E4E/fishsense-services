@@ -104,6 +104,13 @@ CMD ["fishsense-services-processor"]
 FROM runtime AS processor-gpu
 COPY --from=build-processor-gpu /app/.venv /app/.venv
 USER app
+# SAM 3.1 must import here, as it runs: as the app user, by fishsense-core's
+# own imports (fishsense_core/fish/sam3.py). A setuptools without
+# pkg_resources (2026-10-01 bump) broke them in production unseen until
+# 2026-10-18. CPU-only: importing needs no CUDA.
+RUN python -c "import pkg_resources; \
+from sam3.model.sam3_image_processor import Sam3Processor; \
+from sam3.model_builder import build_sam3_image_model"
 CMD ["fishsense-services-processor"]
 
 FROM runtime AS api
