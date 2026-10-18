@@ -90,6 +90,10 @@ AUTOMATIC_HEADTAIL_STATUSES = (
     "decode_failed",
     "raw_unavailable",
     "slate_frame",
+    # A kept mask whose SAM score can't be named under the dot (0043).
+    "mask_unscored",
+    # Left out of `AUTOMATIC_FRAME_MAX_FAILURES` runs (0043): terminal.
+    "frame_failed",
 )
 
 

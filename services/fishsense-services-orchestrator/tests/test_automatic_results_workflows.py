@@ -147,6 +147,13 @@ def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET)
     async def failed(t: AutomaticTarget, step: str, error: str) -> None:
         EVENTS.append(("failed", t.dive_id, step))
 
+    @activity.defn(name="record_automatic_frame_failures")
+    async def frames_failed(
+        t: AutomaticTarget, captures: List[uuid.UUID], error: str
+    ) -> List[uuid.UUID]:
+        EVENTS.append(("frame failures", len(captures)))
+        return []
+
     @activity.defn(name="resolve_automatic_frames_inputs")
     async def frames_in(t: AutomaticTarget) -> PredictAutomaticFramesInput:
         return _frames_input(frames)
@@ -208,7 +215,7 @@ def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET)
         EVENTS.append(("cleanup",))
         return CleanupRawBytesResult(deleted=1)
 
-    return [select, failed, frames_in, frames_out, species_in, species_out, cal_in,
+    return [select, failed, frames_failed, frames_in, frames_out, species_in, species_out, cal_in,
             cal_out, measure_in, measure_out, wake_gpu, wake_per_image, wake_light,
             stage, cleanup]  # fmt: skip
 
@@ -382,15 +389,26 @@ async def test_a_species_failure_costs_the_dive_nothing():
     assert not [e for e in EVENTS if e[0] == "persist species"]
 
 
-async def test_the_cpu_fallback_runs_no_gpu_step():
+async def test_without_a_gpu_a_dive_owing_frames_waits():
+    """Said, not silent (2026-10-15 gap audit). And its calibration and
+    lengths wait too: on a dive whose frames are owed they would be fit on
+    part of it, and every hour without a GPU appended another refusal to its
+    history (review of #85)."""
     report = await _run(AutomaticResultsForDiveWorkflow, TARGET, mode="cpu_fallback")
-    # Said, not silent (2026-10-15 gap audit): the run reads as done, but
-    # its GPU steps are still owed.
-    assert report.skipped == ["frames: no GPU (cpu_fallback)",
-                              "species: no GPU (cpu_fallback)"]  # fmt: skip
+    assert report.skipped == ["frames: no GPU (cpu_fallback)"]
+    assert report.no_gpu == "cpu_fallback"
     kinds = [e[0] for e in EVENTS]
     assert "stage" not in kinds and "persist frames" not in kinds
-    assert "persist species" not in kinds
+    assert "persist calibration" not in kinds and "wake per-image" not in kinds
+    assert "persist lengths" not in kinds and "persist species" not in kinds
+
+
+async def test_without_a_gpu_a_dive_owing_no_frames_still_gets_its_lengths():
+    """Its frames are all done: the CPU steps go on, and only species waits."""
+    report = await _run(
+        AutomaticResultsForDiveWorkflow, TARGET, mode="cpu_fallback", frames=0
+    )
+    assert report.skipped == ["species: no GPU (cpu_fallback)"]
     assert ("persist calibration", "accepted", None) in EVENTS
     assert ("persist lengths", 1) in EVENTS
 
@@ -434,7 +452,7 @@ async def test_a_run_with_no_gpu_says_so_and_stops_draining():
     )
     assert report.stopped == "no GPU (cpu_fallback)"
     assert [d.dive_id for d in report.dives] == [dives[0].dive_id]
-    assert report.dives[0].skipped[0] == "frames: no GPU (cpu_fallback)"
+    assert report.dives[0].no_gpu == "cpu_fallback"
     assert len(SELECTS) == 1
 
 
@@ -512,15 +530,22 @@ def test_the_calibration_child_outlives_the_fit_it_runs():
 
 async def test_the_frames_that_came_back_are_kept_and_the_rest_owed():
     """One frame no worker could finish no longer costs the dive its other
-    frames (2026-10-15 gap audit): what came back is persisted, the dive's
-    failure is recorded for the frame still owed (three, and the cohort
-    leaves it for an operator), the scratch is cleaned up, and the dive
-    stops there -- a calibration on part of its frames would be stale."""
-    report = await _run(
-        AutomaticResultsParentWorkflow, selected=[TARGET], frames=3, frames_partial=True
-    )
+    frames (2026-10-15 gap audit): what came back is persisted, and the frame
+    left out is recorded against the *frame* -- never one of the dive's
+    strikes, which a transient fault would otherwise spend (review of #85);
+    at three runs the store makes it a terminal abstention. The scratch is
+    cleaned up, the dive's calibration waits for its frames, and the run
+    goes on to the next dive."""
+    other = _target()
+    report = await _run(AutomaticResultsParentWorkflow, selected=[TARGET, other],
+                        frames=3, frames_partial=True)  # fmt: skip
     assert ("persist frames", 2) in EVENTS
-    assert ("failed", DIVE, "frames") in EVENTS
+    assert ("frame failures", 1) in EVENTS
+    assert not [e for e in EVENTS if e[0] == "failed"]
     assert ("cleanup",) in EVENTS
     assert not [e for e in EVENTS if e[0] == "persist calibration"]
-    assert report.dives[0].failed == "frames"
+    first = report.dives[0]
+    assert first.failed is None and first.skipped == [
+        "calibration, lengths, species: 1 frame still owed"
+    ]
+    assert [d.dive_id for d in report.dives] == [DIVE, other.dive_id]

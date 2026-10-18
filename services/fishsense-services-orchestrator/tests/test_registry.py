@@ -84,7 +84,9 @@ def test_every_activity_a_workflow_calls_is_built(deps):
         name
         for workflow in WORKFLOWS
         for name in re.findall(
-            r'execute_activity\(\s*"([A-Za-z0-9_]+)"',
+            # `_db("...")`: the automatic track's wrapper (review of #85:
+            # its activities were invisible here).
+            r'(?:execute_activity|_db)\(\s*"([A-Za-z0-9_]+)"',
             inspect.getsource(inspect.getmodule(workflow)),
         )
     }

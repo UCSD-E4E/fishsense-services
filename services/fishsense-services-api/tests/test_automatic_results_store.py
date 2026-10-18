@@ -45,6 +45,7 @@ from depth_measure_seed import (  # noqa: F401  (forget_identities: a fixture)
     exec_,
     fish,
     forget_identities,
+    head_tail_label,
     measurable_capture,
     measurement,
     tenant,
@@ -62,6 +63,8 @@ from fishsense_services_api.automatic_results_store import (
     automatic_frames_inputs,
     automatic_measure_inputs,
     automatic_results_cohort,
+    AUTOMATIC_FRAME_MAX_FAILURES,
+    record_automatic_frame_failures,
     record_automatic_results_failure,
     automatic_species_captures,
     next_dive_for_automatic_results,
@@ -735,6 +738,29 @@ async def test_the_export_flags_a_dive_humans_measured_since(owner_engine, app_e
     assert row["dive_human_measured"] is True
 
 
+async def test_a_dive_whose_only_human_length_is_stale_is_not_flagged(
+    owner_engine, app_engine
+):
+    """Review of #85: the flag read raw `measurements`, so a dive whose only
+    human length rests on a superseded label (labels are superseded, never
+    deleted) read as human-measured, and a reader preferring human lengths
+    dropped its automatic ones for none. It reads `current_measurements`."""
+    lab = await tenant(owner_engine)
+    dive_id, _ = await _measured(owner_engine, app_engine, lab)
+    (cal,) = await _rows(
+        owner_engine,
+        "SELECT id FROM laser_calibrations WHERE dive_id = :d",
+        d=dive_id,
+    )
+    other = await capture(owner_engine, lab, dive_id)
+    gone = await head_tail_label(owner_engine, lab, other, superseded=True)
+    await measurement(owner_engine, lab, other, await fish(owner_engine, lab),
+                      cal["id"], head_tail_label_id=gone)  # fmt: skip
+
+    (row,) = await _rows(owner_engine, "SELECT * FROM automatic_results_export")
+    assert row["dive_human_measured"] is False
+
+
 async def test_the_research_role_reads_the_export_for_the_lab(
     owner_engine, app_engine, research_engine
 ):
@@ -1141,3 +1167,100 @@ async def test_a_failure_needs_a_known_step(owner_engine, app_engine):
     with pytest.raises(DBAPIError):
         await _in(app_engine, lab, record_automatic_results_failure, dive_id,
                   step="sideways", error="x")  # fmt: skip
+
+
+# -- a frame no worker can finish (2026-10-17 review of #85) ------------------------
+
+
+async def _owed(app_engine, lab, dive_id):
+    inputs = await _in(app_engine, lab, automatic_frames_inputs, dive_id,
+                       headtail_version=VERSIONS["headtail_version"])  # fmt: skip
+    return {f.capture_id for f in inputs.frames}
+
+
+async def test_a_frame_left_out_is_still_owed_and_costs_the_dive_no_strike(
+    owner_engine, app_engine
+):
+    """A frame the processor left out after its tries may be a transient
+    fault (a pod torn down, a node preempted): it is recorded against the
+    frame, never as one of the dive's three strikes, and the next run asks
+    for it again."""
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    c = await capture(owner_engine, lab, dive_id)
+
+    await _in(app_engine, lab, record_automatic_frame_failures, dive_id,
+              [(c, "CUDA out of memory")],
+              headtail_version=VERSIONS["headtail_version"])  # fmt: skip
+
+    assert await _owed(app_engine, lab, dive_id) == {c}
+    assert await _rows(owner_engine, "SELECT 1 FROM automatic_results_failures") == []
+    assert await _next(app_engine, lab) == dive_id
+
+
+async def test_a_frame_that_failed_in_three_runs_is_a_terminal_abstention(
+    owner_engine, app_engine
+):
+    """Deterministic, then: a `frame_failed` row, so the frame drains and the
+    dive goes on to its calibration and lengths instead of waiting for an
+    operator with every other frame done."""
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    bad = await capture(owner_engine, lab, dive_id)
+    good = await capture(owner_engine, lab, dive_id)
+
+    for n in range(AUTOMATIC_FRAME_MAX_FAILURES):
+        assert bad in await _owed(app_engine, lab, dive_id), n
+        await _in(app_engine, lab, record_automatic_frame_failures, dive_id,
+                  [(bad, f"run {n}")],
+                  headtail_version=VERSIONS["headtail_version"])  # fmt: skip
+
+    assert await _owed(app_engine, lab, dive_id) == {good}
+    (row,) = await _rows(
+        owner_engine,
+        "SELECT status, predictor_version FROM automatic_head_tail_predictions "
+        "WHERE capture_id = :c",
+        c=bad,
+    )
+    assert row == {"status": "frame_failed",
+                   "predictor_version": VERSIONS["headtail_version"]}  # fmt: skip
+
+
+async def test_a_frame_failure_must_be_the_dives(owner_engine, app_engine):
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    other = await capture(owner_engine, lab, await _backlog_dive(owner_engine, lab))
+    with pytest.raises(ForeignCapture):
+        await _in(app_engine, lab, record_automatic_frame_failures, dive_id,
+                  [(other, "x")], headtail_version=1)  # fmt: skip
+
+
+async def test_an_unscored_mask_is_its_own_abstention(owner_engine, app_engine):
+    """Not `laser_off_all_fish` (a scientific answer): a kernel/score mismatch
+    is a bug to count, so it has its own status."""
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    c = await capture(owner_engine, lab, dive_id)
+    await _predict(app_engine, lab, dive_id, AutomaticHeadTailRow(
+        capture_id=c, status="mask_unscored",
+        predictor_version=VERSIONS["headtail_version"],
+        laser_x=1.0, laser_y=2.0,
+    ))  # fmt: skip
+    assert c not in await _owed(app_engine, lab, dive_id)
+
+
+async def test_failures_at_an_older_version_do_not_count(owner_engine, app_engine):
+    """A new head/tail version is a new chain (a fixed kernel, a new
+    checkpoint): it gets its own tries."""
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    c = await capture(owner_engine, lab, dive_id)
+    for n in range(AUTOMATIC_FRAME_MAX_FAILURES - 1):
+        await _in(app_engine, lab, record_automatic_frame_failures, dive_id,
+                  [(c, f"old {n}")], headtail_version=0)  # fmt: skip
+
+    given_up = await _in(app_engine, lab, record_automatic_frame_failures, dive_id,
+                         [(c, "new")], headtail_version=1)  # fmt: skip
+
+    assert given_up == []
+    assert await _owed(app_engine, lab, dive_id) == {c}

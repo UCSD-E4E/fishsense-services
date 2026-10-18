@@ -30,7 +30,18 @@ started, the cohort is empty, it is handed a dive it already took (it
 tells the cohort which), or a dive's GPU step was skipped (with no GPU every
 dive behind it would skip too). Each run returns an `AutomaticRunReport`:
 the dives it took, what each skipped or failed, and why it stopped -- a GPU
-skip is said, not silent (2026-10-15 gap audit). **A dive's failed step does not hold the backlog**
+skip is said, not silent (2026-10-15 gap audit). **A dive owing frames goes
+no further that run** (its frames skipped for want of a GPU, left out by the
+processor, or running under another firing): its calibration and lengths
+would be fit on part of it and go stale, and each hour without a GPU added a
+refusal to its history (review of #85). A frame left out is recorded against
+the frame, never as a dive strike; three runs make it a terminal
+``frame_failed`` (0043), and the dive goes on.
+
+**Replay.** The reports (2026-10-16/17) changed these workflows' commands
+and results without `workflow.patched` guards: on 2026-10-17 production had
+never run either (0 executions, no `automatic-results` schedule), so there
+was nothing in flight to replay. Once the track runs, guard such changes. **A dive's failed step does not hold the backlog**
 (2026-10-15 audit: the oldest dive, failing deterministically, was selected
 every hour and starved the rest): the failure is recorded against the dive
 (at three the cohort leaves it for an operator), its raw scratch is cleaned
@@ -43,7 +54,7 @@ by hand never reads as done when it isn't.
 import uuid
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Awaitable, Callable, List, Optional
+from typing import Awaitable, Callable, List, Optional, TypeVar
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
@@ -97,6 +108,8 @@ with workflow.unsafe.imports_passed_through():
         stage_raw,
     )
 
+T = TypeVar("T")
+
 __all__ = [
     "AUTOMATIC_DRAIN_WINDOW",
     "AutomaticDiveReport",
@@ -120,6 +133,9 @@ class AutomaticDiveReport:
     skipped: List[str] = field(default_factory=list)
     failed: Optional[str] = None
     species_failed: bool = False
+    #: The GPU's mode when a GPU step was skipped for want of one: then
+    #: every dive behind this one would skip too, and the run stops.
+    no_gpu: Optional[str] = None
 
 
 @dataclass
@@ -212,19 +228,30 @@ def _no_gpu(step: str, gpu: _Gpu) -> str:
     return f"{step}: no GPU ({gpu.mode})"
 
 
+def _skip_for_gpu(step: str, gpu: _Gpu, report: AutomaticDiveReport) -> None:
+    report.skipped.append(_no_gpu(step, gpu))
+    report.no_gpu = gpu.mode
+
+
+#: What waits while a dive owes frames: fit or measured on part of its
+#: frames, they would go stale as the rest arrive (review of #85).
+_AFTER_FRAMES = "calibration, lengths, species"
+
+
 async def _frames(
     target: AutomaticTarget, gpu: _Gpu, report: AutomaticDiveReport
-) -> None:
+) -> bool:
+    """The dive's owed frames; True when none is owed after this run."""
     inputs: PredictAutomaticFramesInput = await _db(
         "resolve_automatic_frames_inputs",
         target,
         result_type=PredictAutomaticFramesInput,
     )
     if not inputs.frames:
-        return
+        return True
     if not await gpu.ready():
-        report.skipped.append(_no_gpu("frames", gpu))
-        return
+        _skip_for_gpu("frames", gpu, report)
+        return False
     staging = StagingTarget(target.tenant_id, target.dive_id)
     # The scratch is this firing's to clean up, whatever happens -- unless
     # the child is running under another firing, which owns it.
@@ -241,20 +268,37 @@ async def _frames(
         )
         if not ran:
             owns_scratch = False
-            return
+            report.skipped.append(
+                f"{_AFTER_FRAMES}: frames running under another firing"
+            )
+            return False
         if results:
             await _db("persist_automatic_frames", target, results, result_type=int)
         # The processor leaves out a frame that failed every try, so one bad
-        # frame no longer costs the dive the rest: those are kept, and the
-        # dive's failure is recorded for the frames still owed (2026-10-15).
-        missing = len(inputs.frames) - len(results or [])
+        # frame no longer costs the dive the rest (2026-10-15). What was left
+        # out is recorded against each *frame*, never as one of the dive's
+        # strikes, which a transient fault would spend; at three runs the
+        # store makes it a terminal abstention (review of #85).
+        returned = {r.capture_id for r in results or []}
+        missing = [f.capture_id for f in inputs.frames if f.capture_id not in returned]
         if missing:
-            error = f"{missing} of {len(inputs.frames)} frames failed every try"
-            workflow.logger.warning(
-                "automatic frames for dive=%s: %s", target.dive_id, error
+            given_up = await _db(
+                "record_automatic_frame_failures",
+                target,
+                missing,
+                "left out after the processor's tries (its log has the cause)",
+                result_type=List[uuid.UUID],
             )
-            await _db("record_automatic_results_failure", target, "frames", error)
-            raise StepFailed("frames")
+            owed = len(missing) - len(given_up)
+            workflow.logger.warning(
+                "automatic frames for dive=%s: %d of %d left out, %d given up",
+                target.dive_id, len(missing), len(inputs.frames), len(given_up),
+            )  # fmt: skip
+            if owed:
+                plural = "frame" if owed == 1 else "frames"
+                report.skipped.append(f"{_AFTER_FRAMES}: {owed} {plural} still owed")
+                return False
+        return True
     finally:
         if owns_scratch:
             await cleanup_raw(staging)
@@ -288,7 +332,7 @@ async def _species_step(
     if not inputs.images:
         return
     if not await gpu.ready():
-        report.skipped.append(_no_gpu("species", gpu))
+        _skip_for_gpu("species", gpu, report)
         return
     ran, results = await _child(
         "PredictSpeciesImagesWorkflow",
@@ -361,10 +405,10 @@ class StepFailed(Exception):
 
 
 async def _step(
-    target: AutomaticTarget, name: str, run: Callable[[], Awaitable[None]]
-) -> None:
+    target: AutomaticTarget, name: str, run: Callable[[], Awaitable[T]]
+) -> T:
     try:
-        await run()
+        return await run()
     except (ActivityError, ChildWorkflowError) as exc:
         error = str(exc.cause or exc)
         workflow.logger.warning(
@@ -379,7 +423,8 @@ async def _run_for_dive(target: AutomaticTarget) -> tuple[AutomaticDiveReport, _
     gpu = _Gpu()
     report = AutomaticDiveReport(target.tenant_id, target.dive_id)
     try:
-        await _step(target, "frames", lambda: _frames(target, gpu, report))
+        if not await _step(target, "frames", lambda: _frames(target, gpu, report)):
+            return report, gpu
         await _step(target, "calibration", lambda: _calibration(target))
         await _step(target, "lengths", lambda: _lengths(target))
     except StepFailed as exc:
@@ -448,7 +493,7 @@ class AutomaticResultsParentWorkflow:
             taken.append(target.dive_id)
             report, gpu = await _run_for_dive(target)
             dives.append(report)
-            if report.skipped:
-                stopped = f"no GPU ({gpu.mode})"
+            if report.no_gpu:
+                stopped = f"no GPU ({report.no_gpu})"
                 break
         return AutomaticRunReport(dives=dives, stopped=stopped)

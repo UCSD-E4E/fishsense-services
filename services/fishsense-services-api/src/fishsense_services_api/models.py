@@ -1391,6 +1391,33 @@ class AutomaticResultsExclusion(Base):
     created_at: Mapped[datetime] = _created_at()
 
 
+class AutomaticFrameFailure(Base):
+    """A frame the processor left out of an automatic run (0043). Never a
+    dive strike; at `AUTOMATIC_FRAME_MAX_FAILURES` the store writes the
+    frame's terminal ``frame_failed`` head/tail. Append-only."""
+
+    __tablename__ = "automatic_frame_failures"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "capture_id"], ["captures.tenant_id", "captures.id"]
+        ),
+        Index(
+            "automatic_frame_failures_tenant_id_capture_id_idx",
+            "tenant_id",
+            "capture_id",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    predictor_version: Mapped[int] = mapped_column(Integer)
+    error: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+
 class AutomaticResultsFailure(Base):
     """A failed automatic run of one of a dive's steps (0040). Append-only;
     an operator deletes a dive's rows to retry it."""

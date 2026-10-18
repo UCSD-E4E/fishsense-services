@@ -10,8 +10,9 @@ audit). Under the default retry policy (no limit) one frame no worker could
 finish -- a crash, an OOM -- retried until the parent's timeout killed this
 workflow, and every other frame's work with it. Each frame now gets
 `FRAME_ATTEMPTS` tries; one that fails them all is missing from the result,
-which the orchestrator persists, recording the dive's failure for the
-frames still owed (its three-strike memory then decides).
+which the orchestrator persists, recording each frame left out against the
+frame (0043) -- not the dive. A worker's refusal (`NoGpuForSam3`) is not a
+frame's: it fails this run with its cause (review of #85).
 """
 
 import asyncio
@@ -20,7 +21,7 @@ from typing import List
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
-from temporalio.exceptions import ActivityError
+from temporalio.exceptions import ActivityError, ApplicationError
 
 with workflow.unsafe.imports_passed_through():
     import annotated_types  # noqa: F401  pylint: disable=unused-import
@@ -35,11 +36,19 @@ with workflow.unsafe.imports_passed_through():
 __all__ = ["FRAME_ATTEMPTS", "PredictAutomaticFramesWorkflow"]
 
 FRAME_ATTEMPTS = 3
+#: The worker's refusals, not a frame's: every frame would refuse alike, so
+#: the run fails with the cause rather than leaving each frame out.
+_WORKER_REFUSALS = ("NoGpuForSam3",)
 _FRAME_RETRY = RetryPolicy(
     initial_interval=timedelta(seconds=10),
     maximum_attempts=FRAME_ATTEMPTS,
-    non_retryable_error_types=["NoGpuForSam3"],
+    non_retryable_error_types=list(_WORKER_REFUSALS),
 )
+
+
+def _worker_refusal(error: ActivityError) -> bool:
+    cause = error.cause
+    return isinstance(cause, ApplicationError) and cause.type in _WORKER_REFUSALS
 
 
 @workflow.defn
@@ -74,11 +83,12 @@ class PredictAutomaticFramesWorkflow:
         )
         results: List[AutomaticFrameResult] = []
         for frame, outcome in zip(payload.frames, outcomes):
+            if isinstance(outcome, ActivityError) and _worker_refusal(outcome):
+                raise outcome
             if isinstance(outcome, ActivityError):
                 workflow.logger.warning(
-                    "automatic frame capture=%s failed %d times, left out: %s",
+                    "automatic frame capture=%s left out after its tries: %s",
                     frame.capture_id,
-                    FRAME_ATTEMPTS,
                     outcome.cause or outcome,
                 )
             elif isinstance(outcome, BaseException):

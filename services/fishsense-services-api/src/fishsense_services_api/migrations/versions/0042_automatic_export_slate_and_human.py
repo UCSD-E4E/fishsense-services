@@ -8,14 +8,17 @@ day):
   before the detector scored its frame, or before a re-score called it a
   slate, stayed in the export: a slate measured as a fish. It is history now,
   not a result;
-* **``dive_human_measured``** (new, last column): the dive has a human
-  measurement. Dives humans measure after their automatic run keep their
-  automatic lengths, so a reader can prefer the human ones or compare.
+* **``dive_human_measured``** (new, last column): the dive has a *current*
+  human length (`current_measurements`: not on a superseded label, nor a
+  replaced calibration). Dives humans measure after their automatic run keep
+  their automatic lengths, so a reader can prefer the human ones or compare.
 
-Both are read per frame / per dive as index lookups (the slate predicate is
-`slate_presence_store.detector_slate_frame`'s, spelled literally), never
-through a DISTINCT ON view correlated per row (the 2026-10-14 slate-cohort
-timeout).
+The slate predicate is one index lookup per frame
+(`slate_presence_store.detector_slate_frame`'s, spelled literally). The human
+flag is one pass over `current_measurements` per query, in a materialized
+CTE of the dives it names, joined by dive -- never a correlated probe per
+export row (review of #85; the 2026-10-14 slate-cohort timeout was that
+shape).
 
 Revision ID: 0042
 Revises: 0041
@@ -23,10 +26,15 @@ Revises: 0041
 
 from alembic import op
 
+from fishsense_services_api.schema_audit import RESEARCH_ROLE
+
 revision = "0042"
 down_revision = "0041"
 
 VIEW = "automatic_results_export"
+#: What the human flag reads that the research role could not yet (it reads
+#: the export as itself: security-invoker views check every layer).
+RESEARCH_BENEATH = ("current_measurements", "measurement_subjects")
 
 #: `slate_presence_store.detector_slate_frame(0.5)`, frozen here: a migration
 #: must not change when the module does.
@@ -40,12 +48,13 @@ _SLATE = """EXISTS (
                 WHERE sp_p.probability >= 0.5
             )"""
 
-_HUMAN_MEASURED = """EXISTS (
-                       SELECT 1 FROM measurements hm
-                       JOIN captures hc
-                         ON hc.tenant_id = hm.tenant_id AND hc.id = hm.capture_id
-                       WHERE hc.tenant_id = d.tenant_id AND hc.dive_id = d.id
-                   )"""
+#: The dives with a current human length, once per query.
+_HUMAN_DIVES = """human_dives AS MATERIALIZED (
+                SELECT DISTINCT hc.tenant_id, hc.dive_id
+                FROM current_measurements hm
+                JOIN captures hc
+                  ON hc.tenant_id = hm.tenant_id AND hc.id = hm.capture_id
+            )"""
 
 
 def upgrade() -> None:
@@ -53,6 +62,7 @@ def upgrade() -> None:
     # (the app role's, the research role's) stay.
     op.execute(f"""
         CREATE OR REPLACE VIEW {VIEW} WITH (security_invoker = true) AS
+            WITH {_HUMAN_DIVES}
             SELECT m.tenant_id,
                    m.producer,
                    d.id AS dive_id,
@@ -96,7 +106,7 @@ def upgrade() -> None:
                    s.predictor_version AS species_predictor_version,
                    s.model_id AS species_model_id,
                    m.created_at,
-                   {_HUMAN_MEASURED} AS dive_human_measured
+                   hd.dive_id IS NOT NULL AS dive_human_measured
             FROM current_automatic_measurements m
             JOIN captures c ON c.tenant_id = m.tenant_id AND c.id = m.capture_id
             JOIN dives d ON d.tenant_id = c.tenant_id AND d.id = c.dive_id
@@ -107,12 +117,16 @@ def upgrade() -> None:
             LEFT JOIN current_automatic_species_predictions s
               ON s.tenant_id = m.tenant_id AND s.capture_id = m.capture_id
              AND s.automatic_head_tail_prediction_id = m.automatic_head_tail_prediction_id
+            LEFT JOIN human_dives hd
+              ON hd.tenant_id = d.tenant_id AND hd.dive_id = d.id
             WHERE m.length_m IS NOT NULL
               AND NOT {_SLATE}
         """)
+    op.execute(f"GRANT SELECT ON {', '.join(RESEARCH_BENEATH)} TO {RESEARCH_ROLE}")
 
 
 def downgrade() -> None:
+    op.execute(f"REVOKE SELECT ON {', '.join(RESEARCH_BENEATH)} FROM {RESEARCH_ROLE}")
     # A column can't be dropped from a view in place: recreate 0036's, and
     # its grants.
     grants = (

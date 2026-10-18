@@ -48,6 +48,7 @@ from fishsense_services_processor.automatic_frames.activities import (
     LaserDot,
 )
 from fishsense_services_processor.automatic_frames.workflow import (
+    FRAME_ATTEMPTS,
     PredictAutomaticFramesWorkflow,
 )
 from fishsense_services_processor.automatic_results.frames import (
@@ -141,19 +142,22 @@ def test_the_kept_masks_score_is_the_one_under_the_dot():
     assert r.status == "predicted" and r.sam_score == pytest.approx(0.7)
 
 
-def test_a_kept_mask_whose_score_cannot_be_named_is_not_predicted(monkeypatch):
+def test_a_kept_mask_whose_score_cannot_be_named_is_not_predicted(monkeypatch, caplog):
     """The gate is SAM's score on the mask under the dot. If the kernel keeps
     a mask but the score can't be named for it (the kernel's crop and ours
     disagree), the row carried `predicted` with `sam_score` NULL -- and NULL
-    passed the table's gate (2026-10-15 gap audit). An unscored mask is no
-    mask under the dot: an abstention, with no head/tail."""
+    passed the table's gate (2026-10-15 gap audit). It is its own abstention,
+    `mask_unscored`, logged: a mismatch to count and fix, never the
+    scientific answer `laser_off_all_fish` (review of #85)."""
     from fishsense_services_processor.automatic_results import frames
 
     monkeypatch.setattr(frames._Gated, "score_at", lambda self, point: None)
 
-    r = _result(_Scored([(_mask_at(*DOT), 0.81)]))
+    with caplog.at_level("WARNING"):
+        r = _result(_Scored([(_mask_at(*DOT), 0.81)]))
 
-    assert r.status == "laser_off_all_fish"
+    assert r.status == "mask_unscored"
+    assert any("unscored" in rec.getMessage() for rec in caplog.records)
     assert r.sam_score is None
     assert (r.head_x, r.head_y, r.tail_x, r.tail_y) == (None, None, None, None)
     assert r.laser_x == DOT[0]  # the dot itself is still the detector's
@@ -376,4 +380,36 @@ async def test_a_frame_that_keeps_failing_does_not_lose_the_others():
             )  # fmt: skip
 
     assert [r.capture_id for r in results] == good
-    assert 1 < len(attempts) <= 5
+    assert len(attempts) == FRAME_ATTEMPTS
+
+
+async def test_no_gpu_fails_the_whole_run_with_its_cause():
+    """`NoGpuForSam3` is the worker's, not a frame's: every frame would
+    refuse, so leaving each out would record the dive's every frame as a
+    frame failure and lose the cause (review of #85). The run fails with it."""
+    from temporalio import activity
+    from temporalio.client import WorkflowFailureError
+
+    @activity.defn(name="predict_automatic_frame")
+    async def stub(payload: PredictAutomaticFrameInput) -> AutomaticFrameResult:
+        raise ApplicationError("no GPU", type="NoGpuForSam3", non_retryable=True)
+
+    payload = PredictAutomaticFramesInput(
+        tenant_id=TENANT, dive_id=uuid.uuid4(), camera_matrix=K,
+        distortion_coefficients=[0.0] * 5,
+        frames=[AutomaticFrame(capture_id=uuid.uuid4(), raw=ObjectRef(bucket="s", key="r"),
+                               jpeg=_ref("preprocess_headtail_jpeg"))],
+    )  # fmt: skip
+    async with await WorkflowEnvironment.start_time_skipping(
+        data_converter=pydantic_data_converter
+    ) as env:
+        async with Worker(env.client, task_queue="t-auto", activities=[stub],
+                          workflows=[PredictAutomaticFramesWorkflow]):  # fmt: skip
+            with pytest.raises(WorkflowFailureError) as failure:
+                await env.client.execute_workflow(
+                    PredictAutomaticFramesWorkflow.run, payload,
+                    id=f"t-auto-{uuid.uuid4()}", task_queue="t-auto",
+                    result_type=List[AutomaticFrameResult],
+                    execution_timeout=timedelta(hours=1),
+                )  # fmt: skip
+    assert "no GPU" in str(failure.value.cause.cause or failure.value.cause)
