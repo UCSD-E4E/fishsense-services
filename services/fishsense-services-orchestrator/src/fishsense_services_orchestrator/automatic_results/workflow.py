@@ -36,7 +36,7 @@ processor, or running under another firing): its calibration and lengths
 would be fit on part of it and go stale, and each hour without a GPU added a
 refusal to its history (review of #85). A frame left out is recorded against
 the frame, never as a dive strike; three runs make it a terminal
-``frame_failed`` (0043), and the dive goes on.
+``frame_failed`` (0044), and the dive goes on.
 
 **Replay.** The reports (2026-10-16/17) changed these workflows' commands
 and results without `workflow.patched` guards: on 2026-10-17 production had

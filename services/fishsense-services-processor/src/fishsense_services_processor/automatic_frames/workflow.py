@@ -11,7 +11,7 @@ finish -- a crash, an OOM -- retried until the parent's timeout killed this
 workflow, and every other frame's work with it. Each frame now gets
 `FRAME_ATTEMPTS` tries; one that fails them all is missing from the result,
 which the orchestrator persists, recording each frame left out against the
-frame (0043) -- not the dive. A worker's refusal (`NoGpuForSam3`) is not a
+frame (0044) -- not the dive. A worker's refusal (`NoGpuForSam3`) is not a
 frame's: it fails this run with its cause (review of #85).
 """
 

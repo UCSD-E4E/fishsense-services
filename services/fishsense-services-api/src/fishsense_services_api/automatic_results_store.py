@@ -182,7 +182,7 @@ _EXCLUDED = """EXISTS (
 
 #: A dive's failed runs before the cohort leaves it for an operator (0040).
 AUTOMATIC_RESULTS_MAX_FAILURES = 3
-#: Runs a frame may be left out of (0043) before it is a terminal
+#: Runs a frame may be left out of (0044) before it is a terminal
 #: ``frame_failed`` abstention. Separate runs, each after the processor's own
 #: tries: a transient fault rarely hits one frame three runs running.
 AUTOMATIC_FRAME_MAX_FAILURES = 3
@@ -407,7 +407,7 @@ async def record_automatic_frame_failures(
     *,
     headtail_version: int,
 ) -> list[uuid.UUID]:
-    """Frames the processor left out of a run (0043). Never one of the
+    """Frames the processor left out of a run (0044). Never one of the
     dive's strikes: the frame stays owed, so the next run asks for it again.
     A frame left out at `AUTOMATIC_FRAME_MAX_FAILURES` runs of this version
     gets its terminal ``frame_failed`` head/tail here, in the same

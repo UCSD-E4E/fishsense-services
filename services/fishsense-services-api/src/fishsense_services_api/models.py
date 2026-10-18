@@ -1392,7 +1392,7 @@ class AutomaticResultsExclusion(Base):
 
 
 class AutomaticFrameFailure(Base):
-    """A frame the processor left out of an automatic run (0043). Never a
+    """A frame the processor left out of an automatic run (0044). Never a
     dive strike; at `AUTOMATIC_FRAME_MAX_FAILURES` the store writes the
     frame's terminal ``frame_failed`` head/tail. Append-only."""
 

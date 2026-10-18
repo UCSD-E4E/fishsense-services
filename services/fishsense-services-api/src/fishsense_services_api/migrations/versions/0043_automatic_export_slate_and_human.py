@@ -20,16 +20,16 @@ CTE of the dives it names, joined by dive -- never a correlated probe per
 export row (review of #85; the 2026-10-14 slate-cohort timeout was that
 shape).
 
-Revision ID: 0042
-Revises: 0041
+Revision ID: 0043
+Revises: 0042
 """
 
 from alembic import op
 
 from fishsense_services_api.schema_audit import RESEARCH_ROLE
 
-revision = "0042"
-down_revision = "0041"
+revision = "0043"
+down_revision = "0042"
 
 VIEW = "automatic_results_export"
 #: What the human flag reads that the research role could not yet (it reads

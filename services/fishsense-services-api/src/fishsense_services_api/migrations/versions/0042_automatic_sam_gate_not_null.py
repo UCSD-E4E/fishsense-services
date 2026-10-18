@@ -9,14 +9,14 @@ such a row either (an unscored mask is ``laser_off_all_fish``).
 The table had no rows in production when this shipped (the chain had never
 run), so the constraint is validated in place.
 
-Revision ID: 0041
-Revises: 0040
+Revision ID: 0042
+Revises: 0041
 """
 
 from alembic import op
 
-revision = "0041"
-down_revision = "0040"
+revision = "0042"
+down_revision = "0041"
 
 TABLE = "automatic_head_tail_predictions"
 GATE = "automatic_head_tail_predictions_sam_gate_check"
