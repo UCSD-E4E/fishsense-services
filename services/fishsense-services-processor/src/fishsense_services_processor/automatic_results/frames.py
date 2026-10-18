@@ -20,6 +20,7 @@ re-implemented; what this adds is
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from typing import Any, List, Optional, Sequence, Tuple
@@ -38,6 +39,8 @@ from fishsense_services_processor.headtail_predict.predict import (
 )
 
 __all__ = ["LaserDot", "ScoredSam3Adapter", "automatic_frame_result"]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -129,6 +132,19 @@ def automatic_frame_result(
         if kept and r.crop_x is not None
         else None
     )
+    if r.status == "predicted" and score is None:
+        # A kept mask whose score can't be named under the dot passed no gate
+        # we can show (2026-10-15 gap audit). Its own abstention, logged: a
+        # kernel/score mismatch to count and fix, not "the dot is on no fish"
+        # (review of #85).
+        logger.warning(
+            "automatic frame capture=%s: kept mask unscored under the dot "
+            "(crop %s,%s)",
+            capture_id,
+            r.crop_x,
+            r.crop_y,
+        )
+        return AutomaticFrameResult(status="mask_unscored", **base)
     return AutomaticFrameResult(
         status=r.status,
         head_x=r.head_x,

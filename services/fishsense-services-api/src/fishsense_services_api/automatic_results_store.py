@@ -19,12 +19,12 @@ run_e2e.py, score.py, tail/evaluate.py). Decided 2026-10-06:
   changed); a predicted fish with no current automatic length while a
   calibration exists. Every one of those drains: abstentions, refused
   calibrations and refused lengths are rows;
-* **slate frames** come from a slate-presence detector built in parallel,
-  through `SlateFrames` -- ``(conn, tenant, dive) -> [(capture_id, p)]`` --
-  stubbed by `no_slate_frames` until it lands. At ``p >= 0.5``
-  (`SLATE_FRAME_THRESHOLD`) a frame is not measured as a fish and is a
-  candidate for the label-free calibration (the slate is the rigid object the
-  paper validated it on, §4.3);
+* **slate frames** come from the slate-presence detector
+  (`slate_presence_store.slate_frames`, wired in the orchestrator's stage),
+  through `SlateFrames` -- ``(conn, tenant, dive) -> [(capture_id, p)]``.
+  At ``p >= 0.5`` (`SLATE_FRAME_THRESHOLD`) a frame is not measured as a fish
+  and is a candidate for the label-free calibration (the slate is the rigid
+  object the paper validated it on, §4.3);
 * **the processor's output is checked** (PLAN.md §9.11): a row for a capture
   outside the dive, or naming another capture's automatic head/tail, is
   refused and nothing is written.
@@ -48,9 +48,11 @@ from fishsense_services_api.slate_presence_store import detector_slate_frame
 __all__ = [
     "AUTOMATIC_PRODUCER",
     "AUTOMATIC_RESULTS_COHORT",
+    "AUTOMATIC_FRAME_MAX_FAILURES",
     "AUTOMATIC_RESULTS_MAX_FAILURES",
     "AUTOMATIC_RESULTS_STEPS",
     "automatic_results_cohort",
+    "record_automatic_frame_failures",
     "record_automatic_results_failure",
     "SLATE_FRAME_THRESHOLD",
     "AutomaticCalibrationCandidate",
@@ -99,7 +101,9 @@ SlateFrames = Callable[
 async def no_slate_frames(
     conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
 ) -> list[tuple[uuid.UUID, float]]:
-    """The stub: no detector yet, so no frame is known to show a slate."""
+    """No frame is known to show a slate: the catalog's default, for tests
+    and tools that don't read the detector. Production passes the detector's
+    `slate_frames` (orchestrator `automatic_results.stage`)."""
     del conn, tenant_id, dive_id
     return []
 
@@ -178,6 +182,10 @@ _EXCLUDED = """EXISTS (
 
 #: A dive's failed runs before the cohort leaves it for an operator (0040).
 AUTOMATIC_RESULTS_MAX_FAILURES = 3
+#: Runs a frame may be left out of (0043) before it is a terminal
+#: ``frame_failed`` abstention. Separate runs, each after the processor's own
+#: tries: a transient fault rarely hits one frame three runs running.
+AUTOMATIC_FRAME_MAX_FAILURES = 3
 
 #: The steps a failure is recorded against (0040's check).
 AUTOMATIC_RESULTS_STEPS = ("frames", "calibration", "lengths", "species")
@@ -351,6 +359,62 @@ async def record_automatic_results_failure(
         ),
         {"t": tenant_id, "d": dive_id, "step": step, "error": error[:4000]},
     )
+
+
+async def record_automatic_frame_failures(
+    conn: AsyncConnection,
+    tenant_id: uuid.UUID,
+    dive_id: uuid.UUID,
+    failures: Sequence[tuple[uuid.UUID, str]],
+    *,
+    headtail_version: int,
+) -> list[uuid.UUID]:
+    """Frames the processor left out of a run (0043). Never one of the
+    dive's strikes: the frame stays owed, so the next run asks for it again.
+    A frame left out at `AUTOMATIC_FRAME_MAX_FAILURES` runs of this version
+    gets its terminal ``frame_failed`` head/tail here, in the same
+    transaction, so it drains and the dive goes on. Returns those frames."""
+    failures = list(failures)
+    if not failures:
+        return []
+    await _check_captures(conn, tenant_id, dive_id, [c for c, _ in failures])
+    for capture_id, error in failures:
+        await conn.execute(
+            text(
+                "INSERT INTO automatic_frame_failures "
+                "(tenant_id, capture_id, predictor_version, error) "
+                "VALUES (:t, :c, :hv, :error)"
+            ),
+            {"t": tenant_id, "c": capture_id, "hv": headtail_version,
+             "error": error[:4000]},
+        )  # fmt: skip
+    exhausted = list(
+        (
+            await conn.execute(
+                text("""
+                    SELECT f.capture_id FROM automatic_frame_failures f
+                    WHERE f.tenant_id = :t AND f.capture_id = ANY(:ids)
+                      AND f.predictor_version = :hv
+                    GROUP BY f.capture_id
+                    HAVING count(*) >= :max
+                    """),
+                {"t": tenant_id, "ids": [c for c, _ in failures],
+                 "hv": headtail_version, "max": AUTOMATIC_FRAME_MAX_FAILURES},
+            )
+        ).scalars()
+    )  # fmt: skip
+    await _insert(
+        conn,
+        "automatic_head_tail_predictions",
+        tenant_id,
+        [
+            AutomaticHeadTailRow(
+                capture_id=c, status="frame_failed", predictor_version=headtail_version
+            )
+            for c in exhausted
+        ],
+    )
+    return exhausted
 
 
 # -- frames: the GPU stage's input --------------------------------------------------
@@ -875,7 +939,7 @@ async def persist_automatic_measurements(
 class AutomaticResultsCatalog(ServicePrincipal):
     """The automatic-results track's database side, as the orchestrator's
     service principal. `slate_frames` is the slate-presence detector's store
-    function (stubbed to none until it lands)."""
+    function (`slate_presence_store.slate_frames` in production)."""
 
     def __init__(
         self, engine, *, sub: str, slate_frames: SlateFrames = no_slate_frames
@@ -895,6 +959,19 @@ class AutomaticResultsCatalog(ServicePrincipal):
         async with self._tenant(tenant_id) as conn:
             await record_automatic_results_failure(
                 conn, tenant_id, dive_id, step=step, error=error
+            )
+
+    async def record_automatic_frame_failures(
+        self,
+        tenant_id: uuid.UUID,
+        dive_id: uuid.UUID,
+        failures: Sequence[tuple[uuid.UUID, str]],
+        *,
+        headtail_version: int,
+    ) -> list[uuid.UUID]:
+        async with self._tenant(tenant_id) as conn:
+            return await record_automatic_frame_failures(
+                conn, tenant_id, dive_id, failures, headtail_version=headtail_version
             )
 
     async def automatic_frames_inputs(

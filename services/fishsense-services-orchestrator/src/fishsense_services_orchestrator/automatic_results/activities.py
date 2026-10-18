@@ -177,9 +177,9 @@ class AutomaticResultsActivities:
             target.tenant_id, HEADTAIL_JPEG_FOLDER, checksum, from_v1=from_v1
         )
 
-    async def _write(self, target: AutomaticTarget, fn, *args):
+    async def _write(self, target: AutomaticTarget, fn, *args, **kwargs):
         try:
-            return await fn(target.tenant_id, target.dive_id, *args)
+            return await fn(target.tenant_id, target.dive_id, *args, **kwargs)
         except InvalidAutomaticResults as exc:
             raise _refuse(target, str(exc)) from exc
 
@@ -215,6 +215,20 @@ class AutomaticResultsActivities:
         for an operator (0040)."""
         await self._catalog.record_automatic_results_failure(
             target.tenant_id, target.dive_id, step=step, error=error
+        )
+
+    @activity.defn(name="record_automatic_frame_failures")
+    async def record_automatic_frame_failures(
+        self, target: AutomaticTarget, captures: List[uuid.UUID], error: str
+    ) -> List[uuid.UUID]:
+        """Frames the processor left out of a run, recorded against each
+        frame -- never one of the dive's strikes (0043). Returns the frames
+        the store has given up on (their terminal ``frame_failed`` rows)."""
+        return await self._write(
+            target,
+            self._catalog.record_automatic_frame_failures,
+            [(c, error) for c in captures],
+            headtail_version=AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
         )
 
     # -- frames (GPU) ---------------------------------------------------------

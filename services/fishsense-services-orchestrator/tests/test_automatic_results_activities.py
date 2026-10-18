@@ -359,3 +359,18 @@ async def test_a_failed_step_is_recorded_against_its_dive():
         ("record_automatic_results_failure", (TENANT_A, DIVE),
          {"step": "frames", "error": "boom"}),
     ]  # fmt: skip
+
+
+async def test_frames_left_out_are_recorded_against_each_frame():
+    """Review of #85: never as one of the dive's strikes. The store answers
+    which frames it has given up on (their terminal `frame_failed` rows)."""
+    bad = uuid.uuid4()
+    catalog = _Catalog(record_automatic_frame_failures=[bad])
+    given_up = await _run(
+        _acts(catalog).record_automatic_frame_failures, TARGET, [bad], "left out"
+    )
+    assert given_up == [bad]
+    assert catalog.calls == [
+        ("record_automatic_frame_failures", (TENANT_A, DIVE, [(bad, "left out")]),
+         {"headtail_version": AUTOMATIC_HEADTAIL_PREDICTOR_VERSION}),
+    ]  # fmt: skip
