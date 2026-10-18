@@ -1082,14 +1082,6 @@ async def test_a_dive_that_failed_three_times_leaves_the_cohort(
     assert len(rows) == 3 and rows[0]["step"] == "frames"
 
 
-async def test_a_failure_needs_a_known_step(owner_engine, app_engine):
-    lab = await tenant(owner_engine)
-    dive_id = await _backlog_dive(owner_engine, lab)
-    with pytest.raises(DBAPIError):
-        await _in(app_engine, lab, record_automatic_results_failure, dive_id,
-                  step="sideways", error="x")  # fmt: skip
-
-
 async def test_strikes_before_a_later_success_do_not_count(owner_engine, app_engine):
     """Review of #85: the strikes were cumulative and never reset, so three
     transient faults weeks apart -- each followed by a run that got further --
@@ -1131,3 +1123,11 @@ async def test_strikes_with_no_progress_between_still_leave_the_dive(
                   step="calibration", error=f"deterministic {n}")  # fmt: skip
 
     assert await _next(app_engine, lab) is None
+
+
+async def test_a_failure_needs_a_known_step(owner_engine, app_engine):
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    with pytest.raises(DBAPIError):
+        await _in(app_engine, lab, record_automatic_results_failure, dive_id,
+                  step="sideways", error="x")  # fmt: skip
