@@ -39,6 +39,8 @@ from fishsense_services_contracts import (
 )
 
 __all__ = [
+    "GPU_TWO_ACTIVITIES_BYTES",
+    "gpu_activity_cap",
     "ROLES",
     "ROLE_GPU",
     "ROLE_LIGHT",
@@ -64,8 +66,8 @@ ROLE_TASK_QUEUES: Final[dict[str, str]] = {
     ROLE_GPU: PROCESSOR_GPU_TASK_QUEUE,
 }
 
-#: Each role's activity cap, and why (a pod may lower it, e.g. the GPU
-#: queue's CPU fallback runs 1):
+#: Each role's activity cap, and why (a pod's FISHSENSE_PROCESSOR_MAX_
+#: CONCURRENT_ACTIVITIES overrides it):
 #:
 #: * ``per_image`` 2 -- a memory ceiling. Each activity peaks at 1-3 GB in a
 #:   rawpy decode; v1's pod OOMKilled into CrashLoopBackOff at the SDK default
@@ -73,13 +75,29 @@ ROLE_TASK_QUEUES: Final[dict[str, str]] = {
 #:   replicas instead;
 #: * ``light`` 8 -- nothing here decodes an image, and every stage drains one
 #:   dive per firing, so a busy hour never queues;
-#: * ``gpu`` 2 -- v1's GPU pod shared the per-image settings; it still decodes
-#:   a raw frame per image, so the same memory ceiling holds.
+#: * ``gpu`` 1 -- the floor of a GPU-memory ceiling. v1's GPU pod shared the
+#:   per-image setting (2), but two SAM 3.1 frames at once ran a 10.6 GiB
+#:   Turing card out of memory (2026-10-18). The worker raises it on a card
+#:   with room (`gpu_activity_cap`), so a big card is not left half idle.
 ROLE_MAX_CONCURRENT_ACTIVITIES: Final[dict[str, int]] = {
     ROLE_PER_IMAGE: 2,
     ROLE_LIGHT: 8,
-    ROLE_GPU: 2,
+    ROLE_GPU: 1,
 }
+
+
+#: Total GPU memory at which the GPU role runs two frames at once: twice the
+#: 10.6 GiB card two frames overran, with headroom. The frames activity logs
+#: each frame's peak (`torch.cuda.max_memory_allocated`); tune this from it.
+GPU_TWO_ACTIVITIES_BYTES: Final = 22 * 2**30
+
+
+def gpu_activity_cap(total_bytes: int | None) -> int:
+    """The GPU role's cap for a card of `total_bytes` (None: no CUDA, the CPU
+    fallback): the floor, or two where two frames have room."""
+    if total_bytes is not None and total_bytes >= GPU_TWO_ACTIVITIES_BYTES:
+        return 2
+    return ROLE_MAX_CONCURRENT_ACTIVITIES[ROLE_GPU]
 
 
 @dataclass(frozen=True)

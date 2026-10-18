@@ -76,9 +76,10 @@ spec:
           env:
             - name: FISHSENSE_PROCESSOR_ROLE
               value: gpu
-            # One image at a time. CPU inference is slow and memory-hungry;
-            # concurrency buys little and risks the decode OOM. A backlog here
-            # drains slowly on purpose -- the alternative was not draining.
+            # One image at a time, pinned whatever the GPU role's cap does
+            # (it sizes itself by the card's memory; this pod has none). CPU
+            # inference is slow and memory-hungry; concurrency buys little and
+            # risks the decode OOM. A backlog here drains slowly on purpose.
             - name: FISHSENSE_PROCESSOR_MAX_CONCURRENT_ACTIVITIES
               value: "1"
             - name: FISHSENSE_TEMPORAL_ADDRESS

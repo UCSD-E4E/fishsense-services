@@ -60,3 +60,19 @@ def test_the_gpu_image_imports_sam3_when_it_is_built():
     assert "import pkg_resources" in check
     for line in SAM3_IMPORTS:
         assert line in check, line
+    # ...and Triton's kernel cache is writable for that user (review of #110).
+    assert "expanduser('~/.triton" in check
+
+
+def test_the_images_user_has_a_home():
+    """Triton writes its kernel cache under $HOME (no XDG): the runtime
+    stage's `app` user (uid 10001, the pods' runAsUser) must have a real,
+    writable home, in the image itself -- for every pod, compose and a
+    `docker run` alike (review of #110)."""
+    dockerfile = (LOCK.parent / "Dockerfile").read_text()
+    runtime = dockerfile.split("FROM python:3.13-slim AS runtime", 1)[1].split(
+        "\nFROM ", 1
+    )[0]
+    useradd = next(line for line in runtime.splitlines() if "useradd" in line)
+    assert "--uid 10001" in useradd
+    assert "--create-home" in useradd and "--no-create-home" not in useradd

@@ -27,6 +27,7 @@ CPU fallback at all. A raw frame missing from scratch is an abstention
 from __future__ import annotations
 
 import asyncio
+import sys
 import tempfile
 from collections.abc import Awaitable, Callable
 from importlib.metadata import version
@@ -145,6 +146,7 @@ class AutomaticFramesActivities:  # pylint: disable=too-few-public-methods
 
         path, model_id = await self._sam3_checkpoint()
         segmenter = await asyncio.to_thread(self._segmenter, str(path))
+        _reset_gpu_peak()
         result = await asyncio.to_thread(
             lambda: automatic_frame_result(
                 capture_id=frame.capture_id,
@@ -157,10 +159,34 @@ class AutomaticFramesActivities:  # pylint: disable=too-few-public-methods
                 slate_probability=frame.slate_probability,
             )
         )
+        peak = _gpu_peak_bytes()
         activity.logger.info(
-            "automatic frame capture=%s status=%s sam_score=%s",
+            "automatic frame capture=%s status=%s sam_score=%s peak_gpu_gib=%s",
             frame.capture_id,
             result.status,
             result.sam_score,
+            "-" if peak is None else f"{peak / 2**30:.2f}",
         )
         return result
+
+
+def _cuda():
+    """torch.cuda if torch is loaded with a card (never imported here: the
+    worker imports torch first, and tests run without it)."""
+    torch = sys.modules.get("torch")
+    if torch is None or not torch.cuda.is_available():
+        return None
+    return torch.cuda
+
+
+def _reset_gpu_peak() -> None:
+    if (cuda := _cuda()) is not None:
+        cuda.reset_peak_memory_stats()
+
+
+def _gpu_peak_bytes() -> int | None:
+    """The process's peak GPU memory since the last reset: one frame's at a
+    cap of one, every in-flight frame's together above it (review of #110:
+    the GPU cap is tuned from this)."""
+    cuda = _cuda()
+    return None if cuda is None else int(cuda.max_memory_allocated())

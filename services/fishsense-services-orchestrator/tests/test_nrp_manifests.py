@@ -325,3 +325,16 @@ def test_the_gpu_keeps_its_compute_capability_floor_beside_the_region():
             "topology.kubernetes.io/region",
         ],
     ]
+
+
+@pytest.mark.parametrize("kind", sorted(LOADED))
+def test_every_processor_runs_as_the_images_user_with_its_home(kind):
+    """The image creates its `app` user's home (Dockerfile `runtime`); a pod
+    gets it by running as that uid and leaving HOME alone. 2026-10-18 the
+    image made no home, and Triton's JIT kernel cache ($HOME/.triton, no XDG)
+    failed every SAM 3.1 frame after the first compile: Permission denied:
+    '/home/app'. Every manifest loaded, so a new one is checked too."""
+    body = LOADED[kind].body
+    security = body["spec"]["template"]["spec"]["securityContext"]
+    assert security["runAsUser"] == 10001
+    assert "HOME" not in _env(body)

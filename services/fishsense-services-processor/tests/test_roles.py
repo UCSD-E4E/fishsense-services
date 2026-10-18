@@ -136,6 +136,50 @@ def test_the_per_image_role_is_capped_at_two_concurrent_activities():
     assert registry.ROLE_MAX_CONCURRENT_ACTIVITIES[registry.ROLE_PER_IMAGE] == 2
 
 
+def test_the_gpu_roles_floor_is_one_activity():
+    """2026-10-18: two SAM 3.1 frames at once ran a 10.6 GiB GPU (an NRP
+    Turing card, compute 7.5, which the GPU manifest admits) out of memory.
+    One at a time is the floor -- a card the worker can't size, and the
+    CPU fallback; a big card raises it (`gpu_activity_cap`)."""
+    assert registry.ROLE_MAX_CONCURRENT_ACTIVITIES[registry.ROLE_GPU] == 1
+
+
+@pytest.mark.parametrize(
+    ("total_bytes", "cap"),
+    [
+        (None, 1),  # no CUDA: the CPU fallback
+        (int(10.58 * 2**30), 1),  # the card that ran out with two
+        (int(16 * 2**30), 1),
+        (registry.GPU_TWO_ACTIVITIES_BYTES - 1, 1),
+        (registry.GPU_TWO_ACTIVITIES_BYTES, 2),
+        (int(80 * 2**30), 2),  # an A100 80 GB: two, not more, until measured
+    ],
+)
+def test_the_gpu_cap_is_sized_by_the_cards_memory(total_bytes, cap):
+    """A role-wide 1 sized for the smallest admitted card would leave a 24+
+    GiB card half idle (review of #110), and the rule is to fill one GPU
+    before asking for another. Two frames fit where they have twice the
+    room the 10.6 GiB card lacked; the per-frame peak the frames activity
+    logs is what tunes the line."""
+    assert registry.gpu_activity_cap(total_bytes) == cap
+
+
+@pytest.mark.parametrize(
+    ("memory", "override", "cap"),
+    [
+        (int(48 * 2**30), None, 2),
+        (int(10.58 * 2**30), None, 1),
+        (int(48 * 2**30), 1, 1),  # a pod's override wins
+    ],
+)
+async def test_a_gpu_worker_takes_its_cap_from_its_card(memory, override, cap):
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        worker = build_worker(env.client, role=registry.ROLE_GPU,
+                              max_concurrent_activities=override,
+                              gpu_memory_bytes=memory)  # fmt: skip
+        assert worker.config()["max_concurrent_activities"] == cap
+
+
 def test_the_light_role_is_not_bound_by_the_decoders_cap():
     """Nothing on the light queue decodes an image, so the per-image cap does
     not apply (v1's light pod: 8)."""

@@ -116,7 +116,10 @@ __all__ = [
     "AutomaticResultsForDiveWorkflow",
     "AutomaticResultsParentWorkflow",
     "AutomaticRunReport",
+    "GPU_CHILD_MAX",
+    "GPU_CHILD_MIN",
     "RUN_TIMEOUT",
+    "gpu_child_timeout",
 ]
 
 
@@ -154,7 +157,21 @@ _DB_FAIL_FAST = RetryPolicy(
     non_retryable_error_types=["NotAMember", "InvalidPredictions"],
 )
 DB_TIMEOUT = timedelta(minutes=15)
-GPU_CHILD_TIMEOUT = timedelta(hours=6)
+#: A GPU child's budget, by how many frames (or images) it was given: it
+#: returns only at the end, so a budget that runs out loses all of it and the
+#: next firing starts over. ~60 s a frame is three times the measured 18 s
+#: (SAM 3.1, one frame at a time on the GPU, 2026-10-18), for queueing behind
+#: other GPU work; the largest dives have ~1,700 frames (review of #110).
+GPU_CHILD_MIN = timedelta(hours=6)
+GPU_CHILD_MAX = timedelta(hours=36)
+GPU_CHILD_PER_FRAME = timedelta(seconds=60)
+
+
+def gpu_child_timeout(frames: int) -> timedelta:
+    budget = timedelta(hours=1) + frames * GPU_CHILD_PER_FRAME
+    return min(max(budget, GPU_CHILD_MIN), GPU_CHILD_MAX)
+
+
 CPU_CHILD_TIMEOUT = timedelta(hours=1)
 #: Above the processor's fit budget (FIT_TIMEOUT, 2 h), so a slow fit is not
 #: cut off by its parent.
@@ -171,7 +188,7 @@ RUN_TIMEOUT = (
     + 10 * DB_TIMEOUT
     + GPU_WAKE_TIMEOUT
     + 2 * WAKE_TIMEOUT
-    + 2 * GPU_CHILD_TIMEOUT
+    + 2 * GPU_CHILD_MAX
     + CALIBRATION_CHILD_TIMEOUT
     + CPU_CHILD_TIMEOUT
     + 2 * STAGE_TIMEOUT
@@ -263,7 +280,7 @@ async def _frames(
             inputs,
             child_id=raw_scratch_reader_id("automatic-frames", target.dive_id),
             task_queue=PROCESSOR_GPU_TASK_QUEUE,
-            timeout=GPU_CHILD_TIMEOUT,
+            timeout=gpu_child_timeout(len(inputs.frames)),
             result_type=List[AutomaticFrameResult],
         )
         if not ran:
@@ -339,7 +356,7 @@ async def _species_step(
         inputs,
         child_id=f"automatic-species-{target.dive_id}",
         task_queue=PROCESSOR_GPU_TASK_QUEUE,
-        timeout=GPU_CHILD_TIMEOUT,
+        timeout=gpu_child_timeout(len(inputs.images)),
         result_type=List[SpeciesPredictionResult],
     )
     persistable = [
