@@ -374,3 +374,37 @@ async def test_frames_left_out_are_recorded_against_each_frame():
         ("record_automatic_frame_failures", (TENANT_A, DIVE, [(bad, "left out")]),
          {"headtail_version": AUTOMATIC_HEADTAIL_PREDICTOR_VERSION}),
     ]  # fmt: skip
+
+
+async def test_a_run_is_planned_for_the_named_tenant():
+    from fishsense_services_api.automatic_results_store import (
+        AutomaticRunPlan,
+        AutomaticRunPlanDive,
+    )
+
+    dive = AutomaticRunPlanDive(
+        number=62, dive_id=DIVE, folder="/d/62", calibration_session=True,
+        excluded=False, human_measured=False, rectifiable=True, frames=9,
+        frames_owed=9,
+    )  # fmt: skip
+    catalog = _Catalog(
+        tenant_by_slug=TENANT_A,
+        automatic_run_plan=AutomaticRunPlan(dives=[dive], missing=[1]),
+    )
+    plan = await _run(_acts(catalog).plan_automatic_run, "lab", [62, 1])
+
+    assert plan["tenant_id"] == str(TENANT_A)
+    assert plan["dives"][0]["dive_id"] == str(DIVE)
+    assert plan["dives"][0]["calibration_session"] is True
+    assert plan["missing"] == [1]
+    assert catalog.calls[1] == (
+        "automatic_run_plan", (TENANT_A, [62, 1]),
+        {"headtail_version": AUTOMATIC_HEADTAIL_PREDICTOR_VERSION},
+    )  # fmt: skip
+
+
+async def test_a_run_for_a_tenant_the_orchestrator_is_not_in_is_refused():
+    catalog = _Catalog(tenant_by_slug=None)
+    with pytest.raises(ApplicationError) as error:
+        await _run(_acts(catalog).plan_automatic_run, "nobody", [62])
+    assert error.value.non_retryable

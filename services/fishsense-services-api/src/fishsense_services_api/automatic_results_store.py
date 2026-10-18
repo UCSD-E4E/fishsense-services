@@ -52,6 +52,9 @@ __all__ = [
     "AUTOMATIC_RESULTS_MAX_FAILURES",
     "AUTOMATIC_RESULTS_STEPS",
     "automatic_results_cohort",
+    "AutomaticRunPlan",
+    "AutomaticRunPlanDive",
+    "automatic_run_plan",
     "record_automatic_frame_failures",
     "record_automatic_results_failure",
     "SLATE_FRAME_THRESHOLD",
@@ -453,6 +456,80 @@ async def record_automatic_frame_failures(
         ],
     )
     return exhausted
+
+
+# -- a by-hand run of named dives (Phase C) -----------------------------------------
+
+
+@dataclass(frozen=True)
+class AutomaticRunPlanDive:
+    """A named dive as a by-hand run would take it."""
+
+    number: int
+    dive_id: uuid.UUID
+    folder: str
+    calibration_session: bool
+    excluded: bool
+    human_measured: bool
+    rectifiable: bool
+    frames: int
+    frames_owed: int
+
+
+@dataclass(frozen=True)
+class AutomaticRunPlan:
+    dives: list[AutomaticRunPlanDive]
+    #: Numbers with no dive in the tenant.
+    missing: list[int]
+
+
+async def automatic_run_plan(
+    conn: AsyncConnection,
+    tenant_id: uuid.UUID,
+    numbers: Sequence[int],
+    *,
+    headtail_version: int,
+) -> AutomaticRunPlan:
+    """The named dives, calibration sessions first -- their slate frames feed
+    the label-free fits their borrowers use -- then in the order given; what
+    the operator reviews before a by-hand run (the validation's paper dives).
+    An excluded dive is still planned (by hand it runs, 0039), and said so."""
+    rows = {
+        r.number: r
+        for r in await conn.execute(
+            text(f"""
+                SELECT d.number, d.id, d.source_path,
+                       {_SESSION} AS calibration_session,
+                       {_EXCLUDED} AS excluded,
+                       {_HUMAN_MEASURED} AS human_measured,
+                       {RECTIFIABLE_DIVE} AS rectifiable,
+                       (SELECT count(*) FROM captures c
+                        WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+                          AND c.is_canonical) AS frames,
+                       (SELECT count(*) FROM captures c
+                        WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+                          AND c.is_canonical AND NOT {_FRAME_DONE}
+                          AND (NOT {_SESSION} OR {_DETECTOR_SLATE})) AS frames_owed
+                FROM dives d
+                WHERE d.tenant_id = :t AND d.number = ANY(:numbers)
+                """),
+            {"t": tenant_id, "numbers": list(numbers), "hv": headtail_version},
+        )
+    }
+    planned = [
+        AutomaticRunPlanDive(
+            number=r.number, dive_id=r.id, folder=r.source_path,
+            calibration_session=r.calibration_session, excluded=r.excluded,
+            human_measured=r.human_measured, rectifiable=r.rectifiable,
+            frames=r.frames, frames_owed=r.frames_owed,
+        )
+        for n in dict.fromkeys(numbers)
+        if (r := rows.get(n)) is not None
+    ]  # fmt: skip
+    planned.sort(key=lambda p: not p.calibration_session)  # stable: given order
+    return AutomaticRunPlan(
+        dives=planned, missing=[n for n in dict.fromkeys(numbers) if n not in rows]
+    )
 
 
 # -- frames: the GPU stage's input --------------------------------------------------
@@ -998,6 +1075,27 @@ class AutomaticResultsCatalog(ServicePrincipal):
             await record_automatic_results_failure(
                 conn, tenant_id, dive_id, step=step, error=error
             )
+
+    async def automatic_run_plan(
+        self, tenant_id: uuid.UUID, numbers: Sequence[int], *, headtail_version: int
+    ) -> AutomaticRunPlan:
+        async with self._tenant(tenant_id) as conn:
+            return await automatic_run_plan(
+                conn, tenant_id, numbers, headtail_version=headtail_version
+            )
+
+    async def tenant_by_slug(self, slug: str) -> uuid.UUID | None:
+        """A member tenant's id by its slug (the operator names tenants so)."""
+        for tenant_id in await self.member_tenants():
+            async with self._tenant(tenant_id) as conn:
+                found = (
+                    await conn.execute(
+                        text("SELECT slug FROM tenants WHERE id = :t"), {"t": tenant_id}
+                    )
+                ).scalar_one_or_none()
+            if found == slug:
+                return tenant_id
+        return None
 
     async def record_automatic_frame_failures(
         self,

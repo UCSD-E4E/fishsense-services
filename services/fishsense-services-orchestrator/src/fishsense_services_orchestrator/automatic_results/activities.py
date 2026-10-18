@@ -22,6 +22,7 @@ rules:
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from dataclasses import dataclass
 from typing import Any, List, Optional, Protocol
@@ -216,6 +217,30 @@ class AutomaticResultsActivities:
         await self._catalog.record_automatic_results_failure(
             target.tenant_id, target.dive_id, step=step, error=error
         )
+
+    @activity.defn(name="plan_automatic_run")
+    async def plan_automatic_run(self, tenant: str, numbers: List[int]) -> dict:
+        """A by-hand run's plan (`run_dives`): the named dives, sessions
+        first, as JSON for the operator's reviewed report."""
+        tenant_id = await self._catalog.tenant_by_slug(tenant)
+        if tenant_id is None:
+            raise ApplicationError(
+                f"the orchestrator is no member of a tenant {tenant!r}",
+                type="NotAMember",
+                non_retryable=True,
+            )
+        plan = await self._catalog.automatic_run_plan(
+            tenant_id,
+            list(numbers),
+            headtail_version=AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
+        )
+        return {
+            "tenant_id": str(tenant_id),
+            "dives": [
+                {**dataclasses.asdict(d), "dive_id": str(d.dive_id)} for d in plan.dives
+            ],
+            "missing": list(plan.missing),
+        }
 
     @activity.defn(name="record_automatic_frame_failures")
     async def record_automatic_frame_failures(
