@@ -36,7 +36,7 @@ import logging
 import signal
 from collections.abc import Iterable
 from datetime import timedelta
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import PositiveInt
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -44,7 +44,12 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from fishsense_services_contracts.temporal import TemporalConnection, connect_options
-from fishsense_services_processor.registry import Stage, registration_for_role
+from fishsense_services_processor.registry import (
+    ROLE_GPU,
+    Stage,
+    gpu_activity_cap,
+    registration_for_role,
+)
 
 __all__ = [
     "GRACEFUL_SHUTDOWN_TIMEOUT",
@@ -76,14 +81,40 @@ class ProcessorSettings(BaseSettings):
     max_concurrent_activities: PositiveInt | None = None
 
 
+_DETECT = object()
+
+
+def detect_gpu_memory_bytes() -> int | None:
+    """The CUDA card's total memory, or None without one (the CPU fallback).
+    torch is imported first in this process (`main`), so this is cheap."""
+    try:
+        import torch  # pylint: disable=import-outside-toplevel
+    except ImportError:
+        return None
+    if not torch.cuda.is_available():
+        return None
+    return int(torch.cuda.get_device_properties(0).total_memory)
+
+
+def _role_cap(role: str, default: int, gpu_bytes: Any) -> int:
+    if role != ROLE_GPU:
+        return default
+    total = detect_gpu_memory_bytes() if gpu_bytes is _DETECT else gpu_bytes
+    cap = gpu_activity_cap(total)
+    log.info("GPU memory %s bytes: %d activities at once", total, cap)
+    return cap
+
+
 def build_worker(
     client: Client,
     *,
     role: str,
     stages: Iterable[Stage] | None = None,
     max_concurrent_activities: int | None = None,
+    gpu_memory_bytes: Any = _DETECT,
 ) -> Worker:
-    """The Temporal worker for one role."""
+    """The Temporal worker for one role. The GPU role's cap is sized by its
+    card (`registry.gpu_activity_cap`) unless the pod overrides it."""
     registration = registration_for_role(role, stages)
     if not registration.workflows and not registration.activities:
         raise ValueError(
@@ -94,9 +125,8 @@ def build_worker(
         task_queue=registration.task_queue,
         workflows=list(registration.workflows),
         activities=list(registration.activities),
-        max_concurrent_activities=(
-            max_concurrent_activities or registration.max_concurrent_activities
-        ),
+        max_concurrent_activities=max_concurrent_activities
+        or _role_cap(role, registration.max_concurrent_activities, gpu_memory_bytes),
         graceful_shutdown_timeout=GRACEFUL_SHUTDOWN_TIMEOUT,
     )
 

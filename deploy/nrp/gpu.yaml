@@ -120,12 +120,6 @@ spec:
             # every cold start: an emptyDir, since the Deployment is deleted.
             - name: XDG_CACHE_HOME
               value: /cache
-            # The app user has no home: Triton's kernel cache (~/.triton,
-            # no XDG) failed every frame after the first compile, 2026-10-18.
-            - name: HOME
-              value: /cache
-            - name: TRITON_CACHE_DIR
-              value: /cache/triton
             # The weights cache (processor weights.py): on the cache volume, or
             # every load downloads multi-GB checkpoints again.
             - name: FISHSENSE_MODEL_WEIGHTS_CACHE_DIR
@@ -136,9 +130,10 @@ spec:
                 optional: true
           resources:
             # Lighter on CPU than the per-image pod: the heavy work is on the
-            # GPU. Memory still covers a full-res decode per in-flight activity
-            # plus the checkpoint's host-side buffers, so it keeps the same
-            # ceiling (the 2026-07-21 OOM was a decode problem, not a GPU one).
+            # GPU. Memory covers a full-res decode per in-flight activity plus
+            # the checkpoints' host-side buffers. The worker runs one activity
+            # at a time, or two on a card with room (registry.gpu_activity_cap,
+            # 2026-10-18), so the ceiling stays sized for two.
             requests:
               cpu: "2"
               memory: 6Gi

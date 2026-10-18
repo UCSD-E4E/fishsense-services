@@ -327,25 +327,14 @@ def test_the_gpu_keeps_its_compute_capability_floor_beside_the_region():
     ]
 
 
-@pytest.mark.parametrize(
-    "kind",
-    [manifests.PER_IMAGE, manifests.LIGHT, manifests.GPU, manifests.GPU_CPU_FALLBACK],
-)
-def test_every_processor_has_a_writable_home(kind):
-    """The image's `app` user (uid 10001) has no home. Triton's JIT kernel
-    cache ignores XDG and makes `$HOME/.triton`: 2026-10-18, a SAM 3.1 frame
-    compiled a kernel and every frame after it failed `Permission denied:
-    '/home/app'`. HOME and Triton's cache live on the pod's writable /cache."""
+@pytest.mark.parametrize("kind", sorted(LOADED))
+def test_every_processor_runs_as_the_images_user_with_its_home(kind):
+    """The image creates its `app` user's home (Dockerfile `runtime`); a pod
+    gets it by running as that uid and leaving HOME alone. 2026-10-18 the
+    image made no home, and Triton's JIT kernel cache ($HOME/.triton, no XDG)
+    failed every SAM 3.1 frame after the first compile: Permission denied:
+    '/home/app'. Every manifest loaded, so a new one is checked too."""
     body = LOADED[kind].body
-    env = _env(body)
-    mounts = {m["mountPath"]: m["name"] for m in _container(body)["volumeMounts"]}
-    empty = {
-        v["name"]
-        for v in body["spec"]["template"]["spec"]["volumes"]
-        if "emptyDir" in v
-    }
-    for name in ("HOME", "TRITON_CACHE_DIR"):
-        path = env.get(name)
-        assert path, name
-        root = "/" + path.strip("/").split("/")[0]
-        assert mounts.get(root) in empty, (name, path)
+    security = body["spec"]["template"]["spec"]["securityContext"]
+    assert security["runAsUser"] == 10001
+    assert "HOME" not in _env(body)

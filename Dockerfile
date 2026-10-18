@@ -71,7 +71,11 @@ RUN uv sync --frozen --no-dev --package fishsense-services-processor --extra tor
     --no-editable
 
 FROM python:3.13-slim AS runtime
-RUN useradd --system --uid 10001 --no-create-home app
+# A real, writable home: Triton's JIT kernel cache is $HOME/.triton (it reads
+# no XDG variable), and without a home every SAM 3.1 frame after the first
+# compile failed Permission denied: '/home/app' (2026-10-18). The pods run as
+# this uid (runAsUser 10001) and so get this home.
+RUN useradd --system --uid 10001 --create-home app
 ENV PATH=/app/.venv/bin:$PATH \
     PYTHONUNBUFFERED=1
 
@@ -110,7 +114,8 @@ USER app
 # 2026-10-18. CPU-only: importing needs no CUDA.
 RUN python -c "import pkg_resources; \
 from sam3.model.sam3_image_processor import Sam3Processor; \
-from sam3.model_builder import build_sam3_image_model"
+from sam3.model_builder import build_sam3_image_model; \
+import os; os.makedirs(os.path.expanduser('~/.triton/cache'), exist_ok=True)"
 CMD ["fishsense-services-processor"]
 
 FROM runtime AS api

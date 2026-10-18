@@ -41,6 +41,8 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Sequence
 
 from temporalio import workflow
+
+from fishsense_services_orchestrator.automatic_results.workflow import RUN_TIMEOUT
 from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
 from temporalio.exceptions import (
     ApplicationError,
@@ -62,8 +64,10 @@ __all__ = [
 #: Parked dives that may recover label-free (decided 2026-10-15).
 PARKED_DIVES = (427, 437, 526)
 PLAN_TIMEOUT = timedelta(minutes=15)
-#: A dive's every step at its longest (`workflow.RUN_TIMEOUT` less its drain).
-DIVE_TIMEOUT = timedelta(hours=20)
+#: A dive's every step at its longest: the backlog run's own timeout, built
+#: from the GPU children's ceiling (review of #110: a fixed 20 h was shorter
+#: than one large dive's frames at one a time).
+DIVE_TIMEOUT = RUN_TIMEOUT
 
 
 @dataclass

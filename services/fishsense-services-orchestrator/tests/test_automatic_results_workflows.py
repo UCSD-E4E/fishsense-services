@@ -549,3 +549,20 @@ async def test_the_frames_that_came_back_are_kept_and_the_rest_owed():
         "calibration, lengths, species: 1 frame still owed"
     ]
     assert [d.dive_id for d in report.dives] == [DIVE, other.dive_id]
+
+
+def test_a_gpu_child_has_time_for_every_frame_it_was_given():
+    """Review of #110: at one frame at a time (~18 s), a fixed 6 h ran out at
+    ~1200 frames, and the largest dives have 1,698, 1,672, 1,498 (production,
+    2026-10-18); the child returns only at the end, so everything computed was
+    lost and the next firing started over. The budget scales with the frames,
+    within a floor and a ceiling the run timeouts are built from."""
+    from fishsense_services_orchestrator.automatic_results import run_dives
+
+    assert sut.gpu_child_timeout(10) == sut.GPU_CHILD_MIN
+    big = sut.gpu_child_timeout(1698)
+    assert big >= timedelta(seconds=1698 * 18 * 2)  # twice the measured rate
+    assert big <= sut.GPU_CHILD_MAX
+    assert sut.gpu_child_timeout(10**6) == sut.GPU_CHILD_MAX
+    assert sut.RUN_TIMEOUT >= 2 * sut.GPU_CHILD_MAX + sut.AUTOMATIC_DRAIN_WINDOW
+    assert run_dives.DIVE_TIMEOUT >= sut.RUN_TIMEOUT

@@ -413,3 +413,19 @@ async def test_no_gpu_fails_the_whole_run_with_its_cause():
                     execution_timeout=timedelta(hours=1),
                 )  # fmt: skip
     assert "no GPU" in str(failure.value.cause.cause or failure.value.cause)
+
+
+async def test_each_frame_logs_its_peak_gpu_memory(monkeypatch, caplog):
+    """Review of #110: the GPU cap rests on how much one SAM 3.1 frame takes,
+    which nobody had measured. Each frame logs the process's peak GPU memory
+    over it (all frames in flight, at a cap above one), so the cap is tuned
+    from production, not guessed."""
+    from fishsense_services_processor.automatic_frames import activities as acts
+
+    monkeypatch.setattr(acts, "_reset_gpu_peak", lambda: None)
+    monkeypatch.setattr(acts, "_gpu_peak_bytes", lambda: 5 * 2**30)
+    with caplog.at_level("INFO"):
+        await ActivityEnvironment().run(
+            _activities(_Store()).predict_automatic_frame, _payload()
+        )
+    assert any("peak_gpu_gib=5.00" in r.getMessage() for r in caplog.records)

@@ -104,12 +104,6 @@ spec:
               value: /scratch
             - name: XDG_CACHE_HOME
               value: /cache
-            # The app user has no home: Triton's kernel cache (~/.triton,
-            # no XDG) failed every frame after the first compile, 2026-10-18.
-            - name: HOME
-              value: /cache
-            - name: TRITON_CACHE_DIR
-              value: /cache/triton
             # The weights cache (processor weights.py): on the cache volume, or
             # every load downloads multi-GB checkpoints again.
             - name: FISHSENSE_MODEL_WEIGHTS_CACHE_DIR

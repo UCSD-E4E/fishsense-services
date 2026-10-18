@@ -76,9 +76,10 @@ spec:
           env:
             - name: FISHSENSE_PROCESSOR_ROLE
               value: gpu
-            # One image at a time. CPU inference is slow and memory-hungry;
-            # concurrency buys little and risks the decode OOM. A backlog here
-            # drains slowly on purpose -- the alternative was not draining.
+            # One image at a time, pinned whatever the GPU role's cap does
+            # (it sizes itself by the card's memory; this pod has none). CPU
+            # inference is slow and memory-hungry; concurrency buys little and
+            # risks the decode OOM. A backlog here drains slowly on purpose.
             - name: FISHSENSE_PROCESSOR_MAX_CONCURRENT_ACTIVITIES
               value: "1"
             - name: FISHSENSE_TEMPORAL_ADDRESS
@@ -97,12 +98,6 @@ spec:
               value: /scratch
             - name: XDG_CACHE_HOME
               value: /cache
-            # The app user has no home: Triton's kernel cache (~/.triton,
-            # no XDG) failed every frame after the first compile, 2026-10-18.
-            - name: HOME
-              value: /cache
-            - name: TRITON_CACHE_DIR
-              value: /cache/triton
             # The weights cache (processor weights.py): on the cache volume, or
             # every load downloads multi-GB checkpoints again.
             - name: FISHSENSE_MODEL_WEIGHTS_CACHE_DIR
