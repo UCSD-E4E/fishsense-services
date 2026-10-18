@@ -71,6 +71,33 @@ The portal:
 cd apps/web && npm ci && npm run dev
 ```
 
+### Testing the UI locally
+
+[`compose.yml`](compose.yml) has no sign-in or object store of its own. The
+UI harness, [`compose.ui.yml`](compose.ui.yml), adds both:
+
+- a mock OIDC issuer that accepts any username, with optional claims such as
+  `name`, `org` or `groups` typed into its login form's claims box;
+- a local Garage.
+
+It also seeds a synthetic `lab` tenant:
+- Ginny, the decoy, in a measured Lite dive with made-up labels;
+- three FishSense Mobile captures with their files in Garage.
+
+Then it runs the web on the host, with hot reload (Node needs to be on your
+PATH, e.g. via `nix develop`). Nothing in it reaches production.
+
+```sh
+deploy/local/ui/up.sh            # then open http://localhost:3000
+deploy/local/ui/up.sh --reset    # start again from an empty database and bucket
+```
+
+Sign in as `dev-admin` (the tenant's admin) or `dev-member` (a member). Any
+other name has no membership. The seed is
+[`dev_seed.py`](services/fishsense-services-api/src/fishsense_services_api/dev_seed.py)
+(`fishsense-services-api dev-seed`). It refuses any database that isn't local,
+or that holds migrated v1 data.
+
 ## Tests
 
 The rule is **test first**: write a failing test, then the code that makes it

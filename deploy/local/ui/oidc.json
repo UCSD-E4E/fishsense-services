@@ -1,0 +1,22 @@
+{
+  "interactiveLogin": true,
+  "httpServer": "NettyWrapper",
+  "tokenCallbacks": [
+    {
+      "issuerId": "fishsense-web",
+      "tokenExpiry": 3600,
+      "requestMappings": [
+        {
+          "requestParam": "grant_type",
+          "match": "client_credentials",
+          "claims": { "sub": "web-service", "aud": ["fishsense-web"] }
+        },
+        {
+          "requestParam": "grant_type",
+          "match": "*",
+          "claims": { "aud": ["fishsense-web"] }
+        }
+      ]
+    }
+  ]
+}

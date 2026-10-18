@@ -30,7 +30,12 @@ rpc_secret = "{secret}"
 s3_region = "garage"
 api_bind_addr = "[::]:3900"
 root_domain = ".s3.garage.localhost"
+[admin]
+api_bind_addr = "[::]:3903"
+admin_token = "{admin_token}"
 """
+#: The admin API's token (dev_seed.bootstrap_garage drives that API).
+ADMIN_TOKEN = "test-only-admin-token"
 
 
 @dataclass(frozen=True)
@@ -41,20 +46,24 @@ class GarageKey:
 
 
 class Garage:
-    def __init__(self, config_dir: Path) -> None:
+    def __init__(self, config_dir: Path, *, layout: bool = True) -> None:
+        #: False leaves the cluster as a fresh install is: no layout, so it
+        #: stores nothing until one is applied (dev_seed.bootstrap_garage).
+        self._layout = layout
         config = config_dir / "garage.toml"
-        config.write_text(CONFIG.format(secret="0" * 63 + "1"))
+        config.write_text(CONFIG.format(secret="0" * 63 + "1", admin_token=ADMIN_TOKEN))
         self._container = (
             DockerContainer(IMAGE)
-            .with_exposed_ports(3900)
+            .with_exposed_ports(3900, 3903)
             .with_volume_mapping(str(config), "/etc/garage.toml", "ro")
         )
 
     def __enter__(self) -> Garage:
         self._container.start()
         node = self._wait_for_node()
-        self._garage("layout", "assign", "-z", "dc1", "-c", "1G", node)
-        self._garage("layout", "apply", "--version", "1")
+        if self._layout:
+            self._garage("layout", "assign", "-z", "dc1", "-c", "1G", node)
+            self._garage("layout", "apply", "--version", "1")
         return self
 
     def __exit__(self, *exc) -> None:
@@ -64,6 +73,11 @@ class Garage:
     def endpoint_url(self) -> str:
         host = self._container.get_container_host_ip()
         return f"http://{host}:{self._container.get_exposed_port(3900)}"
+
+    @property
+    def admin_url(self) -> str:
+        host = self._container.get_container_host_ip()
+        return f"http://{host}:{self._container.get_exposed_port(3903)}"
 
     def tenant_store(self, bucket: str) -> GarageKey:
         """A bucket and a key granted on it alone."""

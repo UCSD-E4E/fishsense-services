@@ -144,6 +144,22 @@ class V1MigrationSettings(BaseSettings):
     app_role: str = "fishsense_app"
 
 
+class DevSeedSettings(BaseSettings):
+    """For ``dev-seed`` only: the local UI harness (compose.ui.yml), never
+    production. The owner's DSN, and the local Garage: its admin API, to
+    create the tenant buckets, and the stores file the API reads."""
+
+    model_config = SettingsConfigDict(env_prefix="FISHSENSE_")
+
+    migration_database_url: SecretStr
+    tenant_stores_file: Path
+    object_store_endpoint_url: str
+    object_store_public_url: str
+    object_store_region: str = "garage"
+    dev_garage_admin_url: str
+    dev_garage_admin_token: SecretStr
+
+
 class AuditSettings(BaseSettings):
     """For the read-only audit commands (``audit-range-trend``) only.
 
