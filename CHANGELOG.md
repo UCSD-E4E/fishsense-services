@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.10.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.9.0...v0.10.0) (2026-10-18)
+
+
+### Features
+
+* **automatic:** phase C — run the paper's dives by hand, score against the paper's own frames and Table 3 ([397543e](https://github.com/UCSD-E4E/fishsense-services/commit/397543eaa55a65ce6355b05c4314db81dd82aa6f))
+* **automatic:** run named dives through the chain by hand, planned first ([17802ea](https://github.com/UCSD-E4E/fishsense-services/commit/17802ea4fde8aa1127826be4b0afba5f7d8b2258))
+* **automatic:** score the paper's own reef frames, its rejected ones, and Table 3 ([83b6ba9](https://github.com/UCSD-E4E/fishsense-services/commit/83b6ba93b43c8bb00c7eda6a2547282d2f2d3880))
+
 ## [0.9.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.8.0...v0.9.0) (2026-10-18)
 
 
