@@ -411,11 +411,11 @@ table, not a rewrite. Maps onto existing tables where possible.
 | **User** + **Membership(role)** | `user` | `user` today is a Label-Studio identity only; add auth principal + membership. |
 | **DeviceKind** | *(new enum)* | `lite \| lite_flatport \| mobile \| multilens \| mono \| scout`. `lite_flatport` shares Lite's hardware, but its **camera model** (axial, refractive) and **calibration workflow** (in air, no slate) differ — that, not the hardware, is what makes it a kind. (Kind vs configuration of `lite` — §9.21.) |
 | **Device** | `camera` | add `kind`; Lite = TG-6 metadata. |
-| **Device component** *(new)* | *(none)* | Housing/**port** (flat / dome / layered; pane thickness, glass index, standoff, dome radius/decentre), removable **air lens**, laser mount with bench-measured origin `|O|`. Components change independently of the camera serial (an air lens is re-fitted per dive), so a dive records **which configuration** it used. Required by the in-air calibration method (§2.7). |
-| **Session / Experiment** *(new)* | *(none — lives in research repos)* | Groups dives by protocol (field / pool / designed-angle), site, era, diver; carries per-dive research flags (design-excluded, accuracy evidence + the rule version that set it, split-from). Lets the cohort rule stay research code while its inputs live in the data model. |
+| **Device component** *(new)* | *(none)* | Housing/**port** (flat / dome / layered; pane thickness, glass index, standoff, dome radius/decentre), removable **air lens**, laser mount with bench-measured origin `|O|`. Components change independently of the camera serial (an air lens is re-fitted per dive), so a dive records **which configuration** it used. Required by the in-air calibration method (§2.7). *2026-10-16:* the port starts as a per-mission fact with provenance; nothing but prod data and the `D` suffix counts as known (§4.9). |
+| **Session / Experiment** *(new)* | *(none — lives in research repos)* | Groups dives by protocol (field / pool / designed-angle), site, era, diver; carries per-dive research flags (design-excluded, accuracy evidence + the rule version that set it, split-from). Lets the cohort rule stay research code while its inputs live in the data model. *2026-10-16:* the field-trip grouping is the **Deployment** (§4.9). A research protocol grouping, if still needed, sits beside it. |
 | **Capture** (core) | `image` (+`dive`) | tenant, uploader, device, timestamps, geo, environment, **pointer to raw in Garage**, content checksum (v1: md5 of the whole ORF; duplicates across dives → `is_canonical`). Reproducibility anchor. |
 | **CaptureExtension** (per kind) | `cameraintrinsics` (Lite) | Mobile: LiDAR depth + ARKit meta; Mono: model inputs. |
-| **Dive / Batch** | `dive`, `diveslate`, `diveframecluster(+mapping)` | Lite offload session. Carries v1's `priority` (LOW/HIGH/NONE) + `notes`. |
+| **Dive / Batch** → **Mission** | `dive`, `diveslate`, `diveframecluster(+mapping)` | Lite offload session. Carries v1's `priority` (LOW/HIGH/NONE) + `notes`. *2026-10-16:* generalised to **Mission**, one device's recording session, with phones included (§4.9). |
 | **Camera calibration** *(new)* | `cameraintrinsics` | Per device configuration, **append-only**: **camera model type** (`pinhole` \| `axial_refractive`, extensible), medium (**air / water**), coordinate frame (**raw sensor** vs JPEG), target + target-geometry version, RMS, **port/refraction model + version**. Research shows the two halves must be modeled separately — each camera model calibrates its own laser (§2.7). |
 | **Laser calibration** *(new as a first-class entity)* | `laserextrinsics`, `divelaserline`, refusal columns on `dive`, `calibration_dive_id` | Per dive, **append-only**, names its camera calibration; records **producer** — `slate`, `checkerboard`, and the research producers `dots+range`, `dots+two_ranges`, `dots+apparent_size`, `bench` — plus lever arm, observation count, conditioning, residual, each gate verdict, and post-hoc verdicts (range trend); a refusal is a calibration outcome, not dive columns. Borrowing — §9.17. |
 | **Dive conditions** *(new)* | *(none)* | Per dive: water salinity, temperature (or a fresh/brackish/sea preset) → the water index used, and its source. Input to refraction correction. |
@@ -631,6 +631,122 @@ Everything except the reference tables above carries `tenant_id`.
 - **Reuse krg patterns**: OpenBao-rendered secrets, mTLS Temporal client certs
   (CN `fishsense-worker`), app-password service accounts, and the release-please →
   promote → `nixos-rebuild` / `kubectl apply -k` CI pipeline.
+
+### 4.9 One system: Lite and Mobile *(decided 2026-10-16; design, not yet built)*
+Lite and Mobile are **the same thing**: a device photographs a fish, and a length comes
+from the image plus a depth source. The only difference is where the depth comes from: a
+laser and a calibration, or the phone's LiDAR. They should share one data model and one
+display.
+
+**Where v0.8.0 stands.**
+- **Already shared:** `tenants`, `devices(kind)`, `captures`, `fish`, `measurements(source
+  server|device)` and `current_measurements`.
+- **Where they split:**
+
+| | Lite | Mobile |
+|---|---|---|
+| Grouping | `dives` | none (`dive_id` NULL) |
+| Depth | `laser_depths` (laser + calibration) | `depth_f32` object only; no depth column |
+| Head/tail points | `head_tail_labels` (Label Studio) | `device_measurement_points` (auto / dragged) |
+| Species | labels + predictions | none: one bare `fish` per capture |
+| Location | none (the dive path is the only "site") | lat/lon/accuracy + `place_name` |
+| Processing | ~16 stages | **none**: every cohort joins `dives` |
+| Display | Superset only; **no web page shows Lite fish** | web `/captures`; the app shows only its local data |
+
+**Decisions**
+- **Mission** generalises the dive. A mission is one device's continuous recording
+  session in the field. The word matches E4E's data-management tool
+  ([e4e-data-management](https://github.com/UCSD-E4E/e4e-data-management)), whose mission
+  folder already *is* our dive folder: `ED-NN/<mission>/` holds `metadata.json`,
+  `manifest.json` and the frames directly.
+  - `dives` becomes `missions`, and `captures.dive_id` becomes `mission_id`.
+  - A mission carries a **purpose**: `survey`, `lens_calibration`, `laser_calibration`,
+    `slate`, `known_length` (Box, Ginny), or `other`. Purpose decides which stages use it.
+  - The dive-only columns (slate template, calibration target and source, priority) stay,
+    nullable for missions they don't apply to.
+  - User-facing names that stay as they are, so nothing breaks: the `v1.*` views, the
+    portal's `/dives/{number}` routes and the Label Studio project titles.
+  - Phone captures belong to missions too (§9.23).
+- **Deployment** is the parent: one field trip, equal to e4edm's **dataset**
+  (`YYYY.MM.DD.PROJECT.LOCATION`, with README and manifest). It holds missions across
+  expedition days. It is the natural home for whatever a trip shares: water conditions,
+  and calibrations borrowed between dives on the same trip.
+  - Nullable for legacy dives. Grouping them afterwards is a dry-run tool.
+  - **Naming rule:** a NRP/Kubernetes object is always a "processor Deployment"
+    (`k8s_deployment` in code), and bare "deployment" means the field concept. This goes
+    into CLAUDE.md with the first migration. §4.8's title predates the rule.
+- **Port is a per-mission fact with provenance**, never a device property. The same
+  camera body moves between ports.
+  - Values: `corrective_optic`, `flat`, `dome`, `unknown`.
+  - Provenance: `backfill`, `device_suffix`, `operator`, `calibration`.
+  - Rules (the owner's, 2026-10-16):
+    - every capture already ingested is `corrective_optic` (`backfill`);
+    - a device name with the **`D` suffix** (`FSL-10D`) is `corrective_optic`
+      (`device_suffix`);
+    - **nothing else is known.** A missing `D` does not mean flat. Lab data includes
+      bare-flat-port frames that were never reliably labelled.
+  - Stages **refuse `unknown`**, as they refuse `axial_refractive` today. A flat port is
+    axial, and measuring it as pinhole gives silently wrong lengths.
+  - A calibration can resolve `unknown` (wuwnet): an underwater lens calibration whose
+    focal length is ≈1.31–1.33× the camera's in-air value means a bare flat port, and
+    ≈1× is consistent with the corrective optic. Run it as a dry-run report per mission
+    first, and change nothing without approval.
+  - Device identity stays the MakerNote serial. The `D` is stripped when matching names.
+- **Direct e4edm ingest.** One request names a dataset folder:
+  - The folder name and README become the deployment.
+  - Each `metadata.json` becomes a mission, stored verbatim (`timestamp, device, country,
+    region, site, mission, notes, properties`).
+  - Each mission ingests through today's per-folder path, as a child workflow with a
+    deterministic ID.
+  - The `manifest.json` sha256s are checked as frames are read and become the capture
+    checksums (`checksum_algorithm = 'sha256'`).
+  - FishSense intent comes from `properties`: `purpose`, `slate_template`,
+    `calibration_source` / `self_calibrates`, `priority`, `port`.
+  - Where `properties` is empty, as it is in every dataset on the NAS today, purpose is
+    inferred from the mission name, and the preflight shows it for the operator to
+    confirm or override.
+  - The metadata's `device` is a cross-check on the serial. A mismatch fails the preflight.
+  - Capture time stays EXIF; the mission timestamp is coarse. Location is stored raw
+    (`region` is free text: "San Diego" / "SanDiego").
+  - The ingest-one-folder request stays for the ~496 of 525 dives that predate e4edm.
+  - A FishSense preset in e4edm that fills `properties` is a handoff to that repo, not
+    code here.
+- **Depth source on `measurements`.** Add `depth_source` (`laser`, `lidar`,
+  `label_free`, …) so every length says how its depth was found. The automatic track
+  stays in its own tables (0036).
+- **Stages select captures, not dives.** Cohorts filter on capture, mission purpose and
+  port instead of joining `dives`, so mobile captures can enter stages. Species
+  (BioCLIP zero-shot, Label Studio species) comes first.
+- **Mobile's dragged points are human labels.** They are never altered, only superseded.
+  The read model shows them alongside the Label Studio head/tail labels.
+- **One read model.** An `observations` view (fish × capture × current length ×
+  depth_source × species × time × place × device kind × mission × tenant) behind
+  `GET /tenants/{slug}/observations`. The API, the web and later the app read only this.
+  It replaces the ad hoc joins: `v1.image` already picks up mobile captures through its
+  LEFT JOIN.
+- **One display.** One fish browser in `apps/web` (list, map, filters, detail) for both
+  devices. The detail page has an evidence panel that depends on `depth_source`:
+  - laser: dot, calibration, head/tail label;
+  - LiDAR: depth map, mask, snout/fork versions.
+  - It is the home of the per-tenant dashboards, replacing Superset. The app can later
+    read the same endpoint to show a user's fish across devices.
+
+**From wuwnet** (`wuwnet-fishsense2026@5532b99`, newer than the `440c6a4` snapshot in §2.7)
+- **Into fishsense-core, not here** (§9.21's lean):
+  - `refraction.py` (flat, layered and dome ports; Pinax);
+  - the `pipelines.py` back-projections;
+  - `water.py` (water index);
+  - `board_roll.split` (sensor vs board anisotropy from two rolls).
+- **Into v2:**
+  - calibration metadata: target type, roll coverage measured from the grid (the TG-6's
+    EXIF orientation is wrong looking down), and focus distance (near-focus calibrations
+    run about 1.4% long; unresolved);
+  - per-deployment or per-mission water conditions;
+  - structure-from-motion self-calibration as a camera-calibration producer, which also
+    fits phones;
+  - the E4E board pitch check (§9.25).
+- **Already ported:** `close_with_apparent_size` → `automatic_results/size_constancy.py`.
+- **Stays in the paper:** envelope, figures, target design and rendering, dataset loaders.
 
 ## 5. Phase 0 — prerequisites in `fishsense-core`
 - **Port the image-preprocessing pipeline to Rust** (raw decode, auto-gamma, contrast
@@ -1140,6 +1256,37 @@ overridable)*
   aspect ratio, independent of the error), **frames-per-animal**, **diver/volunteer
   identity** (a privacy question for partner tenants). None exist in v1. Mobile already
   produces masks, and they are synced since 2026-10-11 (§9.6).
+
+**9.23 — How phone captures form missions** (§4.9) — *open*
+- *Options:* inferred server-side from device + a time gap (+ distance), or opened
+  explicitly in the app using the e4edm `metadata.json` fields (then the app ships an
+  update).
+- *Blocks:* mobile captures entering mission-scoped stages and views.
+
+**9.24 — Re-measure mobile captures on the server?** (§4.4, §4.9) — *open*
+- The raw files are kept for this. A `source='server'` LiDAR measurement next to the
+  device's own is a built-in check on the phone.
+- It needs `measurements_server_provenance_check` relaxed, because that check requires a
+  laser calibration.
+- *Alternative:* trust the device's length and only validate a sample.
+
+**9.25 — E4E checkerboard per-axis pitch** (§4.9) — *open; check first*
+- The tests seed `0.04223 × 0.04211 m`, the caliper reading with the long axis +0.28%.
+  wuwnet's same-session roll split (2026-09-25) puts the print at about 1% anisotropic
+  *the other way*.
+- *To close:* a read-only check of prod's `calibration_targets` row, then a re-derivation
+  under the rigour rules. Any change to stored calibrations needs the owner's go-ahead.
+
+**9.26 — Order of the unification work** (§4.9) — *proposed*
+1. Rename dives to missions and add deployments, mission purpose and the port with its
+   provenance (backfill dry-run first).
+2. The `observations` view and API, plus the web fish browser.
+3. Direct e4edm ingest (the never-ingested Canyonview / Scripps Pier / Sealab / NIWC
+   datasets are the first users).
+4. Species for mobile captures.
+5. The board pitch check (§9.25).
+6. The wuwnet math into fishsense-core.
+7. Server re-measurement (§9.24).
 
 ### C. Decide late — post-parity
 
