@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.9.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.8.0...v0.9.0) (2026-10-18)
+
+
+### Features
+
+* **api,web:** derive place names the app couldn't give, on our own geocoder ([78ace6c](https://github.com/UCSD-E4E/fishsense-services/commit/78ace6ce3dc18c4f46596adc740899e63453b0cd))
+* derive place names the app couldn't give, on our own geocoder ([cc32423](https://github.com/UCSD-E4E/fishsense-services/commit/cc324238c49926325d0b4d458f9681725b907eb2))
+
+
+### Bug Fixes
+
+* **api:** renumber the automatic migrations after 0041_capture_place_names ([330268d](https://github.com/UCSD-E4E/fishsense-services/commit/330268dd67a521795cab5a1497d5c8da3e8564b0))
+* **api:** renumber the automatic migrations after 0041_capture_place_names ([8878823](https://github.com/UCSD-E4E/fishsense-services/commit/887882358292704e644e22ab6998cb7966efd971))
+* **automatic:** a dive's strikes reset when a later run gets further ([1511ae1](https://github.com/UCSD-E4E/fishsense-services/commit/1511ae17552d8750dc70c2c520ccb77ad1268ef1))
+* **automatic:** a dive's strikes reset when a later run gets further ([7ae5cc0](https://github.com/UCSD-E4E/fishsense-services/commit/7ae5cc08dab2e11ac6adb009c1ae3f6a2b2b7995))
+* **automatic:** an unscored SAM mask is never a prediction ([50c98c4](https://github.com/UCSD-E4E/fishsense-services/commit/50c98c45fbf5d946a87c0ca2b3b8ac79440963a6))
+* **automatic:** one frame that keeps failing no longer costs the dive ([8c81cb8](https://github.com/UCSD-E4E/fishsense-services/commit/8c81cb863d45b2614fdd8191e776eddfb53723b1))
+* **automatic:** phase B — SAM gate, export filters, GPU-skip reports, bounded frame retries ([6409639](https://github.com/UCSD-E4E/fishsense-services/commit/6409639f607ed83f1685a695cb055a100d5bac2b))
+* **automatic:** review of [#85](https://github.com/UCSD-E4E/fishsense-services/issues/85) -- frame failures are the frame's, owed frames wait ([682d3a4](https://github.com/UCSD-E4E/fishsense-services/commit/682d3a45fd51068f03cd4ea5bbc8b919dee48135))
+* **automatic:** runs report what they skipped, and stop without a GPU ([4b2cc7f](https://github.com/UCSD-E4E/fishsense-services/commit/4b2cc7f829a34744bdbb92956d38ce1d8eac001a))
+* **automatic:** the export drops slate frames and flags human-measured dives ([0a0519b](https://github.com/UCSD-E4E/fishsense-services/commit/0a0519b59a3241c529b51ae257a4441cab271d97))
+
+
+### Documentation
+
+* **plan:** one system for Lite and Mobile ([5edb9e8](https://github.com/UCSD-E4E/fishsense-services/commit/5edb9e8bfb05d76491e6817e319c8ff1f9b0fb4b))
+* **plan:** one system for Lite and Mobile (missions, deployments, port provenance) ([9c19a28](https://github.com/UCSD-E4E/fishsense-services/commit/9c19a28eee301ef6048f08d0f2d708d0156df2fa))
+
 ## [0.8.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.7.1...v0.8.0) (2026-10-15)
 
 
