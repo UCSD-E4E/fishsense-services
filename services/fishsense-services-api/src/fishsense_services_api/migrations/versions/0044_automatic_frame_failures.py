@@ -15,14 +15,14 @@ and cost a dive with one corrupt raw its calibration and every length.
   between the kernel and the score lookup, a bug to count, not the
   scientific answer ``laser_off_all_fish``.
 
-Revision ID: 0043
-Revises: 0042
+Revision ID: 0044
+Revises: 0043
 """
 
 from alembic import context, op
 
-revision = "0043"
-down_revision = "0042"
+revision = "0044"
+down_revision = "0043"
 
 ACTIVE_TENANT = "NULLIF(current_setting('app.tenant_id', true), '')::uuid"
 HEAD_TAILS = "automatic_head_tail_predictions"
