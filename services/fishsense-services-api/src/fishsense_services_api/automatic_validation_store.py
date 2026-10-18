@@ -16,7 +16,14 @@ the frames humans labelled, as the paper chose them:
 * the automatic chain's current output for the frame
   (`current_automatic_head_tail_predictions`), unless `outputs` supplies it;
   then a frame `outputs` does not name was not run, and is left out (the
-  paper sampled 200 frames of each of reef dives 362 and 366).
+  paper sampled 200 frames of each of reef dives 362 and 366);
+* **the paper's own reef frames** when `reef_frames` names them (v1 image id
+  -> dive; the CLI passes `PAPER_REEF_FRAMES`, Phase C): the reef dives'
+  frames are exactly those, and one whose head/tail label has no points -- a
+  labeller's "not measurable" -- is in, as `rejected`.
+
+`session_calibrations` is Table 3's input: each session's stored laser axis
+and its own accepted label-free fit, as the fit recorded it.
 """
 
 from __future__ import annotations
@@ -28,9 +35,12 @@ from typing import Any, Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from fishsense_services_api.automatic_validation import ValidationFrame
+from fishsense_services_api.automatic_validation import (
+    SessionCalibration,
+    ValidationFrame,
+)
 
-__all__ = ["validation_frames"]
+__all__ = ["session_calibrations", "validation_frames"]
 
 _VALID_LASER = (
     "l.completed AND NOT l.superseded AND l.x IS NOT NULL AND l.y IS NOT NULL"
@@ -41,7 +51,7 @@ _VALID_HT = (
 )
 
 _FRAMES = text(f"""
-    SELECT d.number AS dive_number, c.number AS capture_number,
+    SELECT d.number AS dive_number, c.number AS capture_number, c.v1_id,
            (SELECT s.number FROM dives s WHERE s.tenant_id = d.tenant_id
               AND s.id = d.calibration_source_dive_id) AS link_number,
            ll.x AS laser_x, ll.y AS laser_y, ll.label AS laser,
@@ -63,11 +73,11 @@ _FRAMES = text(f"""
         WHERE l.tenant_id = c.tenant_id AND l.capture_id = c.id AND {_VALID_LASER}
         ORDER BY l.number LIMIT 1
     ) ll
-    CROSS JOIN LATERAL (
+    LEFT JOIN LATERAL (
         SELECT h.head_x, h.head_y, h.tail_x, h.tail_y FROM head_tail_labels h
         WHERE h.tenant_id = c.tenant_id AND h.capture_id = c.id AND {_VALID_HT}
         ORDER BY h.number LIMIT 1
-    ) ht
+    ) ht ON true
     LEFT JOIN LATERAL (
         SELECT s.content_of_image FROM species_labels s
         WHERE s.tenant_id = c.tenant_id AND s.capture_id = c.id AND NOT s.superseded
@@ -114,6 +124,7 @@ async def validation_frames(
     reef_dives: Sequence[int],
     outputs: Optional[Mapping[int, Mapping[str, Any]]] = None,
     label_free: Optional[Mapping[int, tuple]] = None,
+    reef_frames: Optional[Mapping[int, Any]] = None,
 ) -> list[ValidationFrame]:
     """The paper's frames. `outputs` (by capture number: ``auto_dot``,
     ``auto_head_tail``, ``auto_head_tail_humandot``) and `label_free` (by dive
@@ -131,6 +142,12 @@ async def validation_frames(
         _FRAMES, {"t": tenant_id, "dives": [*pool_dives, *reef_dives]}
     ):
         is_pool = r.dive_number in pool_dives
+        listed = not is_pool and reef_frames is not None and r.v1_id in reef_frames
+        if not is_pool and reef_frames is not None and not listed:
+            continue  # not among the paper's frames
+        measured = r.head_x is not None
+        if not measured and not listed:
+            continue  # stage 14 takes only frames with both labels
         model = _model(r.content) if is_pool else None
         if is_pool and model is None:
             continue
@@ -167,12 +184,53 @@ async def validation_frames(
                 green=(r.laser or "").startswith("Green"),
                 camera_matrix=[[float(v) for v in row] for row in r.camera_matrix],
                 human_dot=(r.laser_x, r.laser_y),
-                human_head_tail=(r.head_x, r.head_y, r.tail_x, r.tail_y),
+                human_head_tail=(
+                    (r.head_x, r.head_y, r.tail_x, r.tail_y) if measured else None
+                ),
                 auto_dot=auto_dot,
                 auto_head_tail=auto_ht,
                 stored_calibration=_calibration(r.stored_position, r.stored_axis),
                 label_free_calibration=lf,
                 auto_head_tail_humandot=humandot,
+                rejected=not measured,
             )
         )
     return frames
+
+
+_SESSIONS = text("""
+    SELECT d.number AS dive_number, cc.camera_matrix, g.laser_axis AS stored_axis,
+           lf.vanishing_px, lf.line_direction
+    FROM dives d
+    JOIN current_camera_calibrations cc
+      ON cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
+     AND cc.camera_model = 'pinhole'
+    LEFT JOIN dive_laser_geometry g ON g.tenant_id = d.tenant_id AND g.dive_id = d.id
+    LEFT JOIN current_automatic_laser_calibrations lf
+      ON lf.tenant_id = d.tenant_id AND lf.dive_id = d.id AND lf.outcome = 'accepted'
+    WHERE d.tenant_id = :t AND d.number = ANY(:dives)
+    ORDER BY d.number
+    """)
+
+
+async def session_calibrations(
+    conn: AsyncConnection, tenant_id: uuid.UUID, dives: Sequence[int]
+) -> list[SessionCalibration]:
+    """Table 3's sessions: the stored laser axis, and the session's *own*
+    accepted label-free fit (never a link's: Table 3 fits each session)."""
+    return [
+        SessionCalibration(
+            dive_number=r.dive_number,
+            camera_matrix=[[float(v) for v in row] for row in r.camera_matrix],
+            stored_axis=(
+                None if r.stored_axis is None else [float(v) for v in r.stored_axis]
+            ),
+            vanishing_px=None if r.vanishing_px is None else float(r.vanishing_px),
+            line_direction=(
+                None
+                if r.line_direction is None
+                else [float(v) for v in r.line_direction]
+            ),
+        )
+        for r in await conn.execute(_SESSIONS, {"t": tenant_id, "dives": list(dives)})
+    ]
