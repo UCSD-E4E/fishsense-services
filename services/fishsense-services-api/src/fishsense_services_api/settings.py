@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     #: Garage as phones and browsers reach it; presigned URLs are signed for it.
     object_store_public_url: str | None = None
     object_store_region: str = "garage"
+    #: Our own Photon geocoder (place_names.py), which names the places of
+    #: captures the app couldn't name in the field. Self-hosted, so capture
+    #: locations stay ours. Unset, no place names are derived.
+    geocoder_url: str | None = None
+    geocoder_timeout_seconds: float = 3.0
+    #: How far from a capture a named place may be.
+    geocoder_radius_km: float = 25.0
 
     @field_validator("oidc_audiences", mode="before")
     @classmethod

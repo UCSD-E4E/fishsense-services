@@ -3,6 +3,7 @@ import {
   chooseTenant,
   formatLength,
   getCapturePage,
+  placeName,
   type CapturePage,
 } from "@/lib/captures";
 import { getMyTenants, type TenantMembership } from "@/lib/fishsense-api";
@@ -105,9 +106,7 @@ export default async function CapturesPage({ searchParams }: Props) {
                     <div className="text-slate-500">
                       {new Date(c.captured_at).toLocaleString()}
                     </div>
-                    {c.place_name && (
-                      <div className="text-slate-500">{c.place_name}</div>
-                    )}
+                    <Place capture={c} />
                   </div>
                 </Link>
               </li>
@@ -126,5 +125,16 @@ export default async function CapturesPage({ searchParams }: Props) {
         </>
       )}
     </main>
+  );
+}
+
+function Place({ capture }: { capture: Parameters<typeof placeName>[0] }) {
+  const place = placeName(capture);
+  if (!place) return null;
+  return (
+    <div className="text-slate-500">
+      {place.name}
+      {place.derived ? " (from coordinates)" : ""}
+    </div>
   );
 }

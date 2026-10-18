@@ -15,6 +15,7 @@ from fishsense_services_api.auth import (
     MultiIssuerValidator,
     TokenValidator,
 )
+from fishsense_services_api.place_names import PhotonGeocoder
 from fishsense_services_api.settings import Settings
 from fishsense_services_api.tenant_stores import TenantStores
 
@@ -55,8 +56,18 @@ def create_app_from_env() -> FastAPI:
             public_endpoint_url=settings.object_store_public_url,
             region=settings.object_store_region,
         )
+    geocoder = None
+    if settings.geocoder_url:
+        geocoder = PhotonGeocoder(
+            settings.geocoder_url,
+            timeout_seconds=settings.geocoder_timeout_seconds,
+            radius_km=settings.geocoder_radius_km,
+        )
     app = create_app(
-        engine=engine, validator=MultiIssuerValidator(validators), stores=stores
+        engine=engine,
+        validator=MultiIssuerValidator(validators),
+        stores=stores,
+        geocoder=geocoder,
     )
 
     @asynccontextmanager

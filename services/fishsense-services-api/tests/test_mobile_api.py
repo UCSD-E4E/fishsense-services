@@ -28,15 +28,19 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from datetime import timedelta
 from collections.abc import AsyncIterator
 
 import httpx
 import jwt
 import pytest
+from sqlalchemy import text
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from fishsense_services_api.app import create_app
 from fishsense_services_api.auth import StaticKeySource, TokenValidator
+from fishsense_services_api.place_name_store import RETRY_NO_NAME_AFTER
+from fishsense_services_api.place_names import GeocoderUnavailable, ReverseGeocode
 from fishsense_services_api.tenant_stores import TenantStore, TenantStores
 from garage import REGION
 
@@ -148,13 +152,21 @@ def stores(garage) -> TenantStores:
 
 
 @pytest.fixture
-async def client(app_engine, stores) -> AsyncIterator[httpx.AsyncClient]:
+def geocoder():
+    """No geocoder unless a test brings one (see `TestDerivedPlaceNames`)."""
+    return None
+
+
+@pytest.fixture
+async def client(app_engine, stores, geocoder) -> AsyncIterator[httpx.AsyncClient]:
     validator = TokenValidator(
         issuer=ISSUER,
         audiences=(AUDIENCE,),
         keys=StaticKeySource({KID: SIGNING_KEY.public_key()}),
     )
-    app = create_app(engine=app_engine, validator=validator, stores=stores)
+    app = create_app(
+        engine=app_engine, validator=validator, stores=stores, geocoder=geocoder
+    )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://api.test"
     ) as c:
@@ -663,3 +675,158 @@ async def test_a_known_origin_still_names_its_algorithm(tenants, client, origin)
     )
 
     assert response.status_code == 422
+
+
+# -- place names derived on our own geocoder (fishsense-mobile #72) -----------------
+#
+# The app often can't name a place in the field, and a committed capture is
+# immutable, so the server derives the name from the capture's coordinates --
+# in the background, never holding up a commit or a page -- and keeps it
+# apart from what the app sent.
+
+
+class FakeGeocoder:
+    def __init__(self) -> None:
+        self.answer: ReverseGeocode | Exception = ReverseGeocode(
+            place_name="La Jolla Cove, San Diego, California, United States",
+            source="photon",
+            properties={"name": "La Jolla Cove"},
+        )
+        self.calls: list[tuple[float, float]] = []
+
+    async def reverse(self, latitude: float, longitude: float) -> ReverseGeocode:
+        self.calls.append((latitude, longitude))
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return self.answer
+
+
+def _unnamed(**location) -> dict:
+    return {"latitude": 32.8506, "longitude": -117.2717, **location}
+
+
+class TestDerivedPlaceNames:
+    @pytest.fixture
+    def geocoder(self):
+        return FakeGeocoder()
+
+    async def _detail(self, client, capture) -> dict:
+        response = await client.get(
+            f"/tenants/lab/mobile/captures/{capture}", headers=_bearer(ALICE)
+        )
+        return response.json()
+
+    async def test_a_capture_without_a_name_gets_one_after_its_commit(
+        self, tenants, client, geocoder
+    ):
+        capture = uuid.uuid4()
+
+        await _sync(client, capture, location=_unnamed())
+
+        detail = await self._detail(client, capture)
+        assert geocoder.calls == [(32.8506, -117.2717)]
+        assert detail["derived_place_name"] == (
+            "La Jolla Cove, San Diego, California, United States"
+        )
+        # What the app sent is untouched: the capture is immutable.
+        assert detail["location"]["place_name"] is None
+
+    async def test_a_capture_the_app_named_is_left_alone(
+        self, tenants, client, geocoder
+    ):
+        capture = uuid.uuid4()
+
+        await _sync(client, capture)  # the app named it "La Jolla Cove"
+
+        assert geocoder.calls == []
+        assert (await self._detail(client, capture))["derived_place_name"] is None
+
+    async def test_a_capture_without_coordinates_is_not_geocoded(
+        self, tenants, client, geocoder
+    ):
+        capture = uuid.uuid4()
+
+        await _sync(client, capture, location=None)
+
+        assert geocoder.calls == []
+
+    async def test_an_outage_is_retried_when_the_capture_is_next_read(
+        self, tenants, client, geocoder
+    ):
+        capture = uuid.uuid4()
+        geocoder.answer = GeocoderUnavailable("connection refused")
+        await _sync(client, capture, location=_unnamed())
+        assert (await self._detail(client, capture))["derived_place_name"] is None
+
+        geocoder.answer = ReverseGeocode(place_name="Scripps Pier", source="photon")
+        await self._detail(client, capture)  # this read schedules the retry
+
+        assert (await self._detail(client, capture))["derived_place_name"] == (
+            "Scripps Pier"
+        )
+
+    async def test_a_place_with_no_name_is_not_asked_again_and_again(
+        self, tenants, client, geocoder
+    ):
+        """Open ocean: "no name here" is an answer, kept, not an outage."""
+        capture = uuid.uuid4()
+        geocoder.answer = ReverseGeocode(place_name=None, source="photon")
+        await _sync(client, capture, location=_unnamed())
+
+        for _ in range(3):
+            await self._detail(client, capture)
+
+        assert len(geocoder.calls) == 1
+
+    async def test_the_list_shows_derived_names_and_fills_missing_ones(
+        self, tenants, client, geocoder
+    ):
+        capture = uuid.uuid4()
+        geocoder.answer = GeocoderUnavailable("down")
+        await _sync(client, capture, location=_unnamed())
+        geocoder.answer = ReverseGeocode(place_name="Scripps Pier", source="photon")
+
+        await client.get("/tenants/lab/mobile/captures", headers=_bearer(BOB))
+        page = (
+            await client.get("/tenants/lab/mobile/captures", headers=_bearer(BOB))
+        ).json()
+
+        assert page["captures"][0]["derived_place_name"] == "Scripps Pier"
+        assert page["captures"][0]["place_name"] is None
+
+    async def test_no_name_is_asked_again_once_it_is_old(
+        self, tenants, client, geocoder, owner_engine
+    ):
+        """The geocoder's map data changes; "no name" is re-asked after
+        RETRY_NO_NAME_AFTER."""
+        capture = uuid.uuid4()
+        geocoder.answer = ReverseGeocode(place_name=None, source="photon")
+        await _sync(client, capture, location=_unnamed())
+        async with owner_engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE capture_place_names"
+                    " SET derived_at = now() - CAST(:age AS interval)"
+                ),
+                {"age": RETRY_NO_NAME_AFTER + timedelta(days=1)},
+            )
+        geocoder.answer = ReverseGeocode(place_name="Scripps Pier", source="photon")
+
+        await self._detail(client, capture)
+
+        assert (await self._detail(client, capture))["derived_place_name"] == (
+            "Scripps Pier"
+        )
+
+
+async def test_without_a_geocoder_nothing_is_derived(tenants, client):
+    capture = uuid.uuid4()
+
+    await _sync(client, capture, location=_unnamed())
+
+    detail = (
+        await client.get(
+            f"/tenants/lab/mobile/captures/{capture}", headers=_bearer(ALICE)
+        )
+    ).json()
+    assert detail["derived_place_name"] is None

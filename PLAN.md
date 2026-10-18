@@ -1125,6 +1125,11 @@ overridable); built in migration 0013*
   blocking decision below is settled as **(a)**: the app keeps the **lossless frame** it
   measured on (`rgb_lossless`), and the **mask is synced** (overriding "do not sync it").
   Older builds without the lossless frame still sync.
+- ***Decided 2026-10-16 (owner):*** **place names the app couldn't give are derived on the
+  server**, from the capture's coordinates, on a **self-hosted** Photon geocoder (krg-infra:
+  `docs/handoff/krg-infra/GEOCODER.md`) -- capture locations never leave our infrastructure.
+  Kept apart from the immutable capture (0041 `capture_place_names`), filled in the background
+  after a commit or a read, shown on the web as derived.
 - **Direction: one-way per data class — no conflict resolution needed.**
   - *mobile → server*: captures + form responses = **append-only immutable facts**. A redone
     two-point selection is a **new append-only measurement version**, not a conflict.

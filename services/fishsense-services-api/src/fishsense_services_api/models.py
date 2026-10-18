@@ -1442,3 +1442,31 @@ class AutomaticResultsFailure(Base):
     step: Mapped[str] = mapped_column(Text)
     error: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
+
+
+class CapturePlaceName(Base):
+    """A place name derived from a capture's coordinates (0041). Append-only;
+    the current name is the latest. NULL: no named place in range."""
+
+    __tablename__ = "capture_place_names"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "capture_id"], ["captures.tenant_id", "captures.id"]
+        ),
+        Index(
+            "capture_place_names_tenant_id_capture_id_derived_at_idx",
+            "tenant_id",
+            "capture_id",
+            "derived_at",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    place_name: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(Text)
+    properties: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    derived_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )

@@ -184,6 +184,17 @@
             "title": "Client Capture Uuid",
             "type": "string"
           },
+          "derived_place_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derived Place Name"
+          },
           "latitude": {
             "anyOf": [
               {
@@ -315,6 +326,17 @@
           },
           "depth": {
             "$ref": "#/components/schemas/DepthGeometry"
+          },
+          "derived_place_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derived Place Name"
           },
           "device": {
             "$ref": "#/components/schemas/DeviceInfo"

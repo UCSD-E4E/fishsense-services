@@ -153,6 +153,7 @@ Notes on the commit body:
 
 - `location`, `orientation`, `camera_pose`, `mask` and `measurements` are optional.
 - `app_version`, `core_version` and `model_version` may be null, for a capture from before the app recorded them (v7). Send null, never a made-up value.
+- `location.place_name` may be null. The app does what it can before the first commit, but in the field it often can't. The server then derives a name from `latitude` and `longitude` on our own geocoder, keeps it apart from what the app sent, and shows it on the web as derived (fishsense-mobile #72).
 - **Any other field you add is kept.** The server stores the whole body as the capture's manifest, so send anything the app records, even if this list doesn't name it.
 
 **Measurement version** (in `measurements`, or `POST …/measurements`)
