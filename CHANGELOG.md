@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.10.1...v0.11.0) (2026-10-18)
+
+
+### Features
+
+* one browser for every measured fish, Lite and Mobile alike ([45c2e11](https://github.com/UCSD-E4E/fishsense-services/commit/45c2e11e6933cae04cc1d214a16ce68719916fa4))
+* one browser for every measured fish, Lite and Mobile alike ([08b1380](https://github.com/UCSD-E4E/fishsense-services/commit/08b138092eea483e3fdab701be0fc32b9c7d5240))
+
 ## [0.10.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.10.0...v0.10.1) (2026-10-18)
 
 
