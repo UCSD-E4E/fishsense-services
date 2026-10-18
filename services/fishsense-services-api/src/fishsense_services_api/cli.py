@@ -11,6 +11,9 @@ fishsense-services-api add-tenant conservation-angler \\
     --name "Conservation Angler" --org-claim conservation-angler
                                     # a partner's tenant, joined by its org's
                                     # invitees (migration 0037), as the owner
+fishsense-services-api dev-seed --frames deploy/local/ui/frames
+                                    # LOCAL ONLY: the UI harness's synthetic
+                                    # tenant (compose.ui.yml, dev_seed.py)
 """
 
 import argparse
@@ -20,12 +23,14 @@ import re
 import sys
 import uuid
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from fishsense_services_api import dev_seed
 from fishsense_services_api.automatic_validation import (
     PAPER_CALIBRATION_SESSIONS,
     PAPER_POOL_DIVES,
@@ -62,8 +67,10 @@ from fishsense_services_api.range_trend_store import (
     range_trend_inputs,
 )
 from fishsense_services_api.schema_audit import tenancy_violations
+from fishsense_services_api.tenant_stores import TenantStores, read_stores_file
 from fishsense_services_api.settings import (
     AuditSettings,
+    DevSeedSettings,
     MigrationSettings,
     V1MigrationSettings,
 )
@@ -139,6 +146,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="the partner org (Authentik `org` claim) whose accounts join this "
         "tenant as members; left as it is when omitted",
     )
+    seed = commands.add_parser(
+        "dev-seed",
+        help="LOCAL ONLY: seed the UI harness's synthetic tenant (compose.ui.yml); "
+        "refuses any database that isn't local",
+    )
+    seed.add_argument(
+        "--frames",
+        type=Path,
+        required=True,
+        help="a directory of JPEGs and their frames.json (where each fish is)",
+    )
     return parser
 
 
@@ -155,6 +173,8 @@ async def main(argv: Sequence[str]) -> int:
         return await _validate_automatic(args)
     if args.command == "add-tenant":
         return await _add_tenant(args)
+    if args.command == "dev-seed":
+        return await _dev_seed(args)
     return 2  # unreachable: argparse rejects unknown commands
 
 
@@ -190,6 +210,56 @@ async def _add_tenant(args: argparse.Namespace) -> int:
         await engine.dispose()
     claim = f", joined by org {args.org_claim}" if args.org_claim else ""
     print(f"tenant {args.slug} ({args.name}){claim}")
+    return 0
+
+
+async def _dev_seed(args: argparse.Namespace) -> int:
+    settings = _settings(DevSeedSettings)
+    if settings is None:
+        return 2
+    database_url = settings.migration_database_url.get_secret_value()
+    try:
+        dev_seed.assert_local_url(database_url)
+    except dev_seed.NotLocal as error:
+        print(f"dev-seed REFUSED: {error}", file=sys.stderr)
+        return 1
+    configured = read_stores_file(settings.tenant_stores_file)
+    if dev_seed.TENANT not in configured:
+        print(
+            f"dev-seed: {settings.tenant_stores_file} has no store for tenant"
+            f" {dev_seed.TENANT!r}",
+            file=sys.stderr,
+        )
+        return 2
+    await asyncio.to_thread(
+        dev_seed.bootstrap_garage,
+        settings.dev_garage_admin_url,
+        settings.dev_garage_admin_token.get_secret_value(),
+        configured,
+    )
+    stores = TenantStores(
+        endpoint_url=settings.object_store_endpoint_url,
+        public_endpoint_url=settings.object_store_public_url,
+        region=settings.object_store_region,
+        stores=configured,
+    )
+    engine = create_async_engine(database_url)
+    try:
+        report = await dev_seed.seed(
+            engine, frames=dev_seed.load_frames(args.frames), stores=stores
+        )
+    except dev_seed.NotLocal as error:
+        print(f"dev-seed REFUSED: {error}", file=sys.stderr)
+        return 1
+    finally:
+        await engine.dispose()
+    if report.created:
+        print(
+            f"seeded tenant {dev_seed.TENANT}: {report.lite_captures} Lite and"
+            f" {report.mobile_captures} mobile captures"
+        )
+    else:
+        print(f"tenant {dev_seed.TENANT} was already seeded -- nothing changed")
     return 0
 
 

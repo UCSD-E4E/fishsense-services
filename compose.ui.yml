@@ -1,0 +1,80 @@
+# The UI harness: test the web locally, with sign-in and data, no production.
+#
+#   deploy/local/ui/up.sh        # stack + seed, then the web on :3000
+#
+# On top of compose.yml it adds a mock sign-in (any username; optional claims
+# such as `org` or `groups` go in the login form) and a local Garage, points
+# the API at both, and runs `dev-seed` once: the synthetic `lab` tenant
+# (dev_seed.py). The web runs on the host (`npm run dev`, deploy/local/ui/
+# web.env), because the browser and the web must reach the sign-in at the
+# same address -- the issuer in every token.
+#
+# Dev-only secrets throughout. dev-seed refuses any database that isn't this
+# one.
+
+services:
+  oidc:
+    image: ghcr.io/navikt/mock-oauth2-server:2.1.10
+    environment:
+      JSON_CONFIG_PATH: /ui/oidc.json
+    volumes:
+      - ./deploy/local/ui:/ui:ro
+    ports:
+      - "127.0.0.1:9090:8080"
+
+  garage:
+    image: dxflrs/garage:v2.1.0
+    volumes:
+      - ./deploy/local/ui/garage.toml:/etc/garage.toml:ro
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+    ports:
+      - "127.0.0.1:3900:3900"
+    healthcheck:
+      test: ["CMD", "/garage", "status"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  api:
+    environment:
+      # Tokens name the issuer as the browser reached it; the API fetches its
+      # keys inside the compose network.
+      FISHSENSE_OIDC_ISSUER: http://localhost:9090/fishsense-web
+      FISHSENSE_OIDC_JWKS_URL: http://oidc:8080/fishsense-web/jwks
+      FISHSENSE_TENANT_STORES_FILE: /ui/tenant-stores.json
+      FISHSENSE_OBJECT_STORE_ENDPOINT_URL: http://garage:3900
+      FISHSENSE_OBJECT_STORE_PUBLIC_URL: http://localhost:3900
+    volumes:
+      - ./deploy/local/ui:/ui:ro
+    depends_on:
+      oidc:
+        condition: service_started
+      garage:
+        condition: service_healthy
+
+  seed:
+    build:
+      context: .
+      target: api
+    command: ["fishsense-services-api", "dev-seed", "--frames", "/ui/frames"]
+    environment:
+      FISHSENSE_MIGRATION_DATABASE_URL: postgresql+psycopg://fishsense_owner:owner-dev-only@postgres/fishsense
+      FISHSENSE_TENANT_STORES_FILE: /ui/tenant-stores.json
+      FISHSENSE_OBJECT_STORE_ENDPOINT_URL: http://garage:3900
+      # The seed uploads from inside the network, so it signs for garage:3900.
+      FISHSENSE_OBJECT_STORE_PUBLIC_URL: http://garage:3900
+      FISHSENSE_DEV_GARAGE_ADMIN_URL: http://garage:3903
+      FISHSENSE_DEV_GARAGE_ADMIN_TOKEN: ui-dev-only-admin-token
+    volumes:
+      - ./deploy/local/ui:/ui:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      garage:
+        condition: service_healthy
+    profiles: ["seed"]
+
+volumes:
+  garage-meta:
+  garage-data:
