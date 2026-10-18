@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.11.2](https://github.com/UCSD-E4E/fishsense-services/compare/v0.11.1...v0.11.2) (2026-10-18)
+
+
+### Bug Fixes
+
+* **nrp:** a writable home for the processors, and one GPU frame at a time ([17f999c](https://github.com/UCSD-E4E/fishsense-services/commit/17f999c266d6de59ccb3e930cdd7062fb8d2eb6c))
+* **nrp:** a writable home for the processors, and one GPU frame at a time ([de960e6](https://github.com/UCSD-E4E/fishsense-services/commit/de960e68de0067cab02cd819e54e46edb5a44798))
+* **nrp:** review of [#110](https://github.com/UCSD-E4E/fishsense-services/issues/110) -- home in the image, a GPU cap sized by the card, frame-scaled timeouts ([240c7b5](https://github.com/UCSD-E4E/fishsense-services/commit/240c7b5aa91a379cc0c9f01bd89425cdb7b62316))
+
 ## [0.11.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.11.0...v0.11.1) (2026-10-18)
 
 
