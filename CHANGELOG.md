@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.11.0...v0.11.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* **processor:** pin setuptools below 82 so SAM 3.1 imports again ([a20022b](https://github.com/UCSD-E4E/fishsense-services/commit/a20022b87fd3de8becb87c5fa6b20ce050b8eed7))
+* **processor:** review of [#103](https://github.com/UCSD-E4E/fishsense-services/issues/103) -- the real SAM 3.1 imports, as the app user ([64a17da](https://github.com/UCSD-E4E/fishsense-services/commit/64a17da4c8845ab28b2ef839132d22b75170a89b))
+
 ## [0.11.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.10.1...v0.11.0) (2026-10-18)
 
 
