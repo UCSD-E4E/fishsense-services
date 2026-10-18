@@ -10,7 +10,9 @@ show:
   and ``web-service``, the landing page's service account (member);
 * a measured Lite dive: one frame per :class:`Frame`, each with a laser dot,
   head/tail and species label, a laser depth and a current server
-  measurement. The frames are real (Ginny, the known-length decoy, from
+  measurement. The first :data:`DECOY_FRAMES` are labelled as what they
+  are, the fish model Ginny with her known length (most of production's
+  fish are models); the rest carry a species, so the UI shows both. The frames are real (Ginny, the known-length decoy, from
   ``2025.01.17.FishSense.San Diego``), but **every label and number here is
   made up**: plausible, consistent with a pinhole camera, and not data;
 * FishSense Mobile captures committed the way the API commits them: files PUT
@@ -85,6 +87,10 @@ LITE_LABEL = f"Fish, {LITE_SPECIES[1]} ({LITE_SPECIES[0]})"
 MOBILE_CAPTURES = 3
 #: Ginny's calipered length; the seed's lengths scatter around it.
 DECOY_LENGTH_M = 0.3127
+DECOY_MODEL = "Ginny"
+DECOY_LABEL = f"Fish Model, {DECOY_MODEL}"
+#: How many of the frames are labelled as the decoy (the rest, a species).
+DECOY_FRAMES = 3
 #: Every seeded dive's path starts here, which is how a rerun finds the seed.
 DIVE_PREFIX = "dev-seed/"
 DIVE_PATH = DIVE_PREFIX + "2025.01.17.FishSense.San Diego/ED-00/FSL-10D/Ginny"
@@ -363,12 +369,34 @@ async def _lite(
     species = await _scalar(
         conn, "SELECT ensure_species(:s, :c)", s=LITE_SPECIES[0], c=LITE_SPECIES[1]
     )
+    # The decoy: a global model (and its known length, if the database has
+    # none yet) and the tenant's one fish for it (0012: one per model).
+    model = await _scalar(conn, "SELECT ensure_fish_model(:n)", n=DECOY_MODEL)
+    await conn.execute(
+        text(
+            "INSERT INTO fish_model_references (name, known_length_m, notes) "
+            "SELECT :n, :len, 'dev seed: Ginny, calipered' WHERE NOT EXISTS "
+            "(SELECT 1 FROM fish_model_references WHERE name = :n)"
+        ),
+        {"n": DECOY_MODEL, "len": DECOY_LENGTH_M},
+    )
+    await conn.execute(
+        text(
+            "INSERT INTO fish (tenant_id, fish_model_id) VALUES (:t, :m) "
+            "ON CONFLICT (tenant_id, fish_model_id) DO NOTHING"
+        ),
+        {"t": tenant_id, "m": model},
+    )
+    decoy = await one(
+        "SELECT id FROM fish WHERE tenant_id = :t AND fish_model_id = :m", m=model
+    )
 
     for i, frame in enumerate(frames):
         project = 900_000 + i
         capture = await one(
             "INSERT INTO captures (tenant_id, dive_id, device_id, source_path, "
-            "captured_at, checksum) VALUES (:t, :d, :dev, :p, :at, :sum) RETURNING id",
+            "captured_at, checksum, is_canonical) VALUES (:t, :d, :dev, :p, :at, :sum, "
+            "true) RETURNING id",
             d=dive,
             dev=device,
             p=f"{DIVE_PATH}/{frame.name}.ORF",
@@ -400,12 +428,15 @@ async def _lite(
             "'human', :p, true, true, :content) RETURNING id",
             c=capture,
             p=project,
-            content=LITE_LABEL,
+            content=DECOY_LABEL if i < DECOY_FRAMES else LITE_LABEL,
         )
-        fish = await one(
-            "INSERT INTO fish (tenant_id, species_id) VALUES (:t, :s) RETURNING id",
-            s=species,
-        )
+        if i < DECOY_FRAMES:
+            fish = decoy
+        else:
+            fish = await one(
+                "INSERT INTO fish (tenant_id, species_id) VALUES (:t, :s) RETURNING id",
+                s=species,
+            )
         # A pinhole camera: length = depth * pixel span / focal length. The
         # depth is chosen so the length lands near the decoy's own.
         span = hypot(frame.tail[0] - frame.head[0], frame.tail[1] - frame.head[1])

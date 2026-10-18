@@ -54,6 +54,12 @@ export default async function HomePage() {
         </div>
         <div className="flex items-center gap-3">
           <Link
+            href="/fish"
+            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium shadow-xs transition hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+          >
+            Fish
+          </Link>
+          <Link
             href="/captures"
             className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium shadow-xs transition hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
           >

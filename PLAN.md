@@ -1282,16 +1282,27 @@ overridable)*
 - *To close:* a read-only check of prod's `calibration_targets` row, then a re-derivation
   under the rigour rules. Any change to stored calibrations needs the owner's go-ahead.
 
-**9.26 — Order of the unification work** (§4.9) — *proposed*
-1. Rename dives to missions and add deployments, mission purpose and the port with its
+**9.26 — Order of the unification work** (§4.9) — *in progress; phased, each tested in
+the UI as it lands (decided 2026-10-17)*
+0. ***Built 2026-10-18 (#92):*** a local UI harness (`compose.ui.yml`): mock sign-in, a local
+   Garage, and `dev-seed`'s synthetic tenant. `dev-seed` refuses any database not marked as
+   the harness's.
+1. ***Built 2026-10-18:*** the `observations` view (0045), `GET /tenants/{slug}/observations`
+   and its detail, and the web's `/fish` browser for Lite and Mobile together. The detail
+   shows the method's evidence and a fish model's error against its known length. Lite
+   fish show no photo, and the map waits until Lite has locations (step 2's sites).
+2. Rename dives to missions and add deployments, mission purpose and the port with its
    provenance (backfill dry-run first).
-2. The `observations` view and API, plus the web fish browser.
 3. Direct e4edm ingest (the never-ingested Canyonview / Scripps Pier / Sealab / NIWC
    datasets are the first users).
-4. Species for mobile captures.
-5. The board pitch check (§9.25).
-6. The wuwnet math into fishsense-core.
-7. Server re-measurement (§9.24).
+4. **Lite photo upload** (the owner's direction, 2026-10-18). Lite photos are uploaded into
+   the tenant's own bucket, as Mobile's are, and processed there. Until processing
+   finishes, the UI shows the camera's JPEG. Lite frames today are only in the shared
+   labels bucket, which the API does not read, and the API is not to be given it.
+5. Species for mobile captures.
+6. The board pitch check (§9.25).
+7. The wuwnet math into fishsense-core.
+8. Server re-measurement (§9.24).
 
 ### C. Decide late — post-parity
 
