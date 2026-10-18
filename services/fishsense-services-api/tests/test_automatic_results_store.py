@@ -1161,6 +1161,49 @@ async def test_a_dive_that_failed_three_times_leaves_the_cohort(
     assert len(rows) == 3 and rows[0]["step"] == "frames"
 
 
+async def test_strikes_before_a_later_success_do_not_count(owner_engine, app_engine):
+    """Review of #85: the strikes were cumulative and never reset, so three
+    transient faults weeks apart -- each followed by a run that got further --
+    left a healthy dive for an operator. A strike counts only if nothing of
+    the dive's has been written since it: progress resets the count."""
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    a = await capture(owner_engine, lab, dive_id)
+    await capture(owner_engine, lab, dive_id)
+
+    for n in range(2):
+        await _in(app_engine, lab, record_automatic_results_failure, dive_id,
+                  step="frames", error=f"transient {n}")  # fmt: skip
+    # A later run got further: one frame written.
+    await _predict(app_engine, lab, dive_id,
+                   AutomaticHeadTailRow(capture_id=a, status="no_laser_dot",
+                                        predictor_version=1))  # fmt: skip
+    await _in(app_engine, lab, record_automatic_results_failure, dive_id,
+              step="frames", error="transient 2")  # fmt: skip
+
+    assert await _next(app_engine, lab) == dive_id
+
+
+async def test_strikes_with_no_progress_between_still_leave_the_dive(
+    owner_engine, app_engine
+):
+    """The rule the reset must keep: a dive failing run after run, with
+    nothing written between, waits for an operator."""
+    lab = await tenant(owner_engine)
+    dive_id = await _backlog_dive(owner_engine, lab)
+    a = await capture(owner_engine, lab, dive_id)
+    await capture(owner_engine, lab, dive_id)
+    # Progress first, then three failures with none between.
+    await _predict(app_engine, lab, dive_id,
+                   AutomaticHeadTailRow(capture_id=a, status="no_laser_dot",
+                                        predictor_version=1))  # fmt: skip
+    for n in range(3):
+        await _in(app_engine, lab, record_automatic_results_failure, dive_id,
+                  step="calibration", error=f"deterministic {n}")  # fmt: skip
+
+    assert await _next(app_engine, lab) is None
+
+
 async def test_a_failure_needs_a_known_step(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     dive_id = await _backlog_dive(owner_engine, lab)

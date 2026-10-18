@@ -190,11 +190,48 @@ AUTOMATIC_FRAME_MAX_FAILURES = 3
 #: The steps a failure is recorded against (0040's check).
 AUTOMATIC_RESULTS_STEPS = ("frames", "calibration", "lengths", "species")
 
+
 #: The dive failed as often as the cohort allows (0040).
-_FAILED_OUT = f"""(
-    SELECT count(*) FROM automatic_results_failures f
-    WHERE f.tenant_id = d.tenant_id AND f.dive_id = d.id
-) >= {AUTOMATIC_RESULTS_MAX_FAILURES}"""
+def _dive_rows_newest(table: str) -> str:
+    """When the newest `table` row on dive `d`'s captures was written: each
+    capture's newest row by its `(tenant_id, capture_id, seq)` index, never a
+    join over the table (the cohort's plan test pins it)."""
+    return f"""(SELECT max(x.created_at) FROM captures xc
+            CROSS JOIN LATERAL (
+                SELECT latest.created_at FROM {table} latest
+                WHERE latest.tenant_id = xc.tenant_id AND latest.capture_id = xc.id
+                ORDER BY latest.seq DESC LIMIT 1
+            ) x
+            WHERE xc.tenant_id = d.tenant_id AND xc.dive_id = d.id)"""
+
+
+#: When dive `d` last got further: its newest automatic row of any kind.
+_LAST_PROGRESS = f"""greatest(
+        {_dive_rows_newest("automatic_head_tail_predictions")},
+        {_dive_rows_newest("automatic_species_predictions")},
+        {_dive_rows_newest("automatic_measurements")},
+        (SELECT max(lc.created_at) FROM automatic_laser_calibrations lc
+         WHERE lc.tenant_id = d.tenant_id AND lc.dive_id = d.id))"""
+
+
+def _strikes(since: str = "NULL") -> str:
+    return f"""(
+        SELECT count(*) FROM automatic_results_failures f
+        WHERE f.tenant_id = d.tenant_id AND f.dive_id = d.id
+          AND f.created_at > coalesce({since}, '-infinity'::timestamptz)
+    )"""
+
+
+#: Dive `d` failed `AUTOMATIC_RESULTS_MAX_FAILURES` runs with nothing of it
+#: written since the first of them. Strikes before the dive last got further
+#: don't count (review of #85): three transient faults weeks apart, each run
+#: between getting further, are not a bad dive. Progress is only looked up
+#: for a dive with that many strikes at all (CASE evaluates in order), so
+#: the hourly cohort stays one index probe per dive for the rest.
+_FAILED_OUT = f"""CASE
+    WHEN {_strikes()} < {AUTOMATIC_RESULTS_MAX_FAILURES} THEN false
+    ELSE {_strikes(_LAST_PROGRESS)} >= {AUTOMATIC_RESULTS_MAX_FAILURES}
+END"""
 
 #: Dive `d` has a human measurement: any `measurements` row on its captures.
 _HUMAN_MEASURED = """EXISTS (
@@ -351,7 +388,8 @@ async def record_automatic_results_failure(
     error: str,
 ) -> None:
     """A failed run of the dive's `step` (0040); at
-    `AUTOMATIC_RESULTS_MAX_FAILURES` the cohort leaves the dive."""
+    `AUTOMATIC_RESULTS_MAX_FAILURES` with nothing of the dive written since
+    (`_FAILED_OUT`), the cohort leaves the dive."""
     await conn.execute(
         text(
             "INSERT INTO automatic_results_failures "
