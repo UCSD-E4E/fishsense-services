@@ -23,7 +23,9 @@ matches (the dives, their order and which are sessions; not the frame
 counts, which drift as frames are done). Then it runs each dive's
 `AutomaticResultsForDiveWorkflow` in turn -- the same child id a by-hand run
 uses -- and reports each: one dive failing (its failure is recorded against
-the dive) stops none of the others. `apply` starts the run and returns its
+the dive) stops none of the others, but a dive whose GPU steps were skipped
+for want of a GPU stops the run (`stopped`): every dive behind it would wait
+out the wake and skip too. `apply` starts the run and returns its
 workflow id; the report is the workflow's result.
 """
 
@@ -102,6 +104,7 @@ class RunAutomaticDivesWorkflow:
             "plan": plan,
             "plan_sha256": digest,
             "dives": [],
+            "stopped": None,
         }
         if not request.apply:
             return report
@@ -133,6 +136,13 @@ class RunAutomaticDivesWorkflow:
                 "automatic run: dive %s %s", dive["number"], row["error"] or "done"
             )
             report["dives"].append(row)
+            # With no GPU every dive behind this one would wait out the wake
+            # and skip too (2026-10-18, the first validation run): stop, as
+            # the backlog's drain does.
+            no_gpu = (row["report"] or {}).get("no_gpu")
+            if no_gpu:
+                report["stopped"] = f"no GPU ({no_gpu})"
+                break
         return report
 
 
