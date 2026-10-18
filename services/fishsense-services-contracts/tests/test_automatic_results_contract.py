@@ -21,6 +21,9 @@ def test_every_abstention_is_a_status():
     assert set(AUTOMATIC_HEADTAIL_STATUSES) == {
         "predicted", "no_laser_dot", "no_detections", "laser_off_all_fish",
         "headtail_failed", "decode_failed", "raw_unavailable", "slate_frame",
+        # 0043 (review of #85): a kept mask with no nameable score, and a
+        # frame left out of three runs.
+        "mask_unscored", "frame_failed",
     }  # fmt: skip
 
 
