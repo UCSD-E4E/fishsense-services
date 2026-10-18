@@ -136,6 +136,14 @@ def test_the_per_image_role_is_capped_at_two_concurrent_activities():
     assert registry.ROLE_MAX_CONCURRENT_ACTIVITIES[registry.ROLE_PER_IMAGE] == 2
 
 
+def test_the_gpu_role_runs_one_activity_at_a_time():
+    """2026-10-18: two SAM 3.1 frames at once ran a 10.6 GiB GPU (an NRP
+    Turing card, compute 7.5, which the GPU manifest admits) out of memory.
+    One frame takes ~18 s, so one at a time costs little; throughput comes
+    from replicas, as for the decoders."""
+    assert registry.ROLE_MAX_CONCURRENT_ACTIVITIES[registry.ROLE_GPU] == 1
+
+
 def test_the_light_role_is_not_bound_by_the_decoders_cap():
     """Nothing on the light queue decodes an image, so the per-image cap does
     not apply (v1's light pod: 8)."""

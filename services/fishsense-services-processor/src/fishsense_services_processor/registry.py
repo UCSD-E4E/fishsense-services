@@ -73,12 +73,13 @@ ROLE_TASK_QUEUES: Final[dict[str, str]] = {
 #:   replicas instead;
 #: * ``light`` 8 -- nothing here decodes an image, and every stage drains one
 #:   dive per firing, so a busy hour never queues;
-#: * ``gpu`` 2 -- v1's GPU pod shared the per-image settings; it still decodes
-#:   a raw frame per image, so the same memory ceiling holds.
+#: * ``gpu`` 1 -- a GPU-memory ceiling. v1's GPU pod shared the per-image
+#:   setting (2), but two SAM 3.1 frames at once ran a 10.6 GiB Turing card
+#:   out of memory (2026-10-18). A frame takes ~18 s; replicas add throughput.
 ROLE_MAX_CONCURRENT_ACTIVITIES: Final[dict[str, int]] = {
     ROLE_PER_IMAGE: 2,
     ROLE_LIGHT: 8,
-    ROLE_GPU: 2,
+    ROLE_GPU: 1,
 }
 
 

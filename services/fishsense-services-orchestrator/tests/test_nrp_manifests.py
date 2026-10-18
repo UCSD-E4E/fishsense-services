@@ -325,3 +325,27 @@ def test_the_gpu_keeps_its_compute_capability_floor_beside_the_region():
             "topology.kubernetes.io/region",
         ],
     ]
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [manifests.PER_IMAGE, manifests.LIGHT, manifests.GPU, manifests.GPU_CPU_FALLBACK],
+)
+def test_every_processor_has_a_writable_home(kind):
+    """The image's `app` user (uid 10001) has no home. Triton's JIT kernel
+    cache ignores XDG and makes `$HOME/.triton`: 2026-10-18, a SAM 3.1 frame
+    compiled a kernel and every frame after it failed `Permission denied:
+    '/home/app'`. HOME and Triton's cache live on the pod's writable /cache."""
+    body = LOADED[kind].body
+    env = _env(body)
+    mounts = {m["mountPath"]: m["name"] for m in _container(body)["volumeMounts"]}
+    empty = {
+        v["name"]
+        for v in body["spec"]["template"]["spec"]["volumes"]
+        if "emptyDir" in v
+    }
+    for name in ("HOME", "TRITON_CACHE_DIR"):
+        path = env.get(name)
+        assert path, name
+        root = "/" + path.strip("/").split("/")[0]
+        assert mounts.get(root) in empty, (name, path)
