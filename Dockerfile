@@ -106,6 +106,13 @@ USER app
 CMD ["fishsense-services-processor"]
 
 FROM runtime AS processor-gpu
+# Triton compiles its kernel launchers with a C compiler at run time, and SAM
+# 3.1's NMS, connected components and distance transform are Triton kernels
+# on CUDA: without one, every frame with more than one detection failed
+# "Failed to find C compiler" (2026-10-19). Python.h ships in the base image.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=build-processor-gpu /app/.venv /app/.venv
 USER app
 # SAM 3.1 must import here, as it runs: as the app user, by fishsense-core's
@@ -115,7 +122,10 @@ USER app
 RUN python -c "import pkg_resources; \
 from sam3.model.sam3_image_processor import Sam3Processor; \
 from sam3.model_builder import build_sam3_image_model; \
-import os; os.makedirs(os.path.expanduser('~/.triton/cache'), exist_ok=True)"
+import os; os.makedirs(os.path.expanduser('~/.triton/cache'), exist_ok=True); \
+import shutil, sysconfig; \
+assert shutil.which('gcc'), 'no C compiler for Triton'; \
+assert os.path.exists(os.path.join(sysconfig.get_paths()['include'], 'Python.h')), 'no Python.h'"
 CMD ["fishsense-services-processor"]
 
 FROM runtime AS api
