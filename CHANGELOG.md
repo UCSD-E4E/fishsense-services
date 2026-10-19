@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.12.0...v0.12.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **processor:** a C compiler in the GPU image, for Triton's kernels ([aec7cd9](https://github.com/UCSD-E4E/fishsense-services/commit/aec7cd9ae3674339a53cf4655ee8c06f96e7e577))
+* **processor:** a C compiler in the GPU image, for Triton's kernels ([6df9237](https://github.com/UCSD-E4E/fishsense-services/commit/6df92371ffbd9032f9974a1e08185e7e44c55595))
+
 ## [0.12.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.11.2...v0.12.0) (2026-10-19)
 
 
