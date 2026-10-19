@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.12.1...v0.13.0) (2026-10-19)
+
+
+### Features
+
+* **nrp:** prefer GPUs with room for two frames, and wait out a cold start ([def175e](https://github.com/UCSD-E4E/fishsense-services/commit/def175e5bb6d492f8ea97956fcfcc4bbce69beb6))
+* **nrp:** prefer GPUs with room for two frames, and wait out a cold start ([169d445](https://github.com/UCSD-E4E/fishsense-services/commit/169d445a2f37d3313807b4ff26cbce5a4601fbab))
+
 ## [0.12.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.12.0...v0.12.1) (2026-10-19)
 
 
