@@ -81,6 +81,21 @@ spec:
                   - key: topology.kubernetes.io/region
                     operator: In
                     values: [us-west, us-central, us-east, us-mountain]
+          # Prefer -- never require -- a card with room for two SAM 3.1 frames
+          # at once (the worker's GPU_TWO_ACTIVITIES_BYTES, 22 GiB; NRP labels
+          # GPU memory in MiB). 2026-10-19 the pod kept landing on 10.6 GiB
+          # RTX 2080 Tis, one frame at a time; a small card still serves when
+          # no big one is free.
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: nvidia.com/gpu.memory
+                    operator: Gt
+                    values: ["22527"]
+                  - key: topology.kubernetes.io/region
+                    operator: In
+                    values: [us-west, us-central, us-east, us-mountain]
       # Preemptible guest; predict is read-only against the object store and
       # its write-back idempotent.
       terminationGracePeriodSeconds: 45
