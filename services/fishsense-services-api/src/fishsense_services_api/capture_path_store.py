@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from fishsense_services_api.checksum_store import dive_by_number
+from fishsense_services_api.checksum_store import mission_by_number
 from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
@@ -45,7 +45,7 @@ class PathCapture:
 
 
 async def captures_with_paths(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> list[PathCapture]:
     """Every capture of the dive with a NAS path, duplicates included, in path
     order. A frame held only in the object store has nothing to repair."""
@@ -54,11 +54,11 @@ async def captures_with_paths(
             SELECT id, number, source_path, checksum, checksum_algorithm,
                    is_canonical
             FROM captures
-            WHERE tenant_id = :tenant AND dive_id = :dive
+            WHERE tenant_id = :tenant AND mission_id = :mission
               AND source_path IS NOT NULL
             ORDER BY source_path, number
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     return [
         PathCapture(
@@ -124,17 +124,17 @@ async def repoint_capture(
 class CapturePathCatalog(ServicePrincipal):
     """Path repair's database side, as the orchestrator's principal."""
 
-    async def dive_by_number(
+    async def mission_by_number(
         self, tenant_id: uuid.UUID, number: int
     ) -> uuid.UUID | None:
         async with self._tenant(tenant_id) as conn:
-            return await dive_by_number(conn, tenant_id, number)
+            return await mission_by_number(conn, tenant_id, number)
 
     async def captures_with_paths(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> list[PathCapture]:
         async with self._tenant(tenant_id) as conn:
-            return await captures_with_paths(conn, tenant_id, dive_id)
+            return await captures_with_paths(conn, tenant_id, mission_id)
 
     async def path_holder(self, tenant_id: uuid.UUID, path: str) -> uuid.UUID | None:
         async with self._tenant(tenant_id) as conn:

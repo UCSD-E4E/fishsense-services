@@ -28,9 +28,9 @@ async def _scene(conn):
     tenant = await _one(
         conn, "INSERT INTO tenants (slug, name) VALUES ('lab', 'lab') RETURNING id"
     )
-    dive = await _one(
+    mission = await _one(
         conn,
-        "INSERT INTO dives (tenant_id, source_path, dived_at) "
+        "INSERT INTO missions (tenant_id, source_path, started_at) "
         "VALUES (:t, '/d', now()) RETURNING id",
         t=tenant,
     )
@@ -47,20 +47,20 @@ async def _scene(conn):
         "RETURNING id",
         n=f"E4E Checkerboard {uuid.uuid4()}",
     )
-    return tenant, dive, slate, board
+    return tenant, mission, slate, board
 
 
-async def _refused(conn, tenant, dive, **columns):
-    names = ", ".join(["tenant_id", "dive_id", "producer", "outcome",
+async def _refused(conn, tenant, mission, **columns):
+    names = ", ".join(["tenant_id", "mission_id", "producer", "outcome",
                        "refusal_reason", *columns])  # fmt: skip
-    params = ", ".join([":tenant_id", ":dive_id", "'slate'", "'refused'",
+    params = ", ".join([":tenant_id", ":mission_id", "'slate'", "'refused'",
                         "'insufficient laser points (1 < 2)'",
                         *(f":{c}" for c in columns)])  # fmt: skip
     return await _one(
         conn,
         f"INSERT INTO laser_calibrations ({names}) VALUES ({params}) RETURNING id",
         tenant_id=tenant,
-        dive_id=dive,
+        mission_id=mission,
         **columns,
     )
 
@@ -74,10 +74,10 @@ async def owner(owner_engine):
 async def test_a_calibration_names_the_slate_or_the_board_it_was_fitted_against(
     owner,
 ):
-    tenant, dive, slate, board = await _scene(owner)
+    tenant, mission, slate, board = await _scene(owner)
 
-    by_slate = await _refused(owner, tenant, dive, slate_template_id=slate)
-    by_board = await _refused(owner, tenant, dive, calibration_target_id=board)
+    by_slate = await _refused(owner, tenant, mission, slate_template_id=slate)
+    by_board = await _refused(owner, tenant, mission, calibration_target_id=board)
 
     rows = (
         await owner.execute(
@@ -95,18 +95,18 @@ async def test_a_calibration_names_the_slate_or_the_board_it_was_fitted_against(
 
 async def test_a_calibration_cannot_name_two_targets(owner):
     """One fit, one plane: a row naming both could not say which it used."""
-    tenant, dive, slate, board = await _scene(owner)
+    tenant, mission, slate, board = await _scene(owner)
 
     with pytest.raises(IntegrityError, match="laser_calibrations_one_target_check"):
         await _refused(
-            owner, tenant, dive, slate_template_id=slate, calibration_target_id=board
+            owner, tenant, mission, slate_template_id=slate, calibration_target_id=board
         )
 
 
 async def test_a_clear_is_appended_and_never_rewritten(owner_engine, app_engine):
     async with owner_engine.begin() as conn:
-        tenant, dive, slate, _ = await _scene(conn)
-        refusal = await _refused(conn, tenant, dive, slate_template_id=slate)
+        tenant, mission, slate, _ = await _scene(conn)
+        refusal = await _refused(conn, tenant, mission, slate_template_id=slate)
 
     async with tenant_transaction(app_engine, tenant) as conn:
         await conn.execute(
@@ -127,8 +127,8 @@ async def test_a_clear_is_appended_and_never_rewritten(owner_engine, app_engine)
 
 
 async def test_a_refusal_is_cleared_at_most_once(owner):
-    tenant, dive, slate, _ = await _scene(owner)
-    refusal = await _refused(owner, tenant, dive, slate_template_id=slate)
+    tenant, mission, slate, _ = await _scene(owner)
+    refusal = await _refused(owner, tenant, mission, slate_template_id=slate)
     insert = (
         "INSERT INTO laser_calibration_refusal_clears "
         "(tenant_id, laser_calibration_id) VALUES (:t, :r)"
@@ -140,8 +140,8 @@ async def test_a_refusal_is_cleared_at_most_once(owner):
 
 
 async def test_a_clear_cannot_point_into_another_tenant(owner):
-    tenant, dive, slate, _ = await _scene(owner)
-    refusal = await _refused(owner, tenant, dive, slate_template_id=slate)
+    tenant, mission, slate, _ = await _scene(owner)
+    refusal = await _refused(owner, tenant, mission, slate_template_id=slate)
     other = await _one(
         owner, "INSERT INTO tenants (slug, name) VALUES ('reef', 'reef') RETURNING id"
     )
@@ -158,8 +158,8 @@ async def test_a_clear_cannot_point_into_another_tenant(owner):
 
 async def test_another_tenants_clears_are_invisible(owner_engine, app_engine):
     async with owner_engine.begin() as conn:
-        tenant, dive, slate, _ = await _scene(conn)
-        refusal = await _refused(conn, tenant, dive, slate_template_id=slate)
+        tenant, mission, slate, _ = await _scene(conn)
+        refusal = await _refused(conn, tenant, mission, slate_template_id=slate)
         await conn.execute(
             text(
                 "INSERT INTO laser_calibration_refusal_clears "

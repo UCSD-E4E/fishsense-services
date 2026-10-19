@@ -68,10 +68,10 @@ from fishsense_services_orchestrator.ops.checksums.contracts import (
     VerifyChecksumsReport,
 )
 
-__all__ = ["ChecksumActivities", "ChecksumCatalog", "DIVE_NOT_FOUND_TYPE"]
+__all__ = ["ChecksumActivities", "ChecksumCatalog", "MISSION_NOT_FOUND_TYPE"]
 
 #: The non-retryable error for a dive number no served tenant holds.
-DIVE_NOT_FOUND_TYPE = "DiveNotFound"
+MISSION_NOT_FOUND_TYPE = "DiveNotFound"
 
 
 class ChecksumCatalog(Protocol):
@@ -79,15 +79,15 @@ class ChecksumCatalog(Protocol):
 
     async def member_tenants(self) -> list[uuid.UUID]: ...
 
-    async def dive_by_number(
+    async def mission_by_number(
         self, tenant_id: uuid.UUID, number: int
     ) -> uuid.UUID | None: ...
 
     async def captures_to_verify(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> list[VerifyCapture]: ...
 
-    async def canonical_dive_numbers(self, tenant_id: uuid.UUID) -> list[int]: ...
+    async def canonical_mission_numbers(self, tenant_id: uuid.UUID) -> list[int]: ...
 
 
 def _file_digest(path: Path, algorithm: str) -> str:
@@ -173,7 +173,7 @@ def _verify_one(
         )
 
 
-def _resumed(dive_number: int) -> tuple[int, VerifyChecksumsReport | None]:
+def _resumed(mission_number: int) -> tuple[int, VerifyChecksumsReport | None]:
     """Where the last attempt got to: the next index and its report so far,
     from its last heartbeat; (0, None) on a first attempt."""
     details = activity.info().heartbeat_details
@@ -181,7 +181,7 @@ def _resumed(dive_number: int) -> tuple[int, VerifyChecksumsReport | None]:
         return 0, None
     progress = details[0]
     report = VerifyChecksumsReport.model_validate(progress["report"])
-    if report.dive_number != dive_number:
+    if report.mission_number != mission_number:
         return 0, None
     return int(progress["next"]), report
 
@@ -204,35 +204,40 @@ class ChecksumActivities:
             lambda: build_nas_client(nas_settings)
         )
 
-    async def _find_dive(self, dive_number: int) -> tuple[uuid.UUID, uuid.UUID]:
+    async def _find_mission(self, mission_number: int) -> tuple[uuid.UUID, uuid.UUID]:
         for tenant_id in await self._catalog.member_tenants():
-            dive_id = await self._catalog.dive_by_number(tenant_id, dive_number)
-            if dive_id is not None:
-                return tenant_id, dive_id
+            mission_id = await self._catalog.mission_by_number(
+                tenant_id, mission_number
+            )
+            if mission_id is not None:
+                return tenant_id, mission_id
         raise ApplicationError(
-            f"no dive numbered {dive_number} in any tenant the orchestrator serves",
-            type=DIVE_NOT_FOUND_TYPE,
+            f"no dive numbered {mission_number} in any tenant the orchestrator serves",
+            type=MISSION_NOT_FOUND_TYPE,
             non_retryable=True,
         )
 
     @activity.defn(name="verify_dive_checksums")
-    async def verify_dive_checksums(
-        self, dive_number: int, limit: Optional[int] = None
+    async def verify_mission_checksums(
+        self, mission_number: int, limit: Optional[int] = None
     ) -> VerifyChecksumsReport:
         """Re-hash the dive's captures (the first ``limit`` in path order, or
         all) and report every disagreement."""
-        tenant_id, dive_id = await self._find_dive(dive_number)
-        captures = await self._catalog.captures_to_verify(tenant_id, dive_id)
+        tenant_id, mission_id = await self._find_mission(mission_number)
+        captures = await self._catalog.captures_to_verify(tenant_id, mission_id)
         selected = captures if limit is None else captures[:limit]
 
-        start, report = _resumed(dive_number)
+        start, report = _resumed(mission_number)
         if report is None:
             report = VerifyChecksumsReport(
-                dive_number=dive_number, total_in_dive=len(captures)
+                mission_number=mission_number, total_in_mission=len(captures)
             )
         else:
             activity.logger.info(
-                "resuming dive=%d at frame %d of %d", dive_number, start, len(selected)
+                "resuming dive=%d at frame %d of %d",
+                mission_number,
+                start,
+                len(selected),
             )
 
         nas = self._nas_client_factory()
@@ -249,7 +254,7 @@ class ChecksumActivities:
         activity.logger.info(
             "verified dive=%d checked=%d matched=%d mismatched=%d "
             "timestamp_mismatched=%d missing=%d no_checksum=%d",
-            dive_number,
+            mission_number,
             report.checked,
             report.checksum_matched,
             len(report.mismatches),
@@ -260,12 +265,12 @@ class ChecksumActivities:
         return report
 
     @activity.defn(name="select_canonical_dive_numbers")
-    async def select_canonical_dive_numbers(self) -> List[int]:
+    async def select_canonical_mission_numbers(self) -> List[int]:
         """Every served tenant's dives with at least one canonical capture, in
         number order (v1's ``GET /api/v1/canonical/dives/``, sorted)."""
         numbers = [
             number
             for tenant_id in await self._catalog.member_tenants()
-            for number in await self._catalog.canonical_dive_numbers(tenant_id)
+            for number in await self._catalog.canonical_mission_numbers(tenant_id)
         ]
         return sorted(numbers)

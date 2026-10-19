@@ -121,27 +121,27 @@ async def camera_calibration(owner_engine, tenant_id, device_id, matrix, *, mode
     )
 
 
-async def dive(
+async def mission(
     owner_engine,
     tenant_id,
     *,
     device_id=None,
     priority="high",
-    source_dive=None,
+    source_mission=None,
     created_at=None,
 ):
     n = _n()
     return await _one(
         owner_engine,
-        "INSERT INTO dives (tenant_id, source_path, name, dived_at, priority, "
-        "device_id, calibration_source_dive_id, created_at) VALUES (:t, :p, :p, "
+        "INSERT INTO missions (tenant_id, source_path, name, started_at, priority, "
+        "device_id, calibration_source_mission_id, created_at) VALUES (:t, :p, :p, "
         ":at, :priority, :device, :src, :created) RETURNING id",
         t=tenant_id,
         p=f"/dives/{n}",
         at=T0,
         priority=priority,
         device=device_id,
-        src=source_dive,
+        src=source_mission,
         created=created_at or T0 + timedelta(seconds=n),
     )
 
@@ -149,7 +149,7 @@ async def dive(
 async def calibrate(
     owner_engine,
     tenant_id,
-    dive_id,
+    mission_id,
     *,
     position=PLAUSIBLE_POSITION,
     axis=(0.0, 0.0, 1.0),
@@ -158,11 +158,11 @@ async def calibrate(
     """Append a laser calibration to the dive (current = the latest)."""
     return await _one(
         owner_engine,
-        "INSERT INTO laser_calibrations (tenant_id, dive_id, producer, outcome, "
+        "INSERT INTO laser_calibrations (tenant_id, mission_id, producer, outcome, "
         "laser_position, laser_axis, refusal_reason) VALUES (:t, :d, 'slate', :o, "
         ":p, :a, :r) RETURNING id",
         t=tenant_id,
-        d=dive_id,
+        d=mission_id,
         o=outcome,
         p=None if outcome == "refused" else json.dumps(list(position)),
         a=None if outcome == "refused" else json.dumps(list(axis)),
@@ -170,15 +170,15 @@ async def calibrate(
     )
 
 
-async def capture(owner_engine, tenant_id, dive_id, *, canonical=True):
+async def capture(owner_engine, tenant_id, mission_id, *, canonical=True):
     n = _n()
     return await _one(
         owner_engine,
-        "INSERT INTO captures (tenant_id, dive_id, source_path, captured_at, "
+        "INSERT INTO captures (tenant_id, mission_id, source_path, captured_at, "
         "checksum, is_canonical) VALUES (:t, :d, :p, :at, :sum, :canonical) "
         "RETURNING id",
         t=tenant_id,
-        d=dive_id,
+        d=mission_id,
         p=f"/captures/{n}.ORF",
         at=T0 + timedelta(seconds=n),
         sum=f"{n:032x}",
@@ -270,7 +270,7 @@ async def species_label(
 async def cluster(
     owner_engine,
     tenant_id,
-    dive_id,
+    mission_id,
     captures=(),
     *,
     fish_id=None,
@@ -278,17 +278,17 @@ async def cluster(
 ):
     cluster_id = await _one(
         owner_engine,
-        "INSERT INTO dive_frame_clusters (tenant_id, dive_id, formed_by, fish_id) "
+        "INSERT INTO mission_frame_clusters (tenant_id, mission_id, formed_by, fish_id) "
         "VALUES (:t, :d, :f, :fish) RETURNING id",
         t=tenant_id,
-        d=dive_id,
+        d=mission_id,
         f=formed_by,
         fish=fish_id,
     )
     for capture_id in captures:
         await exec_(
             owner_engine,
-            "INSERT INTO dive_frame_cluster_captures (tenant_id, cluster_id, "
+            "INSERT INTO mission_frame_cluster_captures (tenant_id, cluster_id, "
             "capture_id) VALUES (:t, :k, :c)",
             t=tenant_id,
             k=cluster_id,
@@ -376,18 +376,20 @@ async def depth(
     )
 
 
-async def calibrated_dive(owner_engine, tenant_id, **dive_kwargs):
+async def calibrated_dive(owner_engine, tenant_id, **mission_kwargs):
     """A high-priority dive on a calibrated device with its own accepted,
     plausible laser calibration. Returns (dive, laser calibration)."""
     device_id = await device(owner_engine, tenant_id)
-    dive_id = await dive(owner_engine, tenant_id, device_id=device_id, **dive_kwargs)
-    return dive_id, await calibrate(owner_engine, tenant_id, dive_id)
+    mission_id = await mission(
+        owner_engine, tenant_id, device_id=device_id, **mission_kwargs
+    )
+    return mission_id, await calibrate(owner_engine, tenant_id, mission_id)
 
 
 async def measurable_capture(
     owner_engine,
     tenant_id,
-    dive_id,
+    mission_id,
     content=REAL_FISH,
     *,
     in_cluster=True,
@@ -397,12 +399,12 @@ async def measurable_capture(
     laser, a valid head/tail -- and, for a real fish, a Label Studio cluster
     (v1's `measurable_image`; a model needs none, `fish_model_measurable_image`).
     Returns the capture id."""
-    capture_id = await capture(owner_engine, tenant_id, dive_id)
+    capture_id = await capture(owner_engine, tenant_id, mission_id)
     await laser_label(owner_engine, tenant_id, capture_id)
     await head_tail_label(owner_engine, tenant_id, capture_id)
     await species_label(owner_engine, tenant_id, capture_id, content)
     if in_cluster:
         await cluster(
-            owner_engine, tenant_id, dive_id, [capture_id], fish_id=cluster_fish
+            owner_engine, tenant_id, mission_id, [capture_id], fish_id=cluster_fish
         )
     return capture_id

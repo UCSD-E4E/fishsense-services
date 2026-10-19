@@ -55,7 +55,7 @@ from fishsense_services_orchestrator.slates.pdfs import SlatePdfs
 BUCKET = "fishsense-test"
 LABELS = "labels-fishsense-test"
 LAB, REEF = uuid.UUID(int=1), uuid.UUID(int=2)
-DIVE = uuid.UUID(int=440)
+MISSION = uuid.UUID(int=440)
 SLATE = uuid.UUID(int=7)
 T0 = datetime(2026, 9, 1, tzinfo=UTC)
 K = [[1000.0, 0.0, 960.0], [0.0, 1000.0, 540.0], [0.0, 0.0, 1.0]]
@@ -90,10 +90,10 @@ class FakeCatalog:
     async def member_tenants(self):
         return [LAB, REEF]
 
-    async def next_dive_for_slate_preprocessing(self, tenant_id):
+    async def next_mission_for_slate_preprocessing(self, tenant_id):
         return self.candidates.get(tenant_id)
 
-    async def slate_preprocess_inputs(self, tenant_id, dive_id):
+    async def slate_preprocess_inputs(self, tenant_id, mission_id):
         if isinstance(self.inputs, Exception):
             raise self.inputs
         return self.inputs
@@ -105,8 +105,8 @@ class FakeCatalog:
             else None
         )
 
-    async def clear_slate_reprocess_flags(self, tenant_id, dive_id, *, checksums):
-        self.cleared.append((tenant_id, dive_id, checksums))
+    async def clear_slate_reprocess_flags(self, tenant_id, mission_id, *, checksums):
+        self.cleared.append((tenant_id, mission_id, checksums))
         return 3
 
 
@@ -173,17 +173,17 @@ async def test_returns_the_oldest_candidate_across_tenants(s3):
     )
 
     target = await _run(
-        _activities(s3, catalog).select_next_dive_for_slate_preprocessing
+        _activities(s3, catalog).select_next_mission_for_slate_preprocessing
     )
 
-    assert target == StagingTarget(tenant_id=REEF, dive_id=uuid.UUID(int=20))
+    assert target == StagingTarget(tenant_id=REEF, mission_id=uuid.UUID(int=20))
 
 
-async def test_returns_none_when_no_dive(s3):
+async def test_returns_none_when_no_mission(s3):
     """v1's `test_returns_none_when_no_dive`: an empty cohort is a quiet
     firing, not an error."""
     target = await _run(
-        _activities(s3, FakeCatalog()).select_next_dive_for_slate_preprocessing
+        _activities(s3, FakeCatalog()).select_next_mission_for_slate_preprocessing
     )
 
     assert target is None
@@ -194,7 +194,7 @@ async def test_returns_none_when_no_dive(s3):
 
 def _inputs(captures) -> SlatePreprocessInputs:
     return SlatePreprocessInputs(
-        dive_id=DIVE,
+        mission_id=MISSION,
         slate_template=_template(),
         camera_calibration_id=uuid.UUID(int=99),
         camera_matrix=K,
@@ -209,11 +209,11 @@ async def test_the_payload_carries_the_template_camera_and_frames(s3):
 
     plan = await _run(
         _activities(s3, catalog).resolve_slate_preprocess_inputs,
-        StagingTarget(tenant_id=LAB, dive_id=DIVE),
+        StagingTarget(tenant_id=LAB, mission_id=MISSION),
     )
 
     payload = plan.payload
-    assert (payload.dive_id, payload.slate_template_id) == (DIVE, SLATE)
+    assert (payload.mission_id, payload.slate_template_id) == (MISSION, SLATE)
     assert payload.slate_dpi == 300
     assert payload.reference_points == [(0.0, 0.0), (1.0, 1.0)]
     assert (payload.camera_matrix, payload.distortion_coefficients) == (K, D)
@@ -243,13 +243,13 @@ async def test_a_migrated_frame_is_redrawn_where_v1_wrote_it(s3):
         _activities(
             s3, FakeCatalog(inputs=_inputs([frame]))
         ).resolve_slate_preprocess_inputs,
-        StagingTarget(tenant_id=LAB, dive_id=DIVE),
+        StagingTarget(tenant_id=LAB, mission_id=MISSION),
     )
 
     assert plan.payload.images[0].jpeg.key == v1_key
 
 
-async def test_a_dive_that_cannot_be_resolved_is_refused_for_good(s3):
+async def test_a_mission_that_cannot_be_resolved_is_refused_for_good(s3):
     """v1 raised a ValueError; retrying reads the same rows to the same
     answer, so it is final."""
     catalog = FakeCatalog(inputs=SlateInputsUnavailable("dive has no slate template"))
@@ -257,7 +257,7 @@ async def test_a_dive_that_cannot_be_resolved_is_refused_for_good(s3):
     with pytest.raises(ApplicationError) as excinfo:
         await _run(
             _activities(s3, catalog).resolve_slate_preprocess_inputs,
-            StagingTarget(tenant_id=LAB, dive_id=DIVE),
+            StagingTarget(tenant_id=LAB, mission_id=MISSION),
         )
 
     assert excinfo.value.non_retryable
@@ -455,12 +455,12 @@ async def test_clears_in_the_scope_it_is_given(s3):
 
     cleared = await _run(
         _activities(s3, catalog).clear_slate_reprocess_flags,
-        ClearSlateFlagsInput(tenant_id=LAB, dive_id=DIVE, checksums=["a"]),
+        ClearSlateFlagsInput(tenant_id=LAB, mission_id=MISSION, checksums=["a"]),
     )
     await _run(
         _activities(s3, catalog).clear_slate_reprocess_flags,
-        ClearSlateFlagsInput(tenant_id=LAB, dive_id=DIVE),
+        ClearSlateFlagsInput(tenant_id=LAB, mission_id=MISSION),
     )
 
     assert cleared == 3
-    assert catalog.cleared == [(LAB, DIVE, ["a"]), (LAB, DIVE, None)]
+    assert catalog.cleared == [(LAB, MISSION, ["a"]), (LAB, MISSION, None)]

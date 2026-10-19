@@ -46,7 +46,7 @@ from fishsense_services_orchestrator.ingest.nas_frames import NasSettings
 from ._tiff_builder import build_orf
 
 TENANT = uuid.uuid4()
-DIVE = uuid.uuid4()
+MISSION = uuid.uuid4()
 DEVICE = uuid.uuid4()
 ROOT = "/fishsense_data/REEF/data"
 FOLDER = "2024.06.20.REEF/082929_FishModels_FSL07"
@@ -68,8 +68,8 @@ class RecordingCatalog:
         self.existing = {p: EXISTING_AT for p in existing_paths}
         self.registered: list[dict] = []
 
-    async def registered_captures(self, tenant_id, dive_id):
-        assert (tenant_id, dive_id) == (TENANT, DIVE)
+    async def registered_captures(self, tenant_id, mission_id):
+        assert (tenant_id, mission_id) == (TENANT, MISSION)
         return dict(self.existing)
 
     async def register_capture(self, tenant_id, **capture):
@@ -104,7 +104,7 @@ async def _run(paths, contents, *, catalog=None, errors=None, env=None):
     result = await (env or ActivityEnvironment()).run(
         activities.scan_and_register,
         TENANT,
-        DIVE,
+        MISSION,
         [f"{FOLDER}/{p}" for p in paths],
         DEVICE,
     )
@@ -126,7 +126,7 @@ async def test_registers_a_frame_with_its_checksum_and_timestamp():
     (capture,) = catalog.registered
     assert capture == {
         "tenant_id": TENANT,
-        "dive_id": DIVE,
+        "mission_id": MISSION,
         "device_id": DEVICE,
         "source_path": f"{FOLDER}/A.ORF",
         "captured_at": datetime(2024, 8, 21, 8, 56, 51, tzinfo=timezone.utc),
@@ -153,7 +153,7 @@ async def test_downloads_the_resolved_nas_path():
     )  # fmt: skip
 
     await ActivityEnvironment().run(
-        activities.scan_and_register, TENANT, DIVE, [f"{FOLDER}/A.ORF"], DEVICE
+        activities.scan_and_register, TENANT, MISSION, [f"{FOLDER}/A.ORF"], DEVICE
     )
 
     assert nas_calls[0]["src_path"] == f"{ROOT}/{FOLDER}/A.ORF"
@@ -171,7 +171,7 @@ async def test_the_checksum_is_md5_of_the_whole_file():
     assert catalog.registered[0]["checksum"] == hashlib.md5(data).hexdigest()
 
 
-async def test_reports_the_max_timestamp_for_the_dive():
+async def test_reports_the_max_timestamp_for_the_mission():
     """The dive's datetime is the MAX of its frames -- how every existing dive
     row was derived. `finalize` needs it and only this step reads whole files."""
     early = _orf("2024:08:21 08:00:00")

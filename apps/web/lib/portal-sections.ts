@@ -26,9 +26,9 @@ export const PORTAL_SECTIONS: PortalSection[] = [
       "Accept or skip the model's laser predictions, one frame at a time. Built for a phone: pinch to zoom, and the magnification carries between frames.",
   },
   {
-    title: "Dive calibration links",
+    title: "Mission calibration links",
     href: "/portal/calibration",
     description:
-      "Link a dive with no slate of its own to a sibling slate dive shot on the same rig, so it can be measured without a slate in frame.",
+      "Link a mission with no slate of its own to a sibling slate mission shot on the same rig, so it can be measured without a slate in frame.",
   },
 ];

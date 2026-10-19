@@ -33,8 +33,8 @@ and read each frame's EXIF header. Both are thin mappings onto methods the
 and both are reads — the api-worker's NAS access stays read-only by policy.
 
 The wrapper class preserves its previous external shape so call sites
-in `stage_raw_bytes_for_dive_activity`, `archive_processed_jpegs_to_nas_activity`,
-and `cleanup_raw_bytes_for_dive_activity` are unchanged.
+in `stage_raw_bytes_for_mission_activity`, `archive_processed_jpegs_to_nas_activity`,
+and `cleanup_raw_bytes_for_mission_activity` are unchanged.
 """
 
 from __future__ import annotations
@@ -138,7 +138,7 @@ class NasClient:
 
         The new client takes a full local *file* path; this wrapper
         keeps the previous "drop into a directory" call shape so
-        `stage_raw_bytes_for_dive_activity` doesn't change. The
+        `stage_raw_bytes_for_mission_activity` doesn't change. The
         resulting file lands at `{dest_dir}/{basename(src_path)}`.
 
         Atomic-rename semantics from the underlying `Client.download_to`

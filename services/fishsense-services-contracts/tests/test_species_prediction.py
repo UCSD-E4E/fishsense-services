@@ -145,7 +145,7 @@ class TestTheCandidates:
     def test_the_workflow_input_carries_them_once(self):
         payload = PredictSpeciesImagesInput(
             tenant_id=uuid4(),
-            dive_id=uuid4(),
+            mission_id=uuid4(),
             candidates=[HOGFISH, SNAPPER],
             images=[_image()],
         )

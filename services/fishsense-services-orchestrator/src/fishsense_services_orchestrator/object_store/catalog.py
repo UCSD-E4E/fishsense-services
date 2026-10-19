@@ -18,12 +18,12 @@ __all__ = ["CaptureChecksum", "RawStagingCatalog", "StagingCapture"]
 
 class RawStagingCatalog(Protocol):
     async def captures_to_stage(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> list[StagingCapture]:
         """The dive's canonical captures, with NAS paths and checksums."""
 
     async def checksums_to_clean(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> list[str]:
         """The checksums whose scratch this dive may delete."""
 

@@ -20,12 +20,12 @@ from datetime import UTC, datetime
 
 import numpy as np
 import pytest
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 
 from fishsense_services_api.laser_depth_store import (
     CaptureDots,
-    DiveGeometry,
+    MissionGeometry,
     Dot,
     LaserDepthCandidate,
     LaserDepthWork,
@@ -52,13 +52,13 @@ from fishsense_services_orchestrator.nrp.activities import NrpActivities
 from fishsense_services_orchestrator.worker import build_worker
 from fishsense_services_processor.worker import build_worker as build_processor
 
-TENANT, DIVE = uuid.uuid4(), uuid.uuid4()
+TENANT, MISSION = uuid.uuid4(), uuid.uuid4()
 CAMERA_MATRIX = np.array(
     [[3000.0, 0.0, 2048.0], [0.0, 3000.0, 1536.0], [0.0, 0.0, 1.0]]
 )
 POSITION = np.array([-0.03, -0.10, 0.0])
 AXIS = np.array([0.0, -0.02, 1.0]) / np.linalg.norm([0.0, -0.02, 1.0])
-GEOMETRY = DiveGeometry(
+GEOMETRY = MissionGeometry(
     laser_calibration_id=uuid.uuid4(),
     laser_position=tuple(POSITION),
     laser_axis=tuple(AXIS),
@@ -92,30 +92,30 @@ class _Catalog:
     async def member_tenants(self):
         return [TENANT]
 
-    async def next_dive_for_laser_depth(self, tenant_id):
-        return LaserDepthCandidate(DIVE, datetime(2025, 1, 1, tzinfo=UTC), 1)
+    async def next_mission_for_laser_depth(self, tenant_id):
+        return LaserDepthCandidate(MISSION, datetime(2025, 1, 1, tzinfo=UTC), 1)
 
-    async def next_dive_for_measurement(self, tenant_id):
-        return MeasurementCandidate(DIVE, datetime(2025, 1, 1, tzinfo=UTC), 1)
+    async def next_mission_for_measurement(self, tenant_id):
+        return MeasurementCandidate(MISSION, datetime(2025, 1, 1, tzinfo=UTC), 1)
 
-    async def laser_depth_work(self, tenant_id, dive_id):
+    async def laser_depth_work(self, tenant_id, mission_id):
         return self.work
 
-    async def measurement_work(self, tenant_id, dive_id):
+    async def measurement_work(self, tenant_id, mission_id):
         return self.work
 
-    async def persist_laser_depths(self, tenant_id, dive_id, **result):
+    async def persist_laser_depths(self, tenant_id, mission_id, **result):
         self.persisted = result
         return PersistedDepths(len(result["depths"]), len(result["refusals"]), 0)
 
-    async def persist_measurements(self, tenant_id, dive_id, **result):
+    async def persist_measurements(self, tenant_id, mission_id, **result):
         self.persisted = result
         return PersistedMeasurements(len(result["lengths"]), 0, 0, 0, 0)
 
 
 async def _run(parent, activities):
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with (
             build_worker(

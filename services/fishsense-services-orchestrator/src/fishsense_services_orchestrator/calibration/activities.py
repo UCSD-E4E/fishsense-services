@@ -58,7 +58,7 @@ from fishsense_services_contracts.slate_calibration import (
 from fishsense_services_orchestrator.calibration.contracts import (
     CalibrationProvenance,
     CheckerboardCalibrationPlan,
-    LatticeDive,
+    LatticeMission,
     LatticePlan,
     RecordCalibration,
     SlateCalibrationPlan,
@@ -79,28 +79,28 @@ class LaserCalibrationCatalog(Protocol):
 
     async def resolve_tenant(self, slug: str) -> uuid.UUID | None: ...
 
-    async def next_dive_for_laser_calibration(
+    async def next_mission_for_laser_calibration(
         self, tenant_id: uuid.UUID
     ) -> CalibrationCandidate | None: ...
 
-    async def next_dive_for_checkerboard_calibration(
+    async def next_mission_for_checkerboard_calibration(
         self, tenant_id: uuid.UUID
     ) -> CalibrationCandidate | None: ...
 
     async def slate_calibration_inputs(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> SlateCalibrationInputs | None: ...
 
     async def checkerboard_calibration_inputs(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> CheckerboardInputs: ...
 
-    async def dive_for_number(
+    async def mission_for_number(
         self, tenant_id: uuid.UUID, number: int
     ) -> uuid.UUID | None: ...
 
     async def record_laser_calibration(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, record: CalibrationRecord
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, record: CalibrationRecord
     ) -> uuid.UUID: ...
 
 
@@ -119,9 +119,9 @@ def _attempt_id(producer: str) -> uuid.UUID:
     )
 
 
-def _unavailable(target_dive, exc: CalibrationInputsUnavailable) -> ApplicationError:
+def _unavailable(target_mission, exc: CalibrationInputsUnavailable) -> ApplicationError:
     return ApplicationError(
-        f"cannot resolve a calibration for dive {target_dive}: {exc}",
+        f"cannot resolve a calibration for dive {target_mission}: {exc}",
         type="CalibrationInputsUnavailable",
         non_retryable=True,
     )
@@ -141,9 +141,9 @@ class LaserCalibrationActivities:
             candidate = await next_for(tenant_id)
             if candidate is None:
                 continue
-            key = (candidate.reentry, candidate.created_at, str(candidate.dive_id))
+            key = (candidate.reentry, candidate.created_at, str(candidate.mission_id))
             if best_key is None or key < best_key:
-                best, best_key = StagingTarget(tenant_id, candidate.dive_id), key
+                best, best_key = StagingTarget(tenant_id, candidate.mission_id), key
         if best is None:
             activity.logger.info("no high-priority dives needing %s", what)
         else:
@@ -151,24 +151,26 @@ class LaserCalibrationActivities:
                 "next high-priority dive needing %s: tenant=%s dive=%s",
                 what,
                 best.tenant_id,
-                best.dive_id,
+                best.mission_id,
             )
         return best
 
     @activity.defn(name="select_next_dive_for_laser_calibration")
-    async def select_next_dive_for_laser_calibration(self) -> Optional[StagingTarget]:
+    async def select_next_mission_for_laser_calibration(
+        self,
+    ) -> Optional[StagingTarget]:
         """The next dive stage 13 can calibrate from its slate, across tenants."""
         return await self._oldest(
-            self._catalog.next_dive_for_laser_calibration, "laser calibration"
+            self._catalog.next_mission_for_laser_calibration, "laser calibration"
         )
 
     @activity.defn(name="select_next_dive_for_checkerboard_calibration")
-    async def select_next_dive_for_checkerboard_calibration(
+    async def select_next_mission_for_checkerboard_calibration(
         self,
     ) -> Optional[StagingTarget]:
         """The next dive to calibrate from its checkerboard, across tenants."""
         return await self._oldest(
-            self._catalog.next_dive_for_checkerboard_calibration,
+            self._catalog.next_mission_for_checkerboard_calibration,
             "checkerboard laser calibration",
         )
 
@@ -180,21 +182,21 @@ class LaserCalibrationActivities:
         fit (no slate template, or no slate labels: v1's no-op)."""
         try:
             inputs = await self._catalog.slate_calibration_inputs(
-                target.tenant_id, target.dive_id
+                target.tenant_id, target.mission_id
             )
         except CalibrationInputsUnavailable as exc:
-            raise _unavailable(target.dive_id, exc) from exc
+            raise _unavailable(target.mission_id, exc) from exc
         if inputs is None:
             return None
         activity.logger.info(
             "resolved stage 13 inputs dive=%s observations=%d dive_dots=%d",
-            target.dive_id,
+            target.mission_id,
             len(inputs.observations),
-            len(inputs.dive_dots),
+            len(inputs.mission_dots),
         )
         return SlateCalibrationPlan(
             payload=SlateCalibrationInput(
-                dive_id=target.dive_id,
+                mission_id=target.mission_id,
                 camera_matrix=inputs.camera_matrix,
                 template_points=inputs.template_points,
                 dpi=inputs.dpi,
@@ -208,7 +210,7 @@ class LaserCalibrationActivities:
                     )
                     for o in inputs.observations
                 ],
-                dive_dots=inputs.dive_dots,
+                mission_dots=inputs.mission_dots,
             ),
             provenance=CalibrationProvenance(
                 producer="slate",
@@ -218,13 +220,13 @@ class LaserCalibrationActivities:
             ),
         )
 
-    async def _board(self, tenant_id, dive_id) -> CheckerboardInputs:
+    async def _board(self, tenant_id, mission_id) -> CheckerboardInputs:
         try:
             return await self._catalog.checkerboard_calibration_inputs(
-                tenant_id, dive_id
+                tenant_id, mission_id
             )
         except CalibrationInputsUnavailable as exc:
-            raise _unavailable(dive_id, exc) from exc
+            raise _unavailable(mission_id, exc) from exc
 
     @staticmethod
     def _target(inputs: CheckerboardInputs) -> CheckerboardTarget:
@@ -242,12 +244,12 @@ class LaserCalibrationActivities:
         """The camera, the board's current geometry, and one frame per
         canonical image with a live dot -- "frames worth trying", never
         "frames that will work": the board is found by the processor."""
-        inputs = await self._board(target.tenant_id, target.dive_id)
+        inputs = await self._board(target.tenant_id, target.mission_id)
         layout = self._store.layout
         activity.logger.info(
             "resolved checkerboard calibration inputs dive=%s board=%dx%d "
             "pitch=%.5f/%.5fm frames=%d",
-            target.dive_id,
+            target.mission_id,
             inputs.rows,
             inputs.cols,
             inputs.pitch_x_m,
@@ -256,7 +258,7 @@ class LaserCalibrationActivities:
         )
         return CheckerboardCalibrationPlan(
             payload=PerformCheckerboardCalibrationInput(
-                dive_id=target.dive_id,
+                mission_id=target.mission_id,
                 camera_matrix=inputs.camera_matrix,
                 distortion_coefficients=inputs.distortion_coefficients,
                 target=self._target(inputs),
@@ -269,7 +271,7 @@ class LaserCalibrationActivities:
                     )
                     for frame in inputs.frames
                 ],
-                dive_dots=inputs.dive_dots,
+                mission_dots=inputs.mission_dots,
             ),
             provenance=CalibrationProvenance(
                 producer="checkerboard",
@@ -291,7 +293,7 @@ class LaserCalibrationActivities:
             verdicts["refusal_type"] = result.refusal_type
         written = await self._catalog.record_laser_calibration(
             payload.tenant_id,
-            payload.dive_id,
+            payload.mission_id,
             CalibrationRecord(
                 producer=provenance.producer,
                 outcome=result.outcome,
@@ -311,7 +313,7 @@ class LaserCalibrationActivities:
         )
         activity.logger.info(
             "recorded laser calibration dive=%s producer=%s outcome=%s id=%s",
-            payload.dive_id,
+            payload.mission_id,
             provenance.producer,
             result.outcome,
             written,
@@ -333,32 +335,34 @@ class LaserCalibrationActivities:
         return tenant_id
 
     @activity.defn(name="resolve_lattice_inputs")
-    async def resolve_lattice_inputs(self, dive: LatticeDive) -> LatticePlan:
+    async def resolve_lattice_inputs(self, mission: LatticeMission) -> LatticePlan:
         """The frames the dive's checkerboard fit consumed -- the calibration
         resolver's population, reused so the study cannot drift from it --
         with the key each render is written to."""
-        dive_id = await self._catalog.dive_for_number(dive.tenant_id, dive.number)
-        if dive_id is None:
+        mission_id = await self._catalog.mission_for_number(
+            mission.tenant_id, mission.number
+        )
+        if mission_id is None:
             raise ApplicationError(
-                f"tenant {dive.tenant_id} has no dive numbered {dive.number}",
+                f"tenant {mission.tenant_id} has no dive numbered {mission.number}",
                 type="UnknownDive",
                 non_retryable=True,
             )
-        inputs = await self._board(dive.tenant_id, dive_id)
+        inputs = await self._board(mission.tenant_id, mission_id)
         layout = self._store.layout
         return LatticePlan(
-            target=StagingTarget(tenant_id=dive.tenant_id, dive_id=dive_id),
+            target=StagingTarget(tenant_id=mission.tenant_id, mission_id=mission_id),
             payload=VerifyCheckerboardLatticeInput(
-                dive_id=dive_id,
+                mission_id=mission_id,
                 camera_matrix=inputs.camera_matrix,
                 distortion_coefficients=inputs.distortion_coefficients,
                 target=self._target(inputs),
                 images=[
                     LatticeImage(
                         capture_id=frame.capture_id,
-                        raw=layout.raw(dive.tenant_id, frame.checksum),
+                        raw=layout.raw(mission.tenant_id, frame.checksum),
                         render=layout.processed_jpeg(
-                            dive.tenant_id,
+                            mission.tenant_id,
                             CHECKERBOARD_LATTICE_JPEG_FOLDER,
                             frame.checksum,
                         ),
@@ -367,6 +371,6 @@ class LaserCalibrationActivities:
                     )
                     for frame in inputs.frames
                 ],
-                sample_limit=dive.sample_limit,
+                sample_limit=mission.sample_limit,
             ),
         )

@@ -19,7 +19,7 @@ from datetime import timedelta
 
 import pytest
 from temporalio import workflow
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -37,7 +37,7 @@ from fishsense_services_processor import registry
 from fishsense_services_processor.laser_validation import workflows as sut
 from fishsense_services_processor.laser_validation.stage import STAGE
 
-from ._laser import DIVE, colinear_labels, prod_like_dive
+from ._laser import MISSION, colinear_labels, prod_like_mission
 
 QUEUE = "test-laser-light"
 
@@ -52,11 +52,13 @@ def _dispatch(monkeypatch):
         calls["args"] = args
         calls.update(kwargs)
         return LaserAutoAcceptResult(
-            summary=LaserAutoAcceptSummary(dive_id=DIVE), frames=[]
+            summary=LaserAutoAcceptSummary(mission_id=MISSION), frames=[]
         )
 
     monkeypatch.setattr(workflow, "execute_activity", _record)
-    payload = EvaluateLaserAutoAcceptInput(dive_id=DIVE, dive_number=7, predictions=[])
+    payload = EvaluateLaserAutoAcceptInput(
+        mission_id=MISSION, mission_number=7, predictions=[]
+    )
     asyncio.run(sut.EvaluateLaserAutoAcceptWorkflow().run(payload))
     return calls
 
@@ -80,7 +82,7 @@ def test_the_gate_still_heartbeats(dispatch):
 
 async def _run(workflow_run, payload):
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,
@@ -101,20 +103,20 @@ async def test_the_validation_workflow_returns_what_to_write():
     labels[5].y += 50.0
 
     result = await _run(
-        sut.ValidateLaserLabelsForDiveWorkflow.run,
-        ValidateLaserLabelsInput(dive_id=DIVE, labels=labels),
+        sut.ValidateLaserLabelsForMissionWorkflow.run,
+        ValidateLaserLabelsInput(mission_id=MISSION, labels=labels),
     )
 
     assert [s.label_id for s in result.supersede] == [labels[5].label_id]
     assert result.line is not None
 
 
-async def test_the_plan_workflow_returns_one_dives_plan():
-    labels = prod_like_dive(superseded={9})
+async def test_the_plan_workflow_returns_one_missions_plan():
+    labels = prod_like_mission(superseded={9})
 
     plan = await _run(
         sut.PlanLaserSupersedeRemediationWorkflow.run,
-        PlanLaserRemediationInput(dive_id=7, labels=labels),
+        PlanLaserRemediationInput(mission_id=7, labels=labels),
     )
 
     assert plan.revive_ids == [labels[9].number]
@@ -127,7 +129,7 @@ def test_the_laser_math_is_a_light_stage():
     registration = registry.registration_for_role(registry.ROLE_LIGHT)
     for wf in (
         sut.EvaluateLaserAutoAcceptWorkflow,
-        sut.ValidateLaserLabelsForDiveWorkflow,
+        sut.ValidateLaserLabelsForMissionWorkflow,
         sut.PlanLaserSupersedeRemediationWorkflow,
     ):
         assert wf in registration.workflows

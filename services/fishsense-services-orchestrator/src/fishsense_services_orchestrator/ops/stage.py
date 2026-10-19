@@ -22,8 +22,8 @@ from fishsense_services_orchestrator.ops.checksums.activities import (
     ChecksumActivities,
 )
 from fishsense_services_orchestrator.ops.checksums.workflows import (
-    VerifyAllDivesChecksumsWorkflow,
-    VerifyDiveChecksumsWorkflow,
+    VerifyAllMissionsChecksumsWorkflow,
+    VerifyMissionChecksumsWorkflow,
 )
 from fishsense_services_orchestrator.ops.labeling_configs.activities import (
     LabelingConfigActivities,
@@ -41,7 +41,7 @@ from fishsense_services_orchestrator.ops.paths.workflow import (
     RepairMovedCapturePathsWorkflow,
 )
 from fishsense_services_orchestrator.ops.regroup.activities import RegroupActivities
-from fishsense_services_orchestrator.ops.regroup.workflow import RegroupDiveWorkflow
+from fishsense_services_orchestrator.ops.regroup.workflow import RegroupMissionWorkflow
 from fishsense_services_orchestrator.registry import Deps, ScheduledWorkflow, Stage
 
 
@@ -63,22 +63,22 @@ def _activities(deps: Deps):
         configs=labeling_configs(),
     )
     return [
-        checksums.verify_dive_checksums,
-        checksums.select_canonical_dive_numbers,
+        checksums.verify_mission_checksums,
+        checksums.select_canonical_mission_numbers,
         reconcile.reconcile_labeling_configs,
         paths.repair_moved_capture_paths,
-        regroup.regroup_dive,
+        regroup.regroup_mission,
     ]
 
 
 STAGE = Stage(
     name="ops",
     workflows=[
-        VerifyDiveChecksumsWorkflow,
-        VerifyAllDivesChecksumsWorkflow,
+        VerifyMissionChecksumsWorkflow,
+        VerifyAllMissionsChecksumsWorkflow,
         ReconcileLabelingConfigsWorkflow,
         RepairMovedCapturePathsWorkflow,
-        RegroupDiveWorkflow,
+        RegroupMissionWorkflow,
     ],
     build_activities=_activities,
     schedules=[

@@ -37,9 +37,9 @@ from dataclasses import dataclass
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from fishsense_services_api.checksum_store import dive_by_number
+from fishsense_services_api.checksum_store import mission_by_number
 from fishsense_services_api.clustering_store import ForeignCapture, InvalidClusters
-from fishsense_services_api.laser_depth_store import lock_dive
+from fishsense_services_api.laser_depth_store import lock_mission
 from fishsense_services_api.measurement_store import new_real_fish
 from fishsense_services_api.service_principal import ServicePrincipal
 from fishsense_services_api.species_store import (
@@ -135,22 +135,22 @@ def clusters_fingerprint(clusters: Sequence[LabelStudioCluster]) -> str:
 
 
 async def _label_studio_clusters(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> list[LabelStudioCluster]:
     rows = await conn.execute(
         text("""
             SELECT k.id, k.number, k.fish_id,
                    array_agg(c.id ORDER BY c.captured_at, c.number) AS members
-            FROM dive_frame_clusters k
-            JOIN dive_frame_cluster_captures m
+            FROM mission_frame_clusters k
+            JOIN mission_frame_cluster_captures m
               ON m.tenant_id = k.tenant_id AND m.cluster_id = k.id
             JOIN captures c ON c.tenant_id = m.tenant_id AND c.id = m.capture_id
-            WHERE k.tenant_id = :tenant AND k.dive_id = :dive
+            WHERE k.tenant_id = :tenant AND k.mission_id = :mission
               AND k.formed_by = 'label_studio'
             GROUP BY k.id
             ORDER BY min(c.captured_at), min(c.number), k.number
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     return [
         LabelStudioCluster(r.id, r.number, r.fish_id, tuple(r.members)) for r in rows
@@ -158,15 +158,15 @@ async def _label_studio_clusters(
 
 
 async def regroup_facts(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> RegroupFacts:
     """What a regroup plans from."""
-    grouping = await species_grouping_facts(conn, tenant_id, dive_id)
-    clusters = await _label_studio_clusters(conn, tenant_id, dive_id)
+    grouping = await species_grouping_facts(conn, tenant_id, mission_id)
+    clusters = await _label_studio_clusters(conn, tenant_id, mission_id)
     priority = (
         await conn.execute(
-            text("SELECT priority FROM dives WHERE tenant_id = :t AND id = :d"),
-            {"t": tenant_id, "d": dive_id},
+            text("SELECT priority FROM missions WHERE tenant_id = :t AND id = :d"),
+            {"t": tenant_id, "d": mission_id},
         )
     ).scalar_one()
     measured = await conn.execute(
@@ -177,19 +177,19 @@ async def regroup_facts(
             JOIN captures c ON c.tenant_id = m.tenant_id AND c.id = m.capture_id
             JOIN fish f ON f.tenant_id = m.tenant_id AND f.id = m.fish_id
             LEFT JOIN species s ON s.id = f.species_id
-            WHERE m.tenant_id = :tenant AND c.dive_id = :dive
+            WHERE m.tenant_id = :tenant AND c.mission_id = :mission
               AND m.source = 'server' AND f.species_id IS NOT NULL
             ORDER BY c.captured_at, c.number, f.number
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     numbers = (
         await conn.execute(
             text("""
                 SELECT id, number, is_canonical FROM captures
-                WHERE tenant_id = :t AND dive_id = :d
+                WHERE tenant_id = :t AND mission_id = :d
                 """),
-            {"t": tenant_id, "d": dive_id},
+            {"t": tenant_id, "d": mission_id},
         )
     ).all()
     measured = measured.all()
@@ -228,7 +228,7 @@ async def regroup_facts(
 async def replace_label_studio_clusters(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     clusters: Sequence[NewCluster],
     *,
     expected_fingerprint: str,
@@ -238,15 +238,15 @@ async def replace_label_studio_clusters(
     capture and not written)."""
     await conn.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-        {"key": f"label-studio-clusters:{dive_id}"},
+        {"key": f"label-studio-clusters:{mission_id}"},
     )
     # Stage 14 reads a frame's cluster and binds it under this lock: a cluster
     # must not be deleted between the two (PR #72 review).
-    await lock_dive(conn, "measure-fish", dive_id)
-    current = await _label_studio_clusters(conn, tenant_id, dive_id)
+    await lock_mission(conn, "measure-fish", mission_id)
+    current = await _label_studio_clusters(conn, tenant_id, mission_id)
     if clusters_fingerprint(current) != expected_fingerprint:
         raise ClustersChanged(
-            f"dive {dive_id}'s label-studio clusters changed since the plan"
+            f"dive {mission_id}'s label-studio clusters changed since the plan"
         )
 
     members = {c for cluster in clusters for c in cluster.captures}
@@ -255,14 +255,14 @@ async def replace_label_studio_clusters(
         for r in await conn.execute(
             text("""
                 SELECT id, is_canonical FROM captures
-                WHERE tenant_id = :tenant AND dive_id = :dive AND id = ANY(:ids)
+                WHERE tenant_id = :tenant AND mission_id = :mission AND id = ANY(:ids)
                 """),
-            {"tenant": tenant_id, "dive": dive_id, "ids": list(members)},
+            {"tenant": tenant_id, "mission": mission_id, "ids": list(members)},
         )
     }
     if foreign := members - canonical.keys():
         raise ForeignCapture(
-            f"not captures of dive {dive_id}: {sorted(map(str, foreign))}"
+            f"not captures of dive {mission_id}: {sorted(map(str, foreign))}"
         )
     named = {k.fish_id for k in clusters if k.fish_id is not None}
     real = set(
@@ -279,14 +279,14 @@ async def replace_label_studio_clusters(
     if unknown := named - real:
         raise ValueError(f"not real fish of the tenant: {sorted(map(str, unknown))}")
     if any(len(set(k.captures)) != len(k.captures) for k in clusters):
-        raise InvalidClusters(f"a capture repeats within a cluster of {dive_id}")
+        raise InvalidClusters(f"a capture repeats within a cluster of {mission_id}")
 
     await conn.execute(
         text("""
-            DELETE FROM dive_frame_clusters
-            WHERE tenant_id = :tenant AND dive_id = :dive AND formed_by = 'label_studio'
+            DELETE FROM mission_frame_clusters
+            WHERE tenant_id = :tenant AND mission_id = :mission AND formed_by = 'label_studio'
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     bound: list[uuid.UUID | None] = []
     for cluster in clusters:
@@ -300,17 +300,17 @@ async def replace_label_studio_clusters(
         cluster_id = (
             await conn.execute(
                 text("""
-                    INSERT INTO dive_frame_clusters
-                        (tenant_id, dive_id, formed_by, fish_id, updated_at)
-                    VALUES (:tenant, :dive, 'label_studio', :fish, now())
+                    INSERT INTO mission_frame_clusters
+                        (tenant_id, mission_id, formed_by, fish_id, updated_at)
+                    VALUES (:tenant, :mission, 'label_studio', :fish, now())
                     RETURNING id
                     """),
-                {"tenant": tenant_id, "dive": dive_id, "fish": fish_id},
+                {"tenant": tenant_id, "mission": mission_id, "fish": fish_id},
             )
         ).scalar_one()
         await conn.execute(
             text("""
-                INSERT INTO dive_frame_cluster_captures
+                INSERT INTO mission_frame_cluster_captures
                     (tenant_id, cluster_id, capture_id)
                 SELECT :tenant, :cluster, unnest(CAST(:captures AS uuid[]))
                 """),
@@ -323,22 +323,22 @@ async def replace_label_studio_clusters(
 class RegroupCatalog(ServicePrincipal):
     """A regroup's database side, as the orchestrator's principal."""
 
-    async def dive_by_number(
+    async def mission_by_number(
         self, tenant_id: uuid.UUID, number: int
     ) -> uuid.UUID | None:
         async with self._tenant(tenant_id) as conn:
-            return await dive_by_number(conn, tenant_id, number)
+            return await mission_by_number(conn, tenant_id, number)
 
     async def regroup_facts(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> RegroupFacts:
         async with self._tenant(tenant_id) as conn:
-            return await regroup_facts(conn, tenant_id, dive_id)
+            return await regroup_facts(conn, tenant_id, mission_id)
 
     async def replace_label_studio_clusters(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         clusters: Sequence[NewCluster],
         *,
         expected_fingerprint: str,
@@ -347,7 +347,7 @@ class RegroupCatalog(ServicePrincipal):
             return await replace_label_studio_clusters(
                 conn,
                 tenant_id,
-                dive_id,
+                mission_id,
                 clusters,
                 expected_fingerprint=expected_fingerprint,
             )

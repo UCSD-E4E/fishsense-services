@@ -62,7 +62,7 @@ describe("/portal SSR auth gate (against the running container)", () => {
     const body = await res.text();
     expect(body).toContain("Integration Test User");
     expect(body).toContain("integration-test@fishsense.local");
-    expect(body).toContain("Dive calibration links");
+    expect(body).toContain("Mission calibration links");
   });
 
   it("renders a dead end, not the portal, for a member who is not an admin", async () => {
@@ -74,7 +74,7 @@ describe("/portal SSR auth gate (against the running container)", () => {
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain("needs the admin role");
-    expect(body).not.toContain("Dive calibration links");
+    expect(body).not.toContain("Mission calibration links");
   });
 
   it("does not take the portal from an Authentik group", async () => {
@@ -85,7 +85,7 @@ describe("/portal SSR auth gate (against the running container)", () => {
 
     const body = await res.text();
     expect(body).toContain("not a member");
-    expect(body).not.toContain("Dive calibration links");
+    expect(body).not.toContain("Mission calibration links");
   });
 
   it("does not redirect a signed-in but unauthorized user into a sign-in loop", async () => {

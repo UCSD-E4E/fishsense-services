@@ -99,14 +99,16 @@ class Lab:
     def __init__(self, owner_engine: AsyncEngine, tenant_id) -> None:
         self.owner_engine = owner_engine
         self.tenant_id = tenant_id
-        self._dives: dict[int, tuple] = {}
+        self._missions: dict[int, tuple] = {}
         self._fish: dict[str | None, object] = {}
 
-    async def dive(self, key: int):
+    async def mission(self, key: int):
         """(dive id, its laser calibration) for the test's dive `key`."""
-        if key not in self._dives:
-            self._dives[key] = await calibrated_dive(self.owner_engine, self.tenant_id)
-        return self._dives[key]
+        if key not in self._missions:
+            self._missions[key] = await calibrated_dive(
+                self.owner_engine, self.tenant_id
+            )
+        return self._missions[key]
 
     async def model_fish(self, model: str):
         if model not in self._fish:
@@ -115,11 +117,11 @@ class Lab:
             )
         return self._fish[model]
 
-    async def measure(self, *, dive: int, model: str, length_m, v1_id=None):
-        """One frame of `model` in dive `dive`, measured at `length_m`.
+    async def measure(self, *, mission: int, model: str, length_m, v1_id=None):
+        """One frame of `model` in dive `mission`, measured at `length_m`.
         Returns (capture id, measurement id)."""
-        dive_id, calibration_id = await self.dive(dive)
-        capture_id = await capture(self.owner_engine, self.tenant_id, dive_id)
+        mission_id, calibration_id = await self.mission(mission)
+        capture_id = await capture(self.owner_engine, self.tenant_id, mission_id)
         measurement_id = await _measurement(
             self.owner_engine,
             self.tenant_id,

@@ -19,7 +19,7 @@ def _activities(deps: Deps):
         catalog=MeasurementCatalog(deps.engine, sub=deps.sub)
     )
     return [
-        measure.select_next_dive_for_measurement,
+        measure.select_next_mission_for_measurement,
         measure.resolve_measurement_inputs,
         measure.persist_measurements,
     ]

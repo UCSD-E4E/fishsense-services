@@ -14,12 +14,12 @@ from uuid import UUID
 import pytest
 from temporalio.testing import ActivityEnvironment
 
-from fishsense_services_contracts import ClusterDiveFrameImage
-from fishsense_services_processor.clustering.activities import cluster_dive_frames
+from fishsense_services_contracts import ClusterMissionFrameImage
+from fishsense_services_processor.clustering.activities import cluster_mission_frames
 
 
-def _img(i: int, ts: datetime) -> ClusterDiveFrameImage:
-    return ClusterDiveFrameImage(capture_id=UUID(int=i), taken_datetime=ts)
+def _img(i: int, ts: datetime) -> ClusterMissionFrameImage:
+    return ClusterMissionFrameImage(capture_id=UUID(int=i), taken_datetime=ts)
 
 
 def _ints(result) -> list[list[int]]:
@@ -38,7 +38,7 @@ async def test_returns_capture_ids_grouped_by_temporal_proximity():
     ]
     images = cluster_a + cluster_b
 
-    result = await ActivityEnvironment().run(cluster_dive_frames, images)
+    result = await ActivityEnvironment().run(cluster_mission_frames, images)
 
     assert isinstance(result, list)
     assert all(isinstance(c, list) for c in result)
@@ -52,7 +52,7 @@ async def test_returns_capture_ids_grouped_by_temporal_proximity():
 
 
 async def test_returns_empty_when_no_images():
-    result = await ActivityEnvironment().run(cluster_dive_frames, [])
+    result = await ActivityEnvironment().run(cluster_mission_frames, [])
     assert not result
 
 
@@ -84,7 +84,7 @@ async def test_evenly_spaced_frames_still_produce_clusters():
     base = datetime(2026, 5, 5, 10, 0, 0, tzinfo=timezone.utc)
     images = [_img(1, base), _img(2, base + timedelta(seconds=2))]
 
-    result = await ActivityEnvironment().run(cluster_dive_frames, images)
+    result = await ActivityEnvironment().run(cluster_mission_frames, images)
 
     assert result, "an evenly-spaced dive must not return an empty cluster list"
     assert sorted(i for c in _ints(result) for i in c) == [1, 2]
@@ -97,7 +97,7 @@ async def test_uniform_spacing_at_every_small_n(n):
     base = datetime(2026, 5, 5, 10, 0, 0, tzinfo=timezone.utc)
     images = [_img(i, base + timedelta(seconds=2 * i)) for i in range(n)]
 
-    result = await ActivityEnvironment().run(cluster_dive_frames, images)
+    result = await ActivityEnvironment().run(cluster_mission_frames, images)
 
     assert sorted(i for c in _ints(result) for i in c) == list(range(n))
 
@@ -111,7 +111,7 @@ async def test_a_noise_frame_becomes_its_own_cluster_rather_than_vanishing():
     stray = _img(99, base + timedelta(hours=3))
 
     result = _ints(
-        await ActivityEnvironment().run(cluster_dive_frames, burst + [stray])
+        await ActivityEnvironment().run(cluster_mission_frames, burst + [stray])
     )
 
     assert [99] in result, "the stray frame must appear as its own cluster"
@@ -137,7 +137,7 @@ async def test_every_frame_appears_in_exactly_one_cluster(offsets):
     base = datetime(2026, 5, 5, 10, 0, 0, tzinfo=timezone.utc)
     images = [_img(i, base + timedelta(seconds=o)) for i, o in enumerate(offsets)]
 
-    result = _ints(await ActivityEnvironment().run(cluster_dive_frames, images))
+    result = _ints(await ActivityEnvironment().run(cluster_mission_frames, images))
 
     flat = [i for c in result for i in c]
     assert sorted(flat) == list(range(len(offsets)))
@@ -156,7 +156,7 @@ async def test_real_burst_structure_is_still_grouped():
                 _img(burst * 10 + k, base + timedelta(minutes=10 * burst, seconds=k))
             )
 
-    result = await ActivityEnvironment().run(cluster_dive_frames, images)
+    result = await ActivityEnvironment().run(cluster_mission_frames, images)
 
     multi = [c for c in result if len(c) > 1]
     assert len(multi) == 4, f"expected 4 grouped bursts, got {result}"
@@ -165,14 +165,14 @@ async def test_real_burst_structure_is_still_grouped():
 async def test_empty_input_still_returns_empty():
     """A dive with no images to cluster has nothing to say. Unchanged -- the
     parent never dispatches this case, and inventing a cluster would be worse."""
-    assert await ActivityEnvironment().run(cluster_dive_frames, []) == []
+    assert await ActivityEnvironment().run(cluster_mission_frames, []) == []
 
 
-async def test_a_single_frame_dive_does_not_raise():
+async def test_a_single_frame_mission_does_not_raise():
     """HDBSCAN raises `n_samples=1 while HDBSCAN requires more than one
     sample`, so before the guard a one-frame dive failed the activity, the
     child, and the parent -- a louder failure than the empty-list wedge but
     with the same outcome: the dive never drains."""
     base = datetime(2026, 5, 5, 10, 0, 0, tzinfo=timezone.utc)
-    result = await ActivityEnvironment().run(cluster_dive_frames, [_img(7, base)])
+    result = await ActivityEnvironment().run(cluster_mission_frames, [_img(7, base)])
     assert _ints(result) == [[7]]

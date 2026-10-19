@@ -52,8 +52,8 @@ class TestList:
         assert found.method == "laser"
         assert found.device_kind == "lite"
         assert found.device_name == "FSL-07"
-        assert found.dive_name == "Alligator Deep"
-        assert found.dive_number is not None
+        assert found.mission_name == "Alligator Deep"
+        assert found.mission_number is not None
         assert (found.scientific_name, found.common_name) == (
             "Lachnolaimus maximus",
             "Hogfish",
@@ -78,7 +78,7 @@ class TestList:
         assert (found.latitude, found.longitude) == (32.8665, -117.2546)
         assert found.length_m == pytest.approx(0.42)
         assert found.photo_key == f"mobile/captures/{client_uuid}/rgb_jpeg"
-        assert found.dive_number is None
+        assert found.mission_number is None
 
     async def test_both_are_listed_together_newest_first_and_filter_by_device(
         self, owner_engine, app_engine, tenants

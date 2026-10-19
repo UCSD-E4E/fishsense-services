@@ -73,6 +73,22 @@ Integration tests need Docker. The host has no `python3`; use `uv run python`.
   builders and schedules. Child workflow IDs are deterministic. Activity
   signature changes must keep replaying for in-flight workflows, so add
   optional arguments with defaults.
+- **A mission is what a dive used to be** (Phase 2a, migration 0046): one
+  device's recording session. Write `missions` / `mission_id` in new code.
+  What Temporal or an outside reader sees keeps the old name:
+  - Temporal type names are pinned in their decorators
+    (`@workflow.defn(name="IngestDiveWorkflow")`); workflow, schedule and error
+    type names stay as they were. Renaming a Python class or function that
+    Temporal runs means pinning its old name the same way.
+  - A renamed payload field keeps its old name on the wire:
+    `Annotated[..., renamed_from("dive_id", "mission_id")]`, written by the
+    contracts' `DATA_CONVERTER` (serializes by alias) and read under either
+    name. Every client and worker uses `DATA_CONVERTER`.
+  - Stored values stay: `dive_ineligible` (a gate verdict), `describes_dive`
+    (a gate key), Label Studio titles.
+  - Outside readers' surfaces stay: the research views (schema `v1`,
+    `fish_length_estimate`, `fish_model_*`), `automatic_results_export`, and
+    Superset's `dive_pipeline_status`.
 
 ## Production access
 
@@ -107,6 +123,9 @@ Q() { docker exec fishsense-postgres-1 psql -U postgres -d fishsense_services -A
   recreates it. A schedule's pending firings and its running workflows don't
   survive a recreate.
 - **NRP:**
+  - A "Deployment" here is the Kubernetes object, a *processor Deployment*;
+    a field trip is a *deployment* in the schema (Phase 2b). Never read one
+    for the other.
   - Processors are stood up per wake and torn down when idle; NRP deletes
     Deployments older than two weeks.
   - Request another GPU only once the first is fully used. A slow GPU queue is

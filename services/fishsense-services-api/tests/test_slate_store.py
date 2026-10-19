@@ -44,7 +44,7 @@ from _slate_calibration_seed import (
     T0,
     capture,
     device_with_camera,
-    dive,
+    mission,
     later,
     slate_label,
     slate_template,
@@ -58,9 +58,9 @@ from fishsense_services_api.slate_store import (
     SlateSync,
     apply_slate_sync,
     clear_slate_reprocess_flags,
-    dive_has_slate_labels_in_project,
+    mission_has_slate_labels_in_project,
     flag_slate_labels_for_reprocess,
-    next_dive_for_slate_preprocessing,
+    next_mission_for_slate_preprocessing,
     record_slate_label,
     slate_label_studio_projects,
     slate_populate_candidates,
@@ -75,20 +75,22 @@ ORCHESTRATOR = "service:fishsense-orchestrator"
 
 async def _next(app_engine, lab):
     async with tenant_transaction(app_engine, lab) as conn:
-        candidate = await next_dive_for_slate_preprocessing(conn, lab)
-    return None if candidate is None else candidate.dive_id
+        candidate = await next_mission_for_slate_preprocessing(conn, lab)
+    return None if candidate is None else candidate.mission_id
 
 
-#: `_slate_dive`'s default: a device of its own with a camera calibration.
+#: `_slate_mission`'s default: a device of its own with a camera calibration.
 _A_CAMERA = object()
 
 
-async def _slate_dive(owner_engine, lab, *, device=_A_CAMERA, template=None, **kwargs):
+async def _slate_mission(
+    owner_engine, lab, *, device=_A_CAMERA, template=None, **kwargs
+):
     """A dive with a slate template (built from `template`'s overrides) whose
     device has a camera calibration, unless `device` says otherwise."""
     if device is _A_CAMERA:
         device, _ = await device_with_camera(owner_engine, lab)
-    return await dive(
+    return await mission(
         owner_engine,
         lab,
         slate=await slate_template(owner_engine, **(template or {})),
@@ -109,16 +111,16 @@ async def _row(owner_engine, label_id):
 # ---------- stage 9: the cohort ----------
 
 
-async def test_slate_preprocessing_requires_dive_slate_id_and_marker(
+async def test_slate_preprocessing_requires_mission_slate_id_and_marker(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
     # dive 1: HIGH but no slate template -> excluded.
     # dive 2: HIGH + slate but no slate-marked species label -> excluded.
     # dive 3: HIGH + slate + slate-marked + no slate label -> picked.
-    no_slate = await dive(owner_engine, lab, created_at=T0)
-    unmarked = await _slate_dive(owner_engine, lab, created_at=later(1))
-    marked = await _slate_dive(owner_engine, lab, created_at=later(2))
+    no_slate = await mission(owner_engine, lab, created_at=T0)
+    unmarked = await _slate_mission(owner_engine, lab, created_at=later(1))
+    marked = await _slate_mission(owner_engine, lab, created_at=later(2))
     await species(owner_engine, lab, await capture(owner_engine, lab, no_slate))
     await species(
         owner_engine, lab, await capture(owner_engine, lab, unmarked), content="Fish"
@@ -132,8 +134,8 @@ async def test_slate_preprocessing_skips_when_every_slate_image_labeled(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
-    first = await _slate_dive(owner_engine, lab, created_at=T0)
-    second = await _slate_dive(owner_engine, lab, created_at=later(1))
+    first = await _slate_mission(owner_engine, lab, created_at=T0)
+    second = await _slate_mission(owner_engine, lab, created_at=later(1))
     labeled = await capture(owner_engine, lab, first)
     await species(owner_engine, lab, labeled)
     await species(owner_engine, lab, await capture(owner_engine, lab, second))
@@ -142,13 +144,13 @@ async def test_slate_preprocessing_skips_when_every_slate_image_labeled(
     assert await _next(app_engine, lab) == second
 
 
-async def test_slate_preprocessing_excludes_dive_with_only_incomplete_slate_labels(
+async def test_slate_preprocessing_excludes_mission_with_only_incomplete_slate_labels(
     owner_engine, app_engine
 ):
     """Once populate seeds an incomplete slate label (with a real project) for
     every slate-marked image, the dive drops out of the cohort."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     frame = await capture(owner_engine, lab, only)
     await species(owner_engine, lab, frame)
     await slate_label(owner_engine, lab, frame, completed=False)
@@ -156,11 +158,11 @@ async def test_slate_preprocessing_excludes_dive_with_only_incomplete_slate_labe
     assert await _next(app_engine, lab) is None
 
 
-async def test_slate_preprocessing_excludes_dive_when_sentinel_coexists_with_real_label(
+async def test_slate_preprocessing_excludes_mission_when_sentinel_coexists_with_real_label(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     frame = await capture(owner_engine, lab, only)
     await species(owner_engine, lab, frame)
     await slate_label(owner_engine, lab, frame, project=None, source="import")
@@ -175,7 +177,7 @@ async def test_slate_preprocessing_ignores_null_project_sentinels(
     """NULL-project slate labels are legacy sentinels. They must NOT drop a
     dive from the slate cohort."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     frame = await capture(owner_engine, lab, only)
     await species(owner_engine, lab, frame)
     await slate_label(owner_engine, lab, frame, project=None, source="import")
@@ -189,7 +191,7 @@ async def test_a_dead_lettered_slate_label_does_not_count_as_done(
     """v1's `superseded == False` on the slate-label side of the gate, kept so
     the three preprocess gates are spelled alike."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     frame = await capture(owner_engine, lab, only)
     await species(owner_engine, lab, frame)
     await slate_label(owner_engine, lab, frame, superseded=True)
@@ -197,7 +199,7 @@ async def test_a_dead_lettered_slate_label_does_not_count_as_done(
     assert await _next(app_engine, lab) == only
 
 
-async def test_a_superseded_species_marker_does_not_select_the_dive(
+async def test_a_superseded_species_marker_does_not_select_the_mission(
     owner_engine, app_engine
 ):
     """v2 fix. v1's cohort read every species label, but its resolver read them
@@ -205,7 +207,7 @@ async def test_a_superseded_species_marker_does_not_select_the_dive(
     only marker was dead-lettered was selected, resolved nothing, and was
     selected again next hour, ahead of every newer dive. The two now agree."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     await species(
         owner_engine, lab, await capture(owner_engine, lab, only), superseded=True
     )
@@ -215,7 +217,7 @@ async def test_a_superseded_species_marker_does_not_select_the_dive(
 
 async def test_non_canonical_frames_do_not_count(owner_engine, app_engine):
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     await species(
         owner_engine, lab, await capture(owner_engine, lab, only, canonical=False)
     )
@@ -223,17 +225,17 @@ async def test_non_canonical_frames_do_not_count(owner_engine, app_engine):
     assert await _next(app_engine, lab) is None
 
 
-async def test_only_high_priority_dives_are_offered(owner_engine, app_engine):
+async def test_only_high_priority_missions_are_offered(owner_engine, app_engine):
     lab = await tenant(owner_engine)
-    low = await _slate_dive(owner_engine, lab, priority="low")
+    low = await _slate_mission(owner_engine, lab, priority="low")
     await species(owner_engine, lab, await capture(owner_engine, lab, low))
 
     assert await _next(app_engine, lab) is None
 
 
-async def test_another_tenants_dive_is_never_offered(owner_engine, app_engine):
+async def test_another_tenants_mission_is_never_offered(owner_engine, app_engine):
     lab, reef = await tenant(owner_engine), await tenant(owner_engine, "reef")
-    theirs = await _slate_dive(owner_engine, reef)
+    theirs = await _slate_mission(owner_engine, reef)
     await species(owner_engine, reef, await capture(owner_engine, reef, theirs))
 
     assert await _next(app_engine, lab) is None
@@ -248,7 +250,7 @@ _UNRESOLVABLE = [
 
 
 @pytest.mark.parametrize("unresolvable", _UNRESOLVABLE)
-async def test_a_dive_stage_9_cannot_resolve_is_not_offered(
+async def test_a_mission_stage_9_cannot_resolve_is_not_offered(
     owner_engine, app_engine, unresolvable
 ):
     """v2 fix. The resolver refuses these (and `stage_slate_pdf` a template
@@ -257,14 +259,14 @@ async def test_a_dive_stage_9_cannot_resolve_is_not_offered(
     one. Each is fixed in reference data, not by a rerun: the dive leaves the
     cohort until then, and comes back by itself."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab, **unresolvable)
+    only = await _slate_mission(owner_engine, lab, **unresolvable)
     await species(owner_engine, lab, await capture(owner_engine, lab, only))
 
     assert await _next(app_engine, lab) is None
 
 
 @pytest.mark.parametrize("unresolvable", _UNRESOLVABLE)
-async def test_an_unresolvable_dive_does_not_hold_up_another_tenants(
+async def test_an_unresolvable_mission_does_not_hold_up_another_tenants(
     owner_engine, app_engine, seed_memberships, unresolvable
 ):
     """The orchestrator takes the oldest candidate across every tenant it
@@ -274,16 +276,16 @@ async def test_an_unresolvable_dive_does_not_hold_up_another_tenants(
         {ORCHESTRATOR: {"lab": "member", "reef": "member"}}
     )
     lab, reef = tenants["lab"], tenants["reef"]
-    older = await _slate_dive(owner_engine, lab, created_at=T0, **unresolvable)
+    older = await _slate_mission(owner_engine, lab, created_at=T0, **unresolvable)
     await species(owner_engine, lab, await capture(owner_engine, lab, older))
-    younger = await _slate_dive(owner_engine, reef, created_at=later(1))
+    younger = await _slate_mission(owner_engine, reef, created_at=later(1))
     await species(owner_engine, reef, await capture(owner_engine, reef, younger))
     catalog = SlateCatalog(app_engine, sub=ORCHESTRATOR)
 
     offered = [
-        candidate.dive_id
+        candidate.mission_id
         for tenant_id in await catalog.member_tenants()
-        if (candidate := await catalog.next_dive_for_slate_preprocessing(tenant_id))
+        if (candidate := await catalog.next_mission_for_slate_preprocessing(tenant_id))
     ]
     assert offered == [younger]
 
@@ -291,28 +293,28 @@ async def test_an_unresolvable_dive_does_not_hold_up_another_tenants(
 # ---------- stage 9: the reprocess flag is the second way in ----------
 
 
-async def _labelled_dive(owner_engine, lab, *, flagged, canonical=True):
+async def _labelled_mission(owner_engine, lab, *, flagged, canonical=True):
     """A dive whose slate frame is fully labelled, optionally flagged."""
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     frame = await capture(owner_engine, lab, only, canonical=canonical)
     await species(owner_engine, lab, frame)
     await slate_label(owner_engine, lab, frame, completed=True, needs_reprocess=flagged)
     return only, frame
 
 
-async def test_fully_labelled_dive_is_not_selected_without_a_flag(
+async def test_fully_labelled_mission_is_not_selected_without_a_flag(
     owner_engine, app_engine
 ):
     """The control. If this ever fails the test below proves nothing."""
     lab = await tenant(owner_engine)
-    await _labelled_dive(owner_engine, lab, flagged=False)
+    await _labelled_mission(owner_engine, lab, flagged=False)
 
     assert await _next(app_engine, lab) is None
 
 
-async def test_flagged_dive_is_selected(owner_engine, app_engine):
+async def test_flagged_mission_is_selected(owner_engine, app_engine):
     lab = await tenant(owner_engine)
-    only, _ = await _labelled_dive(owner_engine, lab, flagged=True)
+    only, _ = await _labelled_mission(owner_engine, lab, flagged=True)
 
     assert await _next(app_engine, lab) == only
 
@@ -322,7 +324,7 @@ async def test_flag_on_a_non_canonical_image_does_not_select(owner_engine, app_e
     would select a dive the resolver finds no work for -- and the dive would
     re-stage its raw bytes from the NAS every hour forever."""
     lab = await tenant(owner_engine)
-    await _labelled_dive(owner_engine, lab, flagged=True, canonical=False)
+    await _labelled_mission(owner_engine, lab, flagged=True, canonical=False)
 
     assert await _next(app_engine, lab) is None
 
@@ -330,7 +332,7 @@ async def test_flag_on_a_non_canonical_image_does_not_select(owner_engine, app_e
 async def test_flag_on_a_superseded_row_does_not_select(owner_engine, app_engine):
     """The resolver never sees a superseded row, so neither may the cohort."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     frame = await capture(owner_engine, lab, only)
     await species(owner_engine, lab, frame)
     await slate_label(owner_engine, lab, frame, completed=True)
@@ -344,15 +346,15 @@ async def test_flag_on_a_superseded_row_does_not_select(owner_engine, app_engine
 # ---------- stage 9: the resolver ----------
 
 
-async def _resolve(app_engine, lab, dive_id):
+async def _resolve(app_engine, lab, mission_id):
     async with tenant_transaction(app_engine, lab) as conn:
-        return await slate_preprocess_inputs(conn, lab, dive_id)
+        return await slate_preprocess_inputs(conn, lab, mission_id)
 
 
 async def _resolver_scene(owner_engine, lab, **template):
     device, calibration = await device_with_camera(owner_engine, lab)
     slate = await slate_template(owner_engine, **template)
-    only = await dive(owner_engine, lab, slate=slate, device=device)
+    only = await mission(owner_engine, lab, slate=slate, device=device)
     return only, slate, calibration
 
 
@@ -380,7 +382,7 @@ async def test_returns_only_slate_marked_without_any_slate_label(
     #    (any row excludes -- matches the cohort).
     assert [c.checksum for c in inputs.captures] == [f"{3:032x}"]
     assert inputs.captures[0].capture_id == frames[3]
-    assert inputs.dive_id == only
+    assert inputs.mission_id == only
     assert inputs.slate_template.id == slate
     assert inputs.slate_template.dpi == 300
     assert inputs.slate_template.reference_points == [tuple(p) for p in TEMPLATE_POINTS]
@@ -406,10 +408,10 @@ async def test_image_with_only_null_project_sentinel_treated_as_unlabeled(
     assert [c.checksum for c in inputs.captures] == ["a" * 32]
 
 
-async def test_raises_for_dive_without_a_slate_template(owner_engine, app_engine):
+async def test_raises_for_mission_without_a_slate_template(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     device, _ = await device_with_camera(owner_engine, lab)
-    only = await dive(owner_engine, lab, device=device)
+    only = await mission(owner_engine, lab, device=device)
 
     try:
         await _resolve(app_engine, lab, only)
@@ -437,7 +439,7 @@ async def test_raises_when_the_camera_has_no_calibration(owner_engine, app_engin
     """v1: `camera_id=... has no intrinsics`. v2 reads the device's current
     camera calibration."""
     lab = await tenant(owner_engine)
-    only = await dive(owner_engine, lab, slate=await slate_template(owner_engine))
+    only = await mission(owner_engine, lab, slate=await slate_template(owner_engine))
 
     try:
         await _resolve(app_engine, lab, only)
@@ -498,7 +500,7 @@ async def test_a_capture_says_whether_it_came_from_v1(owner_engine, app_engine):
 
 async def _flag_scene(owner_engine, lab):
     """(open canonical, answered canonical, open non-canonical)."""
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     rows = []
     for n, (completed, canonical) in enumerate(
         ((False, True), (True, True), (False, False))
@@ -559,7 +561,7 @@ async def test_a_superseded_row_is_never_flagged(owner_engine, app_engine):
     """The resolver cannot see it, so a flag on it would select a dive that
     resolves nothing."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     row = await slate_label(
         owner_engine, lab, await capture(owner_engine, lab, only), superseded=True
     )
@@ -571,7 +573,7 @@ async def test_a_superseded_row_is_never_flagged(owner_engine, app_engine):
 
 async def _two_flagged(owner_engine, lab):
     """Two flagged frames: one the run redrew, one flagged while it ran."""
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     rows = []
     for n in (10, 11):
         frame = await capture(owner_engine, lab, only, checksum=f"{n:032d}")
@@ -616,10 +618,10 @@ async def test_an_empty_scope_is_not_read_as_no_scope(owner_engine, app_engine):
     assert await _flags(owner_engine, rows) == [True, True]
 
 
-async def test_a_dive_with_no_labels_clears_zero(owner_engine, app_engine):
+async def test_a_mission_with_no_labels_clears_zero(owner_engine, app_engine):
     """The parent clears unconditionally; that must not be an error."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
 
     async with tenant_transaction(app_engine, lab) as conn:
         assert await clear_slate_reprocess_flags(conn, lab, only, checksums=None) == 0
@@ -628,16 +630,16 @@ async def test_a_dive_with_no_labels_clears_zero(owner_engine, app_engine):
 # ---------- populate: targets ----------
 
 
-async def _candidates(app_engine, lab, dive_id):
+async def _candidates(app_engine, lab, mission_id):
     async with tenant_transaction(app_engine, lab) as conn:
-        return await slate_populate_candidates(conn, lab, dive_id)
+        return await slate_populate_candidates(conn, lab, mission_id)
 
 
 async def test_select_targets_filters_by_slate_marker_and_completion(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     frames = {}
     for n, content in ((1, SLATE_MARKER), (2, "Fish"), (3, SLATE_MARKER)):
         frames[n] = await capture(owner_engine, lab, only, captured_at=later(n))
@@ -656,7 +658,7 @@ async def test_an_incomplete_slate_label_keeps_its_frame_a_target(
     is "no live label at all"): an incomplete row is re-anchored, not
     skipped."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     frame = await capture(owner_engine, lab, only)
     await species(owner_engine, lab, frame)
     await slate_label(owner_engine, lab, frame, completed=False)
@@ -669,7 +671,7 @@ async def test_populate_targets_canonical_frames_only(owner_engine, app_engine):
     twin's checksum and so its JPEG and task URL, and two rows cannot anchor
     one Label Studio task (v2's labels are unique per task)."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     await species(
         owner_engine, lab, await capture(owner_engine, lab, only, canonical=False)
     )
@@ -679,7 +681,7 @@ async def test_populate_targets_canonical_frames_only(owner_engine, app_engine):
 
 async def test_a_superseded_marker_is_not_a_target(owner_engine, app_engine):
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     await species(
         owner_engine, lab, await capture(owner_engine, lab, only), superseded=True
     )
@@ -691,7 +693,7 @@ async def test_a_candidate_carries_what_its_task_needs(owner_engine, app_engine)
     """Its number (v1's image id, the task's `image_id`), its capture time
     (the task's `taken`), and where to look for its JPEG."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     frame = await capture(
         owner_engine, lab, only, v1_id=77001, checksum="e" * 32, captured_at=later(3)
     )
@@ -714,7 +716,7 @@ async def test_recording_a_task_writes_an_incomplete_human_row(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     frame = await capture(owner_engine, lab, only)
 
     async with tenant_transaction(app_engine, lab) as conn:
@@ -737,7 +739,7 @@ async def test_re_recording_revives_the_row_and_keeps_what_the_labeler_did(
     never re-sent. The row is re-anchored and revived (v1 un-superseded it
     too); the labeler's work and the reprocess flag stay."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     frame = await capture(owner_engine, lab, only)
     label = await slate_label(
         owner_engine, lab, frame, task=4001, superseded=True, needs_reprocess=True,
@@ -758,7 +760,7 @@ async def test_re_recording_revives_the_row_and_keeps_what_the_labeler_did(
 
 async def test_a_task_cannot_anchor_another_tenants_capture(owner_engine, app_engine):
     lab, reef = await tenant(owner_engine), await tenant(owner_engine, "reef")
-    theirs = await capture(owner_engine, reef, await _slate_dive(owner_engine, reef))
+    theirs = await capture(owner_engine, reef, await _slate_mission(owner_engine, reef))
 
     try:
         async with tenant_transaction(app_engine, lab) as conn:
@@ -782,7 +784,7 @@ async def test_supersedes_incomplete_rows_this_project_no_longer_owns(
     are kept (the "same project AND refreshed" rule -- dive 341 oscillated
     without both halves); completed rows are never touched."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     kept_frame = await capture(owner_engine, lab, only)
     gone_frame = await capture(owner_engine, lab, only)
     kept = await slate_label(owner_engine, lab, kept_frame, project=66)
@@ -804,9 +806,9 @@ async def test_supersedes_incomplete_rows_this_project_no_longer_owns(
     assert superseded == {kept: False, legacy: True, stale: True, answered: False}
 
 
-async def test_the_supersede_pass_stays_in_its_dive(owner_engine, app_engine):
+async def test_the_supersede_pass_stays_in_its_mission(owner_engine, app_engine):
     lab = await tenant(owner_engine)
-    mine, other = await _slate_dive(owner_engine, lab), await _slate_dive(
+    mine, other = await _slate_mission(owner_engine, lab), await _slate_mission(
         owner_engine, lab
     )
     elsewhere = await slate_label(
@@ -821,18 +823,20 @@ async def test_the_supersede_pass_stays_in_its_dive(owner_engine, app_engine):
     assert (await _row(owner_engine, elsewhere)).superseded is False
 
 
-async def test_whether_a_project_already_holds_the_dives_rows(owner_engine, app_engine):
+async def test_whether_a_project_already_holds_the_missions_rows(
+    owner_engine, app_engine
+):
     """Publish needs "the project holds tasks": live rows of this dive in it."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     frame = await capture(owner_engine, lab, only)
     await slate_label(owner_engine, lab, frame, project=66)
     await slate_label(owner_engine, lab, frame, project=67, superseded=True)
 
     async with tenant_transaction(app_engine, lab) as conn:
-        assert await dive_has_slate_labels_in_project(conn, lab, only, 66)
-        assert not await dive_has_slate_labels_in_project(conn, lab, only, 67)
-        assert not await dive_has_slate_labels_in_project(conn, lab, only, 68)
+        assert await mission_has_slate_labels_in_project(conn, lab, only, 66)
+        assert not await mission_has_slate_labels_in_project(conn, lab, only, 67)
+        assert not await mission_has_slate_labels_in_project(conn, lab, only, 68)
 
 
 # ---------- the sync ----------
@@ -856,7 +860,7 @@ async def test_projects_are_the_distinct_live_slate_label_projects(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     for project, superseded in ((66, False), (66, False), (88, True)):
         await slate_label(
             owner_engine, lab, await capture(owner_engine, lab, only),
@@ -869,7 +873,7 @@ async def test_projects_are_the_distinct_live_slate_label_projects(
 
 async def test_a_task_updates_its_slate_label(owner_engine, app_engine):
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     label = await slate_label(
         owner_engine, lab, await capture(owner_engine, lab, only), task=7001
     )
@@ -890,7 +894,7 @@ async def test_absent_fields_keep_the_last_ones(owner_engine, app_engine):
     """v1 overwrote skipped points and geometry only when the annotation held
     them; `completed` always follows the task."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     label = await slate_label(
         owner_engine, lab, await capture(owner_engine, lab, only), task=7002
     )
@@ -913,7 +917,7 @@ async def test_the_sync_never_touches_the_reprocess_flag(owner_engine, app_engin
     """The flag is the cohort's, not Label Studio's (v2 writes named columns;
     v1 PUT the whole row back and could clear a flag raised in between)."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     label = await slate_label(
         owner_engine, lab, await capture(owner_engine, lab, only), task=7003,
         needs_reprocess=True,
@@ -929,7 +933,7 @@ async def test_a_task_with_no_live_label_is_skipped(owner_engine, app_engine):
     """v1 looked a label up by task among live rows only, and skipped a task
     with none -- a dead-lettered row is not revived by its old task."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     label = await slate_label(
         owner_engine, lab, await capture(owner_engine, lab, only), task=7004,
         superseded=True,
@@ -942,14 +946,14 @@ async def test_a_task_with_no_live_label_is_skipped(owner_engine, app_engine):
     assert (await _row(owner_engine, label)).completed is False
 
 
-async def test_a_task_resolves_to_its_dives_slate_template(owner_engine, app_engine):
+async def test_a_task_resolves_to_its_missions_slate_template(owner_engine, app_engine):
     """The sync needs the template to remove the composite's panel offset."""
     lab = await tenant(owner_engine)
     slate = await slate_template(owner_engine)
-    only = await dive(owner_engine, lab, slate=slate)
+    only = await mission(owner_engine, lab, slate=slate)
     frame = await capture(owner_engine, lab, only)
     await slate_label(owner_engine, lab, frame, task=7005)
-    bare = await dive(owner_engine, lab)
+    bare = await mission(owner_engine, lab)
     await slate_label(
         owner_engine, lab, await capture(owner_engine, lab, bare), task=7006
     )
@@ -990,14 +994,14 @@ async def test_the_catalog_works_within_a_served_tenant(
     owner_engine, app_engine, seed_memberships
 ):
     lab = (await seed_memberships({ORCHESTRATOR: {"lab": "member"}}))["lab"]
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     frame = await capture(owner_engine, lab, only)
     await species(owner_engine, lab, frame)
     catalog = SlateCatalog(app_engine, sub=ORCHESTRATOR)
 
     assert await catalog.member_tenants() == [lab]
-    candidate = await catalog.next_dive_for_slate_preprocessing(lab)
-    assert candidate.dive_id == only
+    candidate = await catalog.next_mission_for_slate_preprocessing(lab)
+    assert candidate.mission_id == only
     await catalog.record_slate_label(
         lab, frame, ls_project_id=66, ls_task_id=8001, image_url="s3://b/k"
     )

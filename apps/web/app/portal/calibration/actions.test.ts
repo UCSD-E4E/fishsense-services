@@ -18,7 +18,7 @@ const { auth, unstable_update, setCalibrationSource, clearCalibrationSource, rev
   }));
 
 vi.mock("@/auth", () => ({ auth, unstable_update }));
-vi.mock("@/lib/dives", () => ({ setCalibrationSource, clearCalibrationSource }));
+vi.mock("@/lib/missions", () => ({ setCalibrationSource, clearCalibrationSource }));
 vi.mock("next/cache", () => ({ revalidatePath }));
 
 import {
@@ -196,7 +196,7 @@ describe("the token the write carries", () => {
 // ── the happy path + guards ───────────────────────────────────────────
 
 describe("setCalibrationSourceAction", () => {
-  it("links the dive and revalidates the portal", async () => {
+  it("links the mission and revalidates the portal", async () => {
     const result = await setCalibrationSourceAction(9, 5);
 
     expect(result).toEqual({ ok: true });
@@ -204,14 +204,14 @@ describe("setCalibrationSourceAction", () => {
     expect(revalidatePath).toHaveBeenCalledWith("/portal");
   });
 
-  it("rejects a dive borrowing its own calibration", async () => {
+  it("rejects a mission borrowing its own calibration", async () => {
     // Self-reference would make laser-extrinsics resolution loop or 404, and
-    // the dive would silently never become measurable.
+    // the mission would silently never become measurable.
     const result = await setCalibrationSourceAction(9, 9);
 
     expect(result).toEqual({
       ok: false,
-      error: "A dive cannot be its own calibration source",
+      error: "A mission cannot be its own calibration source",
     });
     expect(setCalibrationSource).not.toHaveBeenCalled();
   });

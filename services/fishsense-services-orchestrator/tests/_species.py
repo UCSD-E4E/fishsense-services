@@ -21,7 +21,7 @@ from fishsense_services_contracts.object_store import (
 from fishsense_services_orchestrator.object_store.layout import ObjectLayout
 
 TENANT = uuid.UUID("00000000-0000-0000-0000-00000000000a")
-DIVE = uuid.UUID("00000000-0000-0000-0000-0000000000d1")
+MISSION = uuid.UUID("00000000-0000-0000-0000-0000000000d1")
 T0 = datetime(2025, 1, 1, tzinfo=UTC)
 K = [[1000.0, 0.0, 960.0], [0.0, 1000.0, 540.0], [0.0, 0.0, 1.0]]
 D = [-0.1, 0.05, 0.0, 0.0, 0.0]
@@ -155,22 +155,22 @@ class FakeSpeciesCatalog:
     async def member_tenants(self):
         return self.tenants
 
-    async def next_dive_for_species_preprocessing(self, tenant_id):
+    async def next_mission_for_species_preprocessing(self, tenant_id):
         return self.candidates.get(tenant_id)
 
-    async def dives_needing_species_population(self, tenant_id):
+    async def missions_needing_species_population(self, tenant_id):
         return self.population_candidates.get(tenant_id, [])
 
-    async def species_preprocess_facts(self, tenant_id, dive_id):
+    async def species_preprocess_facts(self, tenant_id, mission_id):
         return self.preprocess
 
     async def set_species_needs_reprocess(
-        self, tenant_id, dive_id, value, *, only_incomplete=True, capture_ids=None
+        self, tenant_id, mission_id, value, *, only_incomplete=True, capture_ids=None
     ):
-        self.calls.append(("flag", dive_id, value, capture_ids))
+        self.calls.append(("flag", mission_id, value, capture_ids))
         return 0
 
-    async def species_population_facts(self, tenant_id, dive_id):
+    async def species_population_facts(self, tenant_id, mission_id):
         return self.population
 
     async def record_species_label(
@@ -185,13 +185,13 @@ class FakeSpeciesCatalog:
         self.superseded.extend(label_ids)
         return len(label_ids)
 
-    async def species_grouping_facts(self, tenant_id, dive_id):
+    async def species_grouping_facts(self, tenant_id, mission_id):
         return self.grouping
 
-    async def persist_label_studio_clusters(self, tenant_id, dive_id, groups):
+    async def persist_label_studio_clusters(self, tenant_id, mission_id, groups):
         if self.grouping is not None and self.grouping.already_grouped:
             return None
-        self.persisted.append((dive_id, groups))
+        self.persisted.append((mission_id, groups))
         return len(groups)
 
     async def slate_templates_by_name(self, tenant_id):
@@ -200,18 +200,20 @@ class FakeSpeciesCatalog:
     async def calibration_targets_by_name(self, tenant_id):
         return self.targets
 
-    async def set_dive_slate_template(self, tenant_id, dive_id, slate_template_id):
-        self.links.append(("slate", dive_id, slate_template_id))
+    async def set_mission_slate_template(
+        self, tenant_id, mission_id, slate_template_id
+    ):
+        self.links.append(("slate", mission_id, slate_template_id))
         return True
 
-    async def set_dive_calibration_target(self, tenant_id, dive_id, target_id):
-        self.links.append(("target", dive_id, target_id))
+    async def set_mission_calibration_target(self, tenant_id, mission_id, target_id):
+        self.links.append(("target", mission_id, target_id))
         return True
 
-    async def note_unidentified_slate(self, tenant_id, dive_id, note):
-        if self.notes.get(dive_id):
+    async def note_unidentified_slate(self, tenant_id, mission_id, note):
+        if self.notes.get(mission_id):
             return False
-        self.notes[dive_id] = note
+        self.notes[mission_id] = note
         return True
 
 

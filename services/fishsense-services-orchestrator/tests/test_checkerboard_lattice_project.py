@@ -191,9 +191,9 @@ class FakeProjects:
         self.calls = []
 
     async def ensure_project(
-        self, tenant_id, kind, *, title, labeling_config_xml, dive_id=None
+        self, tenant_id, kind, *, title, labeling_config_xml, mission_id=None
     ):
-        self.calls.append((tenant_id, kind, title, dive_id))
+        self.calls.append((tenant_id, kind, title, mission_id))
         return 4242
 
 

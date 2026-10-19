@@ -30,8 +30,8 @@ def _activities(deps: Deps):
     cleanup = RawCleanupActivities(catalog=catalog, store=store)
     jpegs = ProcessedJpegActivities(catalog=catalog, store=store)
     return [
-        staging.stage_raw_bytes_for_dive,
-        cleanup.cleanup_raw_bytes_for_dive,
+        staging.stage_raw_bytes_for_mission,
+        cleanup.cleanup_raw_bytes_for_mission,
         jpegs.locate_processed_jpeg,
     ]
 

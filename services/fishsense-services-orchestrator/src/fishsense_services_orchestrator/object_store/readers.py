@@ -48,27 +48,27 @@ RAW_SCRATCH_READERS = (
 )
 
 
-def raw_scratch_reader_id(reader: str, dive_id: uuid.UUID) -> str:
+def raw_scratch_reader_id(reader: str, mission_id: uuid.UUID) -> str:
     """The deterministic id of a raw-reading child of this dive."""
     if reader not in RAW_SCRATCH_READERS:
         raise ValueError(
             f"{reader!r} is not in RAW_SCRATCH_READERS: add it there, or cleanup "
             "will delete this dive's raw scratch while the child is reading it"
         )
-    return f"{reader}-{dive_id}"
+    return f"{reader}-{mission_id}"
 
 
-def raw_scratch_reader_ids(dive_id: uuid.UUID) -> list[str]:
+def raw_scratch_reader_ids(mission_id: uuid.UUID) -> list[str]:
     """Every raw-reading child id this dive could have."""
-    return [raw_scratch_reader_id(reader, dive_id) for reader in RAW_SCRATCH_READERS]
+    return [raw_scratch_reader_id(reader, mission_id) for reader in RAW_SCRATCH_READERS]
 
 
-def build_scratch_in_use_query(dive_id: uuid.UUID) -> str:
+def build_scratch_in_use_query(mission_id: uuid.UUID) -> str:
     """Temporal visibility query: is any of this dive's readers still running?
 
     ``WorkflowId IN (...)``, deliberately not a prefix match -- v1's dive 44 must
     not hold dive 442's scratch open. (v2's dive ids are uuids, so a prefix
     could not collide the same way; exact ids are still the honest question.)
     """
-    ids = ", ".join(f"'{wid}'" for wid in raw_scratch_reader_ids(dive_id))
+    ids = ", ".join(f"'{wid}'" for wid in raw_scratch_reader_ids(mission_id))
     return f'ExecutionStatus = "Running" and WorkflowId in ({ids})'

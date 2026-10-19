@@ -25,10 +25,10 @@ from fishsense_services_api.ingest_store import (
     IngestCatalog,
     NotAMember,
     content_overlap,
-    create_dive,
-    dive_by_path,
-    dives_with_leaf,
-    finalize_dive,
+    create_mission,
+    mission_by_path,
+    missions_with_leaf,
+    finalize_mission,
     register_capture,
     registered_captures,
     resolve_device,
@@ -64,16 +64,16 @@ async def _device(owner_engine, tenant, serial="BJ6C67989", name="FSL-07"):
 
 async def _dive(app_engine, tenant, path, device=None) -> uuid.UUID:
     async with tenant_transaction(app_engine, tenant) as conn:
-        return await create_dive(
+        return await create_mission(
             conn, tenant, source_path=path, name=path.rsplit("/", 1)[-1],
-            dived_at=T0, device_id=device,
+            started_at=T0, device_id=device,
         )  # fmt: skip
 
 
-async def _register(app_engine, tenant, dive, path, checksum, device=None):
+async def _register(app_engine, tenant, mission, path, checksum, device=None):
     async with tenant_transaction(app_engine, tenant) as conn:
         return await register_capture(
-            conn, tenant, dive_id=dive, device_id=device, source_path=path,
+            conn, tenant, mission_id=mission, device_id=device, source_path=path,
             captured_at=T0, checksum=checksum,
         )  # fmt: skip
 
@@ -125,18 +125,20 @@ async def test_an_unknown_serial_or_another_tenants_device_does_not_resolve(
 # --- create: low, whatever was asked; upsert on path ---------------------------
 
 
-async def test_a_dive_is_created_at_low_and_rerunning_returns_the_same_dive(
+async def test_a_mission_is_created_at_low_and_rerunning_returns_the_same_mission(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine, "lab")
     first = await _dive(app_engine, lab, "2024 REEF/d1")
     async with owner_engine.begin() as conn:  # it was committed high meanwhile
-        await conn.execute(text("UPDATE dives SET priority = 'high'"))
+        await conn.execute(text("UPDATE missions SET priority = 'high'"))
 
     again = await _dive(app_engine, lab, "2024 REEF/d1")
 
     async with owner_engine.connect() as conn:
-        rows = (await conn.execute(text("SELECT id, name, priority FROM dives"))).all()
+        rows = (
+            await conn.execute(text("SELECT id, name, priority FROM missions"))
+        ).all()
     assert again == first
     assert [tuple(r) for r in rows] == [(first, "d1", "low")]
 
@@ -177,11 +179,11 @@ async def test_canonical_is_decided_per_tenant(owner_engine, app_engine):
     lab, partner = await _tenant(owner_engine, "lab"), await _tenant(
         owner_engine, "partner"
     )
-    lab_dive = await _dive(app_engine, lab, "d1")
-    partner_dive = await _dive(app_engine, partner, "d1")
+    lab_mission = await _dive(app_engine, lab, "d1")
+    partner_mission = await _dive(app_engine, partner, "d1")
 
-    await _register(app_engine, lab, lab_dive, "d1/P1.ORF", A)
-    theirs = await _register(app_engine, partner, partner_dive, "d1/P1.ORF", A)
+    await _register(app_engine, lab, lab_mission, "d1/P1.ORF", A)
+    theirs = await _register(app_engine, partner, partner_mission, "d1/P1.ORF", A)
 
     assert theirs.is_canonical is True
 
@@ -216,14 +218,16 @@ async def test_finalize_opens_the_commit_flag_with_the_scanned_timestamp(
     scanned_max = datetime(2025, 3, 6, 18, 30, tzinfo=UTC)
 
     async with tenant_transaction(app_engine, lab) as conn:
-        await finalize_dive(conn, lab, d1, priority="high", dived_at=scanned_max)
+        await finalize_mission(conn, lab, d1, priority="high", started_at=scanned_max)
 
     async with owner_engine.connect() as conn:
-        row = (await conn.execute(text("SELECT priority, dived_at FROM dives"))).one()
+        row = (
+            await conn.execute(text("SELECT priority, started_at FROM missions"))
+        ).one()
     assert tuple(row) == ("high", scanned_max)
 
 
-async def test_containment_is_shared_checksums_over_this_dives_excluding_itself(
+async def test_containment_is_shared_checksums_over_this_missions_excluding_itself(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine, "lab")
@@ -237,7 +241,7 @@ async def test_containment_is_shared_checksums_over_this_dives_excluding_itself(
     async with tenant_transaction(app_engine, lab) as conn:
         overlap = await content_overlap(conn, lab, new)
 
-    assert [(o.dive_id, o.dive_path, o.shared_images) for o in overlap] == [
+    assert [(o.mission_id, o.mission_path, o.shared_images) for o in overlap] == [
         (old, "old", 2)
     ]
     assert overlap[0].containment == pytest.approx(2 / 3)
@@ -270,7 +274,7 @@ async def test_re_registering_the_canonical_copy_after_a_duplicate_keeps_it(
 # --- lookups preflight makes ---------------------------------------------------
 
 
-async def test_a_dive_is_found_by_its_path_only_within_the_tenant(
+async def test_a_mission_is_found_by_its_path_only_within_the_tenant(
     owner_engine, app_engine
 ):
     lab, partner = await _tenant(owner_engine, "lab"), await _tenant(
@@ -281,13 +285,16 @@ async def test_a_dive_is_found_by_its_path_only_within_the_tenant(
 
     async with tenant_transaction(app_engine, lab) as conn:
         assert (
-            await dive_by_path(conn, lab, "2025/03/06/082929_FishModels_FSL07") == mine
+            await mission_by_path(conn, lab, "2025/03/06/082929_FishModels_FSL07")
+            == mine
         )
-        assert await dive_by_path(conn, lab, "2025/03/06/other") is None
-        assert await dive_by_path(conn, lab, "2025/03/06") is None
+        assert await mission_by_path(conn, lab, "2025/03/06/other") is None
+        assert await mission_by_path(conn, lab, "2025/03/06") is None
 
 
-async def test_dives_sharing_a_folder_name_are_found_exactly(owner_engine, app_engine):
+async def test_missions_sharing_a_folder_name_are_found_exactly(
+    owner_engine, app_engine
+):
     """The prod case: dives 64 and 66 are both `082929_FishModels_FSL07`. The
     match is on the whole leaf -- `_` in a dive name is not a wildcard, and a
     longer name ending in the leaf is a different folder."""
@@ -303,7 +310,7 @@ async def test_dives_sharing_a_folder_name_are_found_exactly(owner_engine, app_e
     await _dive(app_engine, partner, f"2025/03/06/{leaf}")
 
     async with tenant_transaction(app_engine, lab) as conn:
-        found = await dives_with_leaf(conn, lab, leaf)
+        found = await missions_with_leaf(conn, lab, leaf)
 
     assert sorted(found, key=lambda r: r[1]) == sorted(
         [
@@ -356,19 +363,22 @@ async def test_the_catalog_answers_within_the_tenant(
     tenants = await seed_memberships({ORCHESTRATOR: {"lab": "member"}})
     lab = tenants["lab"]
     device = await _device(owner_engine, lab)
-    dive = await _dive(app_engine, lab, "2025/03/06/082929_FishModels_FSL07")
+    mission = await _dive(app_engine, lab, "2025/03/06/082929_FishModels_FSL07")
     catalog = IngestCatalog(app_engine, sub=ORCHESTRATOR)
 
     resolved = await catalog.resolve_device(lab, "BJ6C67989")
     assert (resolved.device_id, resolved.has_camera_calibration) == (device, False)
-    assert await catalog.dive_by_path(lab, "2025/03/06/082929_FishModels_FSL07") == dive
-    assert await catalog.dives_with_leaf(lab, "082929_FishModels_FSL07") == [
-        (dive, "2025/03/06/082929_FishModels_FSL07")
+    assert (
+        await catalog.mission_by_path(lab, "2025/03/06/082929_FishModels_FSL07")
+        == mission
+    )
+    assert await catalog.missions_with_leaf(lab, "082929_FishModels_FSL07") == [
+        (mission, "2025/03/06/082929_FishModels_FSL07")
     ]
     assert await catalog.slate_template("missing") is None
 
 
-async def test_the_catalog_writes_a_dive_through_the_commit_protocol(
+async def test_the_catalog_writes_a_mission_through_the_commit_protocol(
     owner_engine, app_engine, seed_memberships
 ):
     """create at low, register, finalize to high -- the same store functions,
@@ -378,23 +388,23 @@ async def test_the_catalog_writes_a_dive_through_the_commit_protocol(
     catalog = IngestCatalog(app_engine, sub=ORCHESTRATOR)
     path = "2025/03/06/082929_FishModels_FSL07"
 
-    dive = await catalog.create_dive(
-        lab, source_path=path, name="082929_FishModels_FSL07", dived_at=T0,
+    mission = await catalog.create_mission(
+        lab, source_path=path, name="082929_FishModels_FSL07", started_at=T0,
         device_id=device,
     )  # fmt: skip
     registered = await catalog.register_capture(
-        lab, dive_id=dive, device_id=device, source_path=f"{path}/A.ORF",
+        lab, mission_id=mission, device_id=device, source_path=f"{path}/A.ORF",
         captured_at=T0, checksum=A,
     )  # fmt: skip
-    assert await catalog.registered_captures(lab, dive) == {f"{path}/A.ORF": T0}
+    assert await catalog.registered_captures(lab, mission) == {f"{path}/A.ORF": T0}
     assert registered.is_canonical
-    await catalog.finalize_dive(lab, dive, priority="high", dived_at=T0)
-    assert await catalog.content_overlap(lab, dive) == []
+    await catalog.finalize_mission(lab, mission, priority="high", started_at=T0)
+    assert await catalog.content_overlap(lab, mission) == []
 
     async with tenant_transaction(app_engine, lab) as conn:
         priority = (
             await conn.execute(
-                text("SELECT priority FROM dives WHERE id = :d"), {"d": dive}
+                text("SELECT priority FROM missions WHERE id = :d"), {"d": mission}
             )
         ).scalar_one()
     assert priority == "high"
@@ -412,11 +422,11 @@ async def test_the_catalog_rechecks_membership_on_every_tenant_call(
     catalog = IngestCatalog(app_engine, sub=ORCHESTRATOR)
 
     with pytest.raises(NotAMember):
-        await catalog.dive_by_path(tenants["partner"], "anything")
+        await catalog.mission_by_path(tenants["partner"], "anything")
 
-    assert await catalog.dive_by_path(tenants["lab"], "anything") is None
+    assert await catalog.mission_by_path(tenants["lab"], "anything") is None
     async with owner_engine.begin() as conn:
         await conn.execute(text("DELETE FROM memberships WHERE tenant_id = :t"),
                            {"t": tenants["lab"]})  # fmt: skip
     with pytest.raises(NotAMember):
-        await catalog.dive_by_path(tenants["lab"], "anything")
+        await catalog.mission_by_path(tenants["lab"], "anything")

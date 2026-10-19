@@ -51,8 +51,8 @@ __all__ = [
     "NOT_CONFIDENT",
     "REFLECTION",
     "TOO_FEW",
-    "DiveJudgement",
-    "judge_dive",
+    "MissionJudgement",
+    "judge_mission",
 ]
 
 # Safety gate: refuse to act when more than this fraction of a dive's positive
@@ -72,7 +72,7 @@ FLAGGED = "flagged"
 
 
 @dataclass
-class DiveJudgement:  # pylint: disable=too-many-instance-attributes
+class MissionJudgement:  # pylint: disable=too-many-instance-attributes
     """What one fit made of a dive. Ids are label numbers."""
 
     status: str
@@ -115,9 +115,9 @@ def _positives(labels: Iterable[LaserLabelRow]) -> List[LaserLabelRow]:
     )
 
 
-def judge_dive(
+def judge_mission(
     labels: Iterable[LaserLabelRow], calibration_image_ids: set
-) -> DiveJudgement:
+) -> MissionJudgement:
     # pylint: disable=too-many-return-statements
     #   One early return per verdict, in the order they are decided.
     """Fit one line through the dive's positives and flag its outliers.
@@ -132,7 +132,7 @@ def judge_dive(
         for label in positives
         if label.capture_number in calibration_image_ids
     }
-    judgement = DiveJudgement(
+    judgement = MissionJudgement(
         status=TOO_FEW, positives=positives, calibration_ids=calibration_ids
     )
     if len(positives) < MIN_POINTS_FOR_LINE:

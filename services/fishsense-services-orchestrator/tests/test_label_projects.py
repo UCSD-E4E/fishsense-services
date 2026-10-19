@@ -29,7 +29,7 @@ from unittest.mock import MagicMock
 import pytest
 from label_studio_sdk.core import ApiError
 
-from fishsense_services_api.label_project_store import DiveForTitle, RecordedProject
+from fishsense_services_api.label_project_store import MissionForTitle, RecordedProject
 from fishsense_services_orchestrator.labels import populate as pu
 from fishsense_services_orchestrator.labels.label_studio import LabelStudioClient
 from fishsense_services_orchestrator.labels.populate import (
@@ -38,7 +38,7 @@ from fishsense_services_orchestrator.labels.populate import (
 )
 
 TENANT = uuid.uuid4()
-DIVE = uuid.uuid4()
+MISSION = uuid.uuid4()
 CONFIG = "<View><Image name='img' value='$image'/></View>"
 STORAGE = LabelStudioStorageSettings(
     bucket="labels", endpoint_url="http://garage", region="garage",
@@ -50,28 +50,30 @@ STORAGE = LabelStudioStorageSettings(
 class FakeCatalog:
     """label_project_store's semantics, in memory."""
 
-    dives: dict = field(default_factory=dict)
+    missions: dict = field(default_factory=dict)
     #: (kind, dive_id, ls_project_id, title), oldest first.
     records: list = field(default_factory=list)
 
-    async def dive_for_title(self, tenant_id, dive_id):
+    async def mission_for_title(self, tenant_id, mission_id):
         assert tenant_id == TENANT
-        return self.dives.get(dive_id)
+        return self.missions.get(mission_id)
 
-    async def recorded_project(self, tenant_id, kind, *, dive_id, title):
+    async def recorded_project(self, tenant_id, kind, *, mission_id, title):
         assert tenant_id == TENANT
         for k, d, p, t in reversed(self.records):
-            if k == kind and t is not None and d == dive_id:
-                if dive_id is not None or t == title:
+            if k == kind and t is not None and d == mission_id:
+                if mission_id is not None or t == title:
                     return RecordedProject(p, t)
         return None
 
-    async def record_project(self, tenant_id, kind, *, dive_id, ls_project_id, title):
+    async def record_project(
+        self, tenant_id, kind, *, mission_id, ls_project_id, title
+    ):
         assert tenant_id == TENANT
         self.records = [
             r for r in self.records if (r[0], r[2]) != (kind, ls_project_id)
         ]
-        self.records.append((kind, dive_id, ls_project_id, title))
+        self.records.append((kind, mission_id, ls_project_id, title))
 
 
 def _sdk(*, projects=(), detail=None, created_id=900):
@@ -97,16 +99,18 @@ def _projects(sdk, catalog):
 
 
 def _catalog():
-    return FakeCatalog(dives={DIVE: DiveForTitle(number=393, name="dive-alpha")})
+    return FakeCatalog(
+        missions={MISSION: MissionForTitle(number=393, name="dive-alpha")}
+    )
 
 
 async def test_a_recorded_project_is_used_without_a_title_search():
     catalog = _catalog()
-    catalog.records.append(("laser", DIVE, 73, "dive-alpha #393 - Laser Labeling"))
+    catalog.records.append(("laser", MISSION, 73, "dive-alpha #393 - Laser Labeling"))
     sdk = _sdk(detail=SimpleNamespace(id=73, title="whatever", label_config=CONFIG))
 
-    pid = await _projects(sdk, catalog).ensure_dive_project(
-        TENANT, DIVE, "laser", suffix="Laser Labeling", labeling_config_xml=CONFIG
+    pid = await _projects(sdk, catalog).ensure_mission_project(
+        TENANT, MISSION, "laser", suffix="Laser Labeling", labeling_config_xml=CONFIG
     )
 
     assert pid == 73
@@ -118,26 +122,26 @@ async def test_a_recorded_project_is_used_without_a_title_search():
 async def test_a_recorded_project_is_healed_and_given_its_storage():
     """What v1 did for the project its title search found."""
     catalog = _catalog()
-    catalog.records.append(("laser", DIVE, 73, "t"))
+    catalog.records.append(("laser", MISSION, 73, "t"))
     sdk = _sdk(detail=SimpleNamespace(id=73, title="t", label_config="<View/>"))
 
-    await _projects(sdk, catalog).ensure_dive_project(
-        TENANT, DIVE, "laser", suffix="Laser Labeling", labeling_config_xml=CONFIG
+    await _projects(sdk, catalog).ensure_mission_project(
+        TENANT, MISSION, "laser", suffix="Laser Labeling", labeling_config_xml=CONFIG
     )
 
     sdk.projects.update.assert_called_once_with(id=73, label_config=CONFIG)
     assert sdk.import_storage.s3.create.call_args.kwargs["project"] == 73
 
 
-async def test_a_renamed_dive_keeps_its_project():
+async def test_a_renamed_mission_keeps_its_project():
     """v2 change: v1's next populate after a rename created a second project
     under the new title, splitting the dive's labels across two."""
     catalog = _catalog()
-    catalog.records.append(("laser", DIVE, 73, "old-name #393 - Laser Labeling"))
+    catalog.records.append(("laser", MISSION, 73, "old-name #393 - Laser Labeling"))
     sdk = _sdk(detail=SimpleNamespace(id=73, title="old", label_config=CONFIG))
 
-    pid = await _projects(sdk, catalog).ensure_dive_project(
-        TENANT, DIVE, "laser", suffix="Laser Labeling", labeling_config_xml=CONFIG
+    pid = await _projects(sdk, catalog).ensure_mission_project(
+        TENANT, MISSION, "laser", suffix="Laser Labeling", labeling_config_xml=CONFIG
     )
 
     assert pid == 73
@@ -152,21 +156,25 @@ async def test_a_migrated_project_is_found_by_v1s_title_and_recorded():
     title = "dive-alpha #393 - Laser Labeling"
     sdk = _sdk(projects=[SimpleNamespace(id=73, title=title, label_config=CONFIG)])
 
-    pid = await _projects(sdk, catalog).ensure_dive_project(
-        TENANT, DIVE, "laser", suffix="Laser Labeling", labeling_config_xml=CONFIG
+    pid = await _projects(sdk, catalog).ensure_mission_project(
+        TENANT, MISSION, "laser", suffix="Laser Labeling", labeling_config_xml=CONFIG
     )
 
     assert pid == 73
     sdk.projects.create.assert_not_called()
-    assert catalog.records == [("laser", DIVE, 73, title)]
+    assert catalog.records == [("laser", MISSION, 73, title)]
 
 
 async def test_a_new_project_is_created_and_recorded():
     catalog = _catalog()
     sdk = _sdk(created_id=901)
 
-    pid = await _projects(sdk, catalog).ensure_dive_project(
-        TENANT, DIVE, "species", suffix="Species Labeling", labeling_config_xml=CONFIG
+    pid = await _projects(sdk, catalog).ensure_mission_project(
+        TENANT,
+        MISSION,
+        "species",
+        suffix="Species Labeling",
+        labeling_config_xml=CONFIG,
     )
 
     assert pid == 901
@@ -174,36 +182,40 @@ async def test_a_new_project_is_created_and_recorded():
         title="dive-alpha #393 - Species Labeling", label_config=CONFIG, workspace=None
     )
     assert catalog.records == [
-        ("species", DIVE, 901, "dive-alpha #393 - Species Labeling")
+        ("species", MISSION, 901, "dive-alpha #393 - Species Labeling")
     ]
 
 
 async def test_a_recorded_project_deleted_in_label_studio_is_replaced():
     catalog = _catalog()
-    catalog.records.append(("laser", DIVE, 73, "dive-alpha #393 - Laser Labeling"))
+    catalog.records.append(("laser", MISSION, 73, "dive-alpha #393 - Laser Labeling"))
     sdk = _sdk(created_id=902)  # get(73) is a 404
 
-    pid = await _projects(sdk, catalog).ensure_dive_project(
-        TENANT, DIVE, "laser", suffix="Laser Labeling", labeling_config_xml=CONFIG
+    pid = await _projects(sdk, catalog).ensure_mission_project(
+        TENANT, MISSION, "laser", suffix="Laser Labeling", labeling_config_xml=CONFIG
     )
 
     assert pid == 902
     assert catalog.records[-1] == (
         "laser",
-        DIVE,
+        MISSION,
         902,
         "dive-alpha #393 - Laser Labeling",
     )
 
 
-async def test_a_dive_with_no_record_is_an_error():
+async def test_a_mission_with_no_record_is_an_error():
     """v1 raised when the API had no such dive; so does v2 (for a dive of
     another tenant too, which the store does not see)."""
     sdk = _sdk()
 
     with pytest.raises(RuntimeError, match="no such dive"):
-        await _projects(sdk, FakeCatalog()).ensure_dive_project(
-            TENANT, DIVE, "laser", suffix="Laser Labeling", labeling_config_xml=CONFIG
+        await _projects(sdk, FakeCatalog()).ensure_mission_project(
+            TENANT,
+            MISSION,
+            "laser",
+            suffix="Laser Labeling",
+            labeling_config_xml=CONFIG,
         )
     sdk.projects.create.assert_not_called()
 
@@ -247,19 +259,25 @@ async def test_a_project_is_recorded_before_its_storage(monkeypatch):
     sdk = _sdk(created_id=903)
 
     with pytest.raises(RuntimeError, match="garage down"):
-        await _projects(sdk, catalog).ensure_dive_project(
-            TENANT, DIVE, "laser", suffix="Laser Labeling", labeling_config_xml=CONFIG
+        await _projects(sdk, catalog).ensure_mission_project(
+            TENANT,
+            MISSION,
+            "laser",
+            suffix="Laser Labeling",
+            labeling_config_xml=CONFIG,
         )
 
-    assert catalog.records == [("laser", DIVE, 903, "dive-alpha #393 - Laser Labeling")]
+    assert catalog.records == [
+        ("laser", MISSION, 903, "dive-alpha #393 - Laser Labeling")
+    ]
 
 
 async def test_an_unknown_kind_is_refused_before_label_studio_is_touched():
     sdk = _sdk()
 
     with pytest.raises(ValueError, match="kind"):
-        await _projects(sdk, _catalog()).ensure_dive_project(
-            TENANT, DIVE, "guesswork", suffix="X", labeling_config_xml=CONFIG
+        await _projects(sdk, _catalog()).ensure_mission_project(
+            TENANT, MISSION, "guesswork", suffix="X", labeling_config_xml=CONFIG
         )
     sdk.projects.list.assert_not_called()
     sdk.projects.create.assert_not_called()

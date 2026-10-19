@@ -46,7 +46,7 @@ def _member(index=3, size=7):
 
 def test_the_input_round_trips():
     payload = PreprocessSpeciesImagesInput(
-        dive_id=uuid4(),
+        mission_id=uuid4(),
         camera_matrix=K,
         distortion_coefficients=D,
         cluster_members=[[_member(3, 7), _member(6, 7)], [_member(1, 1)]],
@@ -74,7 +74,7 @@ def test_a_position_outside_its_cluster_is_refused(index, size):
 def test_the_intrinsics_must_be_a_camera_matrix():
     with pytest.raises(ValidationError):
         PreprocessSpeciesImagesInput(
-            dive_id=uuid4(),
+            mission_id=uuid4(),
             camera_matrix=[[1.0, 0.0], [0.0, 1.0]],
             distortion_coefficients=D,
             cluster_members=[],

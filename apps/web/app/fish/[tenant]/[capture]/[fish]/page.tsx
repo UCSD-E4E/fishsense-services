@@ -130,10 +130,10 @@ export default async function FishDetailPage({ params }: Props) {
               .filter(Boolean)
               .join(" ") || "—"}
           />
-          {o.dive && (
+          {o.mission && (
             <Row
-              label="Dive"
-              value={`${o.dive.name ?? "—"}${o.dive.number != null ? ` #${o.dive.number}` : ""}`}
+              label="Mission"
+              value={`${o.mission.name ?? "—"}${o.mission.number != null ? ` #${o.mission.number}` : ""}`}
             />
           )}
           {o.client_capture_uuid && (

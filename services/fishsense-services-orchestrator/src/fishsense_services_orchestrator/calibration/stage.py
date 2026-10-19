@@ -57,8 +57,8 @@ def _activities(deps: Deps):
         label_studio=label_studio,
     )
     return [
-        calibration.select_next_dive_for_laser_calibration,
-        calibration.select_next_dive_for_checkerboard_calibration,
+        calibration.select_next_mission_for_laser_calibration,
+        calibration.select_next_mission_for_checkerboard_calibration,
         calibration.resolve_slate_calibration_inputs,
         calibration.resolve_checkerboard_calibration_inputs,
         calibration.record_laser_calibration,

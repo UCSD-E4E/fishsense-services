@@ -57,8 +57,8 @@ from fishsense_services_orchestrator.automatic_results.activities import (
 )
 
 TENANT_A, TENANT_B = uuid.uuid4(), uuid.uuid4()
-DIVE = uuid.uuid4()
-TARGET = AutomaticTarget(TENANT_A, DIVE)
+MISSION = uuid.uuid4()
+TARGET = AutomaticTarget(TENANT_A, MISSION)
 K = [[3000.0, 0.0, 2048.0], [0.0, 3000.0, 1536.0], [0.0, 0.0, 1.0]]
 T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -118,29 +118,29 @@ async def _run(fn, *args):
 # -- select -------------------------------------------------------------------------
 
 
-async def test_the_oldest_backlog_dive_across_tenants():
+async def test_the_oldest_backlog_mission_across_tenants():
     newer, older = uuid.uuid4(), uuid.uuid4()
     catalog = _Catalog(
-        next_dive_for_automatic_results=lambda tenant, **v: AutomaticCandidate(
+        next_mission_for_automatic_results=lambda tenant, **v: AutomaticCandidate(
             newer if tenant == TENANT_A else older,
             T0.replace(day=2) if tenant == TENANT_A else T0,
         )
     )
-    got = await _run(_acts(catalog).select_next_dive_for_automatic_results)
+    got = await _run(_acts(catalog).select_next_mission_for_automatic_results)
     assert got == AutomaticTarget(TENANT_B, older)
 
 
 async def test_species_on_by_default_is_species_work_in_the_cohort():
-    catalog = _Catalog(next_dive_for_automatic_results=None)
-    await _run(_acts(catalog).select_next_dive_for_automatic_results)
+    catalog = _Catalog(next_mission_for_automatic_results=None)
+    await _run(_acts(catalog).select_next_mission_for_automatic_results)
     assert all(kw["species"] is True for _, _, kw in catalog.calls)
 
 
 async def test_with_species_off_the_cohort_has_no_species_work():
     """Its own switch (2026-10-15): off, species never holds a dive."""
-    catalog = _Catalog(next_dive_for_automatic_results=None)
+    catalog = _Catalog(next_mission_for_automatic_results=None)
     await _run(
-        _acts(catalog, species_enabled=False).select_next_dive_for_automatic_results
+        _acts(catalog, species_enabled=False).select_next_mission_for_automatic_results
     )
     assert [kw["species"] for _, _, kw in catalog.calls] == [False, False]
 
@@ -159,8 +159,8 @@ async def test_with_species_off_there_are_no_species_images():
 
 
 async def test_no_backlog_is_none():
-    catalog = _Catalog(next_dive_for_automatic_results=None)
-    assert await _run(_acts(catalog).select_next_dive_for_automatic_results) is None
+    catalog = _Catalog(next_mission_for_automatic_results=None)
+    assert await _run(_acts(catalog).select_next_mission_for_automatic_results) is None
 
 
 # -- frames -------------------------------------------------------------------------
@@ -205,8 +205,8 @@ async def test_frame_results_are_written_as_automatic_rows():
     r = _frame_result("slate_frame", laser_x=1.0, laser_y=2.0, slate_probability=0.8)
 
     assert await _run(_acts(catalog).persist_automatic_frames, TARGET, [r]) == 1
-    ((_, (tenant, dive, rows), _),) = catalog.calls
-    assert (tenant, dive) == (TENANT_A, DIVE)
+    ((_, (tenant, mission, rows), _),) = catalog.calls
+    assert (tenant, mission) == (TENANT_A, MISSION)
     assert rows[0].status == "slate_frame" and rows[0].slate_probability == 0.8
 
 
@@ -293,7 +293,7 @@ async def test_a_calibration_is_written_with_its_camera():
         persist_automatic_calibration=lambda t, d, row: uuid.uuid4(),
     )
     result = AutomaticCalibrationResult(
-        dive_id=DIVE, outcome="refused", refusal_reason="no_candidates",
+        mission_id=MISSION, outcome="refused", refusal_reason="no_candidates",
         algorithm_version="1",
     )  # fmt: skip
 
@@ -322,7 +322,7 @@ async def test_lengths_are_written_under_the_calibration_they_were_computed_with
     plan = await _run(acts.resolve_automatic_measure_inputs, TARGET)
     assert plan.payload.laser_position == [0.1, 0, 0]
     result = MeasureAutomaticResult(
-        dive_id=DIVE, algorithm="laser_depth_fronto_parallel", algorithm_version="1",
+        mission_id=MISSION, algorithm="laser_depth_fronto_parallel", algorithm_version="1",
         core_version="4.1.0",
         lengths=[AutomaticLength(capture_id=capture,
                                  automatic_head_tail_prediction_id=ht,
@@ -343,20 +343,20 @@ async def test_no_calibration_is_no_plan():
     assert await _run(_acts(catalog).resolve_automatic_measure_inputs, TARGET) is None
 
 
-async def test_the_dives_a_run_took_are_excluded_in_every_tenant():
-    taken = [DIVE, uuid.uuid4()]
-    catalog = _Catalog(next_dive_for_automatic_results=None)
-    await _run(_acts(catalog).select_next_dive_for_automatic_results, taken)
+async def test_the_missions_a_run_took_are_excluded_in_every_tenant():
+    taken = [MISSION, uuid.uuid4()]
+    catalog = _Catalog(next_mission_for_automatic_results=None)
+    await _run(_acts(catalog).select_next_mission_for_automatic_results, taken)
     assert [kw["exclude"] for _, _, kw in catalog.calls] == [taken, taken]
 
 
-async def test_a_failed_step_is_recorded_against_its_dive():
+async def test_a_failed_step_is_recorded_against_its_mission():
     catalog = _Catalog(record_automatic_results_failure=None)
     await _run(
         _acts(catalog).record_automatic_results_failure, TARGET, "frames", "boom"
     )
     assert catalog.calls == [
-        ("record_automatic_results_failure", (TENANT_A, DIVE),
+        ("record_automatic_results_failure", (TENANT_A, MISSION),
          {"step": "frames", "error": "boom"}),
     ]  # fmt: skip
 
@@ -371,7 +371,7 @@ async def test_frames_left_out_are_recorded_against_each_frame():
     )
     assert given_up == [bad]
     assert catalog.calls == [
-        ("record_automatic_frame_failures", (TENANT_A, DIVE, [(bad, "left out")]),
+        ("record_automatic_frame_failures", (TENANT_A, MISSION, [(bad, "left out")]),
          {"headtail_version": AUTOMATIC_HEADTAIL_PREDICTOR_VERSION}),
     ]  # fmt: skip
 
@@ -379,22 +379,22 @@ async def test_frames_left_out_are_recorded_against_each_frame():
 async def test_a_run_is_planned_for_the_named_tenant():
     from fishsense_services_api.automatic_results_store import (
         AutomaticRunPlan,
-        AutomaticRunPlanDive,
+        AutomaticRunPlanMission,
     )
 
-    dive = AutomaticRunPlanDive(
-        number=62, dive_id=DIVE, folder="/d/62", calibration_session=True,
+    mission = AutomaticRunPlanMission(
+        number=62, mission_id=MISSION, folder="/d/62", calibration_session=True,
         excluded=False, human_measured=False, rectifiable=True, frames=9,
         frames_owed=9,
     )  # fmt: skip
     catalog = _Catalog(
         tenant_by_slug=TENANT_A,
-        automatic_run_plan=AutomaticRunPlan(dives=[dive], missing=[1]),
+        automatic_run_plan=AutomaticRunPlan(missions=[mission], missing=[1]),
     )
     plan = await _run(_acts(catalog).plan_automatic_run, "lab", [62, 1])
 
     assert plan["tenant_id"] == str(TENANT_A)
-    assert plan["dives"][0]["dive_id"] == str(DIVE)
+    assert plan["dives"][0]["dive_id"] == str(MISSION)
     assert plan["dives"][0]["calibration_session"] is True
     assert plan["missing"] == [1]
     assert catalog.calls[1] == (

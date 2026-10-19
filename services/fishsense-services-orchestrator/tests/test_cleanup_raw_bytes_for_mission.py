@@ -58,8 +58,8 @@ from fishsense_services_orchestrator.object_store.store import (
 
 BUCKET = "fishsense-test"
 TENANT = uuid.UUID("7b0c7d4e-3f58-4d8e-9a3c-0c5f1f7f2d11")
-DIVE = uuid.UUID("11111111-2222-4333-8444-555555555555")
-TARGET = StagingTarget(tenant_id=TENANT, dive_id=DIVE)
+MISSION = uuid.UUID("11111111-2222-4333-8444-555555555555")
+TARGET = StagingTarget(tenant_id=TENANT, mission_id=MISSION)
 AAA, BBB = "a" * 32, "b" * 32
 
 
@@ -72,8 +72,8 @@ class _Catalog:
         self._checksums = checksums
         self.asked = []
 
-    async def checksums_to_clean(self, tenant_id, dive_id):
-        self.asked.append((tenant_id, dive_id))
+    async def checksums_to_clean(self, tenant_id, mission_id):
+        self.asked.append((tenant_id, mission_id))
         return list(self._checksums)
 
 
@@ -126,14 +126,14 @@ def _raw_keys(s3) -> set[str]:
 async def _cleanup(s3, checksums, temporal=None) -> CleanupRawBytesResult:
     activities = sut.RawCleanupActivities(catalog=_Catalog(checksums), store=_store(s3))
     return await ActivityEnvironment(client=temporal or _Temporal()).run(
-        activities.cleanup_raw_bytes_for_dive, TARGET
+        activities.cleanup_raw_bytes_for_mission, TARGET
     )
 
 
 # -- the delete ------------------------------------------------------------------
 
 
-async def test_deletes_all_raw_orfs_for_dive(s3):
+async def test_deletes_all_raw_orfs_for_mission(s3):
     for checksum in (AAA, BBB):
         s3.put_object(Bucket=BUCKET, Key=_raw_key(checksum), Body=b"raw")
 
@@ -148,7 +148,7 @@ async def test_delete_of_absent_key_counted_as_success(s3):
     assert (await _cleanup(s3, [AAA])).deleted == 1
 
 
-async def test_returns_zero_for_empty_dive(s3):
+async def test_returns_zero_for_empty_mission(s3):
     assert (await _cleanup(s3, [])).deleted == 0
 
 
@@ -181,13 +181,13 @@ def test_activity_module_imports_no_nas_client():
 async def test_does_not_delete_while_another_stage_is_still_reading(s3):
     for checksum in (AAA, BBB):
         s3.put_object(Bucket=BUCKET, Key=_raw_key(checksum), Body=b"raw")
-    temporal = _Temporal(running=[f"preprocess-laser-{DIVE}"])
+    temporal = _Temporal(running=[f"preprocess-laser-{MISSION}"])
 
     result = await _cleanup(s3, [AAA, BBB], temporal)
 
     assert result.deleted == 0
     assert _raw_keys(s3) == {_raw_key(AAA), _raw_key(BBB)}, "nothing deleted"
-    assert temporal.queries == [sut.build_scratch_in_use_query(DIVE)]
+    assert temporal.queries == [sut.build_scratch_in_use_query(MISSION)]
 
 
 async def test_deletes_once_no_sibling_is_running(s3):
@@ -195,7 +195,7 @@ async def test_deletes_once_no_sibling_is_running(s3):
     temporal = _Temporal(running=[])
 
     assert (await _cleanup(s3, [AAA], temporal)).deleted == 1
-    assert temporal.queries == [sut.build_scratch_in_use_query(DIVE)]
+    assert temporal.queries == [sut.build_scratch_in_use_query(MISSION)]
 
 
 async def test_an_unreachable_temporal_reads_as_in_use(s3):
@@ -210,7 +210,7 @@ async def test_an_unreachable_temporal_reads_as_in_use(s3):
 
 async def test_no_client_at_all_reads_as_in_use():
     """Outside a worker there is no client to ask; that is not a yes."""
-    holder = await ActivityEnvironment().run(sut.scratch_in_use, DIVE)
+    holder = await ActivityEnvironment().run(sut.scratch_in_use, MISSION)
 
     assert holder is not None
 
@@ -220,46 +220,46 @@ class TestReaderIds:
         """Preprocess, predict and both checkerboard children read
         `raw/{checksum}.ORF`; missing one means cleanup can delete under it.
         The checkerboard pair were absent until 2026-09-11 (v1)."""
-        assert sut.raw_scratch_reader_ids(DIVE) == [
-            f"preprocess-laser-{DIVE}",
-            f"preprocess-species-{DIVE}",
-            f"preprocess-headtail-{DIVE}",
-            f"preprocess-slate-{DIVE}",
-            f"predict-laser-{DIVE}",
-            f"predict-slate-{DIVE}",
-            f"perform-checkerboard-calibration-{DIVE}",
-            f"verify-checkerboard-lattice-{DIVE}",
-            f"detect-slate-{DIVE}",
-            f"automatic-frames-{DIVE}",
+        assert sut.raw_scratch_reader_ids(MISSION) == [
+            f"preprocess-laser-{MISSION}",
+            f"preprocess-species-{MISSION}",
+            f"preprocess-headtail-{MISSION}",
+            f"preprocess-slate-{MISSION}",
+            f"predict-laser-{MISSION}",
+            f"predict-slate-{MISSION}",
+            f"perform-checkerboard-calibration-{MISSION}",
+            f"verify-checkerboard-lattice-{MISSION}",
+            f"detect-slate-{MISSION}",
+            f"automatic-frames-{MISSION}",
         ]
 
     def test_a_parent_builds_its_childs_id_from_the_same_list(self):
         for reader in sut.RAW_SCRATCH_READERS:
-            assert sut.raw_scratch_reader_id(reader, DIVE) in set(
-                sut.raw_scratch_reader_ids(DIVE)
+            assert sut.raw_scratch_reader_id(reader, MISSION) in set(
+                sut.raw_scratch_reader_ids(MISSION)
             )
 
     def test_a_reader_the_gate_does_not_know_is_refused(self):
         """v2: the tripwire is structural. A new raw-reading child that isn't
         listed would be invisible to every other stage's cleanup."""
         with pytest.raises(ValueError, match="RAW_SCRATCH_READERS"):
-            sut.raw_scratch_reader_id("preprocess-fins", DIVE)
+            sut.raw_scratch_reader_id("preprocess-fins", MISSION)
 
 
 class TestQuery:
-    def test_asks_only_for_running_children_of_this_dive(self):
-        q = sut.build_scratch_in_use_query(DIVE)
+    def test_asks_only_for_running_children_of_this_mission(self):
+        q = sut.build_scratch_in_use_query(MISSION)
 
         assert 'ExecutionStatus = "Running"' in q
-        assert f"'preprocess-laser-{DIVE}'" in q
-        assert f"'predict-slate-{DIVE}'" in q
+        assert f"'preprocess-laser-{MISSION}'" in q
+        assert f"'predict-slate-{MISSION}'" in q
 
-    def test_does_not_match_a_different_dive(self):
+    def test_does_not_match_a_different_mission(self):
         """`WorkflowId IN (...)`, never a prefix match."""
         other = uuid.UUID("11111111-2222-4333-8444-555555555556")
         q = sut.build_scratch_in_use_query(other)
 
-        assert str(DIVE) not in q
+        assert str(MISSION) not in q
         assert " in (" in q.lower() and "startswith" not in q.lower()
 
 

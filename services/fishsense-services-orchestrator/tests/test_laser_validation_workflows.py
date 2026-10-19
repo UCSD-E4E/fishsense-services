@@ -10,7 +10,7 @@ test_remediate_laser_supersedes_parent_workflow.py and the data-worker's
 test_remediate_laser_supersedes_workflow.py. Names and reasons are v1's.
 
 v2 changes, pinned here: each dive is read, judged on the light processor and
-written by an orchestrator child of its own (`ValidateDiveLaserLabelsWorkflow`
+written by an orchestrator child of its own (`ValidateMissionLaserLabelsWorkflow`
 under v1's id `validate-laser-labels-{dive}`), because the processor never
 touches the database; remediation's apply re-plans each dive and refuses,
 writing nothing, an id the fresh plan does not contain.
@@ -24,14 +24,14 @@ from typing import List
 import pytest
 from temporalio import activity
 from temporalio.client import WorkflowFailureError
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
 from fishsense_services_contracts import PROCESSOR_LIGHT_TASK_QUEUE
 from fishsense_services_contracts.laser import (
-    DivePlan,
+    MissionPlan,
     LaserLabelRow,
     LaserValidationResult,
     PlanLaserRemediationInput,
@@ -45,7 +45,7 @@ from fishsense_services_orchestrator.labels.workflow import (
 )
 from fishsense_services_orchestrator.laser import workflow as sut
 from fishsense_services_orchestrator.laser.contracts import (
-    DiveRemediationRequest,
+    MissionRemediationRequest,
     LaserTarget,
     RemediationInputs,
     RemediationTarget,
@@ -60,7 +60,7 @@ TENANT = uuid.UUID(int=1)
 
 
 def _target(n):
-    return LaserTarget(tenant_id=TENANT, dive_id=uuid.UUID(int=n))
+    return LaserTarget(tenant_id=TENANT, mission_id=uuid.UUID(int=n))
 
 
 class Script:
@@ -96,32 +96,32 @@ class Script:
 
         @activity.defn(name="resolve_laser_validation_inputs")
         async def resolve(target: LaserTarget) -> ValidateLaserLabelsInput:
-            s.events.append(f"resolve:{target.dive_id.int}")
-            return ValidateLaserLabelsInput(dive_id=target.dive_id, labels=[])
+            s.events.append(f"resolve:{target.mission_id.int}")
+            return ValidateLaserLabelsInput(mission_id=target.mission_id, labels=[])
 
         @activity.defn(name="apply_laser_validation")
         async def apply(target: LaserTarget, result: LaserValidationResult) -> int:
-            if target.dive_id.int in s.fail:
+            if target.mission_id.int in s.fail:
                 raise ApplicationError("simulated failure", non_retryable=True)
-            s.events.append(f"apply:{target.dive_id.int}")
+            s.events.append(f"apply:{target.mission_id.int}")
             return 1
 
         @activity.defn(name="_judge")
         async def judge(workflow_id: str, payload: ValidateLaserLabelsInput):
             s.judged.append((workflow_id, activity.info().task_queue))
-            return LaserValidationResult(dive_id=payload.dive_id, status="flagged",
+            return LaserValidationResult(mission_id=payload.mission_id, status="flagged",
                                          positives=10)  # fmt: skip
 
         @activity.defn(name="resolve_laser_remediation_dives")
-        async def dives(numbers) -> List[RemediationTarget]:
-            s.events.append(("dives", numbers))
+        async def missions(numbers) -> List[RemediationTarget]:
+            s.events.append(("missions", numbers))
             wanted = sorted(s.plans) if numbers is None else numbers
-            return [RemediationTarget(tenant_id=TENANT, dive_id=uuid.UUID(int=n),
+            return [RemediationTarget(tenant_id=TENANT, mission_id=uuid.UUID(int=n),
                                       number=n) for n in wanted]  # fmt: skip
 
         @activity.defn(name="resolve_laser_remediation_inputs")
         async def remediation_inputs(
-            request: DiveRemediationRequest,
+            request: MissionRemediationRequest,
         ) -> RemediationInputs:
             number = request.target.number
             rows = [
@@ -132,20 +132,20 @@ class Script:
             ]  # fmt: skip
             return RemediationInputs(
                 plan_input=PlanLaserRemediationInput(
-                    dive_id=number, labels=rows,
+                    mission_id=number, labels=rows,
                     excluded_label_ids=request.excluded_label_ids,
-                    dive_excluded=request.dive_excluded,
+                    mission_excluded=request.mission_excluded,
                 ),
                 fingerprint=f"fp-{number}",
             )  # fmt: skip
 
         @activity.defn(name="_plan")
-        async def plan(payload: PlanLaserRemediationInput) -> DivePlan:
-            revive = [] if payload.dive_excluded else [
+        async def plan(payload: PlanLaserRemediationInput) -> MissionPlan:
+            revive = [] if payload.mission_excluded else [
                 r.number for r in payload.labels
                 if r.superseded and r.number not in payload.excluded_label_ids
             ]  # fmt: skip
-            return DivePlan(dive_id=payload.dive_id, status="flagged",
+            return MissionPlan(mission_id=payload.mission_id, status="flagged",
                             positives=len(payload.labels),
                             superseded_now=len(revive), superseded_after=0,
                             revive_ids=revive)  # fmt: skip
@@ -161,7 +161,7 @@ class Script:
             return len(request.pending)
 
         return (
-            [projects, sync, complete, wake, resolve, apply, dives,
+            [projects, sync, complete, wake, resolve, apply, missions,
              remediation_inputs, revive],
             [judge, plan],
         )  # fmt: skip
@@ -170,7 +170,7 @@ class Script:
 async def _run(workflow_run, script, arg=None):
     orchestrator, light = script.activities()
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with (
             Worker(env.client, task_queue=QUEUE,
@@ -188,7 +188,7 @@ async def _run(workflow_run, script, arg=None):
 # -- the validation pass after the sync -------------------------------------------
 
 
-async def test_workflow_dispatches_validation_child_per_complete_dive():
+async def test_workflow_dispatches_validation_child_per_complete_mission():
     script = Script(complete=[_target(5), _target(6)])
 
     await _run(SyncLabelStudioLaserLabelsWorkflow.run, script)
@@ -219,7 +219,7 @@ async def test_workflow_wakes_the_light_processor_before_dispatching_validation(
     assert script.events.index("sync") < script.events.index("complete")
 
 
-async def test_workflow_does_not_wake_the_light_processor_when_no_dives_complete():
+async def test_workflow_does_not_wake_the_light_processor_when_no_missions_complete():
     script = Script(complete=[])
 
     await _run(SyncLabelStudioLaserLabelsWorkflow.run, script)
@@ -227,10 +227,12 @@ async def test_workflow_does_not_wake_the_light_processor_when_no_dives_complete
     assert "wake-light" not in script.events
 
 
-async def test_one_dives_validation_is_read_judged_then_written():
+async def test_one_missions_validation_is_read_judged_then_written():
     script = Script()
 
-    superseded = await _run(sut.ValidateDiveLaserLabelsWorkflow.run, script, _target(9))
+    superseded = await _run(
+        sut.ValidateMissionLaserLabelsWorkflow.run, script, _target(9)
+    )
 
     assert superseded == 1
     assert script.events == ["resolve:9", "apply:9"]
@@ -239,33 +241,33 @@ async def test_one_dives_validation_is_read_judged_then_written():
 # -- remediation -------------------------------------------------------------------
 
 
-async def test_a_dry_run_plans_every_dive_and_writes_nothing():
+async def test_a_dry_run_plans_every_mission_and_writes_nothing():
     script = Script(plans={7: [41, 42], 8: [51]})
 
     report = await _run(
         sut.RemediateLaserSupersedesParentWorkflow.run,
         script,
-        RemediateLaserSupersedesInput(dive_ids=[8, 7]),
+        RemediateLaserSupersedesInput(mission_ids=[8, 7]),
     )
 
     assert report["mode"] == "dry_run"
-    assert [row["dive_id"] for row in report["dives"]] == [7, 8]
+    assert [row["mission_id"] for row in report["missions"]] == [7, 8]
     assert report["totals"]["to_revive"] == 3
     assert report["plan_sha256"] == revival_digest([(7, [41, 42]), (8, [51])])
     assert script.revived == []
 
 
-async def test_without_dives_it_plans_every_dive():
+async def test_without_missions_it_plans_every_mission():
     script = Script(plans={3: [31], 4: []})
 
     report = await _run(
         sut.RemediateLaserSupersedesParentWorkflow.run,
         script,
-        RemediateLaserSupersedesInput(dive_ids=[], all_dives=True),
+        RemediateLaserSupersedesInput(mission_ids=[], all_missions=True),
     )
 
-    assert ("dives", None) in script.events
-    assert [row["dive_id"] for row in report["dives"]] == [3, 4]
+    assert ("missions", None) in script.events
+    assert [row["mission_id"] for row in report["missions"]] == [3, 4]
 
 
 async def test_exclusions_reach_the_plan():
@@ -275,13 +277,13 @@ async def test_exclusions_reach_the_plan():
         sut.RemediateLaserSupersedesParentWorkflow.run,
         script,
         RemediateLaserSupersedesInput(
-            dive_ids=[7, 8], excluded_dive_ids=[8], excluded_label_ids=[42]
+            mission_ids=[7, 8], excluded_mission_ids=[8], excluded_label_ids=[42]
         ),
     )
 
-    assert {row["dive_id"]: row["revive_ids"] for row in report["dives"]} == {
+    assert {row["mission_id"]: row["revive_ids"] for row in report["missions"]} == {
         7: [41], 8: []}  # fmt: skip
-    assert report["excluded_dive_ids"] == [8]
+    assert report["excluded_mission_ids"] == [8]
 
 
 async def test_apply_without_a_matching_digest_writes_nothing():
@@ -292,7 +294,7 @@ async def test_apply_without_a_matching_digest_writes_nothing():
             sut.RemediateLaserSupersedesParentWorkflow.run,
             script,
             RemediateLaserSupersedesInput(
-                dive_ids=[7], apply=True, expected_plan_sha256="not-the-digest"
+                mission_ids=[7], apply=True, expected_plan_sha256="not-the-digest"
             ),
         )
 
@@ -307,7 +309,7 @@ async def test_the_apply_flag_alone_is_not_enough():
         await _run(
             sut.RemediateLaserSupersedesParentWorkflow.run,
             script,
-            RemediateLaserSupersedesInput(dive_ids=[7], apply=True),
+            RemediateLaserSupersedesInput(mission_ids=[7], apply=True),
         )
     assert script.revived == []
 
@@ -320,7 +322,7 @@ async def test_apply_with_the_reviewed_digest_writes_exactly_the_plan():
         sut.RemediateLaserSupersedesParentWorkflow.run,
         script,
         RemediateLaserSupersedesInput(
-            dive_ids=[7, 8], apply=True, expected_plan_sha256=digest
+            mission_ids=[7, 8], apply=True, expected_plan_sha256=digest
         ),
     )
 
@@ -337,7 +339,9 @@ async def test_re_applying_after_success_is_a_no_op():
         sut.RemediateLaserSupersedesParentWorkflow.run,
         script,
         RemediateLaserSupersedesInput(
-            dive_ids=[7], apply=True, expected_plan_sha256=revival_digest([(7, [41])])
+            mission_ids=[7],
+            apply=True,
+            expected_plan_sha256=revival_digest([(7, [41])]),
         ),
     )
 

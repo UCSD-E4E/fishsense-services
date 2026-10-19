@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import text
 from temporalio.client import Client
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 
 pytestmark = pytest.mark.e2e
 
@@ -23,7 +23,7 @@ ORCHESTRATOR = "service:fishsense-orchestrator"
 T0 = datetime(2024, 8, 21, 8, 0, tzinfo=UTC)
 
 
-def _seed_a_dive_ready_for_clustering(stack) -> tuple[uuid.UUID, list[set]]:
+def _seed_a_mission_ready_for_clustering(stack) -> tuple[uuid.UUID, list[set]]:
     """Two bursts of three frames, ten minutes apart, all laser-labelled."""
     slug = stack.grant(ORCHESTRATOR)
     bursts: list[set] = [set(), set()]
@@ -31,9 +31,9 @@ def _seed_a_dive_ready_for_clustering(stack) -> tuple[uuid.UUID, list[set]]:
         tenant = conn.execute(
             text("SELECT id FROM tenants WHERE slug = :s"), {"s": slug}
         ).scalar_one()
-        dive = conn.execute(
+        mission = conn.execute(
             text(
-                "INSERT INTO dives (tenant_id, source_path, dived_at, priority) "
+                "INSERT INTO missions (tenant_id, source_path, started_at, priority) "
                 "VALUES (:t, :p, :at, 'high') RETURNING id"
             ),
             {"t": tenant, "p": f"e2e/{slug}", "at": T0},
@@ -42,11 +42,11 @@ def _seed_a_dive_ready_for_clustering(stack) -> tuple[uuid.UUID, list[set]]:
             for i in range(3):
                 capture = conn.execute(
                     text(
-                        "INSERT INTO captures (tenant_id, dive_id, source_path, "
+                        "INSERT INTO captures (tenant_id, mission_id, source_path, "
                         "captured_at, checksum, is_canonical) "
                         "VALUES (:t, :d, :p, :at, :sum, true) RETURNING id"
                     ),
-                    {"t": tenant, "d": dive, "p": f"e2e/{slug}/{burst}-{i}.ORF",
+                    {"t": tenant, "d": mission, "p": f"e2e/{slug}/{burst}-{i}.ORF",
                      "at": T0 + timedelta(minutes=10 * burst, seconds=i),
                      "sum": uuid.uuid4().hex},
                 ).scalar_one()  # fmt: skip
@@ -59,12 +59,12 @@ def _seed_a_dive_ready_for_clustering(stack) -> tuple[uuid.UUID, list[set]]:
                     {"t": tenant, "c": capture},
                 )
                 bursts[burst].add(capture)
-    return dive, bursts
+    return mission, bursts
 
 
 async def _run_stage_1(address: str) -> None:
     client = await Client.connect(
-        address, namespace="fishsense", data_converter=pydantic_data_converter
+        address, namespace="fishsense", data_converter=DATA_CONVERTER
     )
     await client.execute_workflow(
         "ClusterDiveFramesParentWorkflow",
@@ -74,8 +74,8 @@ async def _run_stage_1(address: str) -> None:
     )
 
 
-def test_stage_1_clusters_a_dive_across_the_stack(stack):
-    dive, bursts = _seed_a_dive_ready_for_clustering(stack)
+def test_stage_1_clusters_a_mission_across_the_stack(stack):
+    mission, bursts = _seed_a_mission_ready_for_clustering(stack)
 
     asyncio.run(_run_stage_1(stack.temporal_address))
 
@@ -85,12 +85,12 @@ def test_stage_1_clusters_a_dive_across_the_stack(stack):
             for row in conn.execute(
                 text(
                     "SELECT array_agg(m.capture_id) AS captures "
-                    "FROM dive_frame_clusters k JOIN dive_frame_cluster_captures m "
+                    "FROM mission_frame_clusters k JOIN mission_frame_cluster_captures m "
                     "ON m.cluster_id = k.id "
-                    "WHERE k.dive_id = :d AND k.formed_by = 'prediction' "
+                    "WHERE k.mission_id = :d AND k.formed_by = 'prediction' "
                     "GROUP BY k.id"
                 ),
-                {"d": dive},
+                {"d": mission},
             )
         ]
     assert sorted(clusters, key=lambda c: min(map(str, c))) == sorted(

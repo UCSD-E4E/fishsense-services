@@ -30,7 +30,7 @@ from temporalio import activity, workflow
 from temporalio.client import WorkflowFailureError
 from temporalio.exceptions import ApplicationError
 from temporalio.common import WorkflowIDReusePolicy
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -69,8 +69,8 @@ from fishsense_services_orchestrator.object_store.contracts import (
 )
 
 TENANT = uuid.uuid4()
-DIVE = uuid.uuid4()
-TARGET = HeadtailTarget(TENANT, DIVE)
+MISSION = uuid.uuid4()
+TARGET = HeadtailTarget(TENANT, MISSION)
 K = [[1000.0, 0.0, 960.0], [0.0, 1000.0, 540.0], [0.0, 0.0, 1.0]]
 D = [-0.1, 0.05, 0.0, 0.0, 0.0]
 QUEUE = "test-headtail-parent"
@@ -98,7 +98,7 @@ def _ref(checksum):
 def _preprocess_inputs(checksums):
     return PreprocessHeadtailImagesInput(
         tenant_id=TENANT,
-        dive_id=DIVE,
+        mission_id=MISSION,
         images=[
             PreprocessHeadtailImage(
                 capture_id=uuid.uuid4(),
@@ -116,7 +116,7 @@ def _preprocess_inputs(checksums):
 def _predict_inputs(n=1):
     return PredictHeadtailImagesInput(
         tenant_id=TENANT,
-        dive_id=DIVE,
+        mission_id=MISSION,
         images=[
             PredictHeadtailImage(
                 capture_id=uuid.uuid4(),
@@ -181,7 +181,7 @@ class _StubPopulateChild:  # pylint: disable=too-few-public-methods
             ["populate", workflow.info().workflow_id],
             schedule_to_close_timeout=timedelta(seconds=5),
         )
-        if str(target.dive_id).endswith("0bad"):
+        if str(target.mission_id).endswith("0bad"):
             # An ApplicationError fails the workflow; a plain exception would
             # only fail its task, which Temporal retries forever.
             raise ApplicationError("this dive's Label Studio project is broken")
@@ -203,17 +203,17 @@ def _preprocess_stubs(selected, inputs):
 
     @activity.defn(name="stage_raw_bytes_for_dive")
     async def stage(target: StagingTarget) -> StageRawBytesResult:
-        EVENTS.append(("stage", target.tenant_id, target.dive_id))
+        EVENTS.append(("stage", target.tenant_id, target.mission_id))
         return StageRawBytesResult(staged=1, skipped_already_present=0, no_path=0)
 
     @activity.defn(name="cleanup_raw_bytes_for_dive")
     async def cleanup(target: StagingTarget) -> CleanupRawBytesResult:
-        EVENTS.append(("cleanup", target.dive_id))
+        EVENTS.append(("cleanup", target.mission_id))
         return CleanupRawBytesResult(deleted=1)
 
     @activity.defn(name="clear_headtail_reprocess_flags")
     async def clear(request: ClearHeadtailReprocessFlags) -> int:
-        EVENTS.append(("clear", request.dive_id, request.checksums))
+        EVENTS.append(("clear", request.mission_id, request.checksums))
         return 0
 
     return [select, resolve, wake, stage, cleanup, clear, _record]
@@ -221,7 +221,7 @@ def _preprocess_stubs(selected, inputs):
 
 async def _run_preprocess(selected, inputs, before=None):
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with (
             Worker(
@@ -258,7 +258,7 @@ async def test_dispatches_child_with_deterministic_id():
 
     assert result == TARGET
     (child,) = [e for e in EVENTS if e[0] == "child"]
-    assert child == ("child", f"preprocess-headtail-{DIVE}", "a", "b")
+    assert child == ("child", f"preprocess-headtail-{MISSION}", "a", "b")
     # Populate is NOT chained here: it is its own +34 parent, behind the +32
     # predict parent. Chaining would seed rows before the detector ran and
     # remove every image from the predict cohort -- silently.
@@ -271,11 +271,11 @@ async def test_the_steps_run_in_v1s_order_and_the_clear_is_scoped():
     await _run_preprocess(TARGET, _preprocess_inputs(["a", "b"]))
 
     assert _kinds() == ["wake", "stage", "child", "cleanup", "clear"]
-    assert EVENTS[1] == ("stage", TENANT, DIVE)
-    assert EVENTS[-1] == ("clear", DIVE, ["a", "b"])
+    assert EVENTS[1] == ("stage", TENANT, MISSION)
+    assert EVENTS[-1] == ("clear", MISSION, ["a", "b"])
 
 
-async def test_returns_none_when_no_dive():
+async def test_returns_none_when_no_mission():
     assert await _run_preprocess(None, None) is None
     assert not EVENTS
 
@@ -287,7 +287,7 @@ async def test_lowers_the_reprocess_flag_even_when_no_work_resolves():
     result = await _run_preprocess(TARGET, _preprocess_inputs([]))
 
     assert result == TARGET
-    assert EVENTS == [("clear", DIVE, None)], "whole dive; no wake, stage or child"
+    assert EVENTS == [("clear", MISSION, None)], "whole dive; no wake, stage or child"
 
 
 async def test_a_child_already_running_means_no_cleanup_and_no_clear():
@@ -298,7 +298,7 @@ async def test_a_child_already_running_means_no_cleanup_and_no_clear():
         await client.start_workflow(
             "PreprocessHeadtailImagesWorkflow",
             _preprocess_inputs(["x"]),
-            id=f"preprocess-headtail-{DIVE}",
+            id=f"preprocess-headtail-{MISSION}",
             task_queue="nobody-polls-this",
         )
 
@@ -336,7 +336,7 @@ def _predict_stubs(*, mode="gpu", images=1):
 
     @activity.defn(name="backfill_headtail_predictions_for_dive")
     async def backfill(target: HeadtailTarget) -> int:
-        EVENTS.append(("backfill", target.dive_id))
+        EVENTS.append(("backfill", target.mission_id))
         return 0
 
     return [select, resolve, wake, persist, backfill, _record, _child_results]
@@ -345,7 +345,7 @@ def _predict_stubs(*, mode="gpu", images=1):
 async def _run_predict(child_results=(), before=None, **stubs):
     CHILD_RESULTS.extend(child_results)
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         # The stub child is on the processor's GPU queue and nowhere else: a
         # regression dispatching elsewhere hangs rather than passes.
@@ -391,9 +391,9 @@ async def test_persists_and_backfills_a_normal_run():
     assert await _run_predict([_predicted()]) == TARGET
     assert EVENTS == [
         ("wake",),
-        ("child", f"predict-headtail-{DIVE}"),
+        ("child", f"predict-headtail-{MISSION}"),
         ("persist", ["predicted"]),
-        ("backfill", DIVE),
+        ("backfill", MISSION),
     ]
 
 
@@ -409,7 +409,7 @@ async def test_an_all_skip_run_still_backfills():
     version, leaving every attached prediction invisible."""
     await _run_predict([_skipped(), _skipped()])
     assert "persist" not in _kinds()
-    assert ("backfill", DIVE) in EVENTS
+    assert ("backfill", MISSION) in EVENTS
 
 
 async def test_no_worker_available_means_no_child():
@@ -426,7 +426,7 @@ async def test_no_images_needs_no_worker():
 
 async def test_the_cpu_fallback_serves_the_same_queue():
     assert await _run_predict([_predicted()], mode="cpu_fallback") == TARGET
-    assert ("backfill", DIVE) in EVENTS
+    assert ("backfill", MISSION) in EVENTS
 
 
 async def test_a_predict_child_already_running_means_do_nothing_more():
@@ -437,7 +437,7 @@ async def test_a_predict_child_already_running_means_do_nothing_more():
         await client.start_workflow(
             "PredictHeadtailImagesWorkflow",
             _predict_inputs(),
-            id=f"predict-headtail-{DIVE}",
+            id=f"predict-headtail-{MISSION}",
             task_queue="nobody-polls-this",
         )
 
@@ -448,7 +448,7 @@ async def test_a_predict_child_already_running_means_do_nothing_more():
 # -- populate (v1's populate parent and workflow tests) -------------------------------
 
 
-async def test_populate_parent_fans_out_one_child_per_dive_and_survives_a_failure():
+async def test_populate_parent_fans_out_one_child_per_mission_and_survives_a_failure():
     """ALLOW_DUPLICATE, id `populate-headtail-{dive}`; one dive's failure must
     not abort the fan-out (v1's `suppress=True`)."""
     good = HeadtailTarget(TENANT, uuid.uuid4())
@@ -459,7 +459,7 @@ async def test_populate_parent_fans_out_one_child_per_dive_and_survives_a_failur
         return [bad, good]
 
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,
@@ -478,7 +478,7 @@ async def test_populate_parent_fans_out_one_child_per_dive_and_survives_a_failur
 
     assert result == [bad, good]
     assert sorted(e[1] for e in EVENTS) == sorted(
-        [f"populate-headtail-{bad.dive_id}", f"populate-headtail-{good.dive_id}"]
+        [f"populate-headtail-{bad.mission_id}", f"populate-headtail-{good.mission_id}"]
     )
 
 
@@ -488,7 +488,7 @@ async def test_populate_parent_with_nothing_to_do_dispatches_nothing():
         return []
 
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,
@@ -518,7 +518,7 @@ async def test_populate_creates_the_project_then_populates_it():
         return 7
 
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,
@@ -582,14 +582,14 @@ async def test_populate_timeouts_and_bounded_retries_are_v1s(activity_calls):
 # -- the backfill, on demand ------------------------------------------------------------
 
 
-async def test_backfill_workflow_runs_the_dives_backfill():
+async def test_backfill_workflow_runs_the_missions_backfill():
     @activity.defn(name="backfill_headtail_predictions_for_dive")
     async def backfill(target: HeadtailTarget) -> int:
         EVENTS.append(("backfill", target))
         return 3
 
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,
@@ -600,7 +600,7 @@ async def test_backfill_workflow_runs_the_dives_backfill():
             attached = await env.client.execute_workflow(
                 BackfillHeadtailPredictionsWorkflow.run,
                 TARGET,
-                id=f"backfill-headtail-predictions-{DIVE}",
+                id=f"backfill-headtail-predictions-{MISSION}",
                 task_queue=QUEUE,
             )
 
@@ -625,7 +625,7 @@ async def _run_sync(fail_projects=()):
         synced.append(project.ls_project_id)
 
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,

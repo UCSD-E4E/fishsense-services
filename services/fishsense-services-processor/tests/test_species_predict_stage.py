@@ -33,7 +33,7 @@ from fishsense_core.models import ModelIntegrityError, ModelUnavailable
 from moto import mock_aws
 from pydantic import ValidationError
 from temporalio import activity
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
 from temporalio.worker import Worker
@@ -470,11 +470,11 @@ async def test_workflow_fans_out_one_prediction_per_image_with_the_candidates():
 
     images = [_payload().image, _payload().image]
     payload = PredictSpeciesImagesInput(
-        tenant_id=uuid.uuid4(), dive_id=uuid.uuid4(), candidates=[HOGFISH],
+        tenant_id=uuid.uuid4(), mission_id=uuid.uuid4(), candidates=[HOGFISH],
         images=images,
     )  # fmt: skip
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,

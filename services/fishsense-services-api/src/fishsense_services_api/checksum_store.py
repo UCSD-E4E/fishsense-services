@@ -35,9 +35,9 @@ from fishsense_services_api.service_principal import ServicePrincipal
 __all__ = [
     "ChecksumCatalog",
     "VerifyCapture",
-    "canonical_dive_numbers",
+    "canonical_mission_numbers",
     "captures_to_verify",
-    "dive_by_number",
+    "mission_by_number",
 ]
 
 
@@ -55,30 +55,30 @@ class VerifyCapture:
     captured_at: datetime
 
 
-async def dive_by_number(
+async def mission_by_number(
     conn: AsyncConnection, tenant_id: uuid.UUID, number: int
 ) -> uuid.UUID | None:
     """The tenant's dive numbered ``number``."""
     return (
         await conn.execute(
-            text("SELECT id FROM dives WHERE tenant_id = :tenant AND number = :n"),
+            text("SELECT id FROM missions WHERE tenant_id = :tenant AND number = :n"),
             {"tenant": tenant_id, "n": number},
         )
     ).scalar_one_or_none()
 
 
 async def captures_to_verify(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> list[VerifyCapture]:
     """Every capture of the dive, duplicates included, in path order."""
     rows = await conn.execute(
         text("""
             SELECT number, source_path, checksum, checksum_algorithm, captured_at
             FROM captures
-            WHERE tenant_id = :tenant AND dive_id = :dive
+            WHERE tenant_id = :tenant AND mission_id = :mission
             ORDER BY coalesce(source_path, ''), number
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     return [
         VerifyCapture(
@@ -88,17 +88,17 @@ async def captures_to_verify(
     ]
 
 
-async def canonical_dive_numbers(
+async def canonical_mission_numbers(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> list[int]:
     """The tenant's dives with at least one canonical capture, by number."""
     rows = await conn.execute(
         text("""
-            SELECT d.number FROM dives d
+            SELECT d.number FROM missions d
             WHERE d.tenant_id = :tenant
               AND EXISTS (
                   SELECT 1 FROM captures c
-                  WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+                  WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id
                     AND c.is_canonical
               )
             ORDER BY d.number
@@ -111,18 +111,18 @@ async def canonical_dive_numbers(
 class ChecksumCatalog(ServicePrincipal):
     """Checksum verification's database side, as the orchestrator's principal."""
 
-    async def dive_by_number(
+    async def mission_by_number(
         self, tenant_id: uuid.UUID, number: int
     ) -> uuid.UUID | None:
         async with self._tenant(tenant_id) as conn:
-            return await dive_by_number(conn, tenant_id, number)
+            return await mission_by_number(conn, tenant_id, number)
 
     async def captures_to_verify(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> list[VerifyCapture]:
         async with self._tenant(tenant_id) as conn:
-            return await captures_to_verify(conn, tenant_id, dive_id)
+            return await captures_to_verify(conn, tenant_id, mission_id)
 
-    async def canonical_dive_numbers(self, tenant_id: uuid.UUID) -> list[int]:
+    async def canonical_mission_numbers(self, tenant_id: uuid.UUID) -> list[int]:
         async with self._tenant(tenant_id) as conn:
-            return await canonical_dive_numbers(conn, tenant_id)
+            return await canonical_mission_numbers(conn, tenant_id)

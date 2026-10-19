@@ -3,7 +3,7 @@
 Ported from fishsense-lite@77e8f8e5 services/fishsense-data-processing-workflow-worker/tests/test_calibration_consistency_remedies.py.
 
 The message is the only thing an operator sees when a calibration is refused —
-it is written into `Dive.calibration_refused_reason` and read back from prod —
+it is written into `Mission.calibration_refused_reason` and read back from prod —
 so a claim in it that the code contradicts sends someone to do unnecessary
 work, or to distrust the pipeline.
 

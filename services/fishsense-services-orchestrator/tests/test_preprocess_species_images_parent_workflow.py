@@ -23,7 +23,7 @@ from typing import List
 
 from temporalio import activity, workflow
 from temporalio.client import WorkflowHandle
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -69,9 +69,9 @@ def _member(name: str, index: int = 1, size: int = 1) -> SpeciesClusterMember:
     )
 
 
-def _inputs(dive, clusters) -> PreprocessSpeciesImagesInput:
+def _inputs(mission, clusters) -> PreprocessSpeciesImagesInput:
     return PreprocessSpeciesImagesInput(
-        dive_id=dive,
+        mission_id=mission,
         camera_matrix=_K,
         distortion_coefficients=_D,
         cluster_members=[
@@ -97,16 +97,18 @@ class _StubChildWorkflow:
         flat = [m.capture_id for group in payload.cluster_members for m in group]
         await workflow.execute_activity(
             "_record_child_dispatch",
-            args=(workflow.info().workflow_id, payload.dive_id, flat),
+            args=(workflow.info().workflow_id, payload.mission_id, flat),
             schedule_to_close_timeout=timedelta(seconds=5),
         )
 
 
 def _record_child(recorder: Recorder):
     @activity.defn(name="_record_child_dispatch")
-    async def record(workflow_id: str, dive_id: uuid.UUID, captures: List[uuid.UUID]):
+    async def record(
+        workflow_id: str, mission_id: uuid.UUID, captures: List[uuid.UUID]
+    ):
         recorder.events.append("child")
-        recorder.children.append((workflow_id, dive_id, captures))
+        recorder.children.append((workflow_id, mission_id, captures))
 
     return record
 
@@ -152,7 +154,7 @@ async def _run(target, inputs, *, runs=1, before=None) -> tuple[list, Recorder]:
     recorder = Recorder()
     results = []
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with (
             Worker(
@@ -187,21 +189,21 @@ async def _run(target, inputs, *, runs=1, before=None) -> tuple[list, Recorder]:
 
 
 async def test_dispatches_child_with_deterministic_id_and_clusters():
-    dive = uuid.uuid4()
-    target = SpeciesTarget(TENANT, dive)
+    mission = uuid.uuid4()
+    target = SpeciesTarget(TENANT, mission)
 
-    (result,), recorder = await _run(target, _inputs(dive, [["a", "b"], ["c"]]))
+    (result,), recorder = await _run(target, _inputs(mission, [["a", "b"], ["c"]]))
 
     assert result == target
     assert recorder.events.count("select") == 1
     assert recorder.resolved == [target]
-    ((child_id, child_dive, flat),) = recorder.children
-    assert child_id == f"preprocess-species-{dive}"
-    assert child_dive == dive
+    ((child_id, child_mission, flat),) = recorder.children
+    assert child_id == f"preprocess-species-{mission}"
+    assert child_mission == mission
     assert flat == [_capture("a"), _capture("b"), _capture("c")]
 
 
-async def test_returns_none_when_selector_finds_no_dive():
+async def test_returns_none_when_selector_finds_no_mission():
     (result,), recorder = await _run(None, None)
 
     assert result is None
@@ -211,11 +213,13 @@ async def test_returns_none_when_selector_finds_no_dive():
 
 
 async def test_skips_child_dispatch_when_no_clusters():
-    dive = uuid.uuid4()
+    mission = uuid.uuid4()
 
-    (result,), recorder = await _run(SpeciesTarget(TENANT, dive), _inputs(dive, []))
+    (result,), recorder = await _run(
+        SpeciesTarget(TENANT, mission), _inputs(mission, [])
+    )
 
-    assert result == SpeciesTarget(TENANT, dive)
+    assert result == SpeciesTarget(TENANT, mission)
     assert recorder.children == []
     # A quiet dive neither wakes a pod nor stages the NAS.
     assert "wake" not in recorder.events and "stage" not in recorder.events
@@ -230,26 +234,28 @@ async def test_child_redispatches_after_a_prior_successful_run():
     permanently spent once it completed, so those frames' JPEGs were never
     produced and populate deferred them forever (prod dives 59/439).
     """
-    dive = uuid.uuid4()
+    mission = uuid.uuid4()
 
     _, recorder = await _run(
-        SpeciesTarget(TENANT, dive), _inputs(dive, [["orphan"]]), runs=2
+        SpeciesTarget(TENANT, mission), _inputs(mission, [["orphan"]]), runs=2
     )
 
     # Same deterministic child id both times; both must have run.
     assert len(recorder.children) == 2, "child must re-dispatch on the second run"
-    assert {c[0] for c in recorder.children} == {f"preprocess-species-{dive}"}
+    assert {c[0] for c in recorder.children} == {f"preprocess-species-{mission}"}
 
 
 async def test_lowers_the_reprocess_flag_even_when_no_work_resolves():
     """A flag that reaches no image must still be lowered, whole-dive: it is
     the one term of the cohort that does not go false on its own, and left up
     it re-selects the dive every hour, re-staging its raw frames."""
-    dive = uuid.uuid4()
+    mission = uuid.uuid4()
 
-    (result,), recorder = await _run(SpeciesTarget(TENANT, dive), _inputs(dive, []))
+    (result,), recorder = await _run(
+        SpeciesTarget(TENANT, mission), _inputs(mission, [])
+    )
 
-    assert result == SpeciesTarget(TENANT, dive)
+    assert result == SpeciesTarget(TENANT, mission)
     assert recorder.clear_scopes == [None], (
         "the no-work path clears the WHOLE dive on purpose -- the flag reached "
         "no image, so nothing else will ever lower it"
@@ -260,10 +266,10 @@ async def test_the_successful_path_clears_only_what_it_redrew():
     """A flag raised while the child is running must survive the clear: the
     child can run two hours, and an unscoped clear would lower a request this
     run never saw."""
-    dive = uuid.uuid4()
+    mission = uuid.uuid4()
 
     _, recorder = await _run(
-        SpeciesTarget(TENANT, dive), _inputs(dive, [["aa", "bb"], ["cc"]])
+        SpeciesTarget(TENANT, mission), _inputs(mission, [["aa", "bb"], ["cc"]])
     )
 
     assert recorder.clear_scopes == [
@@ -272,9 +278,9 @@ async def test_the_successful_path_clears_only_what_it_redrew():
 
 
 async def test_steps_run_wake_stage_child_cleanup_clear():
-    dive = uuid.uuid4()
+    mission = uuid.uuid4()
 
-    _, recorder = await _run(SpeciesTarget(TENANT, dive), _inputs(dive, [["a"]]))
+    _, recorder = await _run(SpeciesTarget(TENANT, mission), _inputs(mission, [["a"]]))
 
     assert recorder.events == ["select", "wake", "stage", "child", "cleanup", "clear"]
 
@@ -290,22 +296,22 @@ class _StillRunningChild:
 async def test_a_child_still_running_keeps_its_scratch_and_flags():
     """If another firing's child is still running, this one dispatched
     nothing and must not clean up or clear after the run that owns it."""
-    dive = uuid.uuid4()
+    mission = uuid.uuid4()
     started: List[WorkflowHandle] = []
 
     async def start_owner(client):
         started.append(
             await client.start_workflow(
                 _StillRunningChild.run,
-                _inputs(dive, [["a"]]),
-                id=f"preprocess-species-{dive}",
+                _inputs(mission, [["a"]]),
+                id=f"preprocess-species-{mission}",
                 task_queue="owner-queue",
             )
         )
 
     recorder = Recorder()
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with (
             Worker(
@@ -313,7 +319,7 @@ async def test_a_child_still_running_keeps_its_scratch_and_flags():
                 task_queue=QUEUE,
                 workflows=[PreprocessSpeciesImagesParentWorkflow],
                 activities=_stubs(
-                    recorder, SpeciesTarget(TENANT, dive), _inputs(dive, [["a"]])
+                    recorder, SpeciesTarget(TENANT, mission), _inputs(mission, [["a"]])
                 ),
             ),
             Worker(
@@ -328,7 +334,7 @@ async def test_a_child_still_running_keeps_its_scratch_and_flags():
                 task_queue=QUEUE,
             )
 
-    assert result == SpeciesTarget(TENANT, dive)
+    assert result == SpeciesTarget(TENANT, mission)
     assert recorder.events == [
         "select",
         "wake",

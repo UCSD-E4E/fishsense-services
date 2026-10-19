@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 
 from temporalio import activity
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -26,12 +26,12 @@ async def _execute(args):
     calls: list[tuple] = []
 
     @activity.defn(name="repair_moved_capture_paths")
-    async def repair(dive_number: int, apply: bool) -> PathRepairReport:
-        calls.append((dive_number, apply))
-        return PathRepairReport(dive_number=dive_number, applied=apply, frames=3)
+    async def repair(mission_number: int, apply: bool) -> PathRepairReport:
+        calls.append((mission_number, apply))
+        return PathRepairReport(mission_number=mission_number, applied=apply, frames=3)
 
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,
@@ -48,7 +48,7 @@ async def _execute(args):
     return report, calls
 
 
-async def test_the_dive_alone_is_a_dry_run():
+async def test_the_mission_alone_is_a_dry_run():
     """`--input 249` is the obvious way to start it, and must change nothing."""
     report, calls = await _execute((249,))
     assert calls == [(249, False)]

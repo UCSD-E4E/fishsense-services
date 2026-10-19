@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 
 from fishsense_services_contracts.temporal import TemporalConnection, connect_options
 
@@ -31,7 +31,7 @@ def test_connect_options_carry_the_namespace_and_the_pydantic_converter():
 
     assert options["target_host"] == "localhost:7233"
     assert options["namespace"] == "fishsense"
-    assert options["data_converter"] is pydantic_data_converter
+    assert options["data_converter"] is DATA_CONVERTER
     assert options["tls"] is False
 
 

@@ -38,7 +38,7 @@ CAMERA_MATRIX = np.array(
     [[3000.0, 0.0, 2048.0], [0.0, 3000.0, 1536.0], [0.0, 0.0, 1.0]]
 )
 CALIBRATION_ID = uuid4()
-DIVE = uuid4()
+MISSION = uuid4()
 
 
 def _laser_calibration(axis=(0.0, -0.02, 1.0)) -> LaserCalibrationGeometry:
@@ -66,7 +66,7 @@ def _dot(label_id: UUID, x, y) -> LaserDot:
 
 def _input(captures, calibration=None) -> ComputeLaserDepthsInput:
     return ComputeLaserDepthsInput(
-        dive_id=DIVE,
+        mission_id=MISSION,
         camera_matrix=tuple(tuple(row) for row in CAMERA_MATRIX),
         calibration=calibration or _laser_calibration(),
         captures=captures,
@@ -158,12 +158,12 @@ async def test_refuses_to_store_an_impossible_depth():
     assert (refusal.x, refusal.y) == (3000.0, 1600.0)
 
 
-async def test_handles_a_dive_with_no_laser_labels():
+async def test_handles_a_mission_with_no_laser_labels():
     """Nothing to try is not an error."""
     result = await _run(_input([]))
 
     assert result.captures == []
-    assert result.dive_id == DIVE
+    assert result.mission_id == MISSION
 
 
 async def test_duplicate_valid_labels_produce_one_depth_per_image():

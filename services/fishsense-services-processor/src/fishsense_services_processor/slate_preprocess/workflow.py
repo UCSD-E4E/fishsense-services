@@ -39,7 +39,7 @@ class PreprocessSlateImagesWorkflow:
     async def run(self, payload: PreprocessSlateImagesInput) -> None:
         workflow.logger.info(
             "preprocessing slate images dive_id=%s images=%d slate=%s",
-            payload.dive_id,
+            payload.mission_id,
             len(payload.images),
             payload.slate_template_id,
         )

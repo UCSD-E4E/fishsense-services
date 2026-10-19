@@ -7,7 +7,7 @@ worker/tests/test_species_slate_content_path_order.py (v2: the parser is
 The species Taxonomy puts two orthogonal answers under `Slate`: the CONTENT
 answer (`Laser on slate` / `Laser not on slate`, which stage 9 keys its cohort
 on) and the SLATE TYPE (`H-Slate`, `V-Slate 2`, ..., which species sync maps to
-`Dive.dive_slate_id`). A labeler on a slate frame is meant to pick both.
+`Mission.dive_slate_id`). A labeler on a slate frame is meant to pick both.
 
 Label Studio returns the paths in **selection order**, and `_content_of_image`
 took `taxonomy[0]`. So whether stage 9 ever saw the frame depended on which

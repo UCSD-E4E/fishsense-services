@@ -56,7 +56,7 @@ def _round_trip(model):
 
 def test_stage_9_hands_the_processor_refs_not_checksums():
     payload = PreprocessSlateImagesInput(
-        dive_id=uuid4(),
+        mission_id=uuid4(),
         slate_template_id=uuid4(),
         slate_pdf=_ref(f"slate_pdf/{uuid4()}.pdf"),
         slate_dpi=300,
@@ -79,21 +79,21 @@ def test_a_slate_needs_a_positive_dpi():
     """The template points are in PDF pixels at this DPI; zero would divide."""
     with pytest.raises(ValidationError):
         SlateCalibrationInput(
-            dive_id=uuid4(),
+            mission_id=uuid4(),
             camera_matrix=K,
             template_points=[(0.0, 0.0)],
             dpi=0,
             observations=[],
-            dive_dots=[],
+            mission_dots=[],
         )
 
 
-def test_stage_13_carries_every_observation_and_the_dives_dots():
+def test_stage_13_carries_every_observation_and_the_missions_dots():
     """v1's activity read these itself; now they cross the wire. A label whose
     reference points are JSON null (prod dive 526) must still be carried, so
     the processor can skip the label, not the dive."""
     payload = SlateCalibrationInput(
-        dive_id=uuid4(),
+        mission_id=uuid4(),
         camera_matrix=K,
         template_points=[(0.0, 0.0), (2400.0, 0.0)],
         dpi=300,
@@ -113,7 +113,7 @@ def test_stage_13_carries_every_observation_and_the_dives_dots():
                 laser_y=200.0,
             ),
         ],
-        dive_dots=[(100.0, 200.0), (110.0, 230.0)],
+        mission_dots=[(100.0, 200.0), (110.0, 230.0)],
     )
 
     assert _round_trip(payload) == payload
@@ -187,7 +187,7 @@ def test_a_checkerboard_target_has_a_pitch_per_axis():
 
 def test_checkerboard_calibration_round_trips():
     payload = PerformCheckerboardCalibrationInput(
-        dive_id=uuid4(),
+        mission_id=uuid4(),
         camera_matrix=K,
         distortion_coefficients=[0.0] * 5,
         target=CheckerboardTarget(rows=10, cols=14, pitch_x_m=0.042, pitch_y_m=0.042),
@@ -196,7 +196,7 @@ def test_checkerboard_calibration_round_trips():
                 capture_id=uuid4(), raw=_ref("raw/ab12.ORF"), laser_x=1.0, laser_y=2.0
             )
         ],
-        dive_dots=[(1.0, 2.0)],
+        mission_dots=[(1.0, 2.0)],
     )
     assert _round_trip(payload) == payload
 
@@ -219,7 +219,7 @@ def test_lattice_verification_round_trips():
         laser_y=2.0,
     )
     payload = VerifyCheckerboardLatticeInput(
-        dive_id=uuid4(),
+        mission_id=uuid4(),
         camera_matrix=K,
         distortion_coefficients=[0.0] * 5,
         target=CheckerboardTarget(rows=10, cols=14, pitch_x_m=0.042, pitch_y_m=0.042),

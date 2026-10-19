@@ -32,28 +32,28 @@ async def _one(conn, sql: str, **params):
     return (await conn.execute(text(sql), params)).scalar_one()
 
 
-async def _tenant_and_dive(conn, slug: str) -> tuple[uuid.UUID, uuid.UUID]:
+async def _tenant_and_mission(conn, slug: str) -> tuple[uuid.UUID, uuid.UUID]:
     tenant = await _one(
         conn, "INSERT INTO tenants (slug, name) VALUES (:s, :s) RETURNING id", s=slug
     )
-    dive = await _one(
+    mission = await _one(
         conn,
-        "INSERT INTO dives (tenant_id, source_path, dived_at) "
+        "INSERT INTO missions (tenant_id, source_path, started_at) "
         "VALUES (:t, '/a', now()) RETURNING id",
         t=tenant,
     )
-    return tenant, dive
+    return tenant, mission
 
 
-async def _fit(conn, tenant, dive, **overrides) -> uuid.UUID:
+async def _fit(conn, tenant, mission, **overrides) -> uuid.UUID:
     values = {**FIT, **overrides}
-    names = ", ".join(["tenant_id", "dive_id", *values])
-    params = ", ".join([":tenant_id", ":dive_id", *(f":{c}" for c in values)])
+    names = ", ".join(["tenant_id", "mission_id", *values])
+    params = ", ".join([":tenant_id", ":mission_id", *(f":{c}" for c in values)])
     return await _one(
         conn,
-        f"INSERT INTO dive_laser_lines ({names}) VALUES ({params}) RETURNING id",
+        f"INSERT INTO mission_laser_lines ({names}) VALUES ({params}) RETURNING id",
         tenant_id=tenant,
-        dive_id=dive,
+        mission_id=mission,
         **values,
     )
 
@@ -66,14 +66,14 @@ async def owner(owner_engine):
 
 async def test_the_app_role_appends_but_never_rewrites_a_fit(owner_engine, app_engine):
     async with owner_engine.begin() as conn:
-        tenant, dive = await _tenant_and_dive(conn, "lab")
+        tenant, mission = await _tenant_and_mission(conn, "lab")
 
     async with tenant_transaction(app_engine, tenant) as conn:
-        await _fit(conn, tenant, dive)
+        await _fit(conn, tenant, mission)
 
     for statement in (
-        "UPDATE dive_laser_lines SET c = 0",
-        "DELETE FROM dive_laser_lines",
+        "UPDATE mission_laser_lines SET c = 0",
+        "DELETE FROM mission_laser_lines",
     ):
         with pytest.raises(DBAPIError, match="permission denied"):
             async with tenant_transaction(app_engine, tenant) as conn:
@@ -90,20 +90,22 @@ async def test_the_app_role_appends_but_never_rewrites_a_fit(owner_engine, app_e
     ],
 )
 async def test_fit_statistics_stay_in_range(owner, overrides):
-    tenant, dive = await _tenant_and_dive(owner, "lab")
+    tenant, mission = await _tenant_and_mission(owner, "lab")
 
     with pytest.raises(IntegrityError, match="check"):
         async with owner.begin_nested():
-            await _fit(owner, tenant, dive, **overrides)
+            await _fit(owner, tenant, mission, **overrides)
 
 
-async def test_current_is_the_latest_fit_per_dive(owner):
-    tenant, dive = await _tenant_and_dive(owner, "lab")
-    await _fit(owner, tenant, dive, c=-1200.0)
-    latest = await _fit(owner, tenant, dive, c=-1180.0)
+async def test_current_is_the_latest_fit_per_mission(owner):
+    tenant, mission = await _tenant_and_mission(owner, "lab")
+    await _fit(owner, tenant, mission, c=-1200.0)
+    latest = await _fit(owner, tenant, mission, c=-1180.0)
 
     current = await _one(
-        owner, "SELECT id FROM current_dive_laser_lines WHERE dive_id = :d", d=dive
+        owner,
+        "SELECT id FROM current_mission_laser_lines WHERE mission_id = :d",
+        d=mission,
     )
 
     assert current == latest
@@ -111,9 +113,9 @@ async def test_current_is_the_latest_fit_per_dive(owner):
 
 async def test_line_confidence_is_an_unbounded_stability_signal(owner):
     """Not a probability: v1's real values run from ~2.6 to ~270 000."""
-    tenant, dive = await _tenant_and_dive(owner, "lab")
+    tenant, mission = await _tenant_and_mission(owner, "lab")
 
-    await _fit(owner, tenant, dive, line_confidence=270256.98)
+    await _fit(owner, tenant, mission, line_confidence=270256.98)
 
 
 @pytest.mark.parametrize(
@@ -123,8 +125,8 @@ async def test_a_fit_says_which_noise_estimator_it_used(owner, estimator):
     """`label_noise_mad`'s scale changed with fishsense-core 4.1.0 (signed
     residuals, about 1.0 sigma, against v1's absolute ones, about 0.59), so a
     fit without its estimator can't be compared with another (migration 0017)."""
-    tenant, dive = await _tenant_and_dive(owner, "lab")
+    tenant, mission = await _tenant_and_mission(owner, "lab")
 
     with pytest.raises(IntegrityError):
         async with owner.begin_nested():
-            await _fit(owner, tenant, dive, noise_estimator=estimator)
+            await _fit(owner, tenant, mission, noise_estimator=estimator)

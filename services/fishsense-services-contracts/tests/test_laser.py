@@ -112,7 +112,7 @@ def test_the_digest_ignores_order():
     )
 
 
-def test_the_digest_ignores_dives_with_nothing_to_revive():
+def test_the_digest_ignores_missions_with_nothing_to_revive():
     assert sut.revival_digest([(7, [5]), (9, [])]) == sut.revival_digest([(7, [5])])
 
 
@@ -134,7 +134,7 @@ def test_the_digest_is_v1s_for_the_same_numbers():
 
 
 def test_dry_run_is_the_default():
-    request = sut.RemediateLaserSupersedesInput(dive_ids=[7])
+    request = sut.RemediateLaserSupersedesInput(mission_ids=[7])
     assert request.apply is False
     assert request.expected_plan_sha256 is None
 
@@ -149,7 +149,7 @@ def _ref(key="tenants/00000000-0000-0000-0000-000000000001/raw/abc.ORF"):
 def test_preprocess_input_carries_refs_not_checksums():
     """Only the orchestrator issues keys (PLAN.md §9.11)."""
     payload = sut.PreprocessLaserImagesInput(
-        dive_id=uuid.uuid4(),
+        mission_id=uuid.uuid4(),
         images=[
             sut.LaserPreprocessImage(
                 capture_id=uuid.uuid4(),
@@ -171,7 +171,7 @@ def test_preprocess_input_carries_refs_not_checksums():
 def test_a_bbox_is_four_numbers():
     with pytest.raises(ValidationError):
         sut.PreprocessLaserImagesInput(
-            dive_id=uuid.uuid4(),
+            mission_id=uuid.uuid4(),
             images=[],
             camera_matrix=[[1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0]],
             distortion_coefficients=[0.0] * 5,

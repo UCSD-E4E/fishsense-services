@@ -44,7 +44,7 @@ __all__ = [
     "AutomaticCalibrationActivities",
     "HEARTBEAT_EVERY_S",
     "MAX_CALIBRATION_FRAMES",
-    "dive_line",
+    "mission_line",
     "spread",
 ]
 
@@ -79,7 +79,7 @@ async def _while_heartbeating(fn, *args):
         activity.heartbeat()
 
 
-def dive_line(dots) -> Optional[tuple[float, float, float]]:
+def mission_line(dots) -> Optional[tuple[float, float, float]]:
     """``(a, b, c)`` of the dive's laser line, or None when it can't be told."""
     # pylint: disable-next=import-outside-toplevel
     from fishsense_core.line_fit import fit_dive_line
@@ -103,7 +103,7 @@ def _features(jpeg: bytes, dot) -> sc.FrameFeatures:
 def _fit(payload: FitAutomaticCalibrationInput, features, kept):
     dots = np.array([[f.x, f.y] for f in kept], float)
     pairs = sc.pair_scales(features, dots)
-    line = dive_line(payload.line_dots) if payload.line_dots else None
+    line = mission_line(payload.line_dots) if payload.line_dots else None
     return sc.fit_label_free(
         dots=dots, pairs=pairs, camera_matrix=payload.camera_matrix, line=line
     )
@@ -125,7 +125,7 @@ class AutomaticCalibrationActivities:  # pylint: disable=too-few-public-methods
     ) -> AutomaticCalibrationResult:
         """The dive's label-free calibration from its slate frames, or why not."""
         base = {
-            "dive_id": payload.dive_id,
+            "mission_id": payload.mission_id,
             "algorithm_version": AUTOMATIC_CALIBRATION_VERSION,
             "candidate_count": len(payload.frames),
             "core_version": version("fishsense-core"),
@@ -158,7 +158,7 @@ class AutomaticCalibrationActivities:  # pylint: disable=too-few-public-methods
         fit = await _while_heartbeating(_fit, payload, features, kept)
         activity.logger.info(
             "dive=%s label-free %s (%s): frames=%d pairs=%d ratio=%s",
-            payload.dive_id, fit.outcome, fit.refusal_reason, fit.frames_used,
+            payload.mission_id, fit.outcome, fit.refusal_reason, fit.frames_used,
             fit.pairs, fit.size_ratio,
         )  # fmt: skip
         return AutomaticCalibrationResult(

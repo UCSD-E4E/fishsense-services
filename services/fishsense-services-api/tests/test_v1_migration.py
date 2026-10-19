@@ -190,10 +190,10 @@ def test_dives_keep_their_state_and_borrowing(v1, v2):
 
     dives = _rows(
         v2,
-        "SELECT d.v1_id, d.source_path, d.priority, d.notes, d.flip_dive_slate, "
+        "SELECT d.v1_id, d.source_path, d.priority, d.notes, d.flip_mission_slate, "
         "dev.v1_id, src.v1_id, st.v1_id, ct.v1_id "
-        "FROM dives d JOIN devices dev ON dev.id = d.device_id "
-        "LEFT JOIN dives src ON src.id = d.calibration_source_dive_id "
+        "FROM missions d JOIN devices dev ON dev.id = d.device_id "
+        "LEFT JOIN missions src ON src.id = d.calibration_source_mission_id "
         "LEFT JOIN slate_templates st ON st.id = d.slate_template_id "
         "LEFT JOIN calibration_targets ct ON ct.id = d.calibration_target_id "
         "ORDER BY d.v1_id",
@@ -214,7 +214,7 @@ def test_images_become_captures_with_canonical_copies_kept(v1, v2):
         v2,
         "SELECT c.v1_id, c.source_path, c.checksum, c.is_canonical, "
         "d.v1_id, dev.v1_id FROM captures c "
-        "JOIN dives d ON d.id = c.dive_id JOIN devices dev ON dev.id = c.device_id "
+        "JOIN missions d ON d.id = c.mission_id JOIN devices dev ON dev.id = c.device_id "
         "ORDER BY c.v1_id",
     ) == [
         (100, "dives/d10/P1.ORF", MD5, True, 10, 1),
@@ -226,7 +226,7 @@ def test_images_become_captures_with_canonical_copies_kept(v1, v2):
 def test_running_again_changes_nothing(v1, v2):
     _seed_v1(v1)
     _run(v1, v2)
-    counts = "SELECT (SELECT count(*) FROM devices), (SELECT count(*) FROM dives), (SELECT count(*) FROM captures), (SELECT count(*) FROM fish_model_references)"  # noqa: E501
+    counts = "SELECT (SELECT count(*) FROM devices), (SELECT count(*) FROM missions), (SELECT count(*) FROM captures), (SELECT count(*) FROM fish_model_references)"  # noqa: E501
     before = _rows(v2, counts)
 
     _run(v1, v2)
@@ -298,7 +298,7 @@ def test_extrinsics_become_accepted_calibrations_naming_only_what_is_certain(v1,
     assert _rows(
         v2,
         "SELECT lc.v1_id, d.v1_id, lc.outcome, lc.producer, cc.v1_id "
-        "FROM laser_calibrations lc JOIN dives d ON d.id = lc.dive_id "
+        "FROM laser_calibrations lc JOIN missions d ON d.id = lc.mission_id "
         "LEFT JOIN camera_calibrations cc ON cc.id = lc.camera_calibration_id "
         "WHERE lc.outcome = 'accepted' ORDER BY lc.v1_id",
     ) == [
@@ -318,7 +318,7 @@ def test_a_refusal_becomes_a_refused_row_and_v1s_current_state_holds(v1, v2):
     assert _rows(
         v2,
         "SELECT d.v1_id, c.outcome, c.refusal_reason, c.inputs_as_of::date::text "
-        "FROM current_laser_calibrations c JOIN dives d ON d.id = c.dive_id "
+        "FROM current_laser_calibrations c JOIN missions d ON d.id = c.mission_id "
         "ORDER BY d.v1_id",
     ) == [
         (10, "accepted", None, None),
@@ -328,7 +328,7 @@ def test_a_refusal_becomes_a_refused_row_and_v1s_current_state_holds(v1, v2):
     assert _rows(
         v2,
         "SELECT d.v1_id, src.v1_id FROM effective_laser_calibrations e "
-        "JOIN dives d ON d.id = e.dive_id JOIN dives src ON src.id = e.source_dive_id "
+        "JOIN missions d ON d.id = e.mission_id JOIN missions src ON src.id = e.source_mission_id "
         "ORDER BY d.v1_id",
     ) == [(10, 10), (11, 10)]
 
@@ -341,8 +341,8 @@ def test_laser_lines_arrive_intact(v1, v2):
 
     assert _rows(
         v2,
-        "SELECT l.v1_id, d.v1_id, l.line_confidence FROM dive_laser_lines l "
-        "JOIN dives d ON d.id = l.dive_id",
+        "SELECT l.v1_id, d.v1_id, l.line_confidence FROM mission_laser_lines l "
+        "JOIN missions d ON d.id = l.mission_id",
     ) == [(1, 10, 270256.98)]
 
 
@@ -591,14 +591,14 @@ def test_clusters_keep_their_formation_fish_and_members(v1, v2):
 
     assert _rows(
         v2,
-        "SELECT k.v1_id, k.formed_by, d.v1_id, f.v1_id FROM dive_frame_clusters k "
-        "JOIN dives d ON d.id = k.dive_id LEFT JOIN fish f ON f.id = k.fish_id "
+        "SELECT k.v1_id, k.formed_by, d.v1_id, f.v1_id FROM mission_frame_clusters k "
+        "JOIN missions d ON d.id = k.mission_id LEFT JOIN fish f ON f.id = k.fish_id "
         "ORDER BY k.v1_id",
     ) == [(1, "prediction", 10, None), (2, "label_studio", 10, 1)]
     assert _rows(
         v2,
-        "SELECT k.v1_id, c.v1_id FROM dive_frame_cluster_captures m "
-        "JOIN dive_frame_clusters k ON k.id = m.cluster_id "
+        "SELECT k.v1_id, c.v1_id FROM mission_frame_cluster_captures m "
+        "JOIN mission_frame_clusters k ON k.id = m.cluster_id "
         "JOIN captures c ON c.id = m.capture_id ORDER BY k.v1_id",
     ) == [(1, 100), (2, 100)]
 
@@ -903,7 +903,7 @@ def test_laser_lines_say_which_noise_estimator_made_them(v1, v2):
     _run(v1, v2)
 
     assert _rows(
-        v2, "SELECT v1_id, noise_estimator FROM dive_laser_lines ORDER BY v1_id"
+        v2, "SELECT v1_id, noise_estimator FROM mission_laser_lines ORDER BY v1_id"
     ) == [(1, "absolute_residual_mad"), (2, "signed_residual_mad")]
 
 
@@ -919,7 +919,7 @@ def test_migrated_rows_keep_v1s_ids_as_their_numbers(v1, v2):
 
     assert all(
         number == v1_id
-        for number, v1_id in _rows(v2, "SELECT number, v1_id FROM dives")
+        for number, v1_id in _rows(v2, "SELECT number, v1_id FROM missions")
         + _rows(v2, "SELECT number, v1_id FROM captures")
     )
 
@@ -955,7 +955,7 @@ def test_a_new_row_after_the_migration_is_numbered_above_v1s(v1, v2):
         tenant = conn.execute(text("SELECT id FROM tenants")).scalar_one()
         new = conn.execute(
             text(
-                "INSERT INTO dives (tenant_id, source_path, dived_at) "
+                "INSERT INTO missions (tenant_id, source_path, started_at) "
                 "VALUES (:t, 'new', now()) RETURNING number"
             ),
             {"t": tenant},
@@ -976,7 +976,7 @@ def test_label_studio_projects_are_recorded_from_v1s_labels(v1, v2):
     assert _rows(
         v2,
         "SELECT p.kind, p.ls_project_id, d.v1_id FROM label_studio_projects p "
-        "JOIN dives d ON d.id = p.dive_id ORDER BY p.ls_project_id",
+        "JOIN missions d ON d.id = p.mission_id ORDER BY p.ls_project_id",
     ) == [("laser", 7, 10), ("head_tail", 8, 10), ("slate", 9, 11)]
 
 

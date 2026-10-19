@@ -5,7 +5,7 @@ called on v1's fishsense-api:
 
 * `GET /api/v1/labels/{laser,headtail,species,dive-slate}/label-studio-project-ids`
   -> `GET /tenants/{slug}/label-studio-projects?kind=`;
-* `GET /api/v1/dives/` -> `GET /tenants/{slug}/dives`;
+* `GET /api/v1/dives/` -> `GET /tenants/{slug}/missions`;
 * `PUT /api/v1/dives/{id}/calibration-source/{source_id}` and
   `DELETE /api/v1/dives/{id}/calibration-source/` -> the same under the
   tenant, by dive `number`;
@@ -14,7 +14,7 @@ called on v1's fishsense-api:
   `DELETE /api/v1/dives/{id}/calibration-refused/` -> `.../calibration-target`
   (by the target's `number`) and `.../calibration-refusal` under the tenant:
   the levers a calibration refusal's recorded remedy names (v1's web had no
-  page for them; only the SDK's `DiveClient` called them).
+  page for them; only the SDK's `MissionClient` called them).
 
 v1's API enforced nothing (the web called it as one Basic-auth service
 account, and gated only its own pages on an Authentik group). Here every route
@@ -34,7 +34,7 @@ from fishsense_services_api.memberships import Membership
 from fishsense_services_api.portal_store import (
     CalibrationTargetNotFound,
     DiveNotFound,
-    DiveSummary,
+    MissionSummary,
     GateNotApplicable,
     LabelKind,
     SelfLink,
@@ -42,7 +42,7 @@ from fishsense_services_api.portal_store import (
     clear_calibration_source,
     clear_calibration_target,
     label_studio_project_ids,
-    list_dives,
+    list_missions,
     set_calibration_source,
     set_calibration_target,
     set_needs_reprocess,
@@ -62,10 +62,10 @@ class Cleared(BaseModel):
     cleared: int
 
 
-class Dive(BaseModel):
+class Mission(BaseModel):
     number: int
     name: str | None
-    dived_at: datetime
+    started_at: datetime
     priority: Literal["low", "high", "none"]
     slate_template_number: int | None
     calibration_target_number: int | None
@@ -74,7 +74,7 @@ class Dive(BaseModel):
 
 # A dive's number: v1's id for a migrated dive. Non-negative, as v1's web
 # checked (`safeId`) before putting one in a URL.
-DiveNumber = Annotated[int, Path(ge=0)]
+MissionNumber = Annotated[int, Path(ge=0)]
 
 
 def add_portal_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
@@ -129,20 +129,22 @@ def add_portal_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
             ) from None
 
     @app.get(
-        "/tenants/{slug}/dives", operation_id="list_dives", response_model=list[Dive]
+        "/tenants/{slug}/missions",
+        operation_id="list_missions",
+        response_model=list[Mission],
     )
-    async def get_dives(member: Member) -> list[Dive]:
+    async def get_missions(member: Member) -> list[Mission]:
         async with tenant_transaction(engine, member.tenant_id) as conn:
-            return [_dive(d) for d in await list_dives(conn, member.tenant_id)]
+            return [_dive(d) for d in await list_missions(conn, member.tenant_id)]
 
     @app.put(
-        "/tenants/{slug}/dives/{number}/calibration-source/{source_number}",
-        operation_id="set_dive_calibration_source",
-        response_model=Dive,
+        "/tenants/{slug}/missions/{number}/calibration-source/{source_number}",
+        operation_id="set_mission_calibration_source",
+        response_model=Mission,
     )
-    async def set_dive_calibration_source(
-        member: Admin, number: DiveNumber, source_number: DiveNumber
-    ) -> Dive:
+    async def set_mission_calibration_source(
+        member: Admin, number: MissionNumber, source_number: MissionNumber
+    ) -> Mission:
         """Dive ``number`` borrows dive ``source_number``'s laser calibration.
 
         400 on a self-link; 404 if either dive is missing from the tenant.
@@ -159,12 +161,14 @@ def add_portal_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
         return _dive(summary)
 
     @app.delete(
-        "/tenants/{slug}/dives/{number}/calibration-source",
-        operation_id="clear_dive_calibration_source",
+        "/tenants/{slug}/missions/{number}/calibration-source",
+        operation_id="clear_mission_calibration_source",
         status_code=status.HTTP_204_NO_CONTENT,
         response_class=Response,
     )
-    async def clear_dive_calibration_source(member: Admin, number: DiveNumber) -> None:
+    async def clear_mission_calibration_source(
+        member: Admin, number: MissionNumber
+    ) -> None:
         """Unlink dive ``number`` from any borrowed calibration (idempotent)."""
         try:
             async with tenant_transaction(engine, member.tenant_id) as conn:
@@ -173,13 +177,13 @@ def add_portal_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from None
 
     @app.put(
-        "/tenants/{slug}/dives/{number}/calibration-target/{target_number}",
-        operation_id="set_dive_calibration_target",
-        response_model=Dive,
+        "/tenants/{slug}/missions/{number}/calibration-target/{target_number}",
+        operation_id="set_mission_calibration_target",
+        response_model=Mission,
     )
-    async def set_dive_calibration_target(
-        member: Admin, number: DiveNumber, target_number: DiveNumber
-    ) -> Dive:
+    async def set_mission_calibration_target(
+        member: Admin, number: MissionNumber, target_number: MissionNumber
+    ) -> Mission:
         """Dive ``number`` was shot against calibration target
         ``target_number``: it enters the checkerboard cohort, and a standing
         calibration refusal expires.
@@ -197,12 +201,14 @@ def add_portal_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
         return _dive(summary)
 
     @app.delete(
-        "/tenants/{slug}/dives/{number}/calibration-target",
-        operation_id="clear_dive_calibration_target",
+        "/tenants/{slug}/missions/{number}/calibration-target",
+        operation_id="clear_mission_calibration_target",
         status_code=status.HTTP_204_NO_CONTENT,
         response_class=Response,
     )
-    async def clear_dive_calibration_target(member: Admin, number: DiveNumber) -> None:
+    async def clear_mission_calibration_target(
+        member: Admin, number: MissionNumber
+    ) -> None:
         """Unlink dive ``number`` from any calibration target (idempotent): it
         leaves the checkerboard cohort. A standing refusal is left as it is."""
         try:
@@ -212,14 +218,14 @@ def add_portal_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from None
 
     @app.delete(
-        "/tenants/{slug}/dives/{number}/calibration-refusal",
-        operation_id="clear_dive_calibration_refusal",
+        "/tenants/{slug}/missions/{number}/calibration-refusal",
+        operation_id="clear_mission_calibration_refusal",
         status_code=status.HTTP_204_NO_CONTENT,
         response_class=Response,
     )
-    async def clear_dive_calibration_refusal(
+    async def clear_mission_calibration_refusal(
         member: Admin,
-        number: DiveNumber,
+        number: MissionNumber,
         reason: Annotated[
             str | None, Query(description="why, kept with the clear")
         ] = None,
@@ -235,13 +241,13 @@ def add_portal_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from None
 
     @app.put(
-        "/tenants/{slug}/dives/{number}/labels/{kind}/needs-reprocess",
+        "/tenants/{slug}/missions/{number}/labels/{kind}/needs-reprocess",
         operation_id="raise_needs_reprocess",
         response_model=Flagged,
     )
     async def raise_needs_reprocess(
         member: Admin,
-        number: DiveNumber,
+        number: MissionNumber,
         kind: LabelKind,
         only_incomplete: bool = True,
     ) -> Flagged:
@@ -259,12 +265,12 @@ def add_portal_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
         return Flagged(flagged=flagged)
 
     @app.delete(
-        "/tenants/{slug}/dives/{number}/labels/{kind}/needs-reprocess",
+        "/tenants/{slug}/missions/{number}/labels/{kind}/needs-reprocess",
         operation_id="clear_needs_reprocess",
         response_model=Cleared,
     )
     async def clear_needs_reprocess(
-        member: Admin, number: DiveNumber, kind: LabelKind
+        member: Admin, number: MissionNumber, kind: LabelKind
     ) -> Cleared:
         """Withdraw a redraw of dive ``number``'s ``kind`` frames (idempotent:
         0 when none was asked for)."""
@@ -278,5 +284,5 @@ def add_portal_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
         return Cleared(cleared=cleared)
 
 
-def _dive(summary: DiveSummary) -> Dive:
-    return Dive.model_validate(summary, from_attributes=True)
+def _dive(summary: MissionSummary) -> Mission:
+    return Mission.model_validate(summary, from_attributes=True)

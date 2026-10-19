@@ -17,12 +17,12 @@ from __future__ import annotations
 from datetime import timedelta
 
 from temporalio.client import ScheduleOverlapPolicy
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 
 from fishsense_services_orchestrator.ops.checksums.workflows import (
-    VerifyAllDivesChecksumsWorkflow,
-    VerifyDiveChecksumsWorkflow,
+    VerifyAllMissionsChecksumsWorkflow,
+    VerifyMissionChecksumsWorkflow,
 )
 from fishsense_services_orchestrator.ops.labeling_configs.workflow import (
     ReconcileLabelingConfigsWorkflow,
@@ -30,7 +30,7 @@ from fishsense_services_orchestrator.ops.labeling_configs.workflow import (
 from fishsense_services_orchestrator.ops.paths.workflow import (
     RepairMovedCapturePathsWorkflow,
 )
-from fishsense_services_orchestrator.ops.regroup.workflow import RegroupDiveWorkflow
+from fishsense_services_orchestrator.ops.regroup.workflow import RegroupMissionWorkflow
 from fishsense_services_orchestrator.registry import Deps, stages
 from fishsense_services_orchestrator.schedules import ensure_schedules
 
@@ -44,11 +44,11 @@ def _ops():
 
 def test_the_ops_stage_serves_its_workflows():
     assert set(_ops().workflows) == {
-        VerifyDiveChecksumsWorkflow,
-        VerifyAllDivesChecksumsWorkflow,
+        VerifyMissionChecksumsWorkflow,
+        VerifyAllMissionsChecksumsWorkflow,
         ReconcileLabelingConfigsWorkflow,
         RepairMovedCapturePathsWorkflow,
-        RegroupDiveWorkflow,
+        RegroupMissionWorkflow,
     }
 
 
@@ -74,7 +74,7 @@ def test_only_the_reconcile_is_scheduled():
 
 async def test_the_reconcile_runs_hourly_at_25_and_skips_overlap():
     async with await WorkflowEnvironment.start_local(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         await ensure_schedules(env.client, task_queue="test-ops")
         described = await env.client.get_schedule_handle(

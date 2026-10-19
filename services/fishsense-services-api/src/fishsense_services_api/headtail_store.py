@@ -3,7 +3,7 @@
 Ported from fishsense-lite@77e8f8e5 services/fishsense-api (the cohorts in
 controllers/dive_cohort_controller.py `select_next_for_headtail_preprocessing`
 and dive_prediction_cohort_controller.py `select_next_for_headtail_prediction`
-/ `select_dives_needing_headtail_population`; the flags in
+/ `select_missions_needing_headtail_population`; the flags in
 label_reprocess_controller.py `_set_needs_reprocess`; the prediction write in
 head_tail_prediction_controller.py) and services/fishsense-api-workflow-worker
 (the inputs its activities assembled client-side:
@@ -55,7 +55,10 @@ from typing import Sequence
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from fishsense_services_api.camera_sql import RECTIFIABLE_CAMERA_MODEL, RECTIFIABLE_DIVE
+from fishsense_services_api.camera_sql import (
+    RECTIFIABLE_CAMERA_MODEL,
+    RECTIFIABLE_MISSION,
+)
 from fishsense_services_api.clustering_store import VALID_LASER
 from fishsense_services_api.service_principal import ServicePrincipal
 
@@ -79,13 +82,13 @@ __all__ = [
     "PreprocessCapture",
     "UnsupportedCameraModel",
     "clear_headtail_needs_reprocess",
-    "dives_needing_headtail_population",
+    "missions_needing_headtail_population",
     "headtail_populate_state",
     "headtail_predict_captures",
     "headtail_prediction_cohort",
     "headtail_preprocess_inputs",
-    "next_dive_for_headtail_prediction",
-    "next_dive_for_headtail_preprocessing",
+    "next_mission_for_headtail_prediction",
+    "next_mission_for_headtail_preprocessing",
     "persist_headtail_predictions",
     "record_head_tail_task",
     "set_headtail_needs_reprocess",
@@ -119,7 +122,7 @@ _RENDERABLE_CAMERA_MODEL = RECTIFIABLE_CAMERA_MODEL
 #: re-selected every hour and -- oldest first, across tenants -- blocks every
 #: dive behind it. v1 had no such term (and no axial camera); a dive with no
 #: intrinsics wedged its stage 5.1 the same way.
-_RENDERABLE = RECTIFIABLE_DIVE
+_RENDERABLE = RECTIFIABLE_MISSION
 
 
 #: Dive `d` has stage-5.1 work: a canonical capture with a valid laser and no
@@ -129,7 +132,7 @@ _RENDERABLE = RECTIFIABLE_DIVE
 #: 0029).
 HEADTAIL_PREPROCESS_WORK = f"""EXISTS (
     SELECT 1 FROM captures c
-    WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+    WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id
       AND c.is_canonical
       AND (
           ({_LIVE_LASER} AND NOT EXISTS (
@@ -171,13 +174,13 @@ class ForeignLaserLabel(InvalidPredictions):
 
 @dataclass(frozen=True)
 class HeadtailCandidate:
-    dive_id: uuid.UUID
+    mission_id: uuid.UUID
     created_at: datetime
 
 
 @dataclass(frozen=True)
 class PredictionCandidate:
-    dive_id: uuid.UUID
+    mission_id: uuid.UUID
     created_at: datetime
     #: Some image has never been predicted (not merely a stale row).
     never_predicted: bool
@@ -282,7 +285,7 @@ class PopulateState:
     """One snapshot of a dive, as populate and the backfill read it."""
 
     #: v1's dive id for a migrated dive: what `#{n}` in its titles is.
-    dive_number: int
+    mission_number: int
     candidates: list[PopulateCandidate]
     #: The current prediction of each of the dive's captures.
     predictions: list[CurrentHeadTailPrediction]
@@ -293,7 +296,7 @@ class PopulateState:
 # -- stage 5.1 ----------------------------------------------------------------------
 
 
-async def next_dive_for_headtail_preprocessing(
+async def next_mission_for_headtail_preprocessing(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> HeadtailCandidate | None:
     """The tenant's oldest dive in the stage-5.1 cohort: a canonical capture
@@ -303,7 +306,7 @@ async def next_dive_for_headtail_preprocessing(
     row = (
         await conn.execute(
             text(f"""
-                SELECT d.id, d.created_at FROM dives d
+                SELECT d.id, d.created_at FROM missions d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
                   AND {HEADTAIL_PREPROCESS_COHORT}
                 ORDER BY d.created_at, d.id
@@ -324,7 +327,7 @@ def _flat(values) -> list[float]:
 
 
 async def headtail_preprocess_inputs(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> HeadtailPreprocessInputs:
     """The dive's frames to render and the intrinsics to rectify them with.
 
@@ -340,19 +343,19 @@ async def headtail_preprocess_inputs(
             text(f"""
                 SELECT d.device_id, cc.camera_model, cc.camera_matrix,
                        cc.distortion_coefficients, {_RENDERABLE} AS renderable
-                FROM dives d
+                FROM missions d
                 LEFT JOIN current_camera_calibrations cc
                   ON cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
                 WHERE d.tenant_id = :t AND d.id = :d
                 """),
-            {"t": tenant_id, "d": dive_id},
+            {"t": tenant_id, "d": mission_id},
         )
     ).one_or_none()
     if calibration is None:
-        raise ValueError(f"dive {dive_id} not found")
+        raise ValueError(f"dive {mission_id} not found")
     if not calibration.renderable:
         if calibration.device_id is None:
-            raise ValueError(f"dive {dive_id} has no device")
+            raise ValueError(f"dive {mission_id} has no device")
         if calibration.camera_model is None:
             raise ValueError(
                 f"device {calibration.device_id} has no camera calibration"
@@ -381,9 +384,9 @@ async def headtail_preprocess_inputs(
                              AND h.needs_reprocess AND NOT h.superseded
                        ) AS flagged
                 FROM captures c
-                WHERE c.tenant_id = :t AND c.dive_id = :d AND c.is_canonical
+                WHERE c.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
                 """),
-            {"t": tenant_id, "d": dive_id},
+            {"t": tenant_id, "d": mission_id},
         )
     ).all()
     eligible = sorted(
@@ -406,7 +409,7 @@ async def headtail_preprocess_inputs(
 async def _set_flags(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     value: bool,
     *,
     only_live: bool,
@@ -425,10 +428,10 @@ async def _set_flags(
             UPDATE head_tail_labels h SET needs_reprocess = :value
             FROM captures c
             WHERE c.tenant_id = h.tenant_id AND c.id = h.capture_id
-              AND h.tenant_id = :t AND c.dive_id = :d AND c.is_canonical
+              AND h.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
               {conditions}
             """),
-        {"t": tenant_id, "d": dive_id, "value": value,
+        {"t": tenant_id, "d": mission_id, "value": value,
          "checksums": None if checksums is None else list(checksums)},
     )  # fmt: skip
     return result.rowcount
@@ -437,7 +440,7 @@ async def _set_flags(
 async def set_headtail_needs_reprocess(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     *,
     only_incomplete: bool = True,
 ) -> int:
@@ -446,7 +449,7 @@ async def set_headtail_needs_reprocess(
     would re-select the dive every hour -- and, by default, incomplete ones:
     redrawing a frame someone already answered buys nothing."""
     return await _set_flags(
-        conn, tenant_id, dive_id, True,
+        conn, tenant_id, mission_id, True,
         only_live=True, only_incomplete=only_incomplete, checksums=None,
     )  # fmt: skip
 
@@ -454,7 +457,7 @@ async def set_headtail_needs_reprocess(
 async def clear_headtail_needs_reprocess(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     checksums: Sequence[str] | None = None,
 ) -> int:
     """Lower the flags of the frames redrawn; the rows touched (0, never an
@@ -462,7 +465,7 @@ async def clear_headtail_needs_reprocess(
     completed or superseded mid-redraw must not keep its flag up. `None` is
     the whole dive (the no-work backstop); `[]` is nothing."""
     return await _set_flags(
-        conn, tenant_id, dive_id, False,
+        conn, tenant_id, mission_id, False,
         only_live=False, only_incomplete=False, checksums=checksums,
     )  # fmt: skip
 
@@ -498,12 +501,12 @@ def headtail_prediction_cohort(version: str) -> str:
     return f"""{_RENDERABLE}
         AND EXISTS (
             SELECT 1 FROM captures c
-            WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+            WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id
               AND c.is_canonical AND {_needs_prediction(version)}
         )"""
 
 
-async def next_dive_for_headtail_prediction(
+async def next_mission_for_headtail_prediction(
     conn: AsyncConnection, tenant_id: uuid.UUID, *, predictor_version: int
 ) -> PredictionCandidate | None:
     """The tenant's next dive for the detector: never-predicted work first,
@@ -518,11 +521,11 @@ async def next_dive_for_headtail_prediction(
             text(f"""
                 SELECT d.id, d.created_at, EXISTS (
                     SELECT 1 FROM captures c
-                    WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+                    WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id
                       AND c.is_canonical AND {_LIVE_LASER} AND NOT {_LIVE_LABEL}
                       AND NOT {_ANY_PREDICTION}
                 ) AS never_predicted
-                FROM dives d
+                FROM missions d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
                   AND {headtail_prediction_cohort(":version")}
                 ORDER BY never_predicted DESC, d.created_at, d.id
@@ -539,7 +542,7 @@ async def next_dive_for_headtail_prediction(
 async def headtail_predict_captures(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     *,
     predictor_version: int,
 ) -> list[PredictCapture]:
@@ -551,13 +554,13 @@ async def headtail_predict_captures(
     told whether a row exists and whether its dot died, because only it knows
     whether it has a GPU, and so whether it can improve on the row.
     """
-    params = {"t": tenant_id, "d": dive_id}
+    params = {"t": tenant_id, "d": mission_id}
     dots: dict[uuid.UUID, list[LaserDot]] = {}
     for r in await conn.execute(
         text(f"""
             SELECT l.capture_id, l.id, l.x, l.y FROM laser_labels l
             JOIN captures c ON c.tenant_id = l.tenant_id AND c.id = l.capture_id
-            WHERE c.tenant_id = :t AND c.dive_id = :d AND {VALID_LASER}
+            WHERE c.tenant_id = :t AND c.mission_id = :d AND {VALID_LASER}
             ORDER BY l.number
             """),
         params,
@@ -573,7 +576,7 @@ async def headtail_predict_captures(
             FROM captures c
             LEFT JOIN current_head_tail_predictions p
               ON p.tenant_id = c.tenant_id AND p.capture_id = c.id
-            WHERE c.tenant_id = :t AND c.dive_id = :d AND c.is_canonical
+            WHERE c.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
             ORDER BY c.number
             """),
         params,
@@ -604,7 +607,7 @@ async def headtail_predict_captures(
 async def persist_headtail_predictions(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     rows: Sequence[HeadTailPredictionRow],
 ) -> int:
     """Append the dive's predictions, abstentions included, all or nothing, in
@@ -623,15 +626,15 @@ async def persist_headtail_predictions(
             await conn.execute(
                 text("""
                     SELECT id FROM captures
-                    WHERE tenant_id = :t AND dive_id = :d AND id = ANY(:ids)
+                    WHERE tenant_id = :t AND mission_id = :d AND id = ANY(:ids)
                     """),
-                {"t": tenant_id, "d": dive_id, "ids": list(captures)},
+                {"t": tenant_id, "d": mission_id, "ids": list(captures)},
             )
         ).scalars()
     )
     if foreign := captures - owned:
         raise ForeignCapture(
-            f"not captures of dive {dive_id}: {sorted(map(str, foreign))}"
+            f"not captures of dive {mission_id}: {sorted(map(str, foreign))}"
         )
     named = {r.laser_label_id for r in rows if r.laser_label_id is not None}
     laser_capture = {
@@ -674,7 +677,7 @@ async def persist_headtail_predictions(
 # -- populate and the backfill ----------------------------------------------------
 
 
-async def dives_needing_headtail_population(
+async def missions_needing_headtail_population(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> list[HeadtailCandidate]:
     """Every dive of the tenant needing head/tail tasks (re)populated, oldest
@@ -682,11 +685,11 @@ async def dives_needing_headtail_population(
     abstention counts), and no completed head/tail label."""
     rows = await conn.execute(
         text(f"""
-            SELECT d.id, d.created_at FROM dives d
+            SELECT d.id, d.created_at FROM missions d
             WHERE d.tenant_id = :tenant AND d.priority = 'high'
               AND EXISTS (
                   SELECT 1 FROM captures c
-                  WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+                  WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id
                     AND c.is_canonical AND {_LIVE_LASER} AND {_ANY_PREDICTION}
                     AND NOT EXISTS (
                         SELECT 1 FROM head_tail_labels h
@@ -702,17 +705,17 @@ async def dives_needing_headtail_population(
 
 
 async def headtail_populate_state(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> PopulateState:
     """What populate and the backfill read of the dive, in one snapshot."""
-    params = {"t": tenant_id, "d": dive_id}
+    params = {"t": tenant_id, "d": mission_id}
     number = (
         await conn.execute(
-            text("SELECT number FROM dives WHERE tenant_id = :t AND id = :d"), params
+            text("SELECT number FROM missions WHERE tenant_id = :t AND id = :d"), params
         )
     ).scalar_one_or_none()
     if number is None:
-        raise ValueError(f"dive {dive_id} not found")
+        raise ValueError(f"dive {mission_id} not found")
 
     candidates = [
         PopulateCandidate(r.id, r.number, r.checksum, r.from_v1, r.captured_at)
@@ -724,7 +727,7 @@ async def headtail_populate_state(
                         WHERE l.tenant_id = c.tenant_id AND l.capture_id = c.id
                           AND {VALID_LASER}) AS first_laser
                 FROM captures c
-                WHERE c.tenant_id = :t AND c.dive_id = :d
+                WHERE c.tenant_id = :t AND c.mission_id = :d
                   AND {_LIVE_LASER} AND NOT {_LIVE_LABEL}
                 ORDER BY first_laser, c.number
                 """),
@@ -741,7 +744,7 @@ async def headtail_populate_state(
             text("""
                 SELECT p.* FROM current_head_tail_predictions p
                 JOIN captures c ON c.tenant_id = p.tenant_id AND c.id = p.capture_id
-                WHERE c.tenant_id = :t AND c.dive_id = :d
+                WHERE c.tenant_id = :t AND c.mission_id = :d
                 ORDER BY c.number
                 """),
             params,
@@ -755,7 +758,7 @@ async def headtail_populate_state(
                 SELECT h.id, h.capture_id, h.ls_project_id, h.ls_task_id, h.completed
                 FROM head_tail_labels h
                 JOIN captures c ON c.tenant_id = h.tenant_id AND c.id = h.capture_id
-                WHERE c.tenant_id = :t AND c.dive_id = :d AND NOT h.superseded
+                WHERE c.tenant_id = :t AND c.mission_id = :d AND NOT h.superseded
                 ORDER BY c.number, h.number
                 """),
             params,
@@ -793,7 +796,7 @@ async def record_head_tail_task(
 async def supersede_head_tail_labels(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     label_ids: Sequence[uuid.UUID],
 ) -> int:
     """Dead-letter these of the dive's live, incomplete labels (populate's
@@ -805,10 +808,10 @@ async def supersede_head_tail_labels(
             UPDATE head_tail_labels h SET superseded = true
             FROM captures c
             WHERE c.tenant_id = h.tenant_id AND c.id = h.capture_id
-              AND h.tenant_id = :t AND c.dive_id = :d AND h.id = ANY(:ids)
+              AND h.tenant_id = :t AND c.mission_id = :d AND h.id = ANY(:ids)
               AND NOT h.completed AND NOT h.superseded
             """),
-        {"t": tenant_id, "d": dive_id, "ids": list(label_ids)},
+        {"t": tenant_id, "d": mission_id, "ids": list(label_ids)},
     )
     return result.rowcount
 
@@ -817,73 +820,77 @@ class HeadtailCatalog(ServicePrincipal):
     """The head/tail stages' database side, as the orchestrator's service
     principal."""
 
-    async def next_dive_for_headtail_preprocessing(
+    async def next_mission_for_headtail_preprocessing(
         self, tenant_id: uuid.UUID
     ) -> HeadtailCandidate | None:
         async with self._tenant(tenant_id) as conn:
-            return await next_dive_for_headtail_preprocessing(conn, tenant_id)
+            return await next_mission_for_headtail_preprocessing(conn, tenant_id)
 
     async def headtail_preprocess_inputs(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> HeadtailPreprocessInputs:
         async with self._tenant(tenant_id) as conn:
-            return await headtail_preprocess_inputs(conn, tenant_id, dive_id)
+            return await headtail_preprocess_inputs(conn, tenant_id, mission_id)
 
     async def set_headtail_needs_reprocess(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, *, only_incomplete: bool = True
+        self,
+        tenant_id: uuid.UUID,
+        mission_id: uuid.UUID,
+        *,
+        only_incomplete: bool = True,
     ) -> int:
         async with self._tenant(tenant_id) as conn:
             return await set_headtail_needs_reprocess(
-                conn, tenant_id, dive_id, only_incomplete=only_incomplete
+                conn, tenant_id, mission_id, only_incomplete=only_incomplete
             )
 
     async def clear_headtail_needs_reprocess(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         checksums: Sequence[str] | None = None,
     ) -> int:
         async with self._tenant(tenant_id) as conn:
             return await clear_headtail_needs_reprocess(
-                conn, tenant_id, dive_id, checksums
+                conn, tenant_id, mission_id, checksums
             )
 
-    async def next_dive_for_headtail_prediction(
+    async def next_mission_for_headtail_prediction(
         self, tenant_id: uuid.UUID, *, predictor_version: int
     ) -> PredictionCandidate | None:
         async with self._tenant(tenant_id) as conn:
-            return await next_dive_for_headtail_prediction(
+            return await next_mission_for_headtail_prediction(
                 conn, tenant_id, predictor_version=predictor_version
             )
 
     async def headtail_predict_captures(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, *, predictor_version: int
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, predictor_version: int
     ) -> list[PredictCapture]:
         async with self._tenant(tenant_id) as conn:
             return await headtail_predict_captures(
-                conn, tenant_id, dive_id, predictor_version=predictor_version
+                conn, tenant_id, mission_id, predictor_version=predictor_version
             )
 
     async def persist_headtail_predictions(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         rows: Sequence[HeadTailPredictionRow],
     ) -> int:
         async with self._tenant(tenant_id) as conn:
-            return await persist_headtail_predictions(conn, tenant_id, dive_id, rows)
+            return await persist_headtail_predictions(conn, tenant_id, mission_id, rows)
 
-    async def dives_needing_headtail_population(
+    async def missions_needing_headtail_population(
         self, tenant_id: uuid.UUID
     ) -> list[HeadtailCandidate]:
         async with self._tenant(tenant_id) as conn:
-            return await dives_needing_headtail_population(conn, tenant_id)
+            return await missions_needing_headtail_population(conn, tenant_id)
 
     async def headtail_populate_state(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> PopulateState:
         async with self._tenant(tenant_id) as conn:
-            return await headtail_populate_state(conn, tenant_id, dive_id)
+            return await headtail_populate_state(conn, tenant_id, mission_id)
 
     async def record_head_tail_task(
         self,
@@ -905,8 +912,10 @@ class HeadtailCatalog(ServicePrincipal):
     async def supersede_head_tail_labels(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         label_ids: Sequence[uuid.UUID],
     ) -> int:
         async with self._tenant(tenant_id) as conn:
-            return await supersede_head_tail_labels(conn, tenant_id, dive_id, label_ids)
+            return await supersede_head_tail_labels(
+                conn, tenant_id, mission_id, label_ids
+            )

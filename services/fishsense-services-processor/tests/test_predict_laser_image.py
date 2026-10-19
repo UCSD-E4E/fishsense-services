@@ -32,7 +32,7 @@ from typing import List
 import numpy as np
 import pytest
 from temporalio import activity
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -332,7 +332,7 @@ async def test_no_region_disables_the_gate(monkeypatch, store):
 
 async def _run_workflow(payload, stub):
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,
@@ -368,7 +368,7 @@ async def test_workflow_fans_out_and_returns_one_prediction_per_image():
     ]
     results = await _run_workflow(
         PredictLaserImagesInput(
-            dive_id=uuid.uuid4(),
+            mission_id=uuid.uuid4(),
             images=images,
             camera_matrix=_K,
             distortion_coefficients=[-0.1, 0.05, 0.0, 0.0, 0.0],
@@ -396,7 +396,7 @@ async def test_workflow_with_no_images_returns_empty_and_calls_nothing():
 
     results = await _run_workflow(
         PredictLaserImagesInput(
-            dive_id=uuid.uuid4(),
+            mission_id=uuid.uuid4(),
             images=[],
             camera_matrix=_K,
             distortion_coefficients=_D,

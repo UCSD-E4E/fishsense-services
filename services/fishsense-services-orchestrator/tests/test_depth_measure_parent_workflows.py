@@ -29,7 +29,7 @@ from typing import List
 
 import pytest
 from temporalio import activity
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -55,7 +55,7 @@ from fishsense_services_contracts.measurement import (
     MeasureFishResult,
 )
 from fishsense_services_orchestrator.laser_depth.activities import (
-    DiveTarget,
+    MissionTarget,
     LaserDepthResolution,
     PersistedLaserDepths,
 )
@@ -72,8 +72,8 @@ from fishsense_services_orchestrator.measurement.workflow import (
     MeasureFishRun,
 )
 
-TENANT, DIVE = uuid.uuid4(), uuid.uuid4()
-TARGET = DiveTarget(tenant_id=TENANT, dive_id=DIVE)
+TENANT, MISSION = uuid.uuid4(), uuid.uuid4()
+TARGET = MissionTarget(tenant_id=TENANT, mission_id=MISSION)
 CALIBRATION = uuid.uuid4()
 K = ((3000.0, 0.0, 2048.0), (0.0, 3000.0, 1536.0), (0.0, 0.0, 1.0))
 GEOMETRY = LaserCalibrationGeometry(
@@ -83,7 +83,7 @@ GEOMETRY = LaserCalibrationGeometry(
 )
 CAPTURE = uuid.uuid4()
 DEPTH_INPUT = ComputeLaserDepthsInput(
-    dive_id=DIVE,
+    mission_id=MISSION,
     camera_matrix=K,
     calibration=GEOMETRY,
     captures=[
@@ -94,7 +94,7 @@ DEPTH_INPUT = ComputeLaserDepthsInput(
     ],
 )
 MEASURE_INPUT = MeasureFishInput(
-    dive_id=DIVE,
+    mission_id=MISSION,
     camera_matrix=K,
     calibration=GEOMETRY,
     captures=[
@@ -145,18 +145,18 @@ class Stage:
             return 1
 
         @activity.defn(name=names[0])
-        async def select() -> DiveTarget | None:
+        async def select() -> MissionTarget | None:
             return self.selected
 
         if self.kind == "depth":
 
             @activity.defn(name=names[1])
-            async def resolve(target: DiveTarget) -> LaserDepthResolution:
+            async def resolve(target: MissionTarget) -> LaserDepthResolution:
                 return self.resolution
 
             @activity.defn(name=names[2])
             async def persist(
-                target: DiveTarget,
+                target: MissionTarget,
                 calibration: uuid.UUID,
                 result: ComputeLaserDepthsResult,
             ) -> PersistedLaserDepths:
@@ -167,12 +167,12 @@ class Stage:
         else:
 
             @activity.defn(name=names[1])
-            async def resolve(target: DiveTarget) -> MeasurementResolution:
+            async def resolve(target: MissionTarget) -> MeasurementResolution:
                 return self.resolution
 
             @activity.defn(name=names[2])
             async def persist(
-                target: DiveTarget, calibration: uuid.UUID, result: MeasureFishResult
+                target: MissionTarget, calibration: uuid.UUID, result: MeasureFishResult
             ) -> PersistedMeasurementRun:
                 self.events.append("persist")
                 self.persisted.append((target, calibration, result))
@@ -188,9 +188,11 @@ class Stage:
 
     def recorder(self):
         @activity.defn(name="_record_child_dispatch")
-        async def record(workflow_id: str, dive_id: uuid.UUID, captures: int) -> None:
+        async def record(
+            workflow_id: str, mission_id: uuid.UUID, captures: int
+        ) -> None:
             self.events.append("child")
-            self.children.append((workflow_id, dive_id, captures))
+            self.children.append((workflow_id, mission_id, captures))
 
         return record
 
@@ -201,8 +203,8 @@ PARENTS = {
 }
 CHILDREN = {"depth": StubDepthChild, "measure": StubMeasureChild}
 CHILD_IDS = {
-    "depth": f"compute-laser-depths-{TENANT}-{DIVE}",
-    "measure": f"measure-fish-{TENANT}-{DIVE}",
+    "depth": f"compute-laser-depths-{TENANT}-{MISSION}",
+    "measure": f"measure-fish-{TENANT}-{MISSION}",
 }
 
 
@@ -227,7 +229,7 @@ def _resolution(kind, payload=True):
 async def _run(stage: Stage, *, child=None, before=None):
     parent = PARENTS[stage.kind]
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with (
             Worker(
@@ -253,21 +255,21 @@ async def _run(stage: Stage, *, child=None, before=None):
 
 
 @pytest.mark.parametrize("kind", ["depth", "measure"])
-async def test_dispatches_child_with_deterministic_id_and_dive_payload(kind):
+async def test_dispatches_child_with_deterministic_id_and_mission_payload(kind):
     stage = Stage(kind, TARGET, _resolution(kind))
 
     result = await _run(stage)
 
-    assert stage.children == [(CHILD_IDS[kind], DIVE, 1)]
+    assert stage.children == [(CHILD_IDS[kind], MISSION, 1)]
     assert stage.events == ["wake", "child", "persist"]
     ((target, calibration, persisted_result),) = stage.persisted
     assert (target, calibration) == (TARGET, CALIBRATION)
     assert persisted_result == (DEPTH_RESULT if kind == "depth" else MEASURE_RESULT)
-    assert (result.tenant_id, result.dive_id) == (TENANT, DIVE)
+    assert (result.tenant_id, result.mission_id) == (TENANT, MISSION)
 
 
 @pytest.mark.parametrize("kind", ["depth", "measure"])
-async def test_returns_none_when_selector_finds_no_dive(kind):
+async def test_returns_none_when_selector_finds_no_mission(kind):
     stage = Stage(kind, None, None)
 
     assert await _run(stage) is None
@@ -283,7 +285,7 @@ async def test_no_work_wakes_nothing_and_dispatches_nothing(kind):
     result = await _run(stage)
 
     assert stage.events == []
-    assert (result.tenant_id, result.dive_id) == (TENANT, DIVE)
+    assert (result.tenant_id, result.mission_id) == (TENANT, MISSION)
 
 
 async def test_the_depth_run_returns_its_counters():
@@ -295,7 +297,7 @@ async def test_the_depth_run_returns_its_counters():
 
     assert result == LaserDepthsRun(
         tenant_id=TENANT,
-        dive_id=DIVE,
+        mission_id=MISSION,
         computed=1,
         refused=2,
         skipped_current=3,
@@ -312,7 +314,7 @@ async def test_the_measure_run_returns_its_counters():
 
     assert result == MeasureFishRun(
         tenant_id=TENANT,
-        dive_id=DIVE,
+        mission_id=MISSION,
         measured=1,
         refused=2,
         skipped_stale=0,

@@ -35,7 +35,7 @@ import pytest
 from sqlalchemy import text
 
 from fishsense_services_api.db import tenant_transaction
-from fishsense_services_api.ingest_store import create_dive, register_capture
+from fishsense_services_api.ingest_store import create_mission, register_capture
 from fishsense_services_api.raw_staging_store import (
     CaptureChecksum,
     RawStagingCatalog,
@@ -66,21 +66,23 @@ async def _tenant(owner_engine, slug="lab") -> uuid.UUID:
 
 async def _dive(app_engine, tenant, path) -> uuid.UUID:
     async with tenant_transaction(app_engine, tenant) as conn:
-        return await create_dive(conn, tenant, source_path=path, name=path, dived_at=T0)
+        return await create_mission(
+            conn, tenant, source_path=path, name=path, started_at=T0
+        )
 
 
-async def _capture(app_engine, tenant, dive, name, checksum):
+async def _capture(app_engine, tenant, mission, name, checksum):
     """A frame registered as ingest registers it: canonical unless another
     canonical copy of the content exists in the tenant."""
     async with tenant_transaction(app_engine, tenant) as conn:
         registered = await register_capture(
-            conn, tenant, dive_id=dive, device_id=None,
-            source_path=f"{dive}/{name}", captured_at=T0, checksum=checksum,
+            conn, tenant, mission_id=mission, device_id=None,
+            source_path=f"{mission}/{name}", captured_at=T0, checksum=checksum,
         )  # fmt: skip
     return registered.capture_id
 
 
-async def _raw_capture(owner_engine, tenant, dive, checksum, *, v1_id=None,
+async def _raw_capture(owner_engine, tenant, mission, checksum, *, v1_id=None,
                        source_path=None, canonical=True):  # fmt: skip
     """A capture written directly: one migrated from v1, or one held only in
     the object store (no NAS path)."""
@@ -88,46 +90,46 @@ async def _raw_capture(owner_engine, tenant, dive, checksum, *, v1_id=None,
         return (
             await conn.execute(
                 text(
-                    "INSERT INTO captures (tenant_id, v1_id, dive_id, source_path, "
+                    "INSERT INTO captures (tenant_id, v1_id, mission_id, source_path, "
                     "raw_object_key, captured_at, checksum, is_canonical) "
                     "VALUES (:t, :v1, :d, :path, :key, :at, :sum, :canon) "
                     "RETURNING id"
                 ),
-                {"t": tenant, "v1": v1_id, "d": dive, "path": source_path,
+                {"t": tenant, "v1": v1_id, "d": mission, "path": source_path,
                  "key": None if source_path else f"uploads/{checksum}.ORF",
                  "at": T0, "sum": checksum, "canon": canonical},
             )
         ).scalar_one()  # fmt: skip
 
 
-async def _stage(app_engine, tenant, dive):
+async def _stage(app_engine, tenant, mission):
     async with tenant_transaction(app_engine, tenant) as conn:
-        return await captures_to_stage(conn, tenant, dive)
+        return await captures_to_stage(conn, tenant, mission)
 
 
-async def _clean(app_engine, tenant, dive):
+async def _clean(app_engine, tenant, mission):
     async with tenant_transaction(app_engine, tenant) as conn:
-        return await checksums_to_clean(conn, tenant, dive)
+        return await checksums_to_clean(conn, tenant, mission)
 
 
 # -- staging ---------------------------------------------------------------------
 
 
-async def test_staging_takes_the_dives_canonical_captures_with_path_and_checksum(
+async def test_staging_takes_the_missions_canonical_captures_with_path_and_checksum(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "2024.06.20.REEF/dive_42")
-    a = await _capture(app_engine, lab, dive, "P1.ORF", _md5(1))
-    b = await _capture(app_engine, lab, dive, "P2.ORF", _md5(2))
+    mission = await _dive(app_engine, lab, "2024.06.20.REEF/dive_42")
+    a = await _capture(app_engine, lab, mission, "P1.ORF", _md5(1))
+    b = await _capture(app_engine, lab, mission, "P2.ORF", _md5(2))
 
-    assert await _stage(app_engine, lab, dive) == [
-        StagingCapture(a, f"{dive}/P1.ORF", _md5(1)),
-        StagingCapture(b, f"{dive}/P2.ORF", _md5(2)),
+    assert await _stage(app_engine, lab, mission) == [
+        StagingCapture(a, f"{mission}/P1.ORF", _md5(1)),
+        StagingCapture(b, f"{mission}/P2.ORF", _md5(2)),
     ]
 
 
-async def test_staging_skips_a_duplicate_whose_canonical_copy_is_another_dives(
+async def test_staging_skips_a_duplicate_whose_canonical_copy_is_another_missions(
     owner_engine, app_engine
 ):
     """Canonical only (v1): the other dive stages that frame."""
@@ -146,37 +148,37 @@ async def test_a_frame_with_no_nas_path_is_returned_for_staging_to_count(
 ):
     """Never silently dropped: staging counts it as `no_path` (v1)."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d")
-    capture = await _raw_capture(owner_engine, lab, dive, _md5(3))
+    mission = await _dive(app_engine, lab, "d")
+    capture = await _raw_capture(owner_engine, lab, mission, _md5(3))
 
-    assert await _stage(app_engine, lab, dive) == [
+    assert await _stage(app_engine, lab, mission) == [
         StagingCapture(capture, None, _md5(3))
     ]
 
 
-async def test_staging_sees_only_the_tenants_own_dive(owner_engine, app_engine):
+async def test_staging_sees_only_the_tenants_own_mission(owner_engine, app_engine):
     lab = await _tenant(owner_engine, "lab")
     reef = await _tenant(owner_engine, "reef")
-    dive = await _dive(app_engine, lab, "d")
-    await _capture(app_engine, lab, dive, "P1.ORF", _md5(1))
+    mission = await _dive(app_engine, lab, "d")
+    await _capture(app_engine, lab, mission, "P1.ORF", _md5(1))
 
-    assert await _stage(app_engine, reef, dive) == []
-    assert await _clean(app_engine, reef, dive) == []
+    assert await _stage(app_engine, reef, mission) == []
+    assert await _clean(app_engine, reef, mission) == []
 
 
 # -- cleanup ---------------------------------------------------------------------
 
 
-async def test_cleanup_takes_every_checksum_this_dive_owns(owner_engine, app_engine):
+async def test_cleanup_takes_every_checksum_this_mission_owns(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d")
-    await _capture(app_engine, lab, dive, "P1.ORF", _md5(1))
-    await _capture(app_engine, lab, dive, "P2.ORF", _md5(2))
+    mission = await _dive(app_engine, lab, "d")
+    await _capture(app_engine, lab, mission, "P1.ORF", _md5(1))
+    await _capture(app_engine, lab, mission, "P2.ORF", _md5(2))
 
-    assert await _clean(app_engine, lab, dive) == [_md5(1), _md5(2)]
+    assert await _clean(app_engine, lab, mission) == [_md5(1), _md5(2)]
 
 
-async def test_cleanup_leaves_scratch_another_dive_owns(owner_engine, app_engine):
+async def test_cleanup_leaves_scratch_another_mission_owns(owner_engine, app_engine):
     """v2 change. The duplicate's key is its canonical twin's, which another
     dive staged and whose child may be reading it right now; that dive's own
     cleanup, gated on its own children, deletes it."""
@@ -191,29 +193,29 @@ async def test_cleanup_leaves_scratch_another_dive_owns(owner_engine, app_engine
     assert await _clean(app_engine, lab, first) == [_md5(1)]
 
 
-async def test_cleanup_still_evicts_a_frame_no_dive_holds_canonical(
+async def test_cleanup_still_evicts_a_frame_no_mission_holds_canonical(
     owner_engine, app_engine
 ):
     """Broader than staging where it is safe (v1's reason for not filtering):
     a frame demoted after it was staged, with no canonical copy anywhere, is
     nobody else's scratch."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d")
+    mission = await _dive(app_engine, lab, "d")
     await _raw_capture(
-        owner_engine, lab, dive, _md5(4), source_path="d/P4.ORF", canonical=False
+        owner_engine, lab, mission, _md5(4), source_path="d/P4.ORF", canonical=False
     )
 
-    assert await _clean(app_engine, lab, dive) == [_md5(4)]
+    assert await _clean(app_engine, lab, mission) == [_md5(4)]
 
 
 async def test_cleanup_names_each_object_once(owner_engine, app_engine):
     """Two rows of one frame in the dive are one scratch object."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d")
-    await _capture(app_engine, lab, dive, "P1.ORF", _md5(1))
-    await _capture(app_engine, lab, dive, "P1-again.ORF", _md5(1))
+    mission = await _dive(app_engine, lab, "d")
+    await _capture(app_engine, lab, mission, "P1.ORF", _md5(1))
+    await _capture(app_engine, lab, mission, "P1-again.ORF", _md5(1))
 
-    assert await _clean(app_engine, lab, dive) == [_md5(1)]
+    assert await _clean(app_engine, lab, mission) == [_md5(1)]
 
 
 # -- the processed-JPEG check ----------------------------------------------------
@@ -221,11 +223,11 @@ async def test_cleanup_names_each_object_once(owner_engine, app_engine):
 
 async def test_a_capture_migrated_from_v1_says_so(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d")
+    mission = await _dive(app_engine, lab, "d")
     migrated = await _raw_capture(
-        owner_engine, lab, dive, _md5(5), v1_id=4242, source_path="d/P5.ORF"
+        owner_engine, lab, mission, _md5(5), v1_id=4242, source_path="d/P5.ORF"
     )
-    ingested = await _capture(app_engine, lab, dive, "P6.ORF", _md5(6))
+    ingested = await _capture(app_engine, lab, mission, "P6.ORF", _md5(6))
 
     async with tenant_transaction(app_engine, lab) as conn:
         assert await capture_checksum(conn, lab, migrated) == CaptureChecksum(
@@ -240,8 +242,8 @@ async def test_a_capture_migrated_from_v1_says_so(owner_engine, app_engine):
 async def test_another_tenants_capture_is_not_found(owner_engine, app_engine):
     lab = await _tenant(owner_engine, "lab")
     reef = await _tenant(owner_engine, "reef")
-    dive = await _dive(app_engine, lab, "d")
-    capture = await _capture(app_engine, lab, dive, "P1.ORF", _md5(1))
+    mission = await _dive(app_engine, lab, "d")
+    capture = await _capture(app_engine, lab, mission, "P1.ORF", _md5(1))
 
     async with tenant_transaction(app_engine, reef) as conn:
         assert await capture_checksum(conn, reef, capture) is None
@@ -254,14 +256,14 @@ async def test_the_catalog_answers_within_a_tenant_it_is_a_member_of(
     owner_engine, app_engine, seed_memberships
 ):
     lab = (await seed_memberships({ORCHESTRATOR: {"lab": "member"}}))["lab"]
-    dive = await _dive(app_engine, lab, "d")
-    capture = await _capture(app_engine, lab, dive, "P1.ORF", _md5(1))
+    mission = await _dive(app_engine, lab, "d")
+    capture = await _capture(app_engine, lab, mission, "P1.ORF", _md5(1))
     catalog = RawStagingCatalog(app_engine, sub=ORCHESTRATOR)
 
-    assert await catalog.captures_to_stage(lab, dive) == [
-        StagingCapture(capture, f"{dive}/P1.ORF", _md5(1))
+    assert await catalog.captures_to_stage(lab, mission) == [
+        StagingCapture(capture, f"{mission}/P1.ORF", _md5(1))
     ]
-    assert await catalog.checksums_to_clean(lab, dive) == [_md5(1)]
+    assert await catalog.checksums_to_clean(lab, mission) == [_md5(1)]
     assert await catalog.capture_checksum(lab, capture) == CaptureChecksum(
         _md5(1), from_v1=False
     )

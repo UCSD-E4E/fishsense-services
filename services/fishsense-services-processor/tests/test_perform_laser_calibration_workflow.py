@@ -21,7 +21,7 @@ import uuid
 from typing import List
 
 from temporalio import activity
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -33,14 +33,14 @@ from fishsense_services_processor.laser_calibration.workflow import (
     PerformLaserCalibrationWorkflow,
 )
 
-DIVE = uuid.UUID(int=427)
+MISSION = uuid.UUID(int=427)
 PAYLOAD = SlateCalibrationInput(
-    dive_id=DIVE,
+    mission_id=MISSION,
     camera_matrix=[[3000.0, 0.0, 2048.0], [0.0, 3000.0, 1536.0], [0.0, 0.0, 1.0]],
     template_points=[(0.0, 0.0)],
     dpi=300,
     observations=[],
-    dive_dots=[],
+    mission_dots=[],
 )
 ACCEPTED = LaserCalibrationResult(
     outcome="accepted",
@@ -69,7 +69,7 @@ async def _run(returns: LaserCalibrationResult, calls: List):
         return returns
 
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,

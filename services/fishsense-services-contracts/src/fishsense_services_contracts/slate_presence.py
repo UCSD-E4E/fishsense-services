@@ -35,7 +35,7 @@ dive: ROC AUC 0.9994, precision 0.999 and recall 0.993 at 0.5.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Annotated
 from uuid import UUID
 
 from pydantic import (
@@ -45,8 +45,10 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic import ConfigDict
 
 from fishsense_services_contracts.object_store import ObjectRef
+from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = [
     "SLATE_CACHE_LONG_SIDE",
@@ -112,8 +114,10 @@ class DetectSlateImagesInput(BaseModel):
     frames and the intrinsics that rectify them (its device's current pinhole
     calibration)."""
 
+    model_config = ConfigDict(validate_by_name=True)
+
     tenant_id: UUID
-    dive_id: UUID
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     camera_matrix: List[List[float]]
     distortion_coefficients: List[float]
     images: List[DetectSlateImage]

@@ -29,7 +29,7 @@ from temporalio.testing import ActivityEnvironment
 
 from fishsense_services_api.laser_depth_store import (
     CaptureDots,
-    DiveGeometry,
+    MissionGeometry,
     Dot,
     LaserDepthCandidate,
     LaserDepthWork,
@@ -56,7 +56,7 @@ from fishsense_services_contracts.measurement import (
     MeasureFishResult,
 )
 from fishsense_services_orchestrator.laser_depth.activities import (
-    DiveTarget,
+    MissionTarget,
     LaserDepthActivities,
 )
 from fishsense_services_orchestrator.measurement.activities import (
@@ -65,9 +65,9 @@ from fishsense_services_orchestrator.measurement.activities import (
 
 T0 = datetime(2025, 3, 6, 17, 0, 15, tzinfo=UTC)
 LAB, REEF, PARTNER = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
-DIVE = uuid.uuid4()
+MISSION = uuid.uuid4()
 K = ((3000.0, 0.0, 2048.0), (0.0, 3000.0, 1536.0), (0.0, 0.0, 1.0))
-GEOMETRY = DiveGeometry(
+GEOMETRY = MissionGeometry(
     laser_calibration_id=uuid.uuid4(),
     laser_position=(0.1, 0.0, 0.0),
     laser_axis=(0.0, 0.0, 1.0),
@@ -87,28 +87,28 @@ class FakeCatalog:
     async def member_tenants(self):
         return [LAB, REEF, PARTNER]
 
-    async def next_dive_for_laser_depth(self, tenant_id):
+    async def next_mission_for_laser_depth(self, tenant_id):
         return self.candidates.get(tenant_id)
 
-    async def next_dive_for_measurement(self, tenant_id):
+    async def next_mission_for_measurement(self, tenant_id):
         return self.candidates.get(tenant_id)
 
-    async def laser_depth_work(self, tenant_id, dive_id):
+    async def laser_depth_work(self, tenant_id, mission_id):
         return self.work
 
-    async def measurement_work(self, tenant_id, dive_id):
+    async def measurement_work(self, tenant_id, mission_id):
         return self.work
 
-    async def persist_laser_depths(self, tenant_id, dive_id, **result):
-        self.persisted = (tenant_id, dive_id, result)
+    async def persist_laser_depths(self, tenant_id, mission_id, **result):
+        self.persisted = (tenant_id, mission_id, result)
         return PersistedDepths(
             written=len(result["depths"]),
             refused=len(result["refusals"]),
             skipped_stale=0,
         )
 
-    async def persist_measurements(self, tenant_id, dive_id, **result):
-        self.persisted = (tenant_id, dive_id, result)
+    async def persist_measurements(self, tenant_id, mission_id, **result):
+        self.persisted = (tenant_id, mission_id, result)
         return PersistedMeasurements(
             measured=len(result["lengths"]),
             refused=0,
@@ -137,10 +137,10 @@ async def test_the_depth_selector_takes_the_oldest_candidate_across_tenants():
     )
 
     picked = await ActivityEnvironment().run(
-        activities.select_next_dive_for_laser_depth
+        activities.select_next_mission_for_laser_depth
     )
 
-    assert picked == DiveTarget(tenant_id=REEF, dive_id=uuid.UUID(int=2))
+    assert picked == MissionTarget(tenant_id=REEF, mission_id=uuid.UUID(int=2))
 
 
 async def test_the_measure_selector_takes_the_oldest_candidate_across_tenants():
@@ -149,20 +149,20 @@ async def test_the_measure_selector_takes_the_oldest_candidate_across_tenants():
     )
 
     picked = await ActivityEnvironment().run(
-        activities.select_next_dive_for_measurement
+        activities.select_next_mission_for_measurement
     )
 
-    assert picked == DiveTarget(tenant_id=REEF, dive_id=uuid.UUID(int=2))
+    assert picked == MissionTarget(tenant_id=REEF, mission_id=uuid.UUID(int=2))
 
 
 @pytest.mark.parametrize(
     "kind, select",
     [
-        (LaserDepthCandidate, "select_next_dive_for_laser_depth"),
-        (MeasurementCandidate, "select_next_dive_for_measurement"),
+        (LaserDepthCandidate, "select_next_mission_for_laser_depth"),
+        (MeasurementCandidate, "select_next_mission_for_measurement"),
     ],
 )
-async def test_dives_created_together_are_taken_in_v1s_id_order(kind, select):
+async def test_missions_created_together_are_taken_in_v1s_id_order(kind, select):
     """Every migrated dive shares one created_at (v1 recorded none), so the
     tiebreak decides v1's order: the dive number (v1's id), not the UUID."""
     catalog = FakeCatalog(
@@ -179,7 +179,7 @@ async def test_dives_created_together_are_taken_in_v1s_id_order(kind, select):
 
     picked = await ActivityEnvironment().run(getattr(activities, select))
 
-    assert picked == DiveTarget(tenant_id=REEF, dive_id=uuid.UUID(int=2))
+    assert picked == MissionTarget(tenant_id=REEF, mission_id=uuid.UUID(int=2))
 
 
 async def test_the_selectors_return_none_when_every_cohort_is_empty():
@@ -188,13 +188,13 @@ async def test_the_selectors_return_none_when_every_cohort_is_empty():
 
     assert (
         await ActivityEnvironment().run(
-            LaserDepthActivities(catalog=catalog).select_next_dive_for_laser_depth
+            LaserDepthActivities(catalog=catalog).select_next_mission_for_laser_depth
         )
         is None
     )
     assert (
         await ActivityEnvironment().run(
-            MeasurementActivities(catalog=catalog).select_next_dive_for_measurement
+            MeasurementActivities(catalog=catalog).select_next_mission_for_measurement
         )
         is None
     )
@@ -219,11 +219,11 @@ async def test_the_depth_resolver_hands_the_processor_the_work_in_order():
     activities = LaserDepthActivities(catalog=FakeCatalog(work=work))
 
     resolution = await ActivityEnvironment().run(
-        activities.resolve_laser_depth_inputs, DiveTarget(LAB, DIVE)
+        activities.resolve_laser_depth_inputs, MissionTarget(LAB, MISSION)
     )
 
     payload = resolution.payload
-    assert payload.dive_id == DIVE
+    assert payload.mission_id == MISSION
     assert payload.camera_matrix == K
     assert payload.calibration.laser_calibration_id == GEOMETRY.laser_calibration_id
     assert payload.calibration.laser_position == (0.1, 0.0, 0.0)
@@ -243,7 +243,7 @@ async def test_the_depth_resolver_hands_nothing_when_there_is_no_work():
     activities = LaserDepthActivities(catalog=FakeCatalog(work=work))
 
     resolution = await ActivityEnvironment().run(
-        activities.resolve_laser_depth_inputs, DiveTarget(LAB, DIVE)
+        activities.resolve_laser_depth_inputs, MissionTarget(LAB, MISSION)
     )
 
     assert resolution.payload is None
@@ -270,7 +270,7 @@ async def test_the_measure_resolver_hands_the_processor_one_laser_and_one_head_t
     activities = MeasurementActivities(catalog=FakeCatalog(work=work))
 
     resolution = await ActivityEnvironment().run(
-        activities.resolve_measurement_inputs, DiveTarget(LAB, DIVE)
+        activities.resolve_measurement_inputs, MissionTarget(LAB, MISSION)
     )
 
     payload = resolution.payload
@@ -303,7 +303,7 @@ async def test_the_measure_resolver_hands_nothing_when_there_is_no_work():
     )
 
     resolution = await ActivityEnvironment().run(
-        activities.resolve_measurement_inputs, DiveTarget(LAB, DIVE)
+        activities.resolve_measurement_inputs, MissionTarget(LAB, MISSION)
     )
 
     assert resolution.payload is None
@@ -317,7 +317,7 @@ async def test_the_depth_persist_hands_over_every_depth_and_refusal():
     capture, other = uuid.uuid4(), uuid.uuid4()
     good, bad, worse = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     result = ComputeLaserDepthsResult(
-        dive_id=DIVE,
+        mission_id=MISSION,
         core_version="4.1.0",
         captures=[
             LaserDepthOutcome(
@@ -359,13 +359,13 @@ async def test_the_depth_persist_hands_over_every_depth_and_refusal():
 
     persisted = await ActivityEnvironment().run(
         LaserDepthActivities(catalog=catalog).persist_laser_depths,
-        DiveTarget(LAB, DIVE),
+        MissionTarget(LAB, MISSION),
         calibration,
         result,
     )
 
-    tenant_id, dive_id, handed = catalog.persisted
-    assert (tenant_id, dive_id) == (LAB, DIVE)
+    tenant_id, mission_id, handed = catalog.persisted
+    assert (tenant_id, mission_id) == (LAB, MISSION)
     assert handed["laser_calibration_id"] == calibration
     assert handed["core_version"] == "4.1.0"
     assert [
@@ -385,7 +385,7 @@ async def test_the_measure_persist_hands_over_lengths_provenance_and_the_parser(
     catalog = FakeCatalog()
     item = _measure_capture()
     result = MeasureFishResult(
-        dive_id=DIVE,
+        mission_id=MISSION,
         algorithm="laser_depth_fronto_parallel",
         algorithm_version="1",
         core_version="4.1.0",
@@ -411,7 +411,7 @@ async def test_the_measure_persist_hands_over_lengths_provenance_and_the_parser(
 
     persisted = await ActivityEnvironment().run(
         MeasurementActivities(catalog=catalog).persist_measurements,
-        DiveTarget(LAB, DIVE),
+        MissionTarget(LAB, MISSION),
         calibration,
         result,
     )

@@ -23,7 +23,7 @@ from typing import Any, Dict, List
 
 import pytest
 from temporalio import activity, workflow
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
@@ -121,7 +121,7 @@ def _ls_stubs(created: List, populated: List, *, rows=3):
 
 async def _execute(workflows, activities, run, *args):
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,
@@ -138,7 +138,7 @@ async def _execute(workflows, activities, run, *args):
             )
 
 
-async def test_workflow_creates_per_dive_project_then_populates():
+async def test_workflow_creates_per_mission_project_then_populates():
     created, populated = [], []
     target = SpeciesTarget(TENANT, uuid.uuid4())
 
@@ -203,16 +203,16 @@ def _parent_stubs(targets, selector_calls, dispatched, *, fail=()):
 
     @activity.defn(name="_record_populate")
     async def record(workflow_id: str, target: SpeciesTarget) -> None:
-        if target.dive_id in fail:
+        if target.mission_id in fail:
             raise ApplicationError("simulated", non_retryable=True)
         dispatched.append((workflow_id, target))
 
     return [select, record]
 
 
-async def test_fans_out_idempotent_populate_child_per_dive():
-    dives = [uuid.uuid4() for _ in range(3)]
-    targets = [SpeciesTarget(TENANT, d) for d in dives]
+async def test_fans_out_idempotent_populate_child_per_mission():
+    missions = [uuid.uuid4() for _ in range(3)]
+    targets = [SpeciesTarget(TENANT, d) for d in missions]
     dispatched, selector_calls = [], []
 
     result = await _execute(
@@ -224,10 +224,10 @@ async def test_fans_out_idempotent_populate_child_per_dive():
     assert result == targets
     assert len(selector_calls) == 1
     assert {t for _, t in dispatched} == set(targets)
-    assert {wid for wid, _ in dispatched} == {f"populate-species-{d}" for d in dives}
+    assert {wid for wid, _ in dispatched} == {f"populate-species-{d}" for d in missions}
 
 
-def test_at_most_four_dives_populate_at_once():
+def test_at_most_four_missions_populate_at_once():
     """v1's bound: a large backlog must not hammer the hosted Label Studio
     import endpoint."""
     assert sut.POPULATE_CONCURRENCY == 4
@@ -247,7 +247,7 @@ async def test_no_dispatch_when_cohort_empty():
     assert not dispatched
 
 
-async def test_one_dives_failure_does_not_abort_the_fan_out():
+async def test_one_missions_failure_does_not_abort_the_fan_out():
     """v1's `ExceptionGroupErrorLogging(suppress=True)`."""
     bad, good = uuid.uuid4(), uuid.uuid4()
     targets = [SpeciesTarget(TENANT, bad), SpeciesTarget(TENANT, good)]

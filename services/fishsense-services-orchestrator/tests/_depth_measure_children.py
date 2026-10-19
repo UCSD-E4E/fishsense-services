@@ -28,13 +28,13 @@ with workflow.unsafe.imports_passed_through():
 
 def depth_result(payload: ComputeLaserDepthsInput) -> ComputeLaserDepthsResult:
     return ComputeLaserDepthsResult(
-        dive_id=payload.dive_id, core_version="4.1.0", captures=[]
+        mission_id=payload.mission_id, core_version="4.1.0", captures=[]
     )
 
 
 def measure_result(payload: MeasureFishInput) -> MeasureFishResult:
     return MeasureFishResult(
-        dive_id=payload.dive_id,
+        mission_id=payload.mission_id,
         algorithm="laser_depth_fronto_parallel",
         algorithm_version="1",
         core_version="4.1.0",
@@ -45,7 +45,7 @@ def measure_result(payload: MeasureFishInput) -> MeasureFishResult:
 async def _record(payload) -> None:
     await workflow.execute_activity(
         "_record_child_dispatch",
-        args=(workflow.info().workflow_id, payload.dive_id, len(payload.captures)),
+        args=(workflow.info().workflow_id, payload.mission_id, len(payload.captures)),
         schedule_to_close_timeout=timedelta(seconds=5),
     )
 

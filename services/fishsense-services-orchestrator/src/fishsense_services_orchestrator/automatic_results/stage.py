@@ -25,12 +25,12 @@ from fishsense_services_orchestrator.automatic_results.activities import (
 from fishsense_services_orchestrator.automatic_results.settings import (
     AutomaticResultsSettings,
 )
-from fishsense_services_orchestrator.automatic_results.run_dives import (
-    RunAutomaticDivesWorkflow,
+from fishsense_services_orchestrator.automatic_results.run_missions import (
+    RunAutomaticMissionsWorkflow,
 )
 from fishsense_services_orchestrator.automatic_results.workflow import (
     RUN_TIMEOUT,
-    AutomaticResultsForDiveWorkflow,
+    AutomaticResultsForMissionWorkflow,
     AutomaticResultsParentWorkflow,
 )
 from fishsense_services_orchestrator.object_store.store import (
@@ -71,7 +71,7 @@ def _activities(deps: Deps):
         store=OrchestratorObjectStore.from_settings(ObjectStoreConnection()),
     )
     return [
-        activities.select_next_dive_for_automatic_results,
+        activities.select_next_mission_for_automatic_results,
         activities.record_automatic_results_failure,
         activities.record_automatic_frame_failures,
         activities.plan_automatic_run,
@@ -90,8 +90,8 @@ STAGE = Stage(
     name="automatic_results",
     workflows=[
         AutomaticResultsParentWorkflow,
-        AutomaticResultsForDiveWorkflow,
-        RunAutomaticDivesWorkflow,
+        AutomaticResultsForMissionWorkflow,
+        RunAutomaticMissionsWorkflow,
     ],
     build_activities=_activities,
     schedules=automatic_results_schedules(AutomaticResultsSettings()),

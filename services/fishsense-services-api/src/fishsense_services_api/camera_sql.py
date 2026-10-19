@@ -10,13 +10,13 @@ candidate: the selector takes the oldest candidate across every tenant, so a
 refused dive re-selected every hour would starve them all.
 """
 
-__all__ = ["RECTIFIABLE_CAMERA_MODEL", "RECTIFIABLE_DIVE"]
+__all__ = ["RECTIFIABLE_CAMERA_MODEL", "RECTIFIABLE_MISSION"]
 
 #: The one camera model the pipeline rectifies.
 RECTIFIABLE_CAMERA_MODEL = "pinhole"
 
 #: Dive `d`'s device has a current pinhole calibration.
-RECTIFIABLE_DIVE = f"""EXISTS (
+RECTIFIABLE_MISSION = f"""EXISTS (
     SELECT 1 FROM current_camera_calibrations cc
     WHERE cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
       AND cc.camera_model = '{RECTIFIABLE_CAMERA_MODEL}'

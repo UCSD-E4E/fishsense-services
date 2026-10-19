@@ -84,28 +84,34 @@ class FakeCatalog:
     async def member_tenants(self):
         return [LAB, REEF, PARTNER]
 
-    async def next_dive_for_headtail_preprocessing(self, tenant_id):
+    async def next_mission_for_headtail_preprocessing(self, tenant_id):
         return self.answers.get("preprocess", {}).get(tenant_id)
 
-    async def next_dive_for_headtail_prediction(self, tenant_id, *, predictor_version):
+    async def next_mission_for_headtail_prediction(
+        self, tenant_id, *, predictor_version
+    ):
         self.calls.append(("version", predictor_version))
         return self.answers.get("predict", {}).get(tenant_id)
 
-    async def headtail_preprocess_inputs(self, tenant_id, dive_id):
+    async def headtail_preprocess_inputs(self, tenant_id, mission_id):
         return self.answers["inputs"]
 
-    async def headtail_predict_captures(self, tenant_id, dive_id, *, predictor_version):
+    async def headtail_predict_captures(
+        self, tenant_id, mission_id, *, predictor_version
+    ):
         self.calls.append(("version", predictor_version))
         return self.answers["captures"]
 
-    async def clear_headtail_needs_reprocess(self, tenant_id, dive_id, checksums=None):
-        self.calls.append(("clear", tenant_id, dive_id, checksums))
+    async def clear_headtail_needs_reprocess(
+        self, tenant_id, mission_id, checksums=None
+    ):
+        self.calls.append(("clear", tenant_id, mission_id, checksums))
         return 3
 
-    async def persist_headtail_predictions(self, tenant_id, dive_id, rows):
+    async def persist_headtail_predictions(self, tenant_id, mission_id, rows):
         if "refuse" in self.answers:
             raise self.answers["refuse"]
-        self.calls.append(("persist", tenant_id, dive_id, rows))
+        self.calls.append(("persist", tenant_id, mission_id, rows))
         return len(rows)
 
 
@@ -132,16 +138,16 @@ async def test_preprocessing_picks_the_oldest_candidate_across_tenants():
     )
 
     target = await _run(
-        _activities(catalog).select_next_dive_for_headtail_preprocessing
+        _activities(catalog).select_next_mission_for_headtail_preprocessing
     )
 
-    assert target == HeadtailTarget(tenant_id=REEF, dive_id=older)
+    assert target == HeadtailTarget(tenant_id=REEF, mission_id=older)
 
 
 async def test_preprocessing_returns_none_when_no_tenant_has_work():
     assert (
         await _run(
-            _activities(FakeCatalog()).select_next_dive_for_headtail_preprocessing
+            _activities(FakeCatalog()).select_next_mission_for_headtail_preprocessing
         )
         is None
     )
@@ -158,9 +164,11 @@ async def test_prediction_prefers_never_predicted_work_across_tenants():
         }
     )
 
-    target = await _run(_activities(catalog).select_next_dive_for_headtail_prediction)
+    target = await _run(
+        _activities(catalog).select_next_mission_for_headtail_prediction
+    )
 
-    assert target == HeadtailTarget(tenant_id=PARTNER, dive_id=fresh)
+    assert target == HeadtailTarget(tenant_id=PARTNER, mission_id=fresh)
     assert ("version", HEADTAIL_PREDICTOR_VERSION) in catalog.calls
 
 
@@ -173,9 +181,11 @@ async def test_prediction_then_takes_the_oldest():
         }
     )
 
-    target = await _run(_activities(catalog).select_next_dive_for_headtail_prediction)
+    target = await _run(
+        _activities(catalog).select_next_mission_for_headtail_prediction
+    )
 
-    assert target == HeadtailTarget(tenant_id=REEF, dive_id=older)
+    assert target == HeadtailTarget(tenant_id=REEF, mission_id=older)
 
 
 # -- the stage-5.1 resolver ----------------------------------------------------------
@@ -203,7 +213,7 @@ async def test_the_preprocess_inputs_carry_the_keys_the_orchestrator_issues():
         target,
     )
 
-    assert (inputs.tenant_id, inputs.dive_id) == (LAB, target.dive_id)
+    assert (inputs.tenant_id, inputs.mission_id) == (LAB, target.mission_id)
     assert (inputs.camera_matrix, inputs.distortion_coefficients) == (K, D)
     first, second = inputs.images
     assert (first.capture_id, first.checksum) == (new, "a" * 32)
@@ -221,7 +231,7 @@ async def test_the_flag_clear_is_scoped_as_the_parent_asks():
     for checksums in (None, [], ["a" * 32]):
         cleared = await _run(
             _activities(catalog).clear_headtail_reprocess_flags,
-            ClearHeadtailReprocessFlags(LAB, target.dive_id, checksums),
+            ClearHeadtailReprocessFlags(LAB, target.mission_id, checksums),
         )
         assert cleared == 3
 
@@ -320,8 +330,8 @@ async def test_every_field_of_a_result_is_persisted():
     )
 
     assert written == 1
-    _, tenant, dive, (row,) = next(c for c in catalog.calls if c[0] == "persist")
-    assert (tenant, dive) == (LAB, target.dive_id)
+    _, tenant, mission, (row,) = next(c for c in catalog.calls if c[0] == "persist")
+    assert (tenant, mission) == (LAB, target.mission_id)
     assert row.__dict__ == result.model_dump()
 
 

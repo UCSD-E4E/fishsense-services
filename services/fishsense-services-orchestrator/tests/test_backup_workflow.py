@@ -45,7 +45,7 @@ from temporalio.client import (
     ScheduleOverlapPolicy,
     WorkflowFailureError,
 )
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.exceptions import ApplicationError, CancelledError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
@@ -90,7 +90,7 @@ def _stubs(timeline: List[str], *, fail_dump=()):
 async def _run(databases, *, fail_dump=(), history=False):
     timeline: List[str] = []
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,
@@ -199,7 +199,7 @@ async def test_a_cancelled_run_prunes_nothing_and_ends_cancelled():
         timeline.append(f"prune:{payload.db_name}")
 
     async with await WorkflowEnvironment.start_local(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,
@@ -390,7 +390,7 @@ async def test_connects_with_the_shared_connection_settings(wired):
 
     kwargs = connect.await_args.kwargs
     assert kwargs["namespace"] == "fishsense"
-    assert kwargs["data_converter"] is pydantic_data_converter
+    assert kwargs["data_converter"] is DATA_CONVERTER
 
 
 async def test_the_worker_is_actually_started(wired):

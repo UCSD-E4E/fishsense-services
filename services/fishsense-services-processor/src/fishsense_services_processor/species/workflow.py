@@ -52,7 +52,7 @@ class PreprocessSpeciesImagesWorkflow:
     async def run(self, payload: PreprocessSpeciesImagesInput) -> None:
         workflow.logger.info(
             "preprocessing species dive_id=%s clusters=%d images=%d",
-            payload.dive_id,
+            payload.mission_id,
             len(payload.cluster_members),
             sum(len(group) for group in payload.cluster_members),
         )

@@ -76,7 +76,7 @@ with workflow.unsafe.imports_passed_through():
     from fishsense_services_orchestrator.calibration.contracts import (
         CalibrationProvenance,
         CheckerboardCalibrationPlan,
-        LatticeDive,
+        LatticeMission,
         LatticeImport,
         LatticePlan,
         LatticeProject,
@@ -141,7 +141,7 @@ async def _record_and_judge(
             "record_laser_calibration",
             RecordCalibration(
                 tenant_id=target.tenant_id,
-                dive_id=target.dive_id,
+                mission_id=target.mission_id,
                 result=result,
                 provenance=provenance,
             ),
@@ -157,18 +157,18 @@ async def _record_and_judge(
         # non-retryable type) to a recording failure would be worse (v1).
         workflow.logger.error(
             "could not record the calibration refusal for dive=%s: %s",
-            target.dive_id,
+            target.mission_id,
             exc,
         )
     if result.outcome == "refused":
         raise ApplicationError(
-            f"dive_id={target.dive_id}: {result.refusal_reason}",
+            f"dive_id={target.mission_id}: {result.refusal_reason}",
             type=result.refusal_type,
             non_retryable=True,
         )
     workflow.logger.info(
         "calibrated dive=%s producer=%s observations=%d",
-        target.dive_id,
+        target.mission_id,
         provenance.producer,
         result.observation_count,
     )
@@ -196,7 +196,7 @@ class PerformLaserCalibrationParentWorkflow:
         )
         if plan is None:
             workflow.logger.info(
-                "dive=%s has no slate labels to calibrate from", target.dive_id
+                "dive=%s has no slate labels to calibrate from", target.mission_id
             )
             return target
 
@@ -205,7 +205,7 @@ class PerformLaserCalibrationParentWorkflow:
             result: LaserCalibrationResult = await workflow.execute_child_workflow(
                 "PerformLaserCalibrationWorkflow",
                 plan.payload,
-                id=f"perform-laser-calibration-{target.dive_id}",
+                id=f"perform-laser-calibration-{target.mission_id}",
                 task_queue=PROCESSOR_LIGHT_TASK_QUEUE,
                 execution_timeout=timedelta(minutes=15),
                 id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
@@ -215,7 +215,7 @@ class PerformLaserCalibrationParentWorkflow:
             workflow.logger.info(
                 "perform-laser-calibration-%s is still running; skipping "
                 "duplicate dispatch",
-                target.dive_id,
+                target.mission_id,
             )
             return target
 
@@ -244,7 +244,7 @@ class PerformCheckerboardCalibrationParentWorkflow:
         )
         workflow.logger.info(
             "dispatching checkerboard calibration dive=%s frames=%d board=%dx%d",
-            target.dive_id,
+            target.mission_id,
             len(plan.payload.images),
             plan.payload.target.rows,
             plan.payload.target.cols,
@@ -254,7 +254,7 @@ class PerformCheckerboardCalibrationParentWorkflow:
             # resolver and the selector disagree: find out without staging.
             workflow.logger.warning(
                 "checkerboard calibration resolved no frames; not staging dive=%s",
-                target.dive_id,
+                target.mission_id,
             )
             return target
 
@@ -270,7 +270,7 @@ class PerformCheckerboardCalibrationParentWorkflow:
                 "PerformCheckerboardCalibrationWorkflow",
                 plan.payload,
                 id=raw_scratch_reader_id(
-                    "perform-checkerboard-calibration", target.dive_id
+                    "perform-checkerboard-calibration", target.mission_id
                 ),
                 task_queue=PROCESSOR_TASK_QUEUE,
                 # Generous: a rawpy decode and a corner search per frame, two
@@ -284,7 +284,7 @@ class PerformCheckerboardCalibrationParentWorkflow:
             workflow.logger.info(
                 "dive=%s already has a calibration child running; leaving its "
                 "raw bytes alone",
-                target.dive_id,
+                target.mission_id,
             )
             return target
         finally:
@@ -320,12 +320,12 @@ class VerifyCheckerboardLatticeParentWorkflow:
 
         renders: List[CheckerboardLatticeRender] = []
         failed: List[int] = []
-        for number in payload.dives:
+        for number in payload.missions:
             # Per-dive isolation: without it one unusable dive discards every
             # dive rendered before it, with all of their staging.
             try:
                 renders.extend(
-                    await self._render_dive(tenant_id, number, payload.sample_limit)
+                    await self._render_mission(tenant_id, number, payload.sample_limit)
                 )
             except Exception as exc:  # pylint: disable=broad-except
                 failed.append(number)
@@ -336,7 +336,7 @@ class VerifyCheckerboardLatticeParentWorkflow:
             workflow.logger.error(
                 "lattice verification skipped %d of %d dives: %s",
                 len(failed),
-                len(payload.dives),
+                len(payload.missions),
                 failed,
             )
         if not renders:
@@ -373,18 +373,20 @@ class VerifyCheckerboardLatticeParentWorkflow:
         workflow.logger.info(
             "lattice verification imported %d tasks from %d of %d dives",
             imported,
-            len(payload.dives) - len(failed),
-            len(payload.dives),
+            len(payload.missions) - len(failed),
+            len(payload.missions),
         )
         return imported
 
-    async def _render_dive(
+    async def _render_mission(
         self, tenant_id, number: int, sample_limit
     ) -> List[CheckerboardLatticeRender]:
         """Stage one dive's frames, render its lattices, drop the scratch."""
         plan: Optional[LatticePlan] = await workflow.execute_activity(
             "resolve_lattice_inputs",
-            LatticeDive(tenant_id=tenant_id, number=number, sample_limit=sample_limit),
+            LatticeMission(
+                tenant_id=tenant_id, number=number, sample_limit=sample_limit
+            ),
             schedule_to_close_timeout=timedelta(minutes=5),
             retry_policy=_DB_FAIL_FAST,
             result_type=Optional[LatticePlan],
@@ -406,7 +408,9 @@ class VerifyCheckerboardLatticeParentWorkflow:
             return await workflow.execute_child_workflow(
                 "VerifyCheckerboardLatticeWorkflow",
                 plan.payload,
-                id=raw_scratch_reader_id("verify-checkerboard-lattice", target.dive_id),
+                id=raw_scratch_reader_id(
+                    "verify-checkerboard-lattice", target.mission_id
+                ),
                 task_queue=PROCESSOR_TASK_QUEUE,
                 execution_timeout=timedelta(hours=2),
                 id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,

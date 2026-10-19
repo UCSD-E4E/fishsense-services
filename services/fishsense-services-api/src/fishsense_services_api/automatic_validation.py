@@ -54,9 +54,9 @@ __all__ = [
     "LADDER",
     "PAPER",
     "PAPER_CALIBRATION_SESSIONS",
-    "PAPER_POOL_DIVES",
-    "PAPER_REEF_CALIBRATED_DIVES",
-    "PAPER_REEF_DIVES",
+    "PAPER_POOL_MISSIONS",
+    "PAPER_REEF_CALIBRATED_MISSIONS",
+    "PAPER_REEF_MISSIONS",
     "PAPER_REEF_FRAMES",
     "PAPER_TABLE3",
     "LadderRow",
@@ -77,14 +77,14 @@ __all__ = [
 ]
 
 #: run_e2e.py `ORDER`: fish-model dives first, then the angle tests.
-PAPER_POOL_DIVES = (58, 59, 60, 61, 66, 76, 84, 87, 94, 114)
+PAPER_POOL_MISSIONS = (58, 59, 60, 61, 66, 76, 84, 87, 94, 114)
 #: Table 3's calibration sessions (register.py `DIVES`); the pool dives
 #: borrow them through their calibration links (score.py `PAIR`).
 PAPER_CALIBRATION_SESSIONS = (62, 63, 65, 71, 77, 80, 83, 87, 94, 114)
 #: tail/stage.py `CALIBRATED_REEF`.
-PAPER_REEF_CALIBRATED_DIVES = (347, 341, 465, 349, 279, 471, 436, 383)
+PAPER_REEF_CALIBRATED_MISSIONS = (347, 341, 465, 349, 279, 471, 436, 383)
 #: ...and the two green-laser reef dives with no stored calibration.
-PAPER_REEF_DIVES = (*PAPER_REEF_CALIBRATED_DIVES, 362, 366)
+PAPER_REEF_MISSIONS = (*PAPER_REEF_CALIBRATED_MISSIONS, 362, 366)
 
 #: The paper's numbers, for the report.
 PAPER = {
@@ -113,7 +113,7 @@ def _paper_reef_frames() -> dict[int, tuple[int, bool]]:
     data = json.loads(
         (Path(__file__).parent / "automatic_validation_reef_frames.json").read_text()
     )
-    return {image: (dive, measured) for image, dive, measured in data["frames"]}
+    return {image: (mission, measured) for image, mission, measured in data["frames"]}
 
 
 #: The paper's 791 reef frames: v1 image id -> (dive number, human-measured).
@@ -140,7 +140,7 @@ class ValidationFrame:
     """One human-labelled frame and what the automatic chain made of it."""
 
     capture_number: int
-    dive_number: int
+    mission_number: int
     set: str
     model: Optional[str]
     true_length_m: Optional[float]
@@ -239,8 +239,8 @@ def pool_ladder(frames: Sequence[ValidationFrame]) -> list[LadderRow]:
         errors = np.array([got / f.true_length_m - 1 for f, got in measured])
         fish: dict[tuple, list[float]] = {}
         for f, got in measured:
-            fish.setdefault((f.dive_number, f.model), []).append(got)
-        truth = {(f.dive_number, f.model): f.true_length_m for f in pool}
+            fish.setdefault((f.mission_number, f.model), []).append(got)
+        truth = {(f.mission_number, f.model): f.true_length_m for f in pool}
         fish_err = [fish_p90(v) / truth[k] - 1 for k, v in fish.items()]
         rows.append(
             LadderRow(
@@ -326,7 +326,7 @@ class SessionCalibration:
     vanishing point's position along the dive line) and `line_direction` its
     ``u`` (`size_constancy.line_direction`, slate_unknown.frame's rule)."""
 
-    dive_number: int
+    mission_number: int
     camera_matrix: list
     stored_axis: Optional[Sequence[float]]
     vanishing_px: Optional[float]
@@ -352,7 +352,7 @@ def calibration_error_deg(session: SessionCalibration) -> Optional[float]:
 
 @dataclass(frozen=True)
 class Table3Row:
-    dive_number: int
+    mission_number: int
     err_deg: Optional[float]
     paper_err_deg: Optional[float]
 
@@ -362,10 +362,10 @@ def table3(
 ) -> list[Table3Row]:
     """A row per session, and one per `expected` session not among them (no
     error: no dive, or no accepted fit), so a missing one shows."""
-    errors = {s.dive_number: calibration_error_deg(s) for s in sessions}
+    errors = {s.mission_number: calibration_error_deg(s) for s in sessions}
     return [
         Table3Row(
-            dive_number=n, err_deg=errors.get(n), paper_err_deg=PAPER_TABLE3.get(n)
+            mission_number=n, err_deg=errors.get(n), paper_err_deg=PAPER_TABLE3.get(n)
         )
         for n in sorted({*errors, *expected})
     ]
@@ -431,6 +431,6 @@ def format_report(
                   "  session     ours    (paper)"]  # fmt: skip
         for r in calibration:
             lines.append(
-                f"  {r.dive_number:>7} {_deg(r.err_deg)} ({_deg(r.paper_err_deg)})"
+                f"  {r.mission_number:>7} {_deg(r.err_deg)} ({_deg(r.paper_err_deg)})"
             )
     return "\n".join(lines)

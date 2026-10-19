@@ -26,19 +26,19 @@ async def _tenant_and_capture(conn, slug: str) -> tuple[uuid.UUID, uuid.UUID]:
     tenant = await _one(
         conn, "INSERT INTO tenants (slug, name) VALUES (:s, :s) RETURNING id", s=slug
     )
-    dive = await _one(
+    mission = await _one(
         conn,
-        "INSERT INTO dives (tenant_id, source_path, dived_at) "
+        "INSERT INTO missions (tenant_id, source_path, started_at) "
         "VALUES (:t, :p, now()) RETURNING id",
         t=tenant,
         p=f"/{slug}",
     )
     capture = await _one(
         conn,
-        "INSERT INTO captures (tenant_id, dive_id, source_path, captured_at, checksum) "
+        "INSERT INTO captures (tenant_id, mission_id, source_path, captured_at, checksum) "
         "VALUES (:t, :d, :p, now(), '0123456789abcdef0123456789abcdef') RETURNING id",
         t=tenant,
-        d=dive,
+        d=mission,
         p=f"/{slug}/1.ORF",
     )
     return tenant, capture

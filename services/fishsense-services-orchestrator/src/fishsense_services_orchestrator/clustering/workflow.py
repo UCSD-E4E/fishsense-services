@@ -4,7 +4,7 @@ Ported from fishsense-lite@a8b2c3bc services/fishsense-api-workflow-worker/src/
 fishsense_api_workflow_worker/workflows/cluster_dive_frames_parent_workflow.py.
 
 Picks the oldest high-priority dive needing dive-frame clustering, wakes the
-processor's light role on NRP, and dispatches `DiveFrameClusteringWorkflow` to
+processor's light role on NRP, and dispatches `MissionFrameClusteringWorkflow` to
 the light queue. After
 the child returns, persists its clusters as prediction clusters, so stage-2
 species preprocessing has the cluster gate it depends on. Stage 1 has no NAS
@@ -48,14 +48,14 @@ with workflow.unsafe.imports_passed_through():
 
     from fishsense_services_contracts import (
         PROCESSOR_LIGHT_TASK_QUEUE,
-        ClusterDiveFramesInput,
+        ClusterMissionFramesInput,
     )
     from fishsense_services_orchestrator.clustering.activities import (
         ClusteringTarget,
     )
     from fishsense_services_orchestrator.nrp.workflow import wake_light_processor
 
-__all__ = ["ClusterDiveFramesParentWorkflow"]
+__all__ = ["ClusterMissionFramesParentWorkflow"]
 
 # Selector and resolver are database round trips: one retry for a transient
 # blip, then fail -- a consistent error is a bug, and should surface in seconds
@@ -68,8 +68,8 @@ _DB_FAIL_FAST = RetryPolicy(
 )
 
 
-@workflow.defn
-class ClusterDiveFramesParentWorkflow:
+@workflow.defn(name="ClusterDiveFramesParentWorkflow")
+class ClusterMissionFramesParentWorkflow:
     # pylint: disable=too-few-public-methods
     """Pick the oldest high-priority dive needing dive-frame clustering and
     dispatch its work to the processor. Returns the target processed, or None
@@ -86,16 +86,16 @@ class ClusterDiveFramesParentWorkflow:
         if target is None:
             return None
 
-        inputs: ClusterDiveFramesInput = await workflow.execute_activity(
+        inputs: ClusterMissionFramesInput = await workflow.execute_activity(
             "resolve_clustering_inputs",
             target,
             schedule_to_close_timeout=timedelta(minutes=5),
             retry_policy=_DB_FAIL_FAST,
-            result_type=ClusterDiveFramesInput,
+            result_type=ClusterMissionFramesInput,
         )
         workflow.logger.info(
             "dispatching dive-frame clustering to the processor dive=%s captures=%d",
-            target.dive_id,
+            target.mission_id,
             len(inputs.images),
         )
         if not inputs.images:
@@ -111,7 +111,7 @@ class ClusterDiveFramesParentWorkflow:
             clusters: List[List[UUID]] = await workflow.execute_child_workflow(
                 "DiveFrameClusteringWorkflow",
                 inputs,
-                id=f"cluster-{target.dive_id}",
+                id=f"cluster-{target.mission_id}",
                 task_queue=PROCESSOR_LIGHT_TASK_QUEUE,
                 execution_timeout=timedelta(minutes=15),
                 id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
@@ -120,7 +120,7 @@ class ClusterDiveFramesParentWorkflow:
         except WorkflowAlreadyStartedError:
             workflow.logger.info(
                 "cluster-%s is already running under another firing; it persists",
-                target.dive_id,
+                target.mission_id,
             )
             return target
 

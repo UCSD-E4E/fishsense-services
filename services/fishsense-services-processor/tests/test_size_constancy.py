@@ -52,9 +52,9 @@ def _stored_vanishing(d, u):
 # -- golden: cscw's labelfree_tv.csv, from cscw's own pair equations -----------------
 
 
-@pytest.mark.parametrize("dive", sorted(GOLDEN, key=int))
-def test_reproduces_cscws_label_free_fit(dive):
-    d = GOLDEN[dive]
+@pytest.mark.parametrize("mission", sorted(GOLDEN, key=int))
+def test_reproduces_cscws_label_free_fit(mission):
+    d = GOLDEN[mission]
     want = d["expected"]
     dots = np.array(d["dots"])
 
@@ -77,14 +77,14 @@ def test_bootstrap_reproduces_cscws_standard_errors():
     """cscw draws every session's bootstrap from one generator, in Table 3's
     order; so must this, to reproduce its SEs."""
     rng = np.random.default_rng(0)
-    for dive in sorted(GOLDEN, key=int):
-        d = GOLDEN[dive]
+    for mission in sorted(GOLDEN, key=int):
+        d = GOLDEN[mission]
         dots = np.array(d["dots"])
         sizes = sc.solve_log_sizes(len(dots), _pairs(d))
         xy = dots[sizes.connected]
         t = xy @ sc.line_direction(d["line"], xy)
         se = sc.bootstrap_se(t, np.exp(sizes.log_sizes[sizes.connected]), rng=rng)
-        assert se == pytest.approx(d["expected"]["se_px"], rel=1e-6), dive
+        assert se == pytest.approx(d["expected"]["se_px"], rel=1e-6), mission
 
 
 def test_table_3_nine_of_ten_within_0_05_deg_and_all_within_0_15():
@@ -293,11 +293,11 @@ CSCW_FEATURES = _cscw_features()
 
 
 @pytest.mark.skipif(CSCW_FEATURES is None, reason="needs ../cscw-fishsense2027")
-@pytest.mark.parametrize("dive", ["63", "94"])
-def test_registration_reproduces_cscws_pairs_from_its_features(dive):
+@pytest.mark.parametrize("mission", ["63", "94"])
+def test_registration_reproduces_cscws_pairs_from_its_features(mission):
     """The registration itself, against the golden pairs, when the sibling
     checkout is present."""
-    d = GOLDEN[dive]
+    d = GOLDEN[mission]
     features = []
     for image_id in d["image_ids"]:
         z = np.load(CSCW_FEATURES / f"{image_id}.npz", allow_pickle=True)

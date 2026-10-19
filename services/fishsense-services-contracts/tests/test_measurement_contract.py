@@ -58,7 +58,7 @@ def _capture():
 
 def test_the_input_round_trips():
     payload = MeasureFishInput(
-        dive_id=uuid4(),
+        mission_id=uuid4(),
         camera_matrix=K,
         calibration=LaserCalibrationGeometry(
             laser_calibration_id=uuid4(),
@@ -118,7 +118,7 @@ def test_a_result_is_a_length_or_a_refusal_never_both_or_neither():
 def test_the_result_names_what_made_it():
     for missing in ("algorithm", "algorithm_version", "core_version"):
         fields = dict(
-            dive_id=uuid4(),
+            mission_id=uuid4(),
             algorithm="laser_depth_fronto_parallel",
             algorithm_version="1",
             core_version="4.1.0",
@@ -129,7 +129,7 @@ def test_the_result_names_what_made_it():
             MeasureFishResult(**fields)
 
     result = MeasureFishResult(
-        dive_id=uuid4(),
+        mission_id=uuid4(),
         algorithm="laser_depth_fronto_parallel",
         algorithm_version="1",
         core_version="4.1.0",

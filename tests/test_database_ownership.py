@@ -101,7 +101,7 @@ def test_the_rule_sees_a_query(tmp_path):
     """The check itself: each kind of breach is caught, the allowance is not."""
     breach = tmp_path / "breach.py"
     breach.write_text(
-        '"""Select the oldest dive from the cohort (prose, not a query)."""\n'
+        '"""Select the oldest mission from the cohort (prose, not a query)."""\n'
         "from sqlalchemy import text\n"
         "import asyncpg\n"
         "Q = 'SELECT id FROM tenants'\n"

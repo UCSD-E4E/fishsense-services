@@ -24,7 +24,7 @@ with workflow.unsafe.imports_passed_through():
         GATE_ACTIVITY_TIMEOUT,
         GATE_EXECUTION_TIMEOUT,
         GATE_QUEUE_WAIT_TIMEOUT,
-        DivePlan,
+        MissionPlan,
         EvaluateLaserAutoAcceptInput,
         LaserAutoAcceptResult,
         LaserValidationResult,
@@ -35,7 +35,7 @@ with workflow.unsafe.imports_passed_through():
 __all__ = [
     "EvaluateLaserAutoAcceptWorkflow",
     "PlanLaserSupersedeRemediationWorkflow",
-    "ValidateLaserLabelsForDiveWorkflow",
+    "ValidateLaserLabelsForMissionWorkflow",
 ]
 
 # v1's validator and plan budget: 10 minutes to run, 15 all told, a one-minute
@@ -68,8 +68,8 @@ class EvaluateLaserAutoAcceptWorkflow:
         )
 
 
-@workflow.defn
-class ValidateLaserLabelsForDiveWorkflow:
+@workflow.defn(name="ValidateLaserLabelsForDiveWorkflow")
+class ValidateLaserLabelsForMissionWorkflow:
     # pylint: disable=too-few-public-methods
     """One judgement of a dive's laser labels; returns what to write."""
 
@@ -89,10 +89,10 @@ class PlanLaserSupersedeRemediationWorkflow:
     """One dive's remediation plan (its report row)."""
 
     @workflow.run
-    async def run(self, payload: PlanLaserRemediationInput) -> DivePlan:
+    async def run(self, payload: PlanLaserRemediationInput) -> MissionPlan:
         return await workflow.execute_activity(
             "plan_laser_supersede_remediation",
             payload,
-            result_type=DivePlan,
+            result_type=MissionPlan,
             **_JUDGE_TIMEOUTS,
         )

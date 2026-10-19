@@ -32,7 +32,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, List, Optional, Protocol, Sequence
+from typing import Any, List, Optional, Protocol, Sequence, Annotated
 
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
@@ -70,6 +70,7 @@ from fishsense_services_orchestrator.species_predict.labeling import (
 from fishsense_services_orchestrator.species_predict.settings import (
     SpeciesPredictionSettings,
 )
+from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = [
     "SpeciesPredictActivities",
@@ -83,7 +84,7 @@ class SpeciesPredictTarget:
     """A dive of a tenant."""
 
     tenant_id: uuid.UUID
-    dive_id: uuid.UUID
+    mission_id: Annotated[uuid.UUID, renamed_from("dive_id", "mission_id")]
 
 
 class SpeciesPredictionCatalog(Protocol):
@@ -91,23 +92,23 @@ class SpeciesPredictionCatalog(Protocol):
 
     async def member_tenants(self) -> list[uuid.UUID]: ...
 
-    async def next_dive_for_species_prediction(
+    async def next_mission_for_species_prediction(
         self, tenant_id: uuid.UUID, *, predictor_version: int
     ) -> SpeciesPredictionCandidate | None: ...
 
     async def species_predict_captures(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, *, predictor_version: int
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, predictor_version: int
     ) -> list[SpeciesPredictCapture]: ...
 
     async def persist_species_predictions(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         rows: Sequence[SpeciesPredictionRow],
     ) -> int: ...
 
     async def species_prediction_state(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> SpeciesPredictionState: ...
 
 
@@ -116,14 +117,14 @@ class SpeciesLabelsCatalog(Protocol):
     read here: the dive's species labels, sentinels included."""
 
     async def species_population_facts(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> SpeciesPopulationFacts: ...
 
 
 def _refuse(target: SpeciesPredictTarget, why: str) -> ApplicationError:
     return ApplicationError(
         f"refusing the processor's species predictions for dive "
-        f"{target.dive_id}: {why}",
+        f"{target.mission_id}: {why}",
         type="InvalidPredictions",
         non_retryable=True,
     )
@@ -147,14 +148,14 @@ class SpeciesPredictActivities:
         self._label_studio_factory = label_studio_factory
 
     @activity.defn(name="select_next_dive_for_species_prediction")
-    async def select_next_dive_for_species_prediction(
+    async def select_next_mission_for_species_prediction(
         self,
     ) -> Optional[SpeciesPredictTarget]:
         """The next dive for BioCLIP across tenants: never-predicted work
         first, then the oldest."""
         best, best_key = None, None
         for tenant_id in await self._catalog.member_tenants():
-            candidate = await self._catalog.next_dive_for_species_prediction(
+            candidate = await self._catalog.next_mission_for_species_prediction(
                 tenant_id, predictor_version=SPECIES_PREDICTOR_VERSION
             )
             if candidate is None:
@@ -162,10 +163,10 @@ class SpeciesPredictActivities:
             key = (
                 not candidate.never_predicted,
                 candidate.created_at,
-                str(candidate.dive_id),
+                str(candidate.mission_id),
             )
             if best_key is None or key < best_key:
-                best = SpeciesPredictTarget(tenant_id, candidate.dive_id)
+                best = SpeciesPredictTarget(tenant_id, candidate.mission_id)
                 best_key = key
         activity.logger.info("next dive for species prediction: %s", best)
         return best
@@ -178,7 +179,7 @@ class SpeciesPredictActivities:
         written, each with its mask's box; the rest are deferred."""
         captures = await self._catalog.species_predict_captures(
             target.tenant_id,
-            target.dive_id,
+            target.mission_id,
             predictor_version=SPECIES_PREDICTOR_VERSION,
         )
         images = []
@@ -207,13 +208,13 @@ class SpeciesPredictActivities:
             )
         activity.logger.info(
             "resolved species predict inputs dive=%s needing=%d deferred_no_jpeg=%d",
-            target.dive_id,
+            target.mission_id,
             len(images),
             len(captures) - len(images),
         )
         return PredictSpeciesImagesInput(
             tenant_id=target.tenant_id,
-            dive_id=target.dive_id,
+            mission_id=target.mission_id,
             candidates=species_candidates(),
             images=images,
         )
@@ -251,17 +252,17 @@ class SpeciesPredictActivities:
         ]
         try:
             written = await self._catalog.persist_species_predictions(
-                target.tenant_id, target.dive_id, rows
+                target.tenant_id, target.mission_id, rows
             )
         except InvalidSpeciesPredictions as exc:
             raise _refuse(target, str(exc)) from exc
         activity.logger.info(
-            "persisted %d species predictions for dive=%s", written, target.dive_id
+            "persisted %d species predictions for dive=%s", written, target.mission_id
         )
         return written
 
     @activity.defn(name="backfill_species_predictions_for_dive")
-    async def backfill_species_predictions_for_dive(
+    async def backfill_species_predictions_for_mission(
         self, target: SpeciesPredictTarget
     ) -> int:
         """Attach the dive's suggestions to its existing incomplete species
@@ -270,22 +271,22 @@ class SpeciesPredictActivities:
         if not self._settings.enabled:
             activity.logger.info(
                 "species prediction is disabled; attaching nothing for dive %s",
-                target.dive_id,
+                target.mission_id,
             )
             return 0
         threshold = self._settings.other_threshold
         state = await self._catalog.species_prediction_state(
-            target.tenant_id, target.dive_id
+            target.tenant_id, target.mission_id
         )
         facts = await self._species_catalog.species_population_facts(
-            target.tenant_id, target.dive_id
+            target.tenant_id, target.mission_id
         )
         judged = set(sentinel_judgements(facts.species_labels))
         targets = select_attach_targets(state.predictions, state.tasks, judged)
         if not targets:
             activity.logger.info(
                 "dive %s: no species suggestions with attachable tasks",
-                target.dive_id,
+                target.mission_id,
             )
             return 0
 
@@ -308,13 +309,13 @@ class SpeciesPredictActivities:
         # attaches, and the project must still show its suggestions.
         await ensure_project_shows_predictions(
             ls,
-            state.dive_number,
+            state.mission_number,
             project_tags(state, judged, threshold),
             species_model_version_tag(SPECIES_PREDICTOR_VERSION, threshold),
         )
         activity.logger.info(
             "dive %s: attached %d species suggestion(s) to existing tasks",
-            target.dive_id,
+            target.mission_id,
             attached,
         )
         return attached

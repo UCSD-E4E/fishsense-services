@@ -2,7 +2,7 @@
 
 Ported verbatim from fishsense-lite@77e8f8e5 services/fishsense-data-processing-
 workflow-worker/src/fishsense_data_processing_workflow_worker/
-laser_label_validation/auto_accept.py. v2: `dive_id` and `image_id` are the
+laser_label_validation/auto_accept.py. v2: `mission_id` and `image_id` are the
 dive's and the capture's `number` (v1's ids for a migrated row), so the
 deterministic audit sample picks the frames v1 picked.
 
@@ -85,7 +85,7 @@ from fishsense_core.laser import (
 )
 
 
-class DiveIneligibleReason(Enum):
+class MissionIneligibleReason(Enum):
     """Why a dive's predictions may not be auto-accepted at all."""
 
     TOO_FEW_PREDICTIONS = "too_few_predictions"
@@ -111,7 +111,7 @@ class FrameVerdict(Enum):
     ALONG_LINE_OUTLIER = "along_line_outlier"
     NO_PREDICTION = "no_prediction"
     AUDIT_SAMPLE = "audit_sample"
-    DIVE_INELIGIBLE = "dive_ineligible"
+    MISSION_INELIGIBLE = "dive_ineligible"
 
 
 @dataclass(frozen=True)
@@ -185,13 +185,13 @@ DEFAULT_CONFIG = AutoAcceptConfig()
 
 
 @dataclass(frozen=True)
-class DiveGate:
+class MissionGate:
     """Whether a dive's predictions agree well enough to auto-accept any of
     them, plus the fit metrics that decided it. Recorded even when eligible —
     the per-dive numbers are the monitoring signal."""
 
     eligible: bool
-    reason: DiveIneligibleReason | None
+    reason: MissionIneligibleReason | None
     n_points: int
     inlier_count: int
     inlier_fraction: float
@@ -233,12 +233,12 @@ def _along_line_z(projections: np.ndarray, inlier_mask: np.ndarray) -> np.ndarra
     return np.abs(projections - median) / scale
 
 
-def _is_audit_sample(dive_id: int, image_id: int, rate: float) -> bool:
+def _is_audit_sample(mission_id: int, image_id: int, rate: float) -> bool:
     """Deterministic per-(dive, image) sampling.
 
     Keyed on the pair rather than drawn from an RNG so a re-run produces the
     same decisions — the cohort revisits dives, and a sample that re-rolled
-    would change a dive's verdicts every pass. Including `dive_id` stops the
+    would change a dive's verdicts every pass. Including `mission_id` stops the
     same frame indices being audited on every dive, which would make the
     audit a fixed blind spot rather than a sample.
     """
@@ -247,18 +247,18 @@ def _is_audit_sample(dive_id: int, image_id: int, rate: float) -> bool:
     if rate >= 1.0:
         return True
     digest = hashlib.blake2b(
-        f"{dive_id}:{image_id}".encode("utf-8"), digest_size=8
+        f"{mission_id}:{image_id}".encode("utf-8"), digest_size=8
     ).digest()
     return int.from_bytes(digest, "big") / float(1 << 64) < rate
 
 
-def evaluate_dive(
-    dive_id: int,
+def evaluate_mission(
+    mission_id: int,
     image_ids: list[int],
     points: np.ndarray,
     *,
     config: AutoAcceptConfig = DEFAULT_CONFIG,
-) -> tuple[DiveGate, list[FrameDecision]]:
+) -> tuple[MissionGate, list[FrameDecision]]:
     """Decide the dive, then each frame.
 
     `points` is an (N, 2) array of predicted dot positions in rectified-image
@@ -274,8 +274,8 @@ def evaluate_dive(
     has_point = np.isfinite(xy).all(axis=1)
     fittable = xy[has_point]
 
-    def _ineligible(reason: DiveIneligibleReason, metrics: dict):
-        gate = DiveGate(eligible=False, reason=reason, **metrics)
+    def _ineligible(reason: MissionIneligibleReason, metrics: dict):
+        gate = MissionGate(eligible=False, reason=reason, **metrics)
         return gate, [
             FrameDecision(
                 image_id=image_id,
@@ -283,7 +283,7 @@ def evaluate_dive(
                 reason=(
                     FrameVerdict.NO_PREDICTION
                     if not present
-                    else FrameVerdict.DIVE_INELIGIBLE
+                    else FrameVerdict.MISSION_INELIGIBLE
                 ),
             )
             for image_id, present in zip(image_ids, has_point)
@@ -297,11 +297,11 @@ def evaluate_dive(
     }
 
     if int(has_point.sum()) < config.min_predictions:
-        return _ineligible(DiveIneligibleReason.TOO_FEW_PREDICTIONS, empty)
+        return _ineligible(MissionIneligibleReason.TOO_FEW_PREDICTIONS, empty)
 
     fit = fit_dive_line(fittable)
     if fit is None:
-        return _ineligible(DiveIneligibleReason.NO_LINE, empty)
+        return _ineligible(MissionIneligibleReason.NO_LINE, empty)
 
     metrics = {
         "n_points": fit.n_points,
@@ -317,9 +317,9 @@ def evaluate_dive(
     # confidence test can read healthy while most of the dive disagrees. The
     # fraction is what actually notices that.
     if fit.inlier_fraction < config.min_inlier_fraction:
-        return _ineligible(DiveIneligibleReason.WEAK_CONSENSUS, metrics)
+        return _ineligible(MissionIneligibleReason.WEAK_CONSENSUS, metrics)
     if fit.line_confidence < config.min_line_confidence:
-        return _ineligible(DiveIneligibleReason.UNCONFIDENT_LINE, metrics)
+        return _ineligible(MissionIneligibleReason.UNCONFIDENT_LINE, metrics)
 
     perp_present = fit.perpendicular_distance(fittable[:, 0], fittable[:, 1])
     tangent = np.array([-fit.b, fit.a])
@@ -331,12 +331,12 @@ def evaluate_dive(
     perp_all[has_point] = perp_present
     z_all[has_point] = z_present
 
-    decisions = _decide_frames(dive_id, image_ids, perp_all, z_all, config)
-    return DiveGate(eligible=True, reason=None, **metrics), decisions
+    decisions = _decide_frames(mission_id, image_ids, perp_all, z_all, config)
+    return MissionGate(eligible=True, reason=None, **metrics), decisions
 
 
 def _decide_frames(
-    dive_id: int,
+    mission_id: int,
     image_ids: list[int],
     perp_all: np.ndarray,
     z_all: np.ndarray,
@@ -359,7 +359,7 @@ def _decide_frames(
             verdict = FrameVerdict.OFF_LINE
         elif z_score > config.max_along_line_z:
             verdict = FrameVerdict.ALONG_LINE_OUTLIER
-        elif _is_audit_sample(dive_id, image_id, config.audit_sample_rate):
+        elif _is_audit_sample(mission_id, image_id, config.audit_sample_rate):
             verdict = FrameVerdict.AUDIT_SAMPLE
         else:
             verdict = FrameVerdict.AUTO_ACCEPTED

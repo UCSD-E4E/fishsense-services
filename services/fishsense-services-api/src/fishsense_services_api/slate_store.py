@@ -11,7 +11,7 @@ Ported from fishsense-lite@77e8f8e5:
 * the flag endpoints, label_reprocess_controller.py `_set_needs_reprocess`
   (the dive-slate kind), which clear_slate_reprocess_flags_activity called;
 * populate_dive_slate_label_studio_project_activity.py's reads and writes
-  (`_select_target_image_ids`, the `put_dive_slate_label` anchoring a task,
+  (`_select_target_image_ids`, the `put_mission_slate_label` anchoring a task,
   the supersede pass, the publish check);
 * the sync's reads and writes (label_controller.py's slate project ids and
   label-by-task lookup, and the PUT of sync_dive_slate_labels_for_label_
@@ -97,9 +97,9 @@ __all__ = [
     "SlateTemplate",
     "apply_slate_sync",
     "clear_slate_reprocess_flags",
-    "dive_has_slate_labels_in_project",
+    "mission_has_slate_labels_in_project",
     "flag_slate_labels_for_reprocess",
-    "next_dive_for_slate_preprocessing",
+    "next_mission_for_slate_preprocessing",
     "record_slate_label",
     "slate_label_studio_projects",
     "slate_populate_candidates",
@@ -118,7 +118,7 @@ class SlateInputsUnavailable(ValueError):
 
 @dataclass(frozen=True)
 class SlatePreprocessCandidate:
-    dive_id: uuid.UUID
+    mission_id: uuid.UUID
     created_at: datetime
 
 
@@ -145,7 +145,7 @@ class SlatePreprocessCapture:
 
 @dataclass(frozen=True)
 class SlatePreprocessInputs:
-    dive_id: uuid.UUID
+    mission_id: uuid.UUID
     slate_template: SlateTemplate
     camera_calibration_id: uuid.UUID
     camera_matrix: list[list[float]]
@@ -192,8 +192,8 @@ class SlateTaskTemplate:
 
 
 #: A capture of dive `d` (aliased) that is its canonical copy.
-_CANONICAL_OF_DIVE = """
-    c.tenant_id = d.tenant_id AND c.dive_id = d.id AND c.is_canonical
+_CANONICAL_OF_MISSION = """
+    c.tenant_id = d.tenant_id AND c.mission_id = d.id AND c.is_canonical
 """
 
 
@@ -226,13 +226,13 @@ def _no_persons_slate_work(marker: str) -> str:
         SELECT 1 FROM captures pc
         JOIN species_labels psp
           ON psp.tenant_id = pc.tenant_id AND psp.capture_id = pc.id
-        WHERE pc.tenant_id = d.tenant_id AND pc.dive_id = d.id AND pc.is_canonical
+        WHERE pc.tenant_id = d.tenant_id AND pc.mission_id = d.id AND pc.is_canonical
           AND psp.content_of_image = {marker} AND NOT psp.superseded
     )
     AND NOT EXISTS (
         SELECT 1 FROM captures pc
         JOIN slate_labels ps ON ps.tenant_id = pc.tenant_id AND ps.capture_id = pc.id
-        WHERE pc.tenant_id = d.tenant_id AND pc.dive_id = d.id AND pc.is_canonical
+        WHERE pc.tenant_id = d.tenant_id AND pc.mission_id = d.id AND pc.is_canonical
           AND ps.ls_project_id IS NOT NULL AND NOT ps.superseded
           AND ps.slate_presence_prediction_id IS NULL
     )
@@ -311,7 +311,7 @@ def slate_preprocess_work(marker: str, *, detector: bool = False) -> str:
     )
     return f"""EXISTS (
         SELECT 1 FROM captures c
-        WHERE {_CANONICAL_OF_DIVE}
+        WHERE {_CANONICAL_OF_MISSION}
           AND (({unlabeled}) OR {_FLAGGED})
     )"""
 
@@ -326,14 +326,14 @@ def slate_preprocess_cohort(marker: str, *, detector: bool = False) -> str:
     )
 
 
-async def next_dive_for_slate_preprocessing(
+async def next_mission_for_slate_preprocessing(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> SlatePreprocessCandidate | None:
     """The tenant's oldest dive in the stage-9 cohort."""
     row = (
         await conn.execute(
             text(f"""
-                SELECT d.id, d.created_at FROM dives d
+                SELECT d.id, d.created_at FROM missions d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
                   AND {slate_preprocess_cohort(":marker", detector=True)}
                 ORDER BY d.created_at, d.id
@@ -372,38 +372,38 @@ async def slate_template(
     return None if row is None else _template(row)
 
 
-async def _dive_setup(conn, tenant_id, dive_id):
+async def _mission_setup(conn, tenant_id, mission_id):
     """The dive's slate template and its device's current camera calibration."""
     row = (
         await conn.execute(
             text("""
                 SELECT d.slate_template_id, cc.id AS calibration_id,
                        cc.camera_matrix, cc.distortion_coefficients
-                FROM dives d
+                FROM missions d
                 LEFT JOIN current_camera_calibrations cc
                   ON cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
-                WHERE d.tenant_id = :tenant AND d.id = :dive
+                WHERE d.tenant_id = :tenant AND d.id = :mission
                 """),
-            {"tenant": tenant_id, "dive": dive_id},
+            {"tenant": tenant_id, "mission": mission_id},
         )
     ).one_or_none()
     if row is None:
-        raise SlateInputsUnavailable(f"dive_id={dive_id} not found")
+        raise SlateInputsUnavailable(f"dive_id={mission_id} not found")
     return row
 
 
 async def slate_preprocess_inputs(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> SlatePreprocessInputs:
     """Everything stage 9 needs for the dive: its template, its camera, and
     the canonical frames to (re)draw -- the cohort's two branches, marked
     frames first, then flagged ones, each once, in capture order."""
-    setup = await _dive_setup(conn, tenant_id, dive_id)
+    setup = await _mission_setup(conn, tenant_id, mission_id)
     if setup.slate_template_id is None:
-        raise SlateInputsUnavailable(f"dive_id={dive_id} has no slate template")
+        raise SlateInputsUnavailable(f"dive_id={mission_id} has no slate template")
     if setup.calibration_id is None:
         raise SlateInputsUnavailable(
-            f"dive_id={dive_id} has no camera calibration for its device"
+            f"dive_id={mission_id} has no camera calibration for its device"
         )
     template = await slate_template(conn, setup.slate_template_id)
     if template is None:
@@ -419,15 +419,15 @@ async def slate_preprocess_inputs(
         text(f"""
             SELECT c.id, c.checksum, c.v1_id IS NOT NULL AS from_v1,
                    ({_MARKED_AND_UNLABELED}) AS marked
-            FROM captures c JOIN dives d ON d.tenant_id = c.tenant_id
-            WHERE d.tenant_id = :tenant AND d.id = :dive AND {_CANONICAL_OF_DIVE}
+            FROM captures c JOIN missions d ON d.tenant_id = c.tenant_id
+            WHERE d.tenant_id = :tenant AND d.id = :mission AND {_CANONICAL_OF_MISSION}
               AND (({_MARKED_AND_UNLABELED}) OR {_FLAGGED})
             ORDER BY NOT ({_MARKED_AND_UNLABELED}), c.number, c.id
             """),
-        {"tenant": tenant_id, "dive": dive_id, "marker": SLATE_CONTENT_MARKER},
+        {"tenant": tenant_id, "mission": mission_id, "marker": SLATE_CONTENT_MARKER},
     )
     return SlatePreprocessInputs(
-        dive_id=dive_id,
+        mission_id=mission_id,
         slate_template=template,
         camera_calibration_id=setup.calibration_id,
         camera_matrix=setup.camera_matrix,
@@ -442,7 +442,7 @@ async def slate_preprocess_inputs(
 async def flag_slate_labels_for_reprocess(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     *,
     only_incomplete: bool = True,
 ) -> int:
@@ -453,11 +453,15 @@ async def flag_slate_labels_for_reprocess(
             UPDATE slate_labels s SET needs_reprocess = true
             FROM captures c
             WHERE s.tenant_id = :tenant AND c.tenant_id = s.tenant_id
-              AND c.id = s.capture_id AND c.dive_id = :dive AND c.is_canonical
+              AND c.id = s.capture_id AND c.mission_id = :mission AND c.is_canonical
               AND NOT s.superseded
               AND (NOT :only_incomplete OR NOT s.completed)
             """),
-        {"tenant": tenant_id, "dive": dive_id, "only_incomplete": only_incomplete},
+        {
+            "tenant": tenant_id,
+            "mission": mission_id,
+            "only_incomplete": only_incomplete,
+        },
     )
     return result.rowcount
 
@@ -465,7 +469,7 @@ async def flag_slate_labels_for_reprocess(
 async def clear_slate_reprocess_flags(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     *,
     checksums: list[str] | None,
 ) -> int:
@@ -477,11 +481,11 @@ async def clear_slate_reprocess_flags(
             UPDATE slate_labels s SET needs_reprocess = false
             FROM captures c
             WHERE s.tenant_id = :tenant AND c.tenant_id = s.tenant_id
-              AND c.id = s.capture_id AND c.dive_id = :dive AND c.is_canonical
+              AND c.id = s.capture_id AND c.mission_id = :mission AND c.is_canonical
               AND (CAST(:checksums AS text[]) IS NULL
                    OR c.checksum = ANY(CAST(:checksums AS text[])))
             """),
-        {"tenant": tenant_id, "dive": dive_id, "checksums": checksums},
+        {"tenant": tenant_id, "mission": mission_id, "checksums": checksums},
     )
     return result.rowcount
 
@@ -490,7 +494,7 @@ async def clear_slate_reprocess_flags(
 
 
 async def slate_populate_candidates(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> list[SlatePopulateCapture]:
     """The dive's canonical frames marked as slate (a live species label), or
     queued by the slate detector (`_detected`), with no completed live slate
@@ -507,10 +511,10 @@ async def slate_populate_candidates(
                    c.captured_at,
                    CASE WHEN {marked} THEN NULL ELSE p.id END AS detected_by
             FROM captures c
-            JOIN dives d ON d.tenant_id = c.tenant_id AND d.id = c.dive_id
+            JOIN missions d ON d.tenant_id = c.tenant_id AND d.id = c.mission_id
             LEFT JOIN current_slate_presence p
               ON p.tenant_id = c.tenant_id AND p.capture_id = c.id
-            WHERE c.tenant_id = :tenant AND c.dive_id = :dive AND c.is_canonical
+            WHERE c.tenant_id = :tenant AND c.mission_id = :mission AND c.is_canonical
               AND ({marked} OR {_detected(":marker")})
               AND NOT EXISTS (
                   SELECT 1 FROM slate_labels s
@@ -519,7 +523,7 @@ async def slate_populate_candidates(
               )
             ORDER BY c.captured_at, c.number
             """),
-        {"tenant": tenant_id, "dive": dive_id, "marker": SLATE_CONTENT_MARKER},
+        {"tenant": tenant_id, "mission": mission_id, "marker": SLATE_CONTENT_MARKER},
     )
     return [
         SlatePopulateCapture(
@@ -565,7 +569,7 @@ async def record_slate_label(
 async def supersede_stale_slate_labels(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     *,
     ls_project_id: int,
     keep_capture_ids: list[uuid.UUID],
@@ -578,19 +582,22 @@ async def supersede_stale_slate_labels(
             UPDATE slate_labels s SET superseded = true
             FROM captures c
             WHERE s.tenant_id = :tenant AND c.tenant_id = s.tenant_id
-              AND c.id = s.capture_id AND c.dive_id = :dive
+              AND c.id = s.capture_id AND c.mission_id = :mission
               AND NOT s.completed AND NOT s.superseded
               AND NOT (s.ls_project_id IS NOT DISTINCT FROM :project
                        AND s.capture_id = ANY(CAST(:keep AS uuid[])))
             """),
-        {"tenant": tenant_id, "dive": dive_id, "project": ls_project_id,
+        {"tenant": tenant_id, "mission": mission_id, "project": ls_project_id,
          "keep": list(keep_capture_ids)},
     )  # fmt: skip
     return result.rowcount
 
 
-async def dive_has_slate_labels_in_project(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID, ls_project_id: int
+async def mission_has_slate_labels_in_project(
+    conn: AsyncConnection,
+    tenant_id: uuid.UUID,
+    mission_id: uuid.UUID,
+    ls_project_id: int,
 ) -> bool:
     """Whether the project already holds live slate labels of the dive."""
     return (
@@ -599,11 +606,11 @@ async def dive_has_slate_labels_in_project(
                 SELECT EXISTS (
                     SELECT 1 FROM slate_labels s JOIN captures c
                       ON c.tenant_id = s.tenant_id AND c.id = s.capture_id
-                    WHERE s.tenant_id = :tenant AND c.dive_id = :dive
+                    WHERE s.tenant_id = :tenant AND c.mission_id = :mission
                       AND s.ls_project_id = :project AND NOT s.superseded
                 )
                 """),
-            {"tenant": tenant_id, "dive": dive_id, "project": ls_project_id},
+            {"tenant": tenant_id, "mission": mission_id, "project": ls_project_id},
         )
     ).scalar_one()
 
@@ -638,7 +645,7 @@ async def slate_template_for_task(
                 SELECT s.capture_id, d.slate_template_id
                 FROM slate_labels s
                 JOIN captures c ON c.tenant_id = s.tenant_id AND c.id = s.capture_id
-                LEFT JOIN dives d ON d.tenant_id = c.tenant_id AND d.id = c.dive_id
+                LEFT JOIN missions d ON d.tenant_id = c.tenant_id AND d.id = c.mission_id
                 WHERE s.tenant_id = :tenant AND s.ls_task_id = :task
                   AND NOT s.superseded
                 """),
@@ -695,17 +702,17 @@ class SlateCatalog(ServicePrincipal):
     """Stage 9 and the dive-slate project's database side, as the
     orchestrator's service principal."""
 
-    async def next_dive_for_slate_preprocessing(
+    async def next_mission_for_slate_preprocessing(
         self, tenant_id: uuid.UUID
     ) -> SlatePreprocessCandidate | None:
         async with self._tenant(tenant_id) as conn:
-            return await next_dive_for_slate_preprocessing(conn, tenant_id)
+            return await next_mission_for_slate_preprocessing(conn, tenant_id)
 
     async def slate_preprocess_inputs(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> SlatePreprocessInputs:
         async with self._tenant(tenant_id) as conn:
-            return await slate_preprocess_inputs(conn, tenant_id, dive_id)
+            return await slate_preprocess_inputs(conn, tenant_id, mission_id)
 
     async def slate_template(
         self, tenant_id: uuid.UUID, slate_template_id: uuid.UUID
@@ -714,26 +721,34 @@ class SlateCatalog(ServicePrincipal):
             return await slate_template(conn, slate_template_id)
 
     async def clear_slate_reprocess_flags(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, *, checksums: list[str] | None
+        self,
+        tenant_id: uuid.UUID,
+        mission_id: uuid.UUID,
+        *,
+        checksums: list[str] | None,
     ) -> int:
         async with self._tenant(tenant_id) as conn:
             return await clear_slate_reprocess_flags(
-                conn, tenant_id, dive_id, checksums=checksums
+                conn, tenant_id, mission_id, checksums=checksums
             )
 
     async def flag_slate_labels_for_reprocess(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, *, only_incomplete: bool = True
+        self,
+        tenant_id: uuid.UUID,
+        mission_id: uuid.UUID,
+        *,
+        only_incomplete: bool = True,
     ) -> int:
         async with self._tenant(tenant_id) as conn:
             return await flag_slate_labels_for_reprocess(
-                conn, tenant_id, dive_id, only_incomplete=only_incomplete
+                conn, tenant_id, mission_id, only_incomplete=only_incomplete
             )
 
     async def slate_populate_candidates(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> list[SlatePopulateCapture]:
         async with self._tenant(tenant_id) as conn:
-            return await slate_populate_candidates(conn, tenant_id, dive_id)
+            return await slate_populate_candidates(conn, tenant_id, mission_id)
 
     async def record_slate_label(
         self,
@@ -759,7 +774,7 @@ class SlateCatalog(ServicePrincipal):
     async def supersede_stale_slate_labels(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         *,
         ls_project_id: int,
         keep_capture_ids: list[uuid.UUID],
@@ -768,17 +783,17 @@ class SlateCatalog(ServicePrincipal):
             return await supersede_stale_slate_labels(
                 conn,
                 tenant_id,
-                dive_id,
+                mission_id,
                 ls_project_id=ls_project_id,
                 keep_capture_ids=keep_capture_ids,
             )
 
-    async def dive_has_slate_labels_in_project(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, ls_project_id: int
+    async def mission_has_slate_labels_in_project(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, ls_project_id: int
     ) -> bool:
         async with self._tenant(tenant_id) as conn:
-            return await dive_has_slate_labels_in_project(
-                conn, tenant_id, dive_id, ls_project_id
+            return await mission_has_slate_labels_in_project(
+                conn, tenant_id, mission_id, ls_project_id
             )
 
     async def slate_label_studio_projects(self, tenant_id: uuid.UUID) -> list[int]:

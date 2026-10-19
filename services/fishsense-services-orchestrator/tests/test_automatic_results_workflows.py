@@ -28,7 +28,7 @@ from datetime import timedelta
 from typing import List, Optional
 
 from temporalio import activity, workflow
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.exceptions import ApplicationError
 from temporalio.client import WorkflowFailureError
 from temporalio.testing import WorkflowEnvironment
@@ -65,8 +65,8 @@ from fishsense_services_orchestrator.automatic_results.activities import (
 )
 from fishsense_services_orchestrator.automatic_results import workflow as sut
 from fishsense_services_orchestrator.automatic_results.workflow import (
-    AutomaticDiveReport,
-    AutomaticResultsForDiveWorkflow,
+    AutomaticMissionReport,
+    AutomaticResultsForMissionWorkflow,
     AutomaticResultsParentWorkflow,
     AutomaticRunReport,
 )
@@ -76,8 +76,8 @@ from fishsense_services_orchestrator.object_store.contracts import (
     StagingTarget,
 )
 
-TENANT, DIVE = uuid.uuid4(), uuid.uuid4()
-TARGET = AutomaticTarget(TENANT, DIVE)
+TENANT, MISSION = uuid.uuid4(), uuid.uuid4()
+TARGET = AutomaticTarget(TENANT, MISSION)
 QUEUE = "test-automatic-results"
 K = [[1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0]]
 REF = ObjectRef(bucket="b", key="k")
@@ -88,7 +88,7 @@ SELECTS: list[tuple] = []
 
 def _frames_input(n):
     return PredictAutomaticFramesInput(
-        tenant_id=TENANT, dive_id=DIVE, camera_matrix=K,
+        tenant_id=TENANT, mission_id=MISSION, camera_matrix=K,
         distortion_coefficients=[0.0] * 5,
         frames=[AutomaticFrame(capture_id=uuid.uuid4(), raw=REF, jpeg=REF)
                 for _ in range(n)],
@@ -97,7 +97,7 @@ def _frames_input(n):
 
 def _species_input(n):
     return PredictSpeciesImagesInput(
-        tenant_id=TENANT, dive_id=DIVE,
+        tenant_id=TENANT, mission_id=MISSION,
         candidates=[SpeciesCandidate(choice="Fish, A (A a)", scientific_name="A a")],
         images=[PredictSpeciesImage(capture_id=uuid.uuid4(),
                                     headtail_prediction_id=uuid.uuid4(), jpeg=REF,
@@ -108,7 +108,7 @@ def _species_input(n):
 def _calibration_plan(n):
     return AutomaticCalibrationPlan(
         payload=FitAutomaticCalibrationInput(
-            tenant_id=TENANT, dive_id=DIVE, camera_matrix=K,
+            tenant_id=TENANT, mission_id=MISSION, camera_matrix=K,
             frames=[AutomaticCalibrationFrame(capture_id=uuid.uuid4(), jpeg=REF,
                                               x=1.0, y=2.0) for _ in range(n)],
         ),
@@ -119,7 +119,7 @@ def _calibration_plan(n):
 def _measure_plan(n):
     return AutomaticMeasurePlan(
         payload=MeasureAutomaticInput(
-            tenant_id=TENANT, dive_id=DIVE, camera_matrix=K,
+            tenant_id=TENANT, mission_id=MISSION, camera_matrix=K,
             laser_position=[0.1, 0, 0], laser_axis=[0, 0, 1],
             captures=[AutomaticMeasureCapture(
                 capture_id=uuid.uuid4(), automatic_head_tail_prediction_id=uuid.uuid4(),
@@ -145,7 +145,7 @@ def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET)
 
     @activity.defn(name="record_automatic_results_failure")
     async def failed(t: AutomaticTarget, step: str, error: str) -> None:
-        EVENTS.append(("failed", t.dive_id, step))
+        EVENTS.append(("failed", t.mission_id, step))
 
     @activity.defn(name="record_automatic_frame_failures")
     async def frames_failed(
@@ -241,14 +241,14 @@ def _species_results(payload):
 
 def _calibration_result(payload):
     return AutomaticCalibrationResult(
-        dive_id=payload["dive_id"], outcome="accepted", algorithm_version="1",
+        mission_id=payload["dive_id"], outcome="accepted", algorithm_version="1",
         laser_position=[0.1, 0, 0], laser_axis=[0, 0, 1],
     ).model_dump(mode="json")  # fmt: skip
 
 
 def _measure_result(payload):
     return MeasureAutomaticResult(
-        dive_id=payload["dive_id"], algorithm="a", algorithm_version="1",
+        mission_id=payload["dive_id"], algorithm="a", algorithm_version="1",
         core_version="4.1.0",
         lengths=[AutomaticLength(capture_id=c["capture_id"],
                                  automatic_head_tail_prediction_id=c[
@@ -330,17 +330,17 @@ class _Measure:  # pylint: disable=too-few-public-methods
 
 
 async def _run(
-    workflow_cls=AutomaticResultsForDiveWorkflow, *args, species_fails=False,
+    workflow_cls=AutomaticResultsForMissionWorkflow, *args, species_fails=False,
     frames_fail=False, frames_partial=False, **stubs,
 ):  # fmt: skip
     EVENTS.clear()
     SELECTS.clear()
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         workers = [
             Worker(env.client, task_queue=QUEUE, activities=_stubs(**stubs),
-                   workflows=[AutomaticResultsForDiveWorkflow,
+                   workflows=[AutomaticResultsForMissionWorkflow,
                               AutomaticResultsParentWorkflow]),
             Worker(env.client, task_queue=PROCESSOR_GPU_TASK_QUEUE,
                    activities=[_record],
@@ -359,42 +359,42 @@ async def _run(
             )
 
 
-async def test_one_dive_every_step_in_order():
-    await _run(AutomaticResultsForDiveWorkflow, TARGET)
+async def test_one_mission_every_step_in_order():
+    await _run(AutomaticResultsForMissionWorkflow, TARGET)
 
     assert EVENTS == [
         ("wake gpu",),
         ("stage",),
-        ("child", f"automatic-frames-{DIVE}"),
+        ("child", f"automatic-frames-{MISSION}"),
         ("persist frames", 2),
         ("cleanup",),
         ("wake per-image",),
-        ("child", f"automatic-calibration-{DIVE}"),
+        ("child", f"automatic-calibration-{MISSION}"),
         ("persist calibration", "accepted", None),
         ("wake light",),
-        ("child", f"automatic-measure-{DIVE}"),
+        ("child", f"automatic-measure-{MISSION}"),
         ("persist lengths", 1),
-        ("child", f"automatic-species-{DIVE}"),
+        ("child", f"automatic-species-{MISSION}"),
         ("persist species", ["decode_failed"]),
     ]
 
 
-async def test_a_species_failure_costs_the_dive_nothing():
+async def test_a_species_failure_costs_the_mission_nothing():
     """Species last, and its failure logged rather than raised: the dive's
     calibration and lengths are already written, and the run succeeds."""
-    report = await _run(AutomaticResultsForDiveWorkflow, TARGET, species_fails=True)
-    assert report == AutomaticDiveReport(TENANT, DIVE, species_failed=True)
+    report = await _run(AutomaticResultsForMissionWorkflow, TARGET, species_fails=True)
+    assert report == AutomaticMissionReport(TENANT, MISSION, species_failed=True)
     assert ("persist lengths", 1) in EVENTS
-    assert ("child", f"automatic-species-{DIVE}") in EVENTS
+    assert ("child", f"automatic-species-{MISSION}") in EVENTS
     assert not [e for e in EVENTS if e[0] == "persist species"]
 
 
-async def test_without_a_gpu_a_dive_owing_frames_waits():
+async def test_without_a_gpu_a_mission_owing_frames_waits():
     """Said, not silent (2026-10-15 gap audit). And its calibration and
     lengths wait too: on a dive whose frames are owed they would be fit on
     part of it, and every hour without a GPU appended another refusal to its
     history (review of #85)."""
-    report = await _run(AutomaticResultsForDiveWorkflow, TARGET, mode="cpu_fallback")
+    report = await _run(AutomaticResultsForMissionWorkflow, TARGET, mode="cpu_fallback")
     assert report.skipped == ["frames: no GPU (cpu_fallback)"]
     assert report.no_gpu == "cpu_fallback"
     kinds = [e[0] for e in EVENTS]
@@ -403,10 +403,10 @@ async def test_without_a_gpu_a_dive_owing_frames_waits():
     assert "persist lengths" not in kinds and "persist species" not in kinds
 
 
-async def test_without_a_gpu_a_dive_owing_no_frames_still_gets_its_lengths():
+async def test_without_a_gpu_a_mission_owing_no_frames_still_gets_its_lengths():
     """Its frames are all done: the CPU steps go on, and only species waits."""
     report = await _run(
-        AutomaticResultsForDiveWorkflow, TARGET, mode="cpu_fallback", frames=0
+        AutomaticResultsForMissionWorkflow, TARGET, mode="cpu_fallback", frames=0
     )
     assert report.skipped == ["species: no GPU (cpu_fallback)"]
     assert ("persist calibration", "accepted", None) in EVENTS
@@ -414,31 +414,31 @@ async def test_without_a_gpu_a_dive_owing_no_frames_still_gets_its_lengths():
 
 
 async def test_no_gpu_work_wakes_no_gpu():
-    report = await _run(AutomaticResultsForDiveWorkflow, TARGET, frames=0, species=0)
+    report = await _run(AutomaticResultsForMissionWorkflow, TARGET, frames=0, species=0)
     assert ("wake gpu",) not in EVENTS and ("stage",) not in EVENTS
     assert report.skipped == []  # nothing owed is nothing skipped
 
 
 async def test_no_slate_frame_is_a_refusal_without_a_processor():
-    await _run(AutomaticResultsForDiveWorkflow, TARGET, slate=0)
+    await _run(AutomaticResultsForMissionWorkflow, TARGET, slate=0)
     assert ("persist calibration", "refused", "no_candidates") in EVENTS
     assert ("wake per-image",) not in EVENTS
 
 
 async def test_no_calibration_means_no_lengths():
-    await _run(AutomaticResultsForDiveWorkflow, TARGET, plan=None)
+    await _run(AutomaticResultsForMissionWorkflow, TARGET, plan=None)
     assert ("wake light",) not in EVENTS
 
 
-async def test_the_parent_runs_the_selected_dive():
+async def test_the_parent_runs_the_selected_mission():
     report = await _run(AutomaticResultsParentWorkflow)
-    assert report.dives == [AutomaticDiveReport(TENANT, DIVE)]
+    assert report.missions == [AutomaticMissionReport(TENANT, MISSION)]
     assert ("persist lengths", 1) in EVENTS
 
 
 async def test_nothing_selected_is_nothing_done():
     report = await _run(AutomaticResultsParentWorkflow, selected=None)
-    assert report == AutomaticRunReport(dives=[], stopped="backlog empty")
+    assert report == AutomaticRunReport(missions=[], stopped="backlog empty")
     assert EVENTS == []
 
 
@@ -446,13 +446,13 @@ async def test_a_run_with_no_gpu_says_so_and_stops_draining():
     """Every backlog dive owes GPU work first (its frames). With no GPU the
     run walked the whole backlog doing nothing, and read as a quiet success
     (2026-10-15 gap audit): it stops at the first dive, and says why."""
-    dives = [_target(), _target(), _target()]
+    missions = [_target(), _target(), _target()]
     report = await _run(
-        AutomaticResultsParentWorkflow, selected=dives, mode="cpu_fallback"
+        AutomaticResultsParentWorkflow, selected=missions, mode="cpu_fallback"
     )
     assert report.stopped == "no GPU (cpu_fallback)"
-    assert [d.dive_id for d in report.dives] == [dives[0].dive_id]
-    assert report.dives[0].no_gpu == "cpu_fallback"
+    assert [d.mission_id for d in report.missions] == [missions[0].mission_id]
+    assert report.missions[0].no_gpu == "cpu_fallback"
     assert len(SELECTS) == 1
 
 
@@ -466,54 +466,54 @@ def _target():
 async def test_one_run_drains_the_backlog():
     """2026-10-15 audit: one dive per hourly firing put the ~474-dive backlog
     weeks out. A run takes dive after dive, telling the cohort what it took."""
-    dives = [_target(), _target(), _target()]
-    report = await _run(AutomaticResultsParentWorkflow, selected=dives)
-    assert [d.dive_id for d in report.dives] == [d.dive_id for d in dives]
+    missions = [_target(), _target(), _target()]
+    report = await _run(AutomaticResultsParentWorkflow, selected=missions)
+    assert [d.mission_id for d in report.missions] == [d.mission_id for d in missions]
     assert report.stopped == "backlog empty"
-    assert SELECTS == [(), (dives[0].dive_id,), (dives[0].dive_id, dives[1].dive_id),
-                       tuple(d.dive_id for d in dives)]  # fmt: skip
+    assert SELECTS == [(), (missions[0].mission_id,), (missions[0].mission_id, missions[1].mission_id),
+                       tuple(d.mission_id for d in missions)]  # fmt: skip
     assert [e for e in EVENTS if e[0] == "persist lengths"] == [
         ("persist lengths", 1)
     ] * 3
 
 
-async def test_a_dive_whose_step_fails_is_recorded_cleaned_up_and_passed_over():
+async def test_a_mission_whose_step_fails_is_recorded_cleaned_up_and_passed_over():
     """A frame no worker can finish, a raw gone from the NAS: the failure is
     recorded (at three the cohort leaves the dive for an operator), its raw
     scratch is cleaned up, and the run goes on."""
-    dives = [_target(), _target()]
+    missions = [_target(), _target()]
     report = await _run(
-        AutomaticResultsParentWorkflow, selected=dives, frames_fail=True
+        AutomaticResultsParentWorkflow, selected=missions, frames_fail=True
     )
-    assert [d.failed for d in report.dives] == ["frames", "frames"]
+    assert [d.failed for d in report.missions] == ["frames", "frames"]
     assert [e for e in EVENTS if e[0] == "failed"] == [
-        ("failed", d.dive_id, "frames") for d in dives
+        ("failed", d.mission_id, "frames") for d in missions
     ]
     assert [e[0] for e in EVENTS].count("cleanup") == 2
     assert not [e for e in EVENTS if e[0] == "persist calibration"]
 
 
-async def test_a_dive_handed_back_twice_ends_the_run():
+async def test_a_mission_handed_back_twice_ends_the_run():
     report = await _run(AutomaticResultsParentWorkflow)
     assert report.stopped == "dive handed back"
     assert len(SELECTS) == 2
 
 
-async def test_no_new_dive_is_started_once_the_drain_window_has_passed():
+async def test_no_new_mission_is_started_once_the_drain_window_has_passed():
     assert sut.AUTOMATIC_DRAIN_WINDOW <= timedelta(minutes=55)
     assert sut.RUN_TIMEOUT >= sut.AUTOMATIC_DRAIN_WINDOW
 
 
-async def test_a_dive_run_by_hand_records_its_failure_and_fails():
+async def test_a_mission_run_by_hand_records_its_failure_and_fails():
     """The validation harness runs dives by hand: a failure must not read as
     a finished dive."""
     try:
-        await _run(AutomaticResultsForDiveWorkflow, TARGET, frames_fail=True)
+        await _run(AutomaticResultsForMissionWorkflow, TARGET, frames_fail=True)
     except WorkflowFailureError:
         pass
     else:
         raise AssertionError("a failed dive run by hand must fail")
-    assert ("failed", DIVE, "frames") in EVENTS
+    assert ("failed", MISSION, "frames") in EVENTS
     assert ("cleanup",) in EVENTS
 
 
@@ -544,11 +544,11 @@ async def test_the_frames_that_came_back_are_kept_and_the_rest_owed():
     assert not [e for e in EVENTS if e[0] == "failed"]
     assert ("cleanup",) in EVENTS
     assert not [e for e in EVENTS if e[0] == "persist calibration"]
-    first = report.dives[0]
+    first = report.missions[0]
     assert first.failed is None and first.skipped == [
         "calibration, lengths, species: 1 frame still owed"
     ]
-    assert [d.dive_id for d in report.dives] == [DIVE, other.dive_id]
+    assert [d.mission_id for d in report.missions] == [MISSION, other.mission_id]
 
 
 def test_a_gpu_child_has_time_for_every_frame_it_was_given():
@@ -557,7 +557,7 @@ def test_a_gpu_child_has_time_for_every_frame_it_was_given():
     2026-10-18); the child returns only at the end, so everything computed was
     lost and the next firing started over. The budget scales with the frames,
     within a floor and a ceiling the run timeouts are built from."""
-    from fishsense_services_orchestrator.automatic_results import run_dives
+    from fishsense_services_orchestrator.automatic_results import run_missions
 
     assert sut.gpu_child_timeout(10) == sut.GPU_CHILD_MIN
     big = sut.gpu_child_timeout(1698)
@@ -565,4 +565,4 @@ def test_a_gpu_child_has_time_for_every_frame_it_was_given():
     assert big <= sut.GPU_CHILD_MAX
     assert sut.gpu_child_timeout(10**6) == sut.GPU_CHILD_MAX
     assert sut.RUN_TIMEOUT >= 2 * sut.GPU_CHILD_MAX + sut.AUTOMATIC_DRAIN_WINDOW
-    assert run_dives.DIVE_TIMEOUT >= sut.RUN_TIMEOUT
+    assert run_missions.MISSION_TIMEOUT >= sut.RUN_TIMEOUT

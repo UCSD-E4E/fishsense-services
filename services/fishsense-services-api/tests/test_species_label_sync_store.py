@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from sqlalchemy import text
 
 from fishsense_services_api.db import tenant_transaction
-from fishsense_services_api.ingest_store import create_dive, register_capture
+from fishsense_services_api.ingest_store import create_mission, register_capture
 from fishsense_services_api.label_sync_store import (
     LabelSyncCatalog,
     SpeciesSync,
@@ -46,17 +46,17 @@ async def _tenant(owner_engine, slug="lab") -> uuid.UUID:
 
 async def _capture(app_engine, tenant) -> tuple[uuid.UUID, uuid.UUID]:
     async with tenant_transaction(app_engine, tenant) as conn:
-        dive = await create_dive(
-            conn, tenant, source_path=f"d-{uuid.uuid4()}", name="d", dived_at=T0
+        mission = await create_mission(
+            conn, tenant, source_path=f"d-{uuid.uuid4()}", name="d", started_at=T0
         )
         capture = (
             await register_capture(
-                conn, tenant, dive_id=dive, device_id=None,
-                source_path=f"{dive}/P.ORF", captured_at=T0,
+                conn, tenant, mission_id=mission, device_id=None,
+                source_path=f"{mission}/P.ORF", captured_at=T0,
                 checksum=uuid.uuid4().hex,
             )  # fmt: skip
         ).capture_id
-    return dive, capture
+    return mission, capture
 
 
 async def _species(owner_engine, tenant, capture, *, project, task, **columns):
@@ -122,7 +122,7 @@ async def test_the_sync_writes_every_field_the_annotation_gives(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive, capture = await _capture(app_engine, lab)
+    mission, capture = await _capture(app_engine, lab)
     await _species(owner_engine, lab, capture, project=70, task=101)
 
     applied = await _apply(
@@ -133,7 +133,7 @@ async def test_the_sync_writes_every_field_the_annotation_gives(
               fish_curved_category="No Curve"),
     )  # fmt: skip
 
-    assert (applied.capture_id, applied.dive_id) == (capture, dive)
+    assert (applied.capture_id, applied.mission_id) == (capture, mission)
     row = await _label(owner_engine, 101)
     assert row.completed is True
     assert row.grouping == "Part of previous group"

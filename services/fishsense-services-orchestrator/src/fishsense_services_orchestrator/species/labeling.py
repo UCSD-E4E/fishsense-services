@@ -17,7 +17,7 @@ SPECIES_PROJECT_TITLE_SUFFIX = "Species Labeling"
 # Labeling-config XML supplied by the user 2026-05-05. Several control
 # names are load-bearing for downstream code:
 #   * `name="grouping"` choices — stage 6.1
-#     (`update_dive_image_groups_activity`) walks PREDICTION clusters
+#     (`update_mission_image_groups_activity`) walks PREDICTION clusters
 #     using these labels to materialize LABEL_STUDIO clusters.
 #   * `name="exclude"` with `Top 3 photos of group` — historically used
 #     by stage 5.1 head/tail. The 2026-05-04 cascade flip moved
@@ -27,7 +27,7 @@ SPECIES_PROJECT_TITLE_SUFFIX = "Species Labeling"
 #   * `name="species"` taxonomy — its top-level `Slate` branch with
 #     the `Laser on slate` leaf is what stage 9 keys on
 #     (`SLATE_CONTENT_MARKER = "Slate, Laser on slate"` in
-#     `populate_dive_slate_label_studio_project_activity.py`).
+#     `populate_mission_slate_label_studio_project_activity.py`).
 # Renaming any of these breaks the downstream populate / sync chain
 # silently (the activity returns no rows rather than erroring).
 #

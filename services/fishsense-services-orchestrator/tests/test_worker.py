@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 
 from fishsense_services_api.clustering_store import ClusteringCandidate
@@ -37,13 +37,13 @@ from fishsense_services_orchestrator.clustering.activities import (
     ClusteringTarget,
 )
 from fishsense_services_orchestrator.clustering.workflow import (
-    ClusterDiveFramesParentWorkflow,
+    ClusterMissionFramesParentWorkflow,
 )
 from fishsense_services_orchestrator.ingest.activities import IngestActivities
-from fishsense_services_orchestrator.ingest.contracts import IngestDiveRequest
+from fishsense_services_orchestrator.ingest.contracts import IngestMissionRequest
 from fishsense_services_orchestrator.ingest.nas import NasEntry
 from fishsense_services_orchestrator.ingest.nas_frames import NasSettings
-from fishsense_services_orchestrator.ingest.workflow import IngestDiveWorkflow
+from fishsense_services_orchestrator.ingest.workflow import IngestMissionWorkflow
 from fishsense_services_orchestrator.nrp.activities import NrpActivities
 from fishsense_services_orchestrator.settings import (
     OrchestratorSettings,
@@ -116,30 +116,30 @@ class _Catalog:
     async def resolve_device(self, tenant_id, serial):
         return ResolvedDevice(DEVICE, "FSL-07", True) if serial == SERIAL else None
 
-    async def dive_by_path(self, tenant_id, path):
+    async def mission_by_path(self, tenant_id, path):
         return None
 
-    async def dives_with_leaf(self, tenant_id, leaf):
+    async def missions_with_leaf(self, tenant_id, leaf):
         return []
 
     async def slate_template(self, name):
         return None
 
-    async def create_dive(self, tenant_id, **dive):
-        self.dive_id = uuid.uuid4()
-        return self.dive_id
+    async def create_mission(self, tenant_id, **mission):
+        self.mission_id = uuid.uuid4()
+        return self.mission_id
 
-    async def registered_captures(self, tenant_id, dive_id):
+    async def registered_captures(self, tenant_id, mission_id):
         return dict(self.captures)
 
     async def register_capture(self, tenant_id, **capture):
         self.captures[capture["source_path"]] = capture["captured_at"]
         return RegisteredCapture(uuid.uuid4(), True)
 
-    async def finalize_dive(self, tenant_id, dive_id, *, priority, dived_at):
-        self.finalized = (dive_id, priority, dived_at)
+    async def finalize_mission(self, tenant_id, mission_id, *, priority, started_at):
+        self.finalized = (mission_id, priority, started_at)
 
-    async def content_overlap(self, tenant_id, dive_id):
+    async def content_overlap(self, tenant_id, mission_id):
         return [ContentOverlap(uuid.uuid4(), "backup/x", 1, 0.5)]
 
 
@@ -170,24 +170,26 @@ async def test_a_whole_ingest_runs_through_the_real_worker():
     )  # fmt: skip
 
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with build_worker(
             env.client, activities=_activities_of(activities), task_queue="wiring"
         ):
             report = await env.client.execute_workflow(
-                IngestDiveWorkflow.run,
-                IngestDiveRequest(tenant="lab", dive_path=FOLDER, self_calibrates=True),
+                IngestMissionWorkflow.run,
+                IngestMissionRequest(
+                    tenant="lab", mission_path=FOLDER, self_calibrates=True
+                ),
                 id=f"wiring-{uuid.uuid4()}",
                 task_queue="wiring",
             )
 
     assert report.committed is True, report
-    assert report.dive_id == catalog.dive_id
+    assert report.mission_id == catalog.mission_id
     assert report.registered == 2
     assert set(catalog.captures) == {f"{FOLDER}/P1.ORF", f"{FOLDER}/P2.ORF"}
     assert catalog.finalized == (
-        catalog.dive_id,
+        catalog.mission_id,
         "high",
         datetime(2024, 8, 21, 8, 56, 51, tzinfo=timezone.utc),
     )
@@ -199,7 +201,7 @@ class _ClusteringCatalog:
     """One tenant, one dive in the stage-1 cohort, two bursts of frames."""
 
     def __init__(self):
-        self.dive = uuid.uuid4()
+        self.mission = uuid.uuid4()
         base = datetime(2024, 8, 21, 8, 0, tzinfo=timezone.utc)
         self.captures = [
             (
@@ -214,16 +216,16 @@ class _ClusteringCatalog:
     async def member_tenants(self):
         return [TENANT]
 
-    async def next_dive_for_clustering(self, tenant_id):
+    async def next_mission_for_clustering(self, tenant_id):
         if self.persisted is not None:
             return None
-        return ClusteringCandidate(self.dive, datetime.now(timezone.utc))
+        return ClusteringCandidate(self.mission, datetime.now(timezone.utc))
 
-    async def canonical_capture_times(self, tenant_id, dive_id):
+    async def canonical_capture_times(self, tenant_id, mission_id):
         return self.captures
 
-    async def persist_prediction_clusters(self, tenant_id, dive_id, clusters):
-        self.persisted = (tenant_id, dive_id, clusters)
+    async def persist_prediction_clusters(self, tenant_id, mission_id, clusters):
+        self.persisted = (tenant_id, mission_id, clusters)
         return len(clusters)
 
 
@@ -235,7 +237,7 @@ async def test_stage_1_runs_across_the_orchestrator_and_the_processor():
     catalog = _ClusteringCatalog()
 
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with (
             build_worker(
@@ -249,14 +251,14 @@ async def test_stage_1_runs_across_the_orchestrator_and_the_processor():
             build_processor(env.client, role="light"),
         ):
             target = await env.client.execute_workflow(
-                ClusterDiveFramesParentWorkflow.run,
+                ClusterMissionFramesParentWorkflow.run,
                 id=f"wiring-{uuid.uuid4()}",
                 task_queue="wiring",
             )
 
-    assert target == ClusteringTarget(tenant_id=TENANT, dive_id=catalog.dive)
-    tenant, dive, clusters = catalog.persisted
-    assert (tenant, dive) == (TENANT, catalog.dive)
+    assert target == ClusteringTarget(tenant_id=TENANT, mission_id=catalog.mission)
+    tenant, mission, clusters = catalog.persisted
+    assert (tenant, mission) == (TENANT, catalog.mission)
     assert sorted(sorted(c.int for c in cluster) for cluster in clusters) == [
         [0, 1, 2],
         [10, 11, 12],

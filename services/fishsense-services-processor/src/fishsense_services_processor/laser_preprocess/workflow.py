@@ -53,7 +53,7 @@ class PreprocessLaserImagesWorkflow:
     async def run(self, payload: PreprocessLaserImagesInput) -> None:
         workflow.logger.info(
             "preprocessing laser images dive_id=%s images=%d",
-            payload.dive_id,
+            payload.mission_id,
             len(payload.images),
         )
         await asyncio.gather(

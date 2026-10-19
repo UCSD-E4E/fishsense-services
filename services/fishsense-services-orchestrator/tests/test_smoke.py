@@ -61,10 +61,10 @@ class FakeProbes:
     async def lab_tenant_id(self):
         return self.lab
 
-    async def research_measurement_count(self, dive_number):
+    async def research_measurement_count(self, mission_number):
         if isinstance(self.measurements, Exception):
             raise self.measurements
-        return self.measurements.get(dive_number, 0)
+        return self.measurements.get(mission_number, 0)
 
     async def temporal_schedule_ids(self):
         if isinstance(self.schedules, Exception):
@@ -87,7 +87,7 @@ def _settings(**overrides):
         api_url="http://api:8000",
         web_url="http://web:3000",
         label_studio_workspace="FishSense",
-        dive_number=490,
+        mission_number=490,
         min_measurements=1,
     )
     values.update(overrides)
@@ -177,7 +177,7 @@ async def test_an_openapi_document_without_paths_fails():
     assert _failed(await _run(probes)) == {"api openapi"}
 
 
-async def test_a_dive_with_fewer_measurements_than_expected_fails():
+async def test_a_mission_with_fewer_measurements_than_expected_fails():
     results = await _run(FakeProbes(), min_measurements=13)
 
     failed = [r for r in results if not r.ok]
@@ -262,28 +262,32 @@ async def test_the_report_says_go_or_no_go_on_its_last_line(capsys):
 # --- the command line -------------------------------------------------------------
 
 
-def test_the_dive_is_required():
+def test_the_mission_is_required():
     """A smoke test with no known dive proves nothing about the data."""
     with pytest.raises(SystemExit):
         sut.parse_args([])
 
 
-def test_the_command_line_names_the_dive_and_the_floor():
+def test_the_command_line_names_the_mission_and_the_floor():
     args = sut.parse_args(["--dive", "490", "--min-measurements", "5"])
 
-    assert (args.dive, args.min_measurements) == (490, 5)
+    assert (args.mission, args.min_measurements) == (490, 5)
 
 
 def test_main_exits_with_the_verdict(monkeypatch):
     monkeypatch.setattr(sut, "_live_probes", lambda: FakeProbes(lab=None))
-    monkeypatch.setattr(sut, "_options", lambda args: _settings(dive_number=args.dive))
+    monkeypatch.setattr(
+        sut, "_options", lambda args: _settings(mission_number=args.mission)
+    )
 
     assert sut.main(["--dive", "490"]) == 1
 
 
 def test_main_is_go_on_a_healthy_slot(monkeypatch):
     monkeypatch.setattr(sut, "_live_probes", lambda: FakeProbes())
-    monkeypatch.setattr(sut, "_options", lambda args: _settings(dive_number=args.dive))
+    monkeypatch.setattr(
+        sut, "_options", lambda args: _settings(mission_number=args.mission)
+    )
 
     assert sut.main(["--dive", "490"]) == 0
 

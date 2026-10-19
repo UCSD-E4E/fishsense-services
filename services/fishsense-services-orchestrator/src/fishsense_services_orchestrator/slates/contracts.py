@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from typing import Annotated
 
 from pydantic import BaseModel
 
 from fishsense_services_contracts.slate_calibration import PreprocessSlateImagesInput
+from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = [
     "ClearSlateFlagsInput",
@@ -49,7 +51,7 @@ class ClearSlateFlagsInput:
     """
 
     tenant_id: uuid.UUID
-    dive_id: uuid.UUID
+    mission_id: Annotated[uuid.UUID, renamed_from("dive_id", "mission_id")]
     checksums: list[str] | None = None
 
 
@@ -66,5 +68,5 @@ class PopulateSlateProject:
     """Push a dive's slate tasks into its project (v1: `(dive_id, project_id)`)."""
 
     tenant_id: uuid.UUID
-    dive_id: uuid.UUID
+    mission_id: Annotated[uuid.UUID, renamed_from("dive_id", "mission_id")]
     ls_project_id: int

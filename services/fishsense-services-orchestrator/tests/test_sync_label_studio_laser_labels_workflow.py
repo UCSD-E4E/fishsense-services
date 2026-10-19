@@ -23,7 +23,7 @@ from typing import List
 import pytest
 from temporalio import activity
 from temporalio.client import WorkflowFailureError
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
@@ -63,7 +63,7 @@ def _stubs(projects, calls: List, *, fail=(), gate=None):
 
 async def _run(activities):
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,

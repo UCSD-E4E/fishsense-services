@@ -54,7 +54,7 @@ function observation(overrides: Partial<Observation> = {}): Observation {
     length_m: 0.305,
     captured_at: "2025-01-18T01:00:00Z",
     device: { kind: "lite", name: "FSL-10" },
-    dive: { number: 2, name: "FSL-10D Ginny" },
+    mission: { number: 2, name: "FSL-10D Ginny" },
     species: null,
     fish_model: { name: "Ginny", known_length_m: 0.3127 },
     location: null,
@@ -238,18 +238,18 @@ describe("methodLabel", () => {
 });
 
 describe("where", () => {
-  it("is the dive for a Lite fish and the place for a mobile one", () => {
+  it("is the mission for a Lite fish and the place for a mobile one", () => {
     expect(where(observation())).toBe("FSL-10D Ginny");
     expect(
       where(
         observation({
           method: "lidar",
-          dive: null,
+          mission: null,
           place_name: "Scripps Pier",
         }),
       ),
     ).toBe("Scripps Pier");
-    expect(where(observation({ dive: null }))).toBeNull();
+    expect(where(observation({ mission: null }))).toBeNull();
   });
 });
 

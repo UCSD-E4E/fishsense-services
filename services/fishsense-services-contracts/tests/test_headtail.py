@@ -163,7 +163,7 @@ def test_the_processor_is_handed_refs_not_folders():
     )
     payload = PreprocessHeadtailImagesInput(
         tenant_id=uuid4(),
-        dive_id=uuid4(),
+        mission_id=uuid4(),
         images=[image],
         camera_matrix=K,
         distortion_coefficients=D,

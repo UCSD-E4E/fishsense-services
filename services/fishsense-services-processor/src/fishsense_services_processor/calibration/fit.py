@@ -42,7 +42,7 @@ from fishsense_services_processor.calibration.consistency import (
     CalibrationInconsistentError,
     CalibrationUnderdeterminedError,
     check_baseline_plausible,
-    check_calibration_describes_dive,
+    check_calibration_describes_mission,
     check_fit_self_consistency,
     check_observation_geometry,
 )
@@ -87,7 +87,7 @@ def fit_laser(
     points,
     dots,
     camera_matrix,
-    dive_dots,
+    mission_dots,
     *,
     too_few_type: str,
     too_few_reason: Callable[[int, int], str],
@@ -155,11 +155,11 @@ def fit_laser(
         # consistent with its own burst and wrong for every frame after it.
         (
             "describes_dive",
-            lambda: check_calibration_describes_dive(
+            lambda: check_calibration_describes_mission(
                 laser_position,
                 laser_axis,
                 matrix,
-                np.asarray(dive_dots, dtype=float).reshape(-1, 2),
+                np.asarray(mission_dots, dtype=float).reshape(-1, 2),
             ),
         ),
     )

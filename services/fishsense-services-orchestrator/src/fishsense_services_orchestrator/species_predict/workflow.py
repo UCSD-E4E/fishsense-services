@@ -107,7 +107,7 @@ class PredictSpeciesImagesParentWorkflow:
         )
         workflow.logger.info(
             "dispatching species predict to the processor dive=%s images=%d",
-            target.dive_id,
+            target.mission_id,
             len(inputs.images),
         )
         if not inputs.images:
@@ -118,7 +118,7 @@ class PredictSpeciesImagesParentWorkflow:
             workflow.logger.warning(
                 "no worker available for the species-predict queue; "
                 "skipping dive=%s this firing",
-                target.dive_id,
+                target.mission_id,
             )
             return None
         workflow.logger.info("species predict running on %s capacity", mode)
@@ -128,7 +128,7 @@ class PredictSpeciesImagesParentWorkflow:
                 await workflow.execute_child_workflow(
                     "PredictSpeciesImagesWorkflow",
                     inputs,
-                    id=f"predict-species-{target.dive_id}",
+                    id=f"predict-species-{target.mission_id}",
                     task_queue=PROCESSOR_GPU_TASK_QUEUE,
                     execution_timeout=PREDICT_CHILD_TIMEOUT,
                     id_reuse_policy=CHILD_ID_REUSE,
@@ -138,7 +138,7 @@ class PredictSpeciesImagesParentWorkflow:
         except WorkflowAlreadyStartedError:
             workflow.logger.info(
                 "predict-species-%s is still running; it persists and backfills",
-                target.dive_id,
+                target.mission_id,
             )
             return target
 

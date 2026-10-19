@@ -31,7 +31,7 @@ v2 changes:
 
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Optional
+from typing import Optional, Annotated
 from uuid import UUID
 
 from temporalio import workflow
@@ -39,12 +39,13 @@ from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
 from temporalio.exceptions import WorkflowAlreadyStartedError
 
 with workflow.unsafe.imports_passed_through():
+    from fishsense_services_contracts.renamed import renamed_from
     import annotated_types  # noqa: F401  pylint: disable=unused-import
     import pydantic  # noqa: F401  pylint: disable=unused-import
 
     from fishsense_services_contracts import PROCESSOR_LIGHT_TASK_QUEUE
     from fishsense_services_contracts.measurement import MeasureFishResult
-    from fishsense_services_orchestrator.laser_depth.activities import DiveTarget
+    from fishsense_services_orchestrator.laser_depth.activities import MissionTarget
     from fishsense_services_orchestrator.laser_depth.workflow import DB_FAIL_FAST
     from fishsense_services_orchestrator.measurement.activities import (
         MeasurementResolution,
@@ -61,7 +62,7 @@ class MeasureFishRun:
     drained."""
 
     tenant_id: UUID
-    dive_id: UUID
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     measured: int = 0
     #: v1's `dropped_nan`, plus v2's zero lengths and unreadable species.
     refused: int = 0
@@ -87,11 +88,11 @@ class MeasureFishParentWorkflow:
 
     @workflow.run
     async def run(self) -> Optional[MeasureFishRun]:
-        target: Optional[DiveTarget] = await workflow.execute_activity(
+        target: Optional[MissionTarget] = await workflow.execute_activity(
             "select_next_dive_for_measurement",
             schedule_to_close_timeout=timedelta(minutes=5),
             retry_policy=DB_FAIL_FAST,
-            result_type=Optional[DiveTarget],
+            result_type=Optional[MissionTarget],
         )
         if target is None:
             return None
@@ -112,10 +113,10 @@ class MeasureFishParentWorkflow:
         )
         payload = resolution.payload
         if payload is None:
-            return MeasureFishRun(target.tenant_id, target.dive_id, **skipped)
+            return MeasureFishRun(target.tenant_id, target.mission_id, **skipped)
         workflow.logger.info(
             "dispatching fish measurement to the processor dive=%s captures=%d",
-            target.dive_id,
+            target.mission_id,
             len(payload.captures),
         )
 
@@ -125,7 +126,7 @@ class MeasureFishParentWorkflow:
             result: MeasureFishResult = await workflow.execute_child_workflow(
                 "MeasureFishWorkflow",
                 payload,
-                id=f"measure-fish-{target.tenant_id}-{target.dive_id}",
+                id=f"measure-fish-{target.tenant_id}-{target.mission_id}",
                 task_queue=PROCESSOR_LIGHT_TASK_QUEUE,
                 execution_timeout=timedelta(hours=1),
                 id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
@@ -135,10 +136,13 @@ class MeasureFishParentWorkflow:
             workflow.logger.info(
                 "measure-fish for dive %s is still running under another firing; "
                 "it persists",
-                target.dive_id,
+                target.mission_id,
             )
             return MeasureFishRun(
-                target.tenant_id, target.dive_id, dispatched_elsewhere=True, **skipped
+                target.tenant_id,
+                target.mission_id,
+                dispatched_elsewhere=True,
+                **skipped,
             )
 
         persisted: PersistedMeasurementRun = await workflow.execute_activity(
@@ -152,7 +156,7 @@ class MeasureFishParentWorkflow:
         )
         return MeasureFishRun(
             target.tenant_id,
-            target.dive_id,
+            target.mission_id,
             measured=persisted.measured,
             refused=persisted.refused,
             skipped_stale=persisted.skipped_stale,

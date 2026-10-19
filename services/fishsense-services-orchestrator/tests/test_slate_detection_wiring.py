@@ -17,7 +17,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 from temporalio import activity
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 
 from fishsense_services_api.slate_presence_store import (
@@ -51,7 +51,7 @@ from fishsense_services_processor.worker import build_worker as build_processor
 from ._species import LAYOUT
 
 TENANT = uuid.uuid4()
-DIVE = uuid.uuid4()
+MISSION = uuid.uuid4()
 T0 = datetime(2026, 9, 1, tzinfo=UTC)
 K = [[3500.0, 0.0, 2000.0], [0.0, 3500.0, 1500.0], [0.0, 0.0, 1.0]]
 D = [-0.1, 0.05, 0.0, 0.0, 0.0]
@@ -74,14 +74,14 @@ class _Catalog:
     async def member_tenants(self):
         return [TENANT]
 
-    async def next_dive_for_slate_detection(
+    async def next_mission_for_slate_detection(
         self, tenant_id, *, model_version, exclude=()
     ):
-        return None if DIVE in exclude else SlateDetectionCandidate(DIVE, T0)
+        return None if MISSION in exclude else SlateDetectionCandidate(MISSION, T0)
 
-    async def slate_detection_inputs(self, tenant_id, dive_id, *, model_version):
+    async def slate_detection_inputs(self, tenant_id, mission_id, *, model_version):
         return SlateDetectionInputs(
-            DIVE,
+            MISSION,
             K,
             D,
             [
@@ -90,7 +90,7 @@ class _Catalog:
             ],
         )
 
-    async def persist_slate_presence(self, tenant_id, dive_id, rows):
+    async def persist_slate_presence(self, tenant_id, mission_id, rows):
         self.persisted.extend(rows)
         return len(rows)
 
@@ -144,7 +144,7 @@ async def test_detection_runs_across_the_orchestrator_and_the_processor():
     orchestrator = SlateDetectionActivities(catalog=catalog, layout=LAYOUT)
 
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with (
             build_worker(
@@ -176,7 +176,7 @@ async def test_detection_runs_across_the_orchestrator_and_the_processor():
                 task_queue="wiring",
             )
 
-    assert target == StagingTarget(TENANT, DIVE)
+    assert target == StagingTarget(TENANT, MISSION)
     assert sorted(store.read, key=lambda r: r.key) == [
         LAYOUT.raw(TENANT, "a" * 32),
         LAYOUT.raw(TENANT, "b" * 32),

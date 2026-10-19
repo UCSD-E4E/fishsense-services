@@ -40,7 +40,7 @@ class DeviceView(BaseModel):
     name: str | None
 
 
-class DiveView(BaseModel):
+class MissionView(BaseModel):
     number: int | None
     name: str | None
 
@@ -70,7 +70,7 @@ class ObservationView(BaseModel):
     length_m: float | None
     captured_at: datetime
     device: DeviceView
-    dive: DiveView | None
+    mission: MissionView | None
     species: SpeciesView | None
     fish_model: FishModelView | None
     location: Coordinates | None
@@ -144,9 +144,9 @@ def add_observation_routes(
             length_m=found.length_m,
             captured_at=found.captured_at,
             device=DeviceView(kind=found.device_kind, name=found.device_name),
-            dive=(
-                DiveView(number=found.dive_number, name=found.dive_name)
-                if found.dive_number is not None or found.dive_name is not None
+            mission=(
+                MissionView(number=found.mission_number, name=found.mission_name)
+                if found.mission_number is not None or found.mission_name is not None
                 else None
             ),
             species=(

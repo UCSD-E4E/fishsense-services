@@ -106,7 +106,7 @@ def test_without_a_mask_every_dot_is_judged_at_three_sigma():
     assert flag_outliers(xy, fit)[mask].all()
 
 
-def test_an_all_calibration_dive_still_rejects_its_wild_dots():
+def test_an_all_calibration_mission_still_rejects_its_wild_dots():
     """A slate-only calibration dive: the line is slate-dominated, every
     frame is a calibration frame, and the coarse rule still has to work."""
     rng = np.random.default_rng(3)

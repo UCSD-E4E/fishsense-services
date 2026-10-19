@@ -50,7 +50,7 @@ from temporalio import activity
 
 from fishsense_services_api.label_project_store import (
     KINDS,
-    DiveForTitle,
+    MissionForTitle,
     RecordedProject,
 )
 from fishsense_services_contracts.object_store import ObjectRef
@@ -72,7 +72,7 @@ __all__ = [
     "LabelStudioStorageSettings",
     "TaskImage",
     "build_image_url",
-    "build_per_dive_title",
+    "build_per_mission_title",
     "build_task_data",
     "create_or_get_label_studio_project",
     "ensure_label_studio_s3_storage",
@@ -363,7 +363,7 @@ async def create_or_get_label_studio_project(
     return project_id
 
 
-def build_per_dive_title(number: int, name: str | None, suffix: str) -> str:
+def build_per_mission_title(number: int, name: str | None, suffix: str) -> str:
     """Build a per-dive LS project title `"{dive.name} #{number} - {suffix}"`.
 
     `#{number}` is **always** included so dives that share a `name` still get
@@ -390,16 +390,16 @@ def build_per_dive_title(number: int, name: str | None, suffix: str) -> str:
 class LabelProjectCatalog(Protocol):
     """See ``fishsense_services_api.label_project_store.LabelProjectCatalog``."""
 
-    async def dive_for_title(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
-    ) -> DiveForTitle | None: ...
+    async def mission_for_title(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
+    ) -> MissionForTitle | None: ...
 
     async def recorded_project(
         self,
         tenant_id: uuid.UUID,
         kind: str,
         *,
-        dive_id: uuid.UUID | None,
+        mission_id: uuid.UUID | None,
         title: str,
     ) -> RecordedProject | None: ...
 
@@ -408,7 +408,7 @@ class LabelProjectCatalog(Protocol):
         tenant_id: uuid.UUID,
         kind: str,
         *,
-        dive_id: uuid.UUID | None,
+        mission_id: uuid.UUID | None,
         ls_project_id: int,
         title: str,
     ) -> None: ...
@@ -435,28 +435,28 @@ class LabelProjects:
         self._workspace = workspace
         self._storage = storage
 
-    async def ensure_dive_project(
+    async def ensure_mission_project(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         kind: str,
         *,
         suffix: str,
         labeling_config_xml: str,
     ) -> int:
         """The dive's project of `kind`, titled `{name} #{number} - {suffix}`."""
-        dive = await self._catalog.dive_for_title(tenant_id, dive_id)
-        if dive is None:
+        mission = await self._catalog.mission_for_title(tenant_id, mission_id)
+        if mission is None:
             raise RuntimeError(
-                f"Cannot build LS project title for dive {dive_id}: "
+                f"Cannot build LS project title for dive {mission_id}: "
                 "no such dive in the tenant"
             )
         return await self.ensure_project(
             tenant_id,
             kind,
-            title=build_per_dive_title(dive.number, dive.name, suffix),
+            title=build_per_mission_title(mission.number, mission.name, suffix),
             labeling_config_xml=labeling_config_xml,
-            dive_id=dive_id,
+            mission_id=mission_id,
         )
 
     async def ensure_project(
@@ -466,7 +466,7 @@ class LabelProjects:
         *,
         title: str,
         labeling_config_xml: str,
-        dive_id: uuid.UUID | None = None,
+        mission_id: uuid.UUID | None = None,
     ) -> int:
         """The project of `kind` for the dive (or, with no dive, titled `title`).
 
@@ -477,7 +477,7 @@ class LabelProjects:
         """
         _check_kind(kind)
         recorded = await self._catalog.recorded_project(
-            tenant_id, kind, dive_id=dive_id, title=title
+            tenant_id, kind, mission_id=mission_id, title=title
         )
         if recorded is not None:
             project = await self._ls.project(recorded.ls_project_id)
@@ -494,7 +494,7 @@ class LabelProjects:
 
         found, workspace_id = await _find_by_title(self._ls, title, self._workspace)
         if found is not None:
-            await self._record(tenant_id, kind, dive_id, found.id, title)
+            await self._record(tenant_id, kind, mission_id, found.id, title)
             await _converge(self._ls, found, labeling_config_xml, self._storage)
             return found.id
 
@@ -506,13 +506,17 @@ class LabelProjects:
         )
         # Recorded before its storage: the project exists now, and a failure
         # registering the storage must not leave it unknown to the registry.
-        await self._record(tenant_id, kind, dive_id, project_id, title)
+        await self._record(tenant_id, kind, mission_id, project_id, title)
         await ensure_label_studio_s3_storage(self._ls, project_id, self._storage)
         return project_id
 
-    async def _record(self, tenant_id, kind, dive_id, project_id, title) -> None:
+    async def _record(self, tenant_id, kind, mission_id, project_id, title) -> None:
         await self._catalog.record_project(
-            tenant_id, kind, dive_id=dive_id, ls_project_id=project_id, title=title
+            tenant_id,
+            kind,
+            mission_id=mission_id,
+            ls_project_id=project_id,
+            title=title,
         )
 
 
@@ -794,15 +798,15 @@ async def publish_label_studio_project(ls: LabelStudioClient, project_id: int) -
     activity.logger.info("Published LS project id=%d", project_id)
 
 
-def _is_dives_own(title: str, dive_number: int) -> bool:
+def _is_missions_own(title: str, mission_number: int) -> bool:
     """Whether `title` carries `#{dive_number}` -- the whole number, so dive 9
     is not taken for dive 94 (v1's substring test did)."""
-    return re.search(rf"#{dive_number}(?!\d)", title) is not None
+    return re.search(rf"#{mission_number}(?!\d)", title) is not None
 
 
 async def ensure_project_shows_predictions(
     ls: LabelStudioClient,
-    dive_number: int,
+    mission_number: int,
     tags_by_project: Mapping[int, Mapping[str, int]] | None,
     current_tag: str | None = None,
 ) -> int:
@@ -833,7 +837,7 @@ async def ensure_project_shows_predictions(
     old tier, the newer tag becomes the majority and the project flips.
 
     **Only per-dive projects are touched**, identified by `#{dive_number}` in
-    the title -- the marker `build_per_dive_title` always emits.
+    the title -- the marker `build_per_mission_title` always emits.
     `model_version` is project-*global* while these tags are derived from one
     dive, so on a grandfathered shared project (the legacy 71/76 layout) two
     dives at different tiers would overwrite each other on alternate runs,
@@ -850,13 +854,13 @@ async def ensure_project_shows_predictions(
         try:
             project = await ls.project(project_id)
             title = "" if project is None else project.title
-            if not _is_dives_own(title, dive_number):
+            if not _is_missions_own(title, mission_number):
                 activity.logger.info(
                     "project %s (%r) is not dive %d's own project; "
                     "leaving model_version alone",
                     project_id,
                     title[:60],
-                    dive_number,
+                    mission_number,
                 )
                 continue
             if (project.model_version or "") == want:

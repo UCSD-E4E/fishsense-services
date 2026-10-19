@@ -33,7 +33,7 @@ v2 changes:
 
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Optional
+from typing import Optional, Annotated
 from uuid import UUID
 
 from temporalio import workflow
@@ -41,13 +41,14 @@ from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
 from temporalio.exceptions import WorkflowAlreadyStartedError
 
 with workflow.unsafe.imports_passed_through():
+    from fishsense_services_contracts.renamed import renamed_from
     import annotated_types  # noqa: F401  pylint: disable=unused-import
     import pydantic  # noqa: F401  pylint: disable=unused-import
 
     from fishsense_services_contracts import PROCESSOR_LIGHT_TASK_QUEUE
     from fishsense_services_contracts.laser_depth import ComputeLaserDepthsResult
     from fishsense_services_orchestrator.laser_depth.activities import (
-        DiveTarget,
+        MissionTarget,
         LaserDepthResolution,
         PersistedLaserDepths,
     )
@@ -70,7 +71,7 @@ class LaserDepthsRun:
     dive it drained."""
 
     tenant_id: UUID
-    dive_id: UUID
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     computed: int = 0
     #: v1's `skipped_invalid_geometry`: images with no depth in front of the
     #: camera, now recorded as refusals.
@@ -94,11 +95,11 @@ class ComputeLaserDepthsParentWorkflow:
 
     @workflow.run
     async def run(self) -> Optional[LaserDepthsRun]:
-        target: Optional[DiveTarget] = await workflow.execute_activity(
+        target: Optional[MissionTarget] = await workflow.execute_activity(
             "select_next_dive_for_laser_depth",
             schedule_to_close_timeout=timedelta(minutes=5),
             retry_policy=DB_FAIL_FAST,
-            result_type=Optional[DiveTarget],
+            result_type=Optional[MissionTarget],
         )
         if target is None:
             return None
@@ -117,10 +118,10 @@ class ComputeLaserDepthsParentWorkflow:
         )
         payload = resolution.payload
         if payload is None:
-            return LaserDepthsRun(target.tenant_id, target.dive_id, **skipped)
+            return LaserDepthsRun(target.tenant_id, target.mission_id, **skipped)
         workflow.logger.info(
             "dispatching laser depths to the processor dive=%s captures=%d",
-            target.dive_id,
+            target.mission_id,
             len(payload.captures),
         )
 
@@ -133,7 +134,7 @@ class ComputeLaserDepthsParentWorkflow:
             result: ComputeLaserDepthsResult = await workflow.execute_child_workflow(
                 "ComputeLaserDepthsWorkflow",
                 payload,
-                id=f"compute-laser-depths-{target.tenant_id}-{target.dive_id}",
+                id=f"compute-laser-depths-{target.tenant_id}-{target.mission_id}",
                 task_queue=PROCESSOR_LIGHT_TASK_QUEUE,
                 execution_timeout=timedelta(hours=1),
                 id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
@@ -143,10 +144,13 @@ class ComputeLaserDepthsParentWorkflow:
             workflow.logger.info(
                 "compute-laser-depths for dive %s is still running under another "
                 "firing; it persists",
-                target.dive_id,
+                target.mission_id,
             )
             return LaserDepthsRun(
-                target.tenant_id, target.dive_id, dispatched_elsewhere=True, **skipped
+                target.tenant_id,
+                target.mission_id,
+                dispatched_elsewhere=True,
+                **skipped,
             )
 
         persisted: PersistedLaserDepths = await workflow.execute_activity(
@@ -160,7 +164,7 @@ class ComputeLaserDepthsParentWorkflow:
         )
         return LaserDepthsRun(
             target.tenant_id,
-            target.dive_id,
+            target.mission_id,
             computed=persisted.computed,
             refused=persisted.refused,
             skipped_stale=persisted.skipped_stale,

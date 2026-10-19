@@ -17,7 +17,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 
 from fishsense_services_api.headtail_store import (
@@ -70,7 +70,7 @@ from fishsense_services_processor.worker import build_worker as build_processor
 from temporalio import activity
 
 TENANT = uuid.uuid4()
-DIVE = uuid.uuid4()
+MISSION = uuid.uuid4()
 T0 = datetime(2026, 9, 1, tzinfo=UTC)
 K = [[3000.0, 0.0, 2048.0], [0.0, 3000.0, 1536.0], [0.0, 0.0, 1.0]]
 D = [-0.05, 0.01, 0.0, 0.0, 0.0]
@@ -101,22 +101,28 @@ class _Catalog:
     async def member_tenants(self):
         return [TENANT]
 
-    async def next_dive_for_headtail_preprocessing(self, tenant_id):
-        return HeadtailCandidate(DIVE, T0)
+    async def next_mission_for_headtail_preprocessing(self, tenant_id):
+        return HeadtailCandidate(MISSION, T0)
 
-    async def headtail_preprocess_inputs(self, tenant_id, dive_id):
+    async def headtail_preprocess_inputs(self, tenant_id, mission_id):
         return HeadtailPreprocessInputs(
             [PreprocessCapture(self.capture, "a" * 32, from_v1=False)], K, D
         )
 
-    async def clear_headtail_needs_reprocess(self, tenant_id, dive_id, checksums=None):
+    async def clear_headtail_needs_reprocess(
+        self, tenant_id, mission_id, checksums=None
+    ):
         self.cleared.append(checksums)
         return 1
 
-    async def next_dive_for_headtail_prediction(self, tenant_id, *, predictor_version):
-        return PredictionCandidate(DIVE, T0, never_predicted=True)
+    async def next_mission_for_headtail_prediction(
+        self, tenant_id, *, predictor_version
+    ):
+        return PredictionCandidate(MISSION, T0, never_predicted=True)
 
-    async def headtail_predict_captures(self, tenant_id, dive_id, *, predictor_version):
+    async def headtail_predict_captures(
+        self, tenant_id, mission_id, *, predictor_version
+    ):
         return [
             PredictCapture(
                 capture_id=self.capture, checksum="a" * 32, from_v1=False,
@@ -125,7 +131,7 @@ class _Catalog:
             )
         ]  # fmt: skip
 
-    async def persist_headtail_predictions(self, tenant_id, dive_id, rows):
+    async def persist_headtail_predictions(self, tenant_id, mission_id, rows):
         self.persisted.extend(rows)
         return len(rows)
 
@@ -190,7 +196,7 @@ async def test_stage_5_1_runs_across_the_orchestrator_and_the_processor(monkeypa
     processor = HeadtailPreprocessActivities(store_factory=lambda: store)
 
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with (
             _orchestrator(env, catalog),
@@ -213,7 +219,7 @@ async def test_stage_5_1_runs_across_the_orchestrator_and_the_processor(monkeypa
                 task_queue="wiring",
             )
 
-    assert target == HeadtailTarget(TENANT, DIVE)
+    assert target == HeadtailTarget(TENANT, MISSION)
     assert store.written == [
         (LAYOUT.processed_jpeg(TENANT, "preprocess_headtail_jpeg", "a" * 32),
          b"\xff\xd8jpeg")
@@ -255,7 +261,7 @@ async def test_prediction_runs_across_the_orchestrator_and_the_processor(monkeyp
         return 0
 
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with (
             build_worker(
@@ -291,7 +297,7 @@ async def test_prediction_runs_across_the_orchestrator_and_the_processor(monkeyp
                 task_queue="wiring",
             )
 
-    assert target == HeadtailTarget(TENANT, DIVE)
+    assert target == HeadtailTarget(TENANT, MISSION)
     (row,) = catalog.persisted
     assert (row.capture_id, row.status, row.laser_label_id) == (
         catalog.capture,

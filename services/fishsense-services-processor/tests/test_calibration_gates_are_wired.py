@@ -8,7 +8,7 @@ The gate suites test the gates as pure functions, which says nothing about
 whether anything calls them. Deleting a call site — or moving it after the
 result is built — leaves those suites entirely green while the bad
 calibration lands in the database and becomes borrowable by sibling dives
-through `calibration_source_dive_id`.
+through `calibration_source_mission_id`.
 
 So these drive the checkerboard fit end to end with a fit the gate must
 refuse, and assert that it comes back **refused**, naming the dive's problem,
@@ -39,7 +39,7 @@ from fishsense_services_processor.checkerboard.activities import (
     FitCheckerboardExtrinsicsInput,
 )
 
-from ._calibration_fixtures import dive_dots_on_ray
+from ._calibration_fixtures import mission_dots_on_ray
 
 CAMERA_MATRIX = [[1800.0, 0.0, 640.0], [0.0, 1800.0, 480.0], [0.0, 0.0, 1.0]]
 
@@ -62,17 +62,20 @@ def _observations(n: int = 12, *, depth=None) -> list[CheckerboardObservation]:
     ]
 
 
-def _payload(origin_xy, *, dive_offset_px=0.0, observations=None):
+def _payload(origin_xy, *, mission_offset_px=0.0, observations=None):
     """The dive's own dots are built on the projection of the ray the fake
-    kernel returns, so `check_calibration_describes_dive` passes unless a test
-    asks for a `dive_offset_px` — the honest stand-in for "the whole dive
+    kernel returns, so `check_calibration_describes_mission` passes unless a test
+    asks for a `mission_offset_px` — the honest stand-in for "the whole dive
     agrees"."""
     return FitCheckerboardExtrinsicsInput(
-        dive_id=uuid.UUID(int=522),
+        mission_id=uuid.UUID(int=522),
         camera_matrix=CAMERA_MATRIX,
         observations=_observations() if observations is None else observations,
-        dive_dots=dive_dots_on_ray(
-            (*origin_xy, 0.0), (0.0, 0.0, 1.0), CAMERA_MATRIX, offset_px=dive_offset_px
+        mission_dots=mission_dots_on_ray(
+            (*origin_xy, 0.0),
+            (0.0, 0.0, 1.0),
+            CAMERA_MATRIX,
+            offset_px=mission_offset_px,
         ),
     )
 
@@ -119,7 +122,7 @@ async def test_checkerboard_fit_accepts_a_plausible_baseline(monkeypatch):
     assert result.refusal_reason is None
 
 
-async def test_checkerboard_fit_refuses_a_fit_the_dive_disagrees_with(monkeypatch):
+async def test_checkerboard_fit_refuses_a_fit_the_mission_disagrees_with(monkeypatch):
     """The gate the other three cannot stand in for.
 
     Baseline and self-consistency both look only at the fit's own
@@ -130,7 +133,7 @@ async def test_checkerboard_fit_refuses_a_fit_the_dive_disagrees_with(monkeypatc
     """
     _patch_fit(monkeypatch, _PLAUSIBLE_XY)
 
-    result = await _fit(_payload(_PLAUSIBLE_XY, dive_offset_px=40.0))
+    result = await _fit(_payload(_PLAUSIBLE_XY, mission_offset_px=40.0))
 
     assert result.outcome == "refused"
     assert result.refusal_type == "CalibrationDoesNotDescribeDiveError"
@@ -174,7 +177,7 @@ def test_the_fit_gates_before_it_accepts():
         "check_observation_geometry(",
         "check_fit_self_consistency(",
         "check_baseline_plausible(laser_position)",
-        "check_calibration_describes_dive(",
+        "check_calibration_describes_mission(",
     ):
         assert source.index(gate) < accepted_at, gate
 

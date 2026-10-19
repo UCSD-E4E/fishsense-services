@@ -29,13 +29,13 @@ from temporalio.testing import ActivityEnvironment
 from fishsense_services_contracts.laser import ValidateLaserLabelsInput
 from fishsense_services_processor.laser_validation import judgement
 from fishsense_services_processor.laser_validation.activities import (
-    validate_laser_labels_for_dive,
+    validate_laser_labels_for_mission,
 )
 
-from ._laser import DIVE, INTERCEPT, NORMAL, SLOPE, label
+from ._laser import MISSION, INTERCEPT, NORMAL, SLOPE, label
 
 
-def _prod_like_dive(seed: int, n: int = 100, sigma: float = 1.85, offsets=None):
+def _prod_like_mission(seed: int, n: int = 100, sigma: float = 1.85, offsets=None):
     """~100 positives on one laser line with prod-like perpendicular noise,
     plus a handful of genuine mislabels 30+ px off. `offsets` adds a
     per-frame shift along the normal (a drifting line)."""
@@ -79,15 +79,15 @@ class _FakeStore:
 
 async def _run(store: _FakeStore) -> int:
     result = await ActivityEnvironment().run(
-        validate_laser_labels_for_dive,
-        ValidateLaserLabelsInput(dive_id=DIVE, labels=store.read()),
+        validate_laser_labels_for_mission,
+        ValidateLaserLabelsInput(mission_id=MISSION, labels=store.read()),
     )
     return store.write(result)
 
 
 @pytest.mark.parametrize("seed", range(5))
 async def test_a_second_run_supersedes_nothing_new(seed):
-    store = _FakeStore(_prod_like_dive(seed))
+    store = _FakeStore(_prod_like_mission(seed))
 
     first = await _run(store)
     after_first = list(store.writes)
@@ -102,7 +102,7 @@ async def test_a_drifting_line_does_not_erode_run_after_run():
     """Dive 223's shape: the line walks from -6.7 to +4.4 px across the dive.
     The first run's judgement must be the ONLY judgement."""
     n = 120
-    store = _FakeStore(_prod_like_dive(11, n=n, offsets=np.linspace(-6.7, 4.4, n)))
+    store = _FakeStore(_prod_like_mission(11, n=n, offsets=np.linspace(-6.7, 4.4, n)))
 
     counts = [await _run(store) for _ in range(4)]
 
@@ -120,7 +120,7 @@ async def test_the_guard_does_not_depend_on_the_noise_estimate(monkeypatch):
         return flags
 
     monkeypatch.setattr(judgement, "flag_outliers", farthest_one)
-    store = _FakeStore(_prod_like_dive(0))
+    store = _FakeStore(_prod_like_mission(0))
 
     counts = [await _run(store) for _ in range(3)]
 
@@ -130,10 +130,10 @@ async def test_the_guard_does_not_depend_on_the_noise_estimate(monkeypatch):
 @pytest.mark.parametrize("shuffle_seed", range(5))
 async def test_the_result_does_not_depend_on_row_order(shuffle_seed):
     """RANSAC picks point pairs by row index: the validator imposes its own."""
-    reference = _FakeStore(_prod_like_dive(3))
+    reference = _FakeStore(_prod_like_mission(3))
     await _run(reference)
 
-    shuffled = _FakeStore(_prod_like_dive(3), shuffle_seed=shuffle_seed)
+    shuffled = _FakeStore(_prod_like_mission(3), shuffle_seed=shuffle_seed)
     await _run(shuffled)
 
     assert sorted(shuffled.writes) == sorted(reference.writes)
@@ -142,13 +142,13 @@ async def test_the_result_does_not_depend_on_row_order(shuffle_seed):
 async def test_a_superseded_label_the_fit_keeps_is_not_revived():
     """Reviving is the reviewed remediation tool's, never the hourly job's --
     and the result has no way to say "revive"."""
-    labels = _prod_like_dive(0)
+    labels = _prod_like_mission(0)
     labels[10].superseded = True
     store = _FakeStore(labels)
 
     result = await ActivityEnvironment().run(
-        validate_laser_labels_for_dive,
-        ValidateLaserLabelsInput(dive_id=DIVE, labels=store.read()),
+        validate_laser_labels_for_mission,
+        ValidateLaserLabelsInput(mission_id=MISSION, labels=store.read()),
     )
 
     assert labels[10].label_id not in {s.label_id for s in result.supersede}
@@ -156,12 +156,12 @@ async def test_a_superseded_label_the_fit_keeps_is_not_revived():
 
 
 async def test_an_already_superseded_outlier_is_not_asked_for_again():
-    first = _FakeStore(_prod_like_dive(0))
+    first = _FakeStore(_prod_like_mission(0))
     superseded_first = await _run(first)
 
     result = await ActivityEnvironment().run(
-        validate_laser_labels_for_dive,
-        ValidateLaserLabelsInput(dive_id=DIVE, labels=first.read()),
+        validate_laser_labels_for_mission,
+        ValidateLaserLabelsInput(mission_id=MISSION, labels=first.read()),
     )
 
     assert superseded_first > 0 and result.supersede == []

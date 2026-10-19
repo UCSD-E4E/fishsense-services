@@ -2,7 +2,7 @@
 
 Ported from fishsense-lite@77e8f8e5 libs/fishsense-shared/src/fishsense_shared/
 ingest_contracts.py (`ChecksumMismatch`, `VerifyChecksumsReport`,
-`DiveVerificationSummary`, `VerifyAllDivesProgress`, `VerifyAllDivesReport`).
+`MissionVerificationSummary`, `VerifyAllMissionsProgress`, `VerifyAllMissionsReport`).
 Semantics are v1's. v1 kept them in fishsense-shared because the API and the
 api-worker both read them; v2's are started and read only through the
 orchestrator (and the Temporal UI), so they live here, not in the processing
@@ -15,15 +15,16 @@ migrated row -- the same integers v1's reports carried, under honest names.
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Annotated
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = [
     "ChecksumMismatch",
-    "DiveVerificationSummary",
-    "VerifyAllDivesProgress",
-    "VerifyAllDivesReport",
+    "MissionVerificationSummary",
+    "VerifyAllMissionsProgress",
+    "VerifyAllMissionsReport",
     "VerifyChecksumsReport",
 ]
 
@@ -50,9 +51,13 @@ class VerifyChecksumsReport(BaseModel):
     present would look entirely new and every frame would land canonical.
     """
 
-    dive_number: int
+    model_config = ConfigDict(validate_by_name=True)
+
+    mission_number: Annotated[int, renamed_from("dive_number", "mission_number")]
     #: Captures in the dive, before any sampling limit.
-    total_in_dive: int = 0
+    total_in_mission: Annotated[
+        int, renamed_from("total_in_dive", "total_in_mission")
+    ] = 0
     checked: int = 0
     checksum_matched: int = 0
     mismatches: List[ChecksumMismatch] = []
@@ -67,12 +72,16 @@ class VerifyChecksumsReport(BaseModel):
     no_stored_checksum: List[ChecksumMismatch] = []
 
 
-class DiveVerificationSummary(BaseModel):
+class MissionVerificationSummary(BaseModel):
     """One dive's result in a sweep: counts, plus the findings themselves."""
 
-    dive_number: int
+    model_config = ConfigDict(validate_by_name=True)
+
+    mission_number: Annotated[int, renamed_from("dive_number", "mission_number")]
     checked: int = 0
-    total_in_dive: int = 0
+    total_in_mission: Annotated[
+        int, renamed_from("total_in_dive", "total_in_mission")
+    ] = 0
     checksum_matched: int = 0
     mismatches: List[ChecksumMismatch] = []
     timestamp_mismatches: List[ChecksumMismatch] = []
@@ -93,31 +102,47 @@ class DiveVerificationSummary(BaseModel):
         )
 
 
-class VerifyAllDivesProgress(BaseModel):
+class VerifyAllMissionsProgress(BaseModel):
     """The sweep's `progress` query. A full sweep is ~930 GB off the NAS, so it
     runs for days and has to be observable while it runs."""
 
+    model_config = ConfigDict(validate_by_name=True)
+
     state: str = "starting"
-    total_dives: int = 0
-    dives_done: int = 0
-    current_dive_number: int | None = None
+    total_missions: Annotated[int, renamed_from("total_dives", "total_missions")] = 0
+    missions_done: Annotated[int, renamed_from("dives_done", "missions_done")] = 0
+    current_mission_number: Annotated[
+        int | None, renamed_from("current_dive_number", "current_mission_number")
+    ] = None
     images_checked: int = 0
     checksum_matched: int = 0
-    dives_with_findings: int = 0
-    dives_errored: int = 0
+    missions_with_findings: Annotated[
+        int, renamed_from("dives_with_findings", "missions_with_findings")
+    ] = 0
+    missions_errored: Annotated[
+        int, renamed_from("dives_errored", "missions_errored")
+    ] = 0
 
 
-class VerifyAllDivesReport(BaseModel):
+class VerifyAllMissionsReport(BaseModel):
     """Aggregate across every dive the sweep visited."""
 
-    dives_requested: int = 0
-    dives_verified: int = 0
+    model_config = ConfigDict(validate_by_name=True)
+
+    missions_requested: Annotated[
+        int, renamed_from("dives_requested", "missions_requested")
+    ] = 0
+    missions_verified: Annotated[
+        int, renamed_from("dives_verified", "missions_verified")
+    ] = 0
     images_checked: int = 0
     checksum_matched: int = 0
     #: Every dive visited, clean ones included: dropping them would make
     #: "verified, fine" indistinguishable from "never reached".
-    dives: List[DiveVerificationSummary] = []
+    missions: Annotated[
+        List[MissionVerificationSummary], renamed_from("dives", "missions")
+    ] = []
 
     @property
-    def dives_with_findings(self) -> List[DiveVerificationSummary]:
-        return [d for d in self.dives if not d.is_clean]
+    def missions_with_findings(self) -> List[MissionVerificationSummary]:
+        return [d for d in self.missions if not d.is_clean]

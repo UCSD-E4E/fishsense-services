@@ -10,12 +10,12 @@ validator to the light queue on 2026-09-04, fishsense-lite@77e8f8e5 roles.py
 from fishsense_services_processor.laser_validation.activities import (
     evaluate_laser_auto_accept,
     plan_laser_supersede_remediation,
-    validate_laser_labels_for_dive,
+    validate_laser_labels_for_mission,
 )
 from fishsense_services_processor.laser_validation.workflows import (
     EvaluateLaserAutoAcceptWorkflow,
     PlanLaserSupersedeRemediationWorkflow,
-    ValidateLaserLabelsForDiveWorkflow,
+    ValidateLaserLabelsForMissionWorkflow,
 )
 from fishsense_services_processor.registry import ROLE_LIGHT, Stage
 
@@ -24,12 +24,12 @@ STAGE = Stage(
     role=ROLE_LIGHT,
     workflows=[
         EvaluateLaserAutoAcceptWorkflow,
-        ValidateLaserLabelsForDiveWorkflow,
+        ValidateLaserLabelsForMissionWorkflow,
         PlanLaserSupersedeRemediationWorkflow,
     ],
     activities=[
         evaluate_laser_auto_accept,
-        validate_laser_labels_for_dive,
+        validate_laser_labels_for_mission,
         plan_laser_supersede_remediation,
     ],
 )

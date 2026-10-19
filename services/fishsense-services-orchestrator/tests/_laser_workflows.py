@@ -14,7 +14,7 @@ with workflow.unsafe.imports_passed_through():
     import pydantic  # noqa: F401  pylint: disable=unused-import
 
     from fishsense_services_contracts.laser import (
-        DivePlan,
+        MissionPlan,
         EvaluateLaserAutoAcceptInput,
         LaserAutoAcceptResult,
         LaserPredictionResult,
@@ -78,9 +78,9 @@ class StubJudge:
 @workflow.defn(name="PlanLaserSupersedeRemediationWorkflow")
 class StubPlan:
     @workflow.run
-    async def run(self, payload: PlanLaserRemediationInput) -> DivePlan:
+    async def run(self, payload: PlanLaserRemediationInput) -> MissionPlan:
         return await workflow.execute_activity(
-            "_plan", args=(payload,), result_type=DivePlan, **_RECORD
+            "_plan", args=(payload,), result_type=MissionPlan, **_RECORD
         )
 
 

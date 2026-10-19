@@ -1,8 +1,8 @@
 // Ported from fishsense-lite@77e8f8e5
 // apps/fishsense-lite-web/app/portal/calibration/page.tsx.
-// v2 change: the dives are read from the v2 API as the signed-in user.
+// v2 change: the missions are read from the v2 API as the signed-in user.
 import Link from "next/link";
-import { getDives } from "@/lib/dives";
+import { getMissions } from "@/lib/missions";
 import { requirePortalUser } from "../guard";
 import { CalibrationLinks } from "./calibration-links";
 
@@ -11,12 +11,12 @@ export const dynamic = "force-dynamic";
 export default async function CalibrationPage() {
   const session = await requirePortalUser("/portal/calibration");
 
-  let dives: Awaited<ReturnType<typeof getDives>> = [];
-  let divesError: string | null = null;
+  let missions: Awaited<ReturnType<typeof getMissions>> = [];
+  let missionsError: string | null = null;
   try {
-    dives = await getDives(session.accessToken ?? "");
+    missions = await getMissions(session.accessToken ?? "");
   } catch (error) {
-    divesError = error instanceof Error ? error.message : "Failed to load dives";
+    missionsError = error instanceof Error ? error.message : "Failed to load missions";
   }
 
   return (
@@ -24,13 +24,13 @@ export default async function CalibrationPage() {
       <header className="mb-8 flex items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">
-            Dive calibration links
+            Mission calibration links
           </h1>
           <p className="mt-1 max-w-3xl text-sm text-slate-600 dark:text-slate-400">
-            Link a dive that has no slate of its own to a sibling slate dive shot
-            with the same camera and laser rig. The dive then borrows that
-            dive&apos;s laser calibration, so it can be measured without a slate
-            in-frame. A dive with its own slate self-calibrates and needs no link.
+            Link a mission that has no slate of its own to a sibling slate mission shot
+            with the same camera and laser rig. The mission then borrows that
+            mission&apos;s laser calibration, so it can be measured without a slate
+            in-frame. A mission with its own slate self-calibrates and needs no link.
           </p>
         </div>
         <Link
@@ -41,12 +41,12 @@ export default async function CalibrationPage() {
         </Link>
       </header>
 
-      {divesError ? (
+      {missionsError ? (
         <p className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-700 dark:bg-red-950 dark:text-red-300">
-          Could not load dives: {divesError}
+          Could not load missions: {missionsError}
         </p>
       ) : (
-        <CalibrationLinks dives={dives} />
+        <CalibrationLinks missions={missions} />
       )}
     </main>
   );

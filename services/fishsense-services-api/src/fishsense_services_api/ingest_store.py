@@ -1,7 +1,7 @@
 """The database side of dive ingest, run in a tenant transaction as the app role.
 
 Ported from fishsense-lite@a8b2c3bc -- the writes behind
-`create_dive_activity`, `finalize_dive_activity`, and the API's image upsert
+`create_mission_activity`, `finalize_mission_activity`, and the API's image upsert
 (`image_controller.post_image`) -- as plain functions over a tenant-scoped
 connection, so RLS applies to every statement. The orchestrator's activities
 call them; there is no HTTP hop inside the control plane (PLAN.md §6.3).
@@ -40,10 +40,10 @@ __all__ = [
     "RegisteredCapture",
     "ResolvedDevice",
     "content_overlap",
-    "create_dive",
-    "dive_by_path",
-    "dives_with_leaf",
-    "finalize_dive",
+    "create_mission",
+    "mission_by_path",
+    "missions_with_leaf",
+    "finalize_mission",
     "register_capture",
     "registered_captures",
     "resolve_device",
@@ -67,8 +67,8 @@ class RegisteredCapture:
 
 @dataclass(frozen=True)
 class ContentOverlap:
-    dive_id: uuid.UUID
-    dive_path: str
+    mission_id: uuid.UUID
+    mission_path: str
     shared_images: int
     containment: float
 
@@ -95,51 +95,51 @@ async def resolve_device(
     return ResolvedDevice(row.id, row.name, row.calibrated)
 
 
-async def create_dive(
+async def create_mission(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
     *,
     source_path: str,
     name: str,
-    dived_at: datetime,
+    started_at: datetime,
     device_id: uuid.UUID | None = None,
     slate_template_id: uuid.UUID | None = None,
-    calibration_source_dive_id: uuid.UUID | None = None,
-    flip_dive_slate: bool = False,
+    calibration_source_mission_id: uuid.UUID | None = None,
+    flip_mission_slate: bool = False,
 ) -> uuid.UUID:
     """Create (or re-open) the dive at **low**, whatever the request asked for.
 
-    `dived_at` is provisional -- preflight's max header timestamp -- and finalize
+    `started_at` is provisional -- preflight's max header timestamp -- and finalize
     replaces it with the scan's. Re-running ingest returns the same dive, back
     at low until finalize promotes it again.
     """
     return (
         await conn.execute(
             text("""
-                INSERT INTO dives (tenant_id, source_path, name, dived_at, priority,
+                INSERT INTO missions (tenant_id, source_path, name, started_at, priority,
                                    device_id, slate_template_id,
-                                   calibration_source_dive_id, flip_dive_slate)
-                VALUES (:tenant, :path, :name, :dived_at, 'low', :device, :slate,
+                                   calibration_source_mission_id, flip_mission_slate)
+                VALUES (:tenant, :path, :name, :started_at, 'low', :device, :slate,
                         :source, :flip)
                 ON CONFLICT (tenant_id, source_path) DO UPDATE SET
                     name = excluded.name,
-                    dived_at = excluded.dived_at,
+                    started_at = excluded.started_at,
                     priority = 'low',
                     device_id = excluded.device_id,
                     slate_template_id = excluded.slate_template_id,
-                    calibration_source_dive_id = excluded.calibration_source_dive_id,
-                    flip_dive_slate = excluded.flip_dive_slate
+                    calibration_source_mission_id = excluded.calibration_source_mission_id,
+                    flip_mission_slate = excluded.flip_mission_slate
                 RETURNING id
                 """),
             {
                 "tenant": tenant_id,
                 "path": source_path,
                 "name": name,
-                "dived_at": dived_at,
+                "started_at": started_at,
                 "device": device_id,
                 "slate": slate_template_id,
-                "source": calibration_source_dive_id,
-                "flip": flip_dive_slate,
+                "source": calibration_source_mission_id,
+                "flip": flip_mission_slate,
             },
         )
     ).scalar_one()
@@ -149,7 +149,7 @@ async def register_capture(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
     *,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     device_id: uuid.UUID | None,
     source_path: str,
     captured_at: datetime,
@@ -180,7 +180,7 @@ async def register_capture(
     ).scalar_one()
     params = {
         "tenant": tenant_id,
-        "dive": dive_id,
+        "mission": mission_id,
         "device": device_id,
         "path": source_path,
         "captured_at": captured_at,
@@ -191,9 +191,9 @@ async def register_capture(
         capture_id = (
             await conn.execute(
                 text("""
-                    INSERT INTO captures (tenant_id, dive_id, device_id, source_path,
+                    INSERT INTO captures (tenant_id, mission_id, device_id, source_path,
                                           captured_at, checksum, is_canonical)
-                    VALUES (:tenant, :dive, :device, :path, :captured_at, :checksum,
+                    VALUES (:tenant, :mission, :device, :path, :captured_at, :checksum,
                             :canonical)
                     RETURNING id
                     """),
@@ -204,7 +204,7 @@ async def register_capture(
         capture_id = existing
         await conn.execute(
             text("""
-                UPDATE captures SET dive_id = :dive, device_id = :device,
+                UPDATE captures SET mission_id = :mission, device_id = :device,
                     captured_at = :captured_at, checksum = :checksum,
                     is_canonical = :canonical
                 WHERE tenant_id = :tenant AND id = :id
@@ -215,7 +215,7 @@ async def register_capture(
 
 
 async def registered_captures(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> dict[str, datetime]:
     """Path -> captured_at for frames already registered to the dive: what a
     resumed scan skips without downloading, and still counts towards the dive's
@@ -223,39 +223,39 @@ async def registered_captures(
     rows = await conn.execute(
         text(
             "SELECT source_path, captured_at FROM captures "
-            "WHERE tenant_id = :tenant AND dive_id = :dive"
+            "WHERE tenant_id = :tenant AND mission_id = :mission"
         ),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     return {r.source_path: r.captured_at for r in rows}
 
 
-async def finalize_dive(
+async def finalize_mission(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     *,
     priority: str,
-    dived_at: datetime,
+    started_at: datetime,
 ) -> None:
     """Open the commit flag. Only call once every frame is accounted for -- the
     finalize activity enforces that before it gets here."""
     await conn.execute(
         text(
-            "UPDATE dives SET priority = :priority, dived_at = :dived_at "
-            "WHERE tenant_id = :tenant AND id = :dive"
+            "UPDATE missions SET priority = :priority, started_at = :started_at "
+            "WHERE tenant_id = :tenant AND id = :mission"
         ),
         {
             "priority": priority,
-            "dived_at": dived_at,
+            "started_at": started_at,
             "tenant": tenant_id,
-            "dive": dive_id,
+            "mission": mission_id,
         },
     )
 
 
 async def content_overlap(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> list[ContentOverlap]:
     """How much of this dive's content already exists under other dives in the
     tenant. Reported, never blocking."""
@@ -263,38 +263,40 @@ async def content_overlap(
         text("""
             WITH mine AS (
                 SELECT DISTINCT checksum FROM captures
-                WHERE tenant_id = :tenant AND dive_id = :dive
+                WHERE tenant_id = :tenant AND mission_id = :mission
             ), shared AS (
-                SELECT c.dive_id, count(DISTINCT c.checksum) AS n
+                SELECT c.mission_id, count(DISTINCT c.checksum) AS n
                 FROM captures c JOIN mine USING (checksum)
-                WHERE c.tenant_id = :tenant AND c.dive_id <> :dive
-                GROUP BY c.dive_id
+                WHERE c.tenant_id = :tenant AND c.mission_id <> :mission
+                GROUP BY c.mission_id
             )
-            SELECT s.dive_id, d.source_path, s.n,
+            SELECT s.mission_id, d.source_path, s.n,
                    s.n::float / (SELECT count(*) FROM mine) AS containment
-            FROM shared s JOIN dives d ON d.id = s.dive_id
+            FROM shared s JOIN missions d ON d.id = s.mission_id
             ORDER BY s.n DESC, d.source_path
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
-    return [ContentOverlap(r.dive_id, r.source_path, r.n, r.containment) for r in rows]
+    return [
+        ContentOverlap(r.mission_id, r.source_path, r.n, r.containment) for r in rows
+    ]
 
 
-async def dive_by_path(
+async def mission_by_path(
     conn: AsyncConnection, tenant_id: uuid.UUID, path: str
 ) -> uuid.UUID | None:
     """The tenant's dive at exactly this path."""
     return (
         await conn.execute(
             text(
-                "SELECT id FROM dives WHERE tenant_id = :tenant AND source_path = :path"
+                "SELECT id FROM missions WHERE tenant_id = :tenant AND source_path = :path"
             ),
             {"tenant": tenant_id, "path": path},
         )
     ).scalar_one_or_none()
 
 
-async def dives_with_leaf(
+async def missions_with_leaf(
     conn: AsyncConnection, tenant_id: uuid.UUID, leaf: str
 ) -> list[tuple[uuid.UUID, str]]:
     """The tenant's dives whose folder name is exactly ``leaf``.
@@ -304,7 +306,7 @@ async def dives_with_leaf(
     """
     rows = await conn.execute(
         text("""
-            SELECT id, source_path FROM dives
+            SELECT id, source_path FROM missions
             WHERE tenant_id = :tenant
               AND (source_path = :leaf
                    OR right(source_path, length(:leaf) + 1) = '/' || :leaf)
@@ -335,23 +337,25 @@ class IngestCatalog(ServicePrincipal):
         async with self._tenant(tenant_id) as conn:
             return await resolve_device(conn, tenant_id, serial)
 
-    async def dive_by_path(self, tenant_id: uuid.UUID, path: str) -> uuid.UUID | None:
+    async def mission_by_path(
+        self, tenant_id: uuid.UUID, path: str
+    ) -> uuid.UUID | None:
         async with self._tenant(tenant_id) as conn:
-            return await dive_by_path(conn, tenant_id, path)
+            return await mission_by_path(conn, tenant_id, path)
 
-    async def dives_with_leaf(
+    async def missions_with_leaf(
         self, tenant_id: uuid.UUID, leaf: str
     ) -> list[tuple[uuid.UUID, str]]:
         async with self._tenant(tenant_id) as conn:
-            return await dives_with_leaf(conn, tenant_id, leaf)
+            return await missions_with_leaf(conn, tenant_id, leaf)
 
     async def slate_template(self, name: str) -> uuid.UUID | None:
         async with self._engine.connect() as conn:
             return await slate_template_by_name(conn, name)
 
-    async def create_dive(self, tenant_id: uuid.UUID, **dive: Any) -> uuid.UUID:
+    async def create_mission(self, tenant_id: uuid.UUID, **mission: Any) -> uuid.UUID:
         async with self._tenant(tenant_id) as conn:
-            return await create_dive(conn, tenant_id, **dive)
+            return await create_mission(conn, tenant_id, **mission)
 
     async def register_capture(
         self, tenant_id: uuid.UUID, **capture: Any
@@ -360,26 +364,26 @@ class IngestCatalog(ServicePrincipal):
             return await register_capture(conn, tenant_id, **capture)
 
     async def registered_captures(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> dict[str, datetime]:
         async with self._tenant(tenant_id) as conn:
-            return await registered_captures(conn, tenant_id, dive_id)
+            return await registered_captures(conn, tenant_id, mission_id)
 
-    async def finalize_dive(
+    async def finalize_mission(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         *,
         priority: str,
-        dived_at: datetime,
+        started_at: datetime,
     ) -> None:
         async with self._tenant(tenant_id) as conn:
-            await finalize_dive(
-                conn, tenant_id, dive_id, priority=priority, dived_at=dived_at
+            await finalize_mission(
+                conn, tenant_id, mission_id, priority=priority, started_at=started_at
             )
 
     async def content_overlap(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> list[ContentOverlap]:
         async with self._tenant(tenant_id) as conn:
-            return await content_overlap(conn, tenant_id, dive_id)
+            return await content_overlap(conn, tenant_id, mission_id)

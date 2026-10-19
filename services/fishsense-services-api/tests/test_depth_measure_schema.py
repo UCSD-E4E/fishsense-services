@@ -55,8 +55,8 @@ async def _depth_refusal(conn, tenant_id, capture_id, label, calibration):
 
 async def test_refusals_are_appended_never_rewritten(owner_engine, app_engine):
     lab = await tenant(owner_engine)
-    dive_id, calibration = await calibrated_dive(owner_engine, lab)
-    capture_id = await capture(owner_engine, lab, dive_id)
+    mission_id, calibration = await calibrated_dive(owner_engine, lab)
+    capture_id = await capture(owner_engine, lab, mission_id)
     label = await laser_label(owner_engine, lab, capture_id)
 
     async with tenant_transaction(app_engine, lab) as conn:
@@ -75,8 +75,8 @@ async def test_refusals_are_appended_never_rewritten(owner_engine, app_engine):
 
 async def test_a_tenant_sees_only_its_own_refusals(owner_engine, app_engine):
     lab, reef = await tenant(owner_engine, "lab"), await tenant(owner_engine, "reef")
-    dive_id, calibration = await calibrated_dive(owner_engine, lab)
-    capture_id = await capture(owner_engine, lab, dive_id)
+    mission_id, calibration = await calibrated_dive(owner_engine, lab)
+    capture_id = await capture(owner_engine, lab, mission_id)
     label = await laser_label(owner_engine, lab, capture_id)
     async with tenant_transaction(app_engine, lab) as conn:
         await _depth_refusal(conn, lab, capture_id, label, calibration)
@@ -94,8 +94,8 @@ async def test_a_tenant_sees_only_its_own_refusals(owner_engine, app_engine):
 async def test_a_refusal_never_holds_a_usable_depth(owner_engine):
     """A positive depth would have been a depth."""
     lab = await tenant(owner_engine)
-    dive_id, calibration = await calibrated_dive(owner_engine, lab)
-    capture_id = await capture(owner_engine, lab, dive_id)
+    mission_id, calibration = await calibrated_dive(owner_engine, lab)
+    capture_id = await capture(owner_engine, lab, mission_id)
     label = await laser_label(owner_engine, lab, capture_id)
 
     with pytest.raises(DBAPIError, match="laser_depth_refusals_depth_m_check"):
@@ -265,11 +265,11 @@ async def test_the_subjects_measurable_rows_are_the_taxonomys(owner_engine):
     pinned divergence (`SQL_BROADER_THAN_PYTHON`), which the store refuses
     rather than wedging on."""
     lab = await tenant(owner_engine)
-    dive_id, _ = await calibrated_dive(owner_engine, lab)
+    mission_id, _ = await calibrated_dive(owner_engine, lab)
     probes = CORPUS + list(taxonomy.SQL_BROADER_THAN_PYTHON)
     by_capture = {}
     for content in probes:
-        capture_id = await capture(owner_engine, lab, dive_id)
+        capture_id = await capture(owner_engine, lab, mission_id)
         await species_label(owner_engine, lab, capture_id, content)
         by_capture[capture_id] = content
 
@@ -346,8 +346,8 @@ async def test_a_devices_own_measurement_is_never_a_stale_binding(owner_engine):
     """The binding rule is v1's, for server results. A device measures what it
     measures, against no server calibration (0013)."""
     lab = await tenant(owner_engine)
-    dive_id, _ = await calibrated_dive(owner_engine, lab)
-    capture_id = await capture(owner_engine, lab, dive_id)
+    mission_id, _ = await calibrated_dive(owner_engine, lab)
+    capture_id = await capture(owner_engine, lab, mission_id)
     await species_label(owner_engine, lab, capture_id, "Fish Model, Grouper")
     snook = await fish(owner_engine, lab, model="Snook")
     await exec_(
@@ -385,7 +385,7 @@ async def test_a_devices_own_measurement_is_never_a_stale_binding(owner_engine):
         # current_measurements, looked up per capture by measurement_work.
         "measurements",
         # measurement_subjects' Label Studio cluster, per species label.
-        "dive_frame_cluster_captures",
+        "mission_frame_cluster_captures",
         # measurement_subjects itself, and the valid labels (their UNIQUE
         # (tenant_id, capture_id, ls_project_id) key serves).
         "species_labels",

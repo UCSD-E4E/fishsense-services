@@ -37,7 +37,7 @@ from _slate_calibration_seed import (
     T0,
     capture,
     device_with_camera,
-    dive,
+    mission,
     later,
     slate_label,
     species,
@@ -54,7 +54,7 @@ from fishsense_services_api.slate_presence_store import (
     SlatePresenceCatalog,
     SlatePresenceRow,
     detector_slate_frame,
-    next_dive_for_slate_detection,
+    next_mission_for_slate_detection,
     persist_slate_presence,
     slate_detection_inputs,
     slate_frames,
@@ -75,7 +75,7 @@ async def _one(owner_engine, sql, **params):
 
 async def _dive(owner_engine, lab, *, camera=True, **kwargs):
     device = (await device_with_camera(owner_engine, lab))[0] if camera else None
-    return await dive(owner_engine, lab, device=device, **kwargs)
+    return await mission(owner_engine, lab, device=device, **kwargs)
 
 
 async def _predicted(owner_engine, lab, capture_id, *, probability=0.9, version=V,
@@ -97,9 +97,9 @@ async def _in(app_engine, lab, fn, *args, **kwargs):
 
 async def _next(app_engine, lab, version=V):
     candidate = await _in(
-        app_engine, lab, next_dive_for_slate_detection, model_version=version
+        app_engine, lab, next_mission_for_slate_detection, model_version=version
     )
-    return None if candidate is None else candidate.dive_id
+    return None if candidate is None else candidate.mission_id
 
 
 AT = T0 + timedelta(days=34)
@@ -188,7 +188,7 @@ async def test_a_prediction_is_its_tenants_capture(owner_engine):
 # -- the cohort ---------------------------------------------------------------------
 
 
-async def test_selects_a_dive_with_an_unpredicted_canonical_capture(
+async def test_selects_a_mission_with_an_unpredicted_canonical_capture(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
@@ -262,7 +262,9 @@ async def test_only_the_current_prediction_counts(owner_engine, app_engine):
     assert await _next(app_engine, lab) == only
 
 
-async def test_a_dive_that_cannot_be_rectified_is_not_offered(owner_engine, app_engine):
+async def test_a_mission_that_cannot_be_rectified_is_not_offered(
+    owner_engine, app_engine
+):
     """No device, or a device whose calibration is not a pinhole: the
     resolver would refuse it, and the oldest refused dive would be selected
     every hour ahead of every other (`camera_sql`)."""
@@ -285,13 +287,13 @@ async def test_a_dive_that_cannot_be_rectified_is_not_offered(owner_engine, app_
         d=device,
         k=json.dumps(K),
     )
-    axial = await dive(owner_engine, lab, device=device, created_at=later(1))
+    axial = await mission(owner_engine, lab, device=device, created_at=later(1))
     await capture(owner_engine, lab, axial)
 
     assert await _next(app_engine, lab) is None
 
 
-async def test_the_oldest_dive_first(owner_engine, app_engine):
+async def test_the_oldest_mission_first(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     newer = await _dive(owner_engine, lab, created_at=later(2))
     older = await _dive(owner_engine, lab, created_at=later(1))
@@ -301,7 +303,7 @@ async def test_the_oldest_dive_first(owner_engine, app_engine):
     assert await _next(app_engine, lab) == older
 
 
-async def test_a_dive_the_run_already_took_is_not_offered_again(
+async def test_a_mission_the_run_already_took_is_not_offered_again(
     owner_engine, app_engine
 ):
     """A dive whose raws can't be staged keeps its unpredicted frames; the
@@ -314,17 +316,17 @@ async def test_a_dive_the_run_already_took_is_not_offered_again(
 
     async def _next_but(*exclude):
         candidate = await _in(
-            app_engine, lab, next_dive_for_slate_detection,
+            app_engine, lab, next_mission_for_slate_detection,
             model_version=V, exclude=list(exclude),
         )  # fmt: skip
-        return None if candidate is None else candidate.dive_id
+        return None if candidate is None else candidate.mission_id
 
     assert await _next_but() == older
     assert await _next_but(older) == newer
     assert await _next_but(older, newer) is None
 
 
-async def test_another_tenants_dive_is_never_offered(owner_engine, app_engine):
+async def test_another_tenants_mission_is_never_offered(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     reef = await tenant(owner_engine, "reef")
     await capture(owner_engine, reef, await _dive(owner_engine, reef))
@@ -349,7 +351,7 @@ async def test_resolves_the_unpredicted_canonical_captures_and_the_camera(
 
     inputs = await _in(app_engine, lab, slate_detection_inputs, only, model_version=V)
 
-    assert inputs.dive_id == only
+    assert inputs.mission_id == only
     assert (inputs.camera_matrix, inputs.distortion_coefficients) == (K, DISTORTION)
     assert [(c.capture_id, c.checksum) for c in inputs.captures] == [
         (first, "a" * 32),
@@ -357,7 +359,7 @@ async def test_resolves_the_unpredicted_canonical_captures_and_the_camera(
     ]
 
 
-async def test_a_dive_with_no_pinhole_camera_is_refused(owner_engine, app_engine):
+async def test_a_mission_with_no_pinhole_camera_is_refused(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     only = await _dive(owner_engine, lab, camera=False)
     await capture(owner_engine, lab, only)
@@ -441,7 +443,7 @@ async def test_an_abstention_is_recorded_without_a_probability(
     assert (current.status, current.probability) == ("decode_failed", None)
 
 
-async def test_a_prediction_for_a_capture_outside_the_dive_is_refused(
+async def test_a_prediction_for_a_capture_outside_the_mission_is_refused(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
@@ -576,48 +578,48 @@ async def test_the_catalog_acts_only_in_tenants_it_is_a_member_of(
     catalog = SlatePresenceCatalog(app_engine, sub=ORCHESTRATOR)
 
     assert await catalog.member_tenants() == [lab]
-    candidate = await catalog.next_dive_for_slate_detection(lab, model_version=V)
+    candidate = await catalog.next_mission_for_slate_detection(lab, model_version=V)
     assert candidate is not None
     assert (
-        await catalog.next_dive_for_slate_detection(
-            lab, model_version=V, exclude=[candidate.dive_id]
+        await catalog.next_mission_for_slate_detection(
+            lab, model_version=V, exclude=[candidate.mission_id]
         )
         is None
     )
     inputs = await catalog.slate_detection_inputs(
-        lab, candidate.dive_id, model_version=V
+        lab, candidate.mission_id, model_version=V
     )
     (only,) = inputs.captures
     assert (
         await catalog.persist_slate_presence(
-            lab, candidate.dive_id, [_row(only.capture_id)]
+            lab, candidate.mission_id, [_row(only.capture_id)]
         )
         == 1
     )
-    assert await catalog.slate_frames(lab, candidate.dive_id) == [
+    assert await catalog.slate_frames(lab, candidate.mission_id) == [
         (only.capture_id, 0.97)
     ]
-    assert len(await catalog.slate_presence(lab, candidate.dive_id)) == 1
+    assert len(await catalog.slate_presence(lab, candidate.mission_id)) == 1
     with pytest.raises(PermissionError):
-        await catalog.next_dive_for_slate_detection(reef, model_version=V)
+        await catalog.next_mission_for_slate_detection(reef, model_version=V)
 
 
 # -- the cohort with the backlog done -------------------------------------------
 
 
-async def _a_finished_backlog(owner_engine, lab, *, dives=40, frames=25):
-    """Every frame of `dives` dives scored, and one dive with none: the cohort
+async def _a_finished_backlog(owner_engine, lab, *, missions=40, frames=25):
+    """Every frame of `missions` dives scored, and one dive with none: the cohort
     as it stood on 2026-10-14 (316 of 317 dives done), at test scale. Returns
     the unscored dive."""
     device = (await device_with_camera(owner_engine, lab))[0]
     ids = []
-    for n in range(dives + 1):
-        d = await dive(owner_engine, lab, device=device, created_at=later(n))
+    for n in range(missions + 1):
+        d = await mission(owner_engine, lab, device=device, created_at=later(n))
         ids.append(d)
         async with owner_engine.begin() as conn:
             await conn.execute(
                 text(
-                    "INSERT INTO captures (tenant_id, dive_id, source_path, "
+                    "INSERT INTO captures (tenant_id, mission_id, source_path, "
                     "captured_at, checksum, is_canonical) "
                     "SELECT :t, :d, :path || '/P' || g || '.ORF', :at, "
                     "md5(:path || '/' || g), true FROM generate_series(1, :n) g"
@@ -628,7 +630,7 @@ async def _a_finished_backlog(owner_engine, lab, *, dives=40, frames=25):
     template = await _predicted(
         owner_engine,
         lab,
-        await _one(owner_engine, "SELECT id FROM captures WHERE dive_id = :d "
+        await _one(owner_engine, "SELECT id FROM captures WHERE mission_id = :d "
                    "LIMIT 1", d=scored[0]),
     )  # fmt: skip
     async with owner_engine.begin() as conn:
@@ -650,12 +652,14 @@ async def _a_finished_backlog(owner_engine, lab, *, dives=40, frames=25):
                 f"INSERT INTO slate_presence_predictions (capture_id, {listed}) "
                 f"SELECT c.id, {copied} FROM slate_presence_predictions p "
                 "JOIN captures c ON c.tenant_id = p.tenant_id "
-                "WHERE p.id = :template AND c.dive_id <> :unscored "
+                "WHERE p.id = :template AND c.mission_id <> :unscored "
                 "AND c.id <> p.capture_id"
             ),
             {"template": template, "unscored": unscored},
         )
-        await conn.execute(text("ANALYZE captures, dives, slate_presence_predictions"))
+        await conn.execute(
+            text("ANALYZE captures, missions, slate_presence_predictions")
+        )
     return unscored
 
 
@@ -693,7 +697,7 @@ def _reads_each_frames_latest_row(nodes) -> bool:
     )
 
 
-async def test_the_last_unscored_dive_is_found_when_every_other_is_done(
+async def test_the_last_unscored_mission_is_found_when_every_other_is_done(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
@@ -718,7 +722,7 @@ async def test_the_cohort_looks_up_each_frames_latest_prediction(
     nodes = await _plan(
         app_engine,
         lab,
-        "SELECT d.id FROM dives d WHERE d.tenant_id = :tenant "
+        "SELECT d.id FROM missions d WHERE d.tenant_id = :tenant "
         f"AND {slate_detection_cohort(':version')} "
         "ORDER BY d.created_at, d.id LIMIT 1",
         tenant=lab,
@@ -740,9 +744,9 @@ async def test_the_detector_slate_predicate_looks_up_each_frames_latest_predicti
     nodes = await _plan(
         app_engine,
         lab,
-        "SELECT d.id FROM dives d WHERE d.tenant_id = :tenant AND EXISTS ("
+        "SELECT d.id FROM missions d WHERE d.tenant_id = :tenant AND EXISTS ("
         "SELECT 1 FROM captures c WHERE c.tenant_id = d.tenant_id "
-        f"AND c.dive_id = d.id AND {detector_slate_frame()})",
+        f"AND c.mission_id = d.id AND {detector_slate_frame()})",
         tenant=lab,
     )
 

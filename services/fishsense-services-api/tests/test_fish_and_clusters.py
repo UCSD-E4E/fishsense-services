@@ -27,23 +27,23 @@ async def _tenant(conn, slug: str) -> uuid.UUID:
     )
 
 
-async def _dive_with_capture(conn, tenant) -> tuple[uuid.UUID, uuid.UUID]:
-    dive = await _one(
+async def _mission_with_capture(conn, tenant) -> tuple[uuid.UUID, uuid.UUID]:
+    mission = await _one(
         conn,
-        "INSERT INTO dives (tenant_id, source_path, dived_at) "
+        "INSERT INTO missions (tenant_id, source_path, started_at) "
         "VALUES (:t, :p, now()) RETURNING id",
         t=tenant,
         p=f"/{uuid.uuid4().hex}",
     )
     capture = await _one(
         conn,
-        "INSERT INTO captures (tenant_id, dive_id, source_path, captured_at, checksum) "
+        "INSERT INTO captures (tenant_id, mission_id, source_path, captured_at, checksum) "
         "VALUES (:t, :d, :p, now(), '0123456789abcdef0123456789abcdef') RETURNING id",
         t=tenant,
-        d=dive,
+        d=mission,
         p=f"/{uuid.uuid4().hex}.ORF",
     )
-    return dive, capture
+    return mission, capture
 
 
 @pytest.fixture
@@ -102,31 +102,31 @@ async def test_fish_are_never_deleted(owner_engine, app_engine):
 
 async def test_a_cluster_knows_how_it_was_formed(owner):
     lab = await _tenant(owner, "lab")
-    dive, _ = await _dive_with_capture(owner, lab)
+    mission, _ = await _mission_with_capture(owner, lab)
     insert = (
-        "INSERT INTO dive_frame_clusters (tenant_id, dive_id, formed_by) "
+        "INSERT INTO mission_frame_clusters (tenant_id, mission_id, formed_by) "
         "VALUES (:t, :d, :f)"
     )
 
-    await owner.execute(text(insert), {"t": lab, "d": dive, "f": "prediction"})
-    await owner.execute(text(insert), {"t": lab, "d": dive, "f": "label_studio"})
+    await owner.execute(text(insert), {"t": lab, "d": mission, "f": "prediction"})
+    await owner.execute(text(insert), {"t": lab, "d": mission, "f": "label_studio"})
     with pytest.raises(IntegrityError, match="check"):
         async with owner.begin_nested():
-            await owner.execute(text(insert), {"t": lab, "d": dive, "f": "vibes"})
+            await owner.execute(text(insert), {"t": lab, "d": mission, "f": "vibes"})
 
 
 async def test_a_capture_sits_in_a_cluster_once_and_leaves_with_it(owner):
     lab = await _tenant(owner, "lab")
-    dive, capture = await _dive_with_capture(owner, lab)
+    mission, capture = await _mission_with_capture(owner, lab)
     cluster = await _one(
         owner,
-        "INSERT INTO dive_frame_clusters (tenant_id, dive_id, formed_by) "
+        "INSERT INTO mission_frame_clusters (tenant_id, mission_id, formed_by) "
         "VALUES (:t, :d, 'prediction') RETURNING id",
         t=lab,
-        d=dive,
+        d=mission,
     )
     member = (
-        "INSERT INTO dive_frame_cluster_captures (tenant_id, cluster_id, capture_id) "
+        "INSERT INTO mission_frame_cluster_captures (tenant_id, cluster_id, capture_id) "
         "VALUES (:t, :c, :p)"
     )
     await owner.execute(text(member), {"t": lab, "c": cluster, "p": capture})
@@ -136,21 +136,21 @@ async def test_a_capture_sits_in_a_cluster_once_and_leaves_with_it(owner):
             await owner.execute(text(member), {"t": lab, "c": cluster, "p": capture})
 
     await owner.execute(
-        text("DELETE FROM dive_frame_clusters WHERE id = :c"), {"c": cluster}
+        text("DELETE FROM mission_frame_clusters WHERE id = :c"), {"c": cluster}
     )
-    assert await _one(owner, "SELECT count(*) FROM dive_frame_cluster_captures") == 0
+    assert await _one(owner, "SELECT count(*) FROM mission_frame_cluster_captures") == 0
 
 
-async def test_only_a_migrated_cluster_may_lack_its_dive_or_formation(owner):
+async def test_only_a_migrated_cluster_may_lack_its_mission_or_formation(owner):
     lab = await _tenant(owner, "lab")
 
     await owner.execute(
-        text("INSERT INTO dive_frame_clusters (tenant_id, v1_id) VALUES (:t, 9)"),
+        text("INSERT INTO mission_frame_clusters (tenant_id, v1_id) VALUES (:t, 9)"),
         {"t": lab},
     )
     with pytest.raises(IntegrityError, match="check"):
         async with owner.begin_nested():
             await owner.execute(
-                text("INSERT INTO dive_frame_clusters (tenant_id) VALUES (:t)"),
+                text("INSERT INTO mission_frame_clusters (tenant_id) VALUES (:t)"),
                 {"t": lab},
             )

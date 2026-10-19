@@ -22,8 +22,8 @@ from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 
 from fishsense_services_contracts.clustering import (
-    ClusterDiveFrameImage,
-    ClusterDiveFramesInput,
+    ClusterMissionFrameImage,
+    ClusterMissionFramesInput,
 )
 from fishsense_services_contracts.object_store import ObjectRef
 from fishsense_services_contracts.task_queues import (
@@ -32,7 +32,11 @@ from fishsense_services_contracts.task_queues import (
     PROCESSOR_TASK_QUEUE,
 )
 
-CONTRACT_VERSION = 6
+#: v7 (2026-10-18, Phase 2a): the models renamed dive -> mission. Every payload's
+#: JSON is unchanged -- each renamed field keeps its old name on the wire
+#: (`renamed.py`) -- so a v6 processor and a v7 orchestrator interoperate; only
+#: the published schema's model names differ.
+CONTRACT_VERSION = 7
 
 
 def _discover_models() -> tuple[type[BaseModel], ...]:
@@ -66,8 +70,8 @@ __all__ = [
     "PROCESSOR_GPU_TASK_QUEUE",
     "PROCESSOR_LIGHT_TASK_QUEUE",
     "PROCESSOR_TASK_QUEUE",
-    "ClusterDiveFrameImage",
-    "ClusterDiveFramesInput",
+    "ClusterMissionFrameImage",
+    "ClusterMissionFramesInput",
     "ObjectRef",
     "json_schema",
 ]

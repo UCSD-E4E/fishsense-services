@@ -42,7 +42,7 @@ ROOT = "/fishsense_data/REEF/data"
 FOLDER = "2024.06.20.REEF/102023_Alligator/101923_Alligator/101923_Alligator_FSL02"
 SUB = "101823_Alligator2_FSL02"
 LAB = uuid.UUID("7b0c7d4e-3f58-4d8e-9a3c-0c5f1f7f2d11")
-DIVE = uuid.UUID("11111111-2222-4333-8444-555555555555")
+MISSION = uuid.UUID("11111111-2222-4333-8444-555555555555")
 
 
 def _md5(n: int) -> str:
@@ -73,11 +73,11 @@ class FakeCatalog:
     async def member_tenants(self):
         return [LAB]
 
-    async def dive_by_number(self, tenant_id, number):
-        return DIVE if (tenant_id, number) == (LAB, 249) else None
+    async def mission_by_number(self, tenant_id, number):
+        return MISSION if (tenant_id, number) == (LAB, 249) else None
 
-    async def captures_with_paths(self, tenant_id, dive_id):
-        assert (tenant_id, dive_id) == (LAB, DIVE)
+    async def captures_with_paths(self, tenant_id, mission_id):
+        assert (tenant_id, mission_id) == (LAB, MISSION)
         return list(self.captures)
 
     async def path_holder(self, tenant_id, path):
@@ -130,12 +130,12 @@ def _settings():
     )
 
 
-async def _repair(catalog, nas, *, apply=False, dive=249):
+async def _repair(catalog, nas, *, apply=False, mission=249):
     activities = sut.PathRepairActivities(
         catalog=catalog, nas_settings=_settings(), nas_client_factory=lambda: nas
     )
     return await ActivityEnvironment().run(
-        activities.repair_moved_capture_paths, dive, apply
+        activities.repair_moved_capture_paths, mission, apply
     )
 
 
@@ -321,8 +321,8 @@ async def test_every_frame_lands_in_exactly_one_bucket():
     assert report.at_path + len(report.would_repair) + report.left_alone == 5
 
 
-async def test_an_unknown_dive_is_a_non_retryable_error():
+async def test_an_unknown_mission_is_a_non_retryable_error():
     with pytest.raises(ApplicationError) as excinfo:
-        await _repair(FakeCatalog([]), FakeNas({}), dive=9999)
+        await _repair(FakeCatalog([]), FakeNas({}), mission=9999)
     assert excinfo.value.type == "DiveNotFound"
     assert excinfo.value.non_retryable

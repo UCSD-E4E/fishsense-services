@@ -12,7 +12,7 @@ the frames humans labelled, as the paper chose them:
   slate (tail/stage.py), labelled or not;
 * green or red, from the laser label (evaluate.py);
 * the camera matrix, the dive's effective stored calibration (0026's
-  `dive_laser_geometry`) and its label-free one (own, else its link's);
+  `mission_laser_geometry`) and its label-free one (own, else its link's);
 * the automatic chain's current output for the frame
   (`current_automatic_head_tail_predictions`), unless `outputs` supplies it;
   then a frame `outputs` does not name was not run, and is left out (the
@@ -51,9 +51,9 @@ _VALID_HT = (
 )
 
 _FRAMES = text(f"""
-    SELECT d.number AS dive_number, c.number AS capture_number, c.v1_id,
-           (SELECT s.number FROM dives s WHERE s.tenant_id = d.tenant_id
-              AND s.id = d.calibration_source_dive_id) AS link_number,
+    SELECT d.number AS mission_number, c.number AS capture_number, c.v1_id,
+           (SELECT s.number FROM missions s WHERE s.tenant_id = d.tenant_id
+              AND s.id = d.calibration_source_mission_id) AS link_number,
            ll.x AS laser_x, ll.y AS laser_y, ll.label AS laser,
            ht.head_x, ht.head_y, ht.tail_x, ht.tail_y,
            sp.content_of_image AS content,
@@ -63,8 +63,8 @@ _FRAMES = text(f"""
            a.status AS auto_status, a.laser_x AS auto_x, a.laser_y AS auto_y,
            a.head_x AS auto_head_x, a.head_y AS auto_head_y,
            a.tail_x AS auto_tail_x, a.tail_y AS auto_tail_y
-    FROM dives d
-    JOIN captures c ON c.tenant_id = d.tenant_id AND c.dive_id = d.id AND c.is_canonical
+    FROM missions d
+    JOIN captures c ON c.tenant_id = d.tenant_id AND c.mission_id = d.id AND c.is_canonical
     JOIN current_camera_calibrations cc
       ON cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
      AND cc.camera_model = 'pinhole'
@@ -84,17 +84,17 @@ _FRAMES = text(f"""
           AND s.ls_project_id IS NOT NULL
         ORDER BY s.number DESC LIMIT 1
     ) sp ON true
-    LEFT JOIN dive_laser_geometry g ON g.tenant_id = d.tenant_id AND g.dive_id = d.id
+    LEFT JOIN mission_laser_geometry g ON g.tenant_id = d.tenant_id AND g.mission_id = d.id
     LEFT JOIN LATERAL (
         SELECT x.laser_position, x.laser_axis
         FROM current_automatic_laser_calibrations x
         WHERE x.tenant_id = d.tenant_id AND x.outcome = 'accepted'
-          AND x.dive_id IN (d.id, d.calibration_source_dive_id)
-        ORDER BY x.dive_id = d.id DESC LIMIT 1
+          AND x.mission_id IN (d.id, d.calibration_source_mission_id)
+        ORDER BY x.mission_id = d.id DESC LIMIT 1
     ) lf ON true
     LEFT JOIN current_automatic_head_tail_predictions a
       ON a.tenant_id = c.tenant_id AND a.capture_id = c.id
-    WHERE d.tenant_id = :t AND d.number = ANY(:dives)
+    WHERE d.tenant_id = :t AND d.number = ANY(:missions)
     ORDER BY d.number, c.number
     """)
 
@@ -120,8 +120,8 @@ async def validation_frames(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
     *,
-    pool_dives: Sequence[int],
-    reef_dives: Sequence[int],
+    pool_missions: Sequence[int],
+    reef_missions: Sequence[int],
     outputs: Optional[Mapping[int, Mapping[str, Any]]] = None,
     label_free: Optional[Mapping[int, tuple]] = None,
     reef_frames: Optional[Mapping[int, Any]] = None,
@@ -139,9 +139,9 @@ async def validation_frames(
     }
     frames = []
     for r in await conn.execute(
-        _FRAMES, {"t": tenant_id, "dives": [*pool_dives, *reef_dives]}
+        _FRAMES, {"t": tenant_id, "missions": [*pool_missions, *reef_missions]}
     ):
-        is_pool = r.dive_number in pool_dives
+        is_pool = r.mission_number in pool_missions
         listed = not is_pool and reef_frames is not None and r.v1_id in reef_frames
         if not is_pool and reef_frames is not None and not listed:
             continue  # not among the paper's frames
@@ -170,14 +170,14 @@ async def validation_frames(
             humandot = None
         given_lf = label_free or {}
         lf = (
-            given_lf.get(r.dive_number)
+            given_lf.get(r.mission_number)
             or given_lf.get(r.link_number)
             or _calibration(r.lf_position, r.lf_axis)
         )
         frames.append(
             ValidationFrame(
                 capture_number=r.capture_number,
-                dive_number=r.dive_number,
+                mission_number=r.mission_number,
                 set="pool" if is_pool else "reef",
                 model=model,
                 true_length_m=tape.get(model) if model else None,
@@ -199,28 +199,28 @@ async def validation_frames(
 
 
 _SESSIONS = text("""
-    SELECT d.number AS dive_number, cc.camera_matrix, g.laser_axis AS stored_axis,
+    SELECT d.number AS mission_number, cc.camera_matrix, g.laser_axis AS stored_axis,
            lf.vanishing_px, lf.line_direction
-    FROM dives d
+    FROM missions d
     JOIN current_camera_calibrations cc
       ON cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
      AND cc.camera_model = 'pinhole'
-    LEFT JOIN dive_laser_geometry g ON g.tenant_id = d.tenant_id AND g.dive_id = d.id
+    LEFT JOIN mission_laser_geometry g ON g.tenant_id = d.tenant_id AND g.mission_id = d.id
     LEFT JOIN current_automatic_laser_calibrations lf
-      ON lf.tenant_id = d.tenant_id AND lf.dive_id = d.id AND lf.outcome = 'accepted'
-    WHERE d.tenant_id = :t AND d.number = ANY(:dives)
+      ON lf.tenant_id = d.tenant_id AND lf.mission_id = d.id AND lf.outcome = 'accepted'
+    WHERE d.tenant_id = :t AND d.number = ANY(:missions)
     ORDER BY d.number
     """)
 
 
 async def session_calibrations(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dives: Sequence[int]
+    conn: AsyncConnection, tenant_id: uuid.UUID, missions: Sequence[int]
 ) -> list[SessionCalibration]:
     """Table 3's sessions: the stored laser axis, and the session's *own*
     accepted label-free fit (never a link's: Table 3 fits each session)."""
     return [
         SessionCalibration(
-            dive_number=r.dive_number,
+            mission_number=r.mission_number,
             camera_matrix=[[float(v) for v in row] for row in r.camera_matrix],
             stored_axis=(
                 None if r.stored_axis is None else [float(v) for v in r.stored_axis]
@@ -232,5 +232,7 @@ async def session_calibrations(
                 else [float(v) for v in r.line_direction]
             ),
         )
-        for r in await conn.execute(_SESSIONS, {"t": tenant_id, "dives": list(dives)})
+        for r in await conn.execute(
+            _SESSIONS, {"t": tenant_id, "missions": list(missions)}
+        )
     ]

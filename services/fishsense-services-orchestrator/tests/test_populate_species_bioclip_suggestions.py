@@ -42,7 +42,7 @@ from fishsense_services_orchestrator.species_predict.settings import (
 )
 
 from ._species import (
-    DIVE,
+    MISSION,
     TENANT,
     FakeSpeciesCatalog,
     FakeStore,
@@ -51,7 +51,7 @@ from ._species import (
     species,
 )
 
-TARGET = SpeciesTarget(TENANT, DIVE)
+TARGET = SpeciesTarget(TENANT, MISSION)
 PROJECT = 70
 HOGFISH = "Fish, Hogfish (Lachnolaimus maximus)"
 TAG = "bioclip-v1 other<0.5"
@@ -93,7 +93,7 @@ class FakePredictions:
         self.species_catalog = species_catalog
         self.calls = 0
 
-    async def species_prediction_state(self, tenant_id, dive_id):
+    async def species_prediction_state(self, tenant_id, mission_id):
         self.calls += 1
         tasks = [
             LiveSpeciesTask(capture_id, project, task, False)

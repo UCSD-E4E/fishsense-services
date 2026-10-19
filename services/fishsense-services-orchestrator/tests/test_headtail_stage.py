@@ -21,7 +21,7 @@ from datetime import timedelta
 
 import pytest
 from temporalio.client import ScheduleOverlapPolicy
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 
 from fishsense_services_orchestrator.headtail import workflow as wf
@@ -108,7 +108,7 @@ def test_the_predict_run_outlives_every_step_it_waits_on():
 async def test_each_schedule_is_created_as_declared(schedule_id):
     name, offset, overlap, run_timeout = EXPECTED[schedule_id]
     async with await WorkflowEnvironment.start_local(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         await ensure_schedules(env.client, task_queue=QUEUE)
         schedule = (

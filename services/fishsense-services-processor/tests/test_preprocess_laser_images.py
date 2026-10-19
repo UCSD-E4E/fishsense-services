@@ -31,7 +31,7 @@ import numpy as np
 import pytest
 from moto import mock_aws
 from temporalio import activity
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -78,7 +78,7 @@ def _images(*checksums):
 
 async def _run_workflow(payload, stub):
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,
@@ -96,7 +96,7 @@ async def _run_workflow(payload, stub):
 
 def _payload(images, **overrides):
     values = {
-        "dive_id": uuid.uuid4(),
+        "mission_id": uuid.uuid4(),
         "images": images,
         "camera_matrix": _K,
         "distortion_coefficients": _D,

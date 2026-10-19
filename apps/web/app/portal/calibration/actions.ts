@@ -11,7 +11,7 @@
 import { revalidatePath } from "next/cache";
 import { auth, unstable_update } from "@/auth";
 import { accessTokenIsFresh, isPortalAuthorized } from "@/lib/authz";
-import { clearCalibrationSource, setCalibrationSource } from "@/lib/dives";
+import { clearCalibrationSource, setCalibrationSource } from "@/lib/missions";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -46,15 +46,15 @@ async function requireAuthorized(): Promise<string> {
 }
 
 export async function setCalibrationSourceAction(
-  diveNumber: number,
+  missionNumber: number,
   sourceNumber: number,
 ): Promise<ActionResult> {
   try {
     const token = await requireAuthorized();
-    if (diveNumber === sourceNumber) {
-      return { ok: false, error: "A dive cannot be its own calibration source" };
+    if (missionNumber === sourceNumber) {
+      return { ok: false, error: "A mission cannot be its own calibration source" };
     }
-    await setCalibrationSource(token, diveNumber, sourceNumber);
+    await setCalibrationSource(token, missionNumber, sourceNumber);
     revalidatePath("/portal");
     return { ok: true };
   } catch (error) {
@@ -63,11 +63,11 @@ export async function setCalibrationSourceAction(
 }
 
 export async function clearCalibrationSourceAction(
-  diveNumber: number,
+  missionNumber: number,
 ): Promise<ActionResult> {
   try {
     const token = await requireAuthorized();
-    await clearCalibrationSource(token, diveNumber);
+    await clearCalibrationSource(token, missionNumber);
     revalidatePath("/portal");
     return { ok: true };
   } catch (error) {

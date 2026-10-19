@@ -49,7 +49,7 @@ async def measure_automatic(payload: MeasureAutomaticInput) -> MeasureAutomaticR
             )
         except ValueError as exc:
             raise ApplicationError(
-                f"dive {payload.dive_id}'s calibration is unusable: {exc}",
+                f"dive {payload.mission_id}'s calibration is unusable: {exc}",
                 type="UnusableLaserCalibration",
                 non_retryable=True,
             ) from exc
@@ -74,12 +74,12 @@ async def measure_automatic(payload: MeasureAutomaticInput) -> MeasureAutomaticR
         )
     activity.logger.info(
         "dive=%s automatic lengths=%d refused=%d",
-        payload.dive_id,
+        payload.mission_id,
         sum(1 for x in lengths if x.refusal is None),
         sum(1 for x in lengths if x.refusal is not None),
     )
     return MeasureAutomaticResult(
-        dive_id=payload.dive_id,
+        mission_id=payload.mission_id,
         algorithm=AUTOMATIC_MEASUREMENT_ALGORITHM,
         algorithm_version=AUTOMATIC_MEASUREMENT_VERSION,
         core_version=version("fishsense-core"),

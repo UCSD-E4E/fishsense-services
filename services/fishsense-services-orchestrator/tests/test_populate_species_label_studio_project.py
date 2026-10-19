@@ -32,7 +32,7 @@ from fishsense_services_orchestrator.species.activities import SpeciesActivities
 from fishsense_services_orchestrator.species.contracts import SpeciesTarget
 
 from ._species import (
-    DIVE,
+    MISSION,
     LAYOUT,
     TENANT,
     FakeSpeciesCatalog,
@@ -45,7 +45,7 @@ from ._species import (
     with_,
 )
 
-TARGET = SpeciesTarget(TENANT, DIVE)
+TARGET = SpeciesTarget(TENANT, MISSION)
 
 
 def _species_label(n, *, completed, project=70, superseded=False):

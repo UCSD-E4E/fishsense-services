@@ -13,7 +13,7 @@ import uuid
 
 import pytest
 from temporalio import activity, workflow
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
@@ -56,7 +56,7 @@ async def test_each_wake_runs_its_roles_activity_and_the_gpu_mode_comes_back(mod
         return mode
 
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,
@@ -90,7 +90,7 @@ async def test_each_wake_budgets_what_its_constant_says():
         return wake
 
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,

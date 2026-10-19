@@ -78,8 +78,8 @@ async def _dive(owner_engine, tenant, number, *, source=None):
         return (
             await conn.execute(
                 text(
-                    "INSERT INTO dives (tenant_id, v1_id, name, source_path, dived_at, "
-                    "calibration_source_dive_id) VALUES (:t, :n, :name, :p, :at, :s) "
+                    "INSERT INTO missions (tenant_id, v1_id, name, source_path, started_at, "
+                    "calibration_source_mission_id) VALUES (:t, :n, :name, :p, :at, :s) "
                     "RETURNING id"
                 ),
                 {"t": tenant, "n": number, "name": f"dive {number}",
@@ -88,25 +88,25 @@ async def _dive(owner_engine, tenant, number, *, source=None):
         ).scalar_one()
 
 
-async def _source_of(owner_engine, dive_id):
+async def _source_of(owner_engine, mission_id):
     async with owner_engine.connect() as conn:
         return (
             await conn.execute(
                 text(
-                    "SELECT s.number FROM dives d LEFT JOIN dives s "
-                    "ON s.id = d.calibration_source_dive_id WHERE d.id = :d"
+                    "SELECT s.number FROM missions d LEFT JOIN missions s "
+                    "ON s.id = d.calibration_source_mission_id WHERE d.id = :d"
                 ),
-                {"d": dive_id},
+                {"d": mission_id},
             )
         ).scalar_one()
 
 
 async def _laser_label(owner_engine, tenant, project_id, *, completed=False):
     async with owner_engine.begin() as conn:
-        dive = (
+        mission = (
             await conn.execute(
                 text(
-                    "INSERT INTO dives (tenant_id, source_path, dived_at) "
+                    "INSERT INTO missions (tenant_id, source_path, started_at) "
                     "VALUES (:t, gen_random_uuid()::text, :at) RETURNING id"
                 ),
                 {"t": tenant, "at": T0},
@@ -115,11 +115,11 @@ async def _laser_label(owner_engine, tenant, project_id, *, completed=False):
         capture = (
             await conn.execute(
                 text(
-                    "INSERT INTO captures (tenant_id, dive_id, source_path, "
+                    "INSERT INTO captures (tenant_id, mission_id, source_path, "
                     "captured_at, checksum) VALUES (:t, :d, gen_random_uuid()::text, "
                     ":at, md5(random()::text)) RETURNING id"
                 ),
-                {"t": tenant, "d": dive, "at": T0},
+                {"t": tenant, "d": mission, "at": T0},
             )
         ).scalar_one()
         await conn.execute(
@@ -167,11 +167,11 @@ async def test_no_token_is_401(client):
     for method, path in [
         ("GET", "/tenants/lab/membership"),
         ("GET", "/tenants/lab/label-studio-projects?kind=laser"),
-        ("GET", "/tenants/lab/dives"),
-        ("PUT", "/tenants/lab/dives/2/calibration-source/1"),
-        ("DELETE", "/tenants/lab/dives/2/calibration-source"),
-        ("PUT", "/tenants/lab/dives/2/labels/laser/needs-reprocess"),
-        ("DELETE", "/tenants/lab/dives/2/labels/laser/needs-reprocess"),
+        ("GET", "/tenants/lab/missions"),
+        ("PUT", "/tenants/lab/missions/2/calibration-source/1"),
+        ("DELETE", "/tenants/lab/missions/2/calibration-source"),
+        ("PUT", "/tenants/lab/missions/2/labels/laser/needs-reprocess"),
+        ("DELETE", "/tenants/lab/missions/2/labels/laser/needs-reprocess"),
     ]:
         response = await client.request(method, path)
         assert response.status_code == 401, (method, path)
@@ -258,18 +258,18 @@ async def test_a_non_member_cannot_list_a_tenants_projects(
 # -- dives ---------------------------------------------------------------------
 
 
-async def test_a_member_lists_dives_by_number(client, tenants, owner_engine):
+async def test_a_member_lists_missions_by_number(client, tenants, owner_engine):
     source = await _dive(owner_engine, tenants["lab"], 1)
     await _dive(owner_engine, tenants["lab"], 2, source=source)
     await _dive(owner_engine, tenants["partner"], 3)
 
-    response = await client.get("/tenants/lab/dives", headers=_bearer(MEMBER))
+    response = await client.get("/tenants/lab/missions", headers=_bearer(MEMBER))
 
     assert response.json() == [
-        {"number": 1, "name": "dive 1", "dived_at": "2025-01-01T00:00:00Z",
+        {"number": 1, "name": "dive 1", "started_at": "2025-01-01T00:00:00Z",
          "priority": "low", "slate_template_number": None,
          "calibration_target_number": None, "calibration_source_number": None},
-        {"number": 2, "name": "dive 2", "dived_at": "2025-01-01T00:00:00Z",
+        {"number": 2, "name": "dive 2", "started_at": "2025-01-01T00:00:00Z",
          "priority": "low", "slate_template_number": None,
          "calibration_target_number": None, "calibration_source_number": 1},
     ]  # fmt: skip
@@ -278,14 +278,14 @@ async def test_a_member_lists_dives_by_number(client, tenants, owner_engine):
 # -- the calibration-source link ------------------------------------------------------
 
 
-async def test_an_admin_links_a_dive_to_a_calibration_source(
+async def test_an_admin_links_a_mission_to_a_calibration_source(
     client, tenants, owner_engine
 ):
     await _dive(owner_engine, tenants["lab"], 1)
     two = await _dive(owner_engine, tenants["lab"], 2)
 
     response = await client.put(
-        "/tenants/lab/dives/2/calibration-source/1", headers=_bearer(ADMIN)
+        "/tenants/lab/missions/2/calibration-source/1", headers=_bearer(ADMIN)
     )
 
     assert response.status_code == 200
@@ -302,7 +302,7 @@ async def test_a_member_who_is_not_an_admin_cannot_link(client, tenants, owner_e
     two = await _dive(owner_engine, tenants["lab"], 2)
 
     response = await client.put(
-        "/tenants/lab/dives/2/calibration-source/1", headers=_bearer(MEMBER)
+        "/tenants/lab/missions/2/calibration-source/1", headers=_bearer(MEMBER)
     )
 
     assert response.status_code == 403
@@ -314,17 +314,17 @@ async def test_a_member_who_is_not_an_admin_cannot_clear(client, tenants, owner_
     two = await _dive(owner_engine, tenants["lab"], 2, source=source)
 
     response = await client.delete(
-        "/tenants/lab/dives/2/calibration-source", headers=_bearer(MEMBER)
+        "/tenants/lab/missions/2/calibration-source", headers=_bearer(MEMBER)
     )
 
     assert response.status_code == 403
     assert await _source_of(owner_engine, two) == 1
 
 
-async def test_the_role_is_checked_before_the_dive_is_looked_up(client, tenants):
+async def test_the_role_is_checked_before_the_mission_is_looked_up(client, tenants):
     """A non-admin learns nothing about which dives exist: 403, not 404."""
     response = await client.put(
-        "/tenants/lab/dives/999/calibration-source/998", headers=_bearer(MEMBER)
+        "/tenants/lab/missions/999/calibration-source/998", headers=_bearer(MEMBER)
     )
 
     assert response.status_code == 403
@@ -335,7 +335,7 @@ async def test_an_admin_of_another_tenant_cannot_link(client, tenants, owner_eng
     two = await _dive(owner_engine, tenants["lab"], 2)
 
     response = await client.put(
-        "/tenants/lab/dives/2/calibration-source/1", headers=_bearer(OUTSIDER)
+        "/tenants/lab/missions/2/calibration-source/1", headers=_bearer(OUTSIDER)
     )
 
     assert response.status_code == 404
@@ -346,24 +346,24 @@ async def test_a_self_link_is_a_400(client, tenants, owner_engine):
     await _dive(owner_engine, tenants["lab"], 1)
 
     response = await client.put(
-        "/tenants/lab/dives/1/calibration-source/1", headers=_bearer(ADMIN)
+        "/tenants/lab/missions/1/calibration-source/1", headers=_bearer(ADMIN)
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "A dive cannot be its own calibration source"
+    assert response.json()["detail"] == "A mission cannot be its own calibration source"
 
 
 @pytest.mark.parametrize(
     "path, detail",
     [
-        ("/tenants/lab/dives/999/calibration-source/1", "dive 999 not found"),
+        ("/tenants/lab/missions/999/calibration-source/1", "mission 999 not found"),
         (
-            "/tenants/lab/dives/1/calibration-source/999",
-            "calibration source dive 999 not found",
+            "/tenants/lab/missions/1/calibration-source/999",
+            "calibration source mission 999 not found",
         ),
     ],
 )
-async def test_a_missing_dive_or_source_is_a_404(
+async def test_a_missing_mission_or_source_is_a_404(
     client, tenants, owner_engine, path, detail
 ):
     await _dive(owner_engine, tenants["lab"], 1)
@@ -374,12 +374,12 @@ async def test_a_missing_dive_or_source_is_a_404(
     assert response.json()["detail"] == detail
 
 
-async def test_another_tenants_dive_is_not_a_source(client, tenants, owner_engine):
+async def test_another_tenants_mission_is_not_a_source(client, tenants, owner_engine):
     await _dive(owner_engine, tenants["lab"], 1)
     await _dive(owner_engine, tenants["partner"], 2)
 
     response = await client.put(
-        "/tenants/lab/dives/1/calibration-source/2", headers=_bearer(ADMIN)
+        "/tenants/lab/missions/1/calibration-source/2", headers=_bearer(ADMIN)
     )
 
     assert response.status_code == 404
@@ -390,30 +390,30 @@ async def test_an_admin_clears_a_link_idempotently(client, tenants, owner_engine
     two = await _dive(owner_engine, tenants["lab"], 2, source=source)
 
     first = await client.delete(
-        "/tenants/lab/dives/2/calibration-source", headers=_bearer(ADMIN)
+        "/tenants/lab/missions/2/calibration-source", headers=_bearer(ADMIN)
     )
     again = await client.delete(
-        "/tenants/lab/dives/2/calibration-source", headers=_bearer(ADMIN)
+        "/tenants/lab/missions/2/calibration-source", headers=_bearer(ADMIN)
     )
 
     assert (first.status_code, again.status_code) == (204, 204)
     assert await _source_of(owner_engine, two) is None
 
 
-async def test_clearing_a_missing_dive_is_a_404(client, tenants):
+async def test_clearing_a_missing_mission_is_a_404(client, tenants):
     response = await client.delete(
-        "/tenants/lab/dives/999/calibration-source", headers=_bearer(ADMIN)
+        "/tenants/lab/missions/999/calibration-source", headers=_bearer(ADMIN)
     )
 
     assert response.status_code == 404
 
 
 @pytest.mark.parametrize("bad", ["abc", "1.5", "-1", "0x1"])
-async def test_a_dive_number_is_a_non_negative_integer(client, tenants, bad):
+async def test_a_mission_number_is_a_non_negative_integer(client, tenants, bad):
     """v1's web validated ids as non-negative integers (`safeId`) before they
     went into a URL; the API refuses anything else itself."""
     response = await client.put(
-        f"/tenants/lab/dives/{bad}/calibration-source/1", headers=_bearer(ADMIN)
+        f"/tenants/lab/missions/{bad}/calibration-source/1", headers=_bearer(ADMIN)
     )
 
     assert response.status_code == 422
@@ -437,21 +437,21 @@ LABEL_TABLES = {
 }
 
 
-async def _labelled_dive(owner_engine, tenant, number, table):
+async def _labelled_mission(owner_engine, tenant, number, table):
     """Dive `number` with two canonical frames labelled in `table`: one
     answered, one not."""
-    dive = await _dive(owner_engine, tenant, number)
+    mission = await _dive(owner_engine, tenant, number)
     async with owner_engine.begin() as conn:
         for done in (False, True):
             capture = (
                 await conn.execute(
                     text(
-                        "INSERT INTO captures (tenant_id, dive_id, source_path, "
+                        "INSERT INTO captures (tenant_id, mission_id, source_path, "
                         "captured_at, checksum, is_canonical) VALUES (:t, :d, "
                         "gen_random_uuid()::text, :at, md5(random()::text), true) "
                         "RETURNING id"
                     ),
-                    {"t": tenant, "d": dive, "at": T0},
+                    {"t": tenant, "d": mission, "at": T0},
                 )
             ).scalar_one()
             await conn.execute(
@@ -461,36 +461,36 @@ async def _labelled_dive(owner_engine, tenant, number, table):
                 ),
                 {"t": tenant, "c": capture, "done": done},
             )
-    return dive
+    return mission
 
 
-async def _flagged(owner_engine, table, dive):
+async def _flagged(owner_engine, table, mission):
     async with owner_engine.connect() as conn:
         return (
             await conn.execute(
                 text(
                     f"SELECT count(*) FROM {table} l JOIN captures c "
-                    "ON c.id = l.capture_id WHERE c.dive_id = :d AND l.needs_reprocess"
+                    "ON c.id = l.capture_id WHERE c.mission_id = :d AND l.needs_reprocess"
                 ),
-                {"d": dive},
+                {"d": mission},
             )
         ).scalar_one()
 
 
 @pytest.mark.parametrize("kind", sorted(LABEL_TABLES))
-async def test_an_admin_asks_for_a_dives_unanswered_frames_to_be_redrawn(
+async def test_an_admin_asks_for_a_missions_unanswered_frames_to_be_redrawn(
     client, tenants, owner_engine, kind
 ):
     table = LABEL_TABLES[kind]
-    dive = await _labelled_dive(owner_engine, tenants["lab"], 7, table)
+    mission = await _labelled_mission(owner_engine, tenants["lab"], 7, table)
 
     response = await client.put(
-        f"/tenants/lab/dives/7/labels/{kind}/needs-reprocess", headers=_bearer(ADMIN)
+        f"/tenants/lab/missions/7/labels/{kind}/needs-reprocess", headers=_bearer(ADMIN)
     )
 
     assert response.status_code == 200
     assert response.json() == {"flagged": 1}
-    assert await _flagged(owner_engine, table, dive) == 1
+    assert await _flagged(owner_engine, table, mission) == 1
 
 
 @pytest.mark.parametrize("kind", sorted(LABEL_TABLES))
@@ -498,86 +498,87 @@ async def test_only_incomplete_false_redraws_answered_frames_too(
     client, tenants, owner_engine, kind
 ):
     table = LABEL_TABLES[kind]
-    dive = await _labelled_dive(owner_engine, tenants["lab"], 7, table)
+    mission = await _labelled_mission(owner_engine, tenants["lab"], 7, table)
 
     response = await client.put(
-        f"/tenants/lab/dives/7/labels/{kind}/needs-reprocess",
+        f"/tenants/lab/missions/7/labels/{kind}/needs-reprocess",
         params={"only_incomplete": "false"},
         headers=_bearer(ADMIN),
     )
 
     assert response.json() == {"flagged": 2}
-    assert await _flagged(owner_engine, table, dive) == 2
+    assert await _flagged(owner_engine, table, mission) == 2
 
 
 @pytest.mark.parametrize("kind", sorted(LABEL_TABLES))
 async def test_an_admin_withdraws_a_redraw(client, tenants, owner_engine, kind):
     table = LABEL_TABLES[kind]
-    dive = await _labelled_dive(owner_engine, tenants["lab"], 7, table)
+    mission = await _labelled_mission(owner_engine, tenants["lab"], 7, table)
     await client.put(
-        f"/tenants/lab/dives/7/labels/{kind}/needs-reprocess",
+        f"/tenants/lab/missions/7/labels/{kind}/needs-reprocess",
         params={"only_incomplete": "false"},
         headers=_bearer(ADMIN),
     )
 
     first = await client.delete(
-        f"/tenants/lab/dives/7/labels/{kind}/needs-reprocess", headers=_bearer(ADMIN)
+        f"/tenants/lab/missions/7/labels/{kind}/needs-reprocess", headers=_bearer(ADMIN)
     )
     again = await client.delete(
-        f"/tenants/lab/dives/7/labels/{kind}/needs-reprocess", headers=_bearer(ADMIN)
+        f"/tenants/lab/missions/7/labels/{kind}/needs-reprocess", headers=_bearer(ADMIN)
     )
 
     assert first.json() == {"cleared": 2}
     # Idempotent, never a 404 (v1's). v1 counted the rows the clear touched,
     # not the flags it lowered, so the count of a repeat is not pinned.
     assert again.status_code == 200
-    assert await _flagged(owner_engine, table, dive) == 0
+    assert await _flagged(owner_engine, table, mission) == 0
 
 
 async def test_a_member_who_is_not_an_admin_cannot_ask_for_a_redraw(
     client, tenants, owner_engine
 ):
-    dive = await _labelled_dive(owner_engine, tenants["lab"], 7, "laser_labels")
+    mission = await _labelled_mission(owner_engine, tenants["lab"], 7, "laser_labels")
 
     raised = await client.put(
-        "/tenants/lab/dives/7/labels/laser/needs-reprocess", headers=_bearer(MEMBER)
+        "/tenants/lab/missions/7/labels/laser/needs-reprocess", headers=_bearer(MEMBER)
     )
     cleared = await client.delete(
-        "/tenants/lab/dives/7/labels/laser/needs-reprocess", headers=_bearer(MEMBER)
+        "/tenants/lab/missions/7/labels/laser/needs-reprocess", headers=_bearer(MEMBER)
     )
 
     assert (raised.status_code, cleared.status_code) == (403, 403)
-    assert await _flagged(owner_engine, "laser_labels", dive) == 0
+    assert await _flagged(owner_engine, "laser_labels", mission) == 0
 
 
 async def test_another_tenants_admin_cannot_ask_for_a_redraw(
     client, tenants, owner_engine
 ):
-    dive = await _labelled_dive(owner_engine, tenants["lab"], 7, "laser_labels")
+    mission = await _labelled_mission(owner_engine, tenants["lab"], 7, "laser_labels")
 
     response = await client.put(
-        "/tenants/lab/dives/7/labels/laser/needs-reprocess", headers=_bearer(OUTSIDER)
+        "/tenants/lab/missions/7/labels/laser/needs-reprocess",
+        headers=_bearer(OUTSIDER),
     )
 
     assert response.status_code == 404
-    assert await _flagged(owner_engine, "laser_labels", dive) == 0
+    assert await _flagged(owner_engine, "laser_labels", mission) == 0
 
 
-async def test_a_redraw_of_a_missing_dive_is_a_404(client, tenants):
+async def test_a_redraw_of_a_missing_mission_is_a_404(client, tenants):
     for method in ("PUT", "DELETE"):
         response = await client.request(
             method,
-            "/tenants/lab/dives/999/labels/laser/needs-reprocess",
+            "/tenants/lab/missions/999/labels/laser/needs-reprocess",
             headers=_bearer(ADMIN),
         )
         assert response.status_code == 404, method
-        assert response.json()["detail"] == "dive 999 not found"
+        assert response.json()["detail"] == "mission 999 not found"
 
 
 @pytest.mark.parametrize("kind", ["headtail", "dive-slate", "checkerboard_lattice"])
 async def test_a_redraw_of_an_unknown_kind_is_a_422(client, tenants, kind):
     response = await client.put(
-        f"/tenants/lab/dives/7/labels/{kind}/needs-reprocess", headers=_bearer(ADMIN)
+        f"/tenants/lab/missions/7/labels/{kind}/needs-reprocess", headers=_bearer(ADMIN)
     )
 
     assert response.status_code == 422
@@ -595,16 +596,16 @@ async def test_a_redraw_of_an_unknown_kind_is_a_422(client, tenants, kind):
 # never edited.
 
 
-async def _refused(owner_engine, tenant, dive):
+async def _refused(owner_engine, tenant, mission):
     async with owner_engine.begin() as conn:
         return (
             await conn.execute(
                 text(
-                    "INSERT INTO laser_calibrations (tenant_id, dive_id, producer, "
+                    "INSERT INTO laser_calibrations (tenant_id, mission_id, producer, "
                     "outcome, refusal_reason) VALUES (:t, :d, 'checkerboard', "
                     "'refused', 'implausible baseline') RETURNING id"
                 ),
-                {"t": tenant, "d": dive},
+                {"t": tenant, "d": mission},
             )
         ).scalar_one()
 
@@ -638,15 +639,15 @@ async def _board(owner_engine):
         ).one()
 
 
-async def _links(owner_engine, dive):
+async def _links(owner_engine, mission):
     async with owner_engine.connect() as conn:
         return (
             await conn.execute(
                 text(
                     "SELECT calibration_target_id, calibration_links_changed_at "
-                    "FROM dives WHERE id = :d"
+                    "FROM missions WHERE id = :d"
                 ),
-                {"d": dive},
+                {"d": mission},
             )
         ).one()
 
@@ -654,16 +655,16 @@ async def _links(owner_engine, dive):
 async def test_an_admin_clears_a_calibration_refusal(client, tenants, owner_engine):
     """v1's operator override: "try it again". The clear is appended, with
     the admin's reason, and a repeat is a no-op (v1: idempotent, 204)."""
-    dive = await _dive(owner_engine, tenants["lab"], 7)
-    refusal = await _refused(owner_engine, tenants["lab"], dive)
+    mission = await _dive(owner_engine, tenants["lab"], 7)
+    refusal = await _refused(owner_engine, tenants["lab"], mission)
 
     first = await client.delete(
-        "/tenants/lab/dives/7/calibration-refusal",
+        "/tenants/lab/missions/7/calibration-refusal",
         params={"reason": "board re-measured"},
         headers=_bearer(ADMIN),
     )
     again = await client.delete(
-        "/tenants/lab/dives/7/calibration-refusal", headers=_bearer(ADMIN)
+        "/tenants/lab/missions/7/calibration-refusal", headers=_bearer(ADMIN)
     )
 
     assert (first.status_code, again.status_code) == (204, 204)
@@ -672,23 +673,23 @@ async def test_an_admin_clears_a_calibration_refusal(client, tenants, owner_engi
     ]
 
 
-async def test_an_admin_links_a_dive_to_a_calibration_target(
+async def test_an_admin_links_a_mission_to_a_calibration_target(
     client, tenants, owner_engine
 ):
     """The remedy's other half. Written as the species sync writes it, so the
     write expires a standing refusal (v1's `_clear_refusal`)."""
-    dive = await _dive(owner_engine, tenants["lab"], 7)
+    mission = await _dive(owner_engine, tenants["lab"], 7)
     board = await _board(owner_engine)
 
     response = await client.put(
-        f"/tenants/lab/dives/7/calibration-target/{board.number}",
+        f"/tenants/lab/missions/7/calibration-target/{board.number}",
         headers=_bearer(ADMIN),
     )
 
     assert response.status_code == 200
     assert response.json()["number"] == 7
     assert response.json()["calibration_target_number"] == board.number
-    links = await _links(owner_engine, dive)
+    links = await _links(owner_engine, mission)
     assert links.calibration_target_id == board.id
     assert links.calibration_links_changed_at is not None
 
@@ -699,43 +700,43 @@ async def test_an_admin_clears_a_calibration_target_idempotently(
     """What a refusal's remedy asks of a checkerboard dive that needs other
     frames: it leaves the board's cohort. v1's clear did not touch the
     refusal, and neither does this."""
-    dive = await _dive(owner_engine, tenants["lab"], 7)
+    mission = await _dive(owner_engine, tenants["lab"], 7)
     board = await _board(owner_engine)
     await client.put(
-        f"/tenants/lab/dives/7/calibration-target/{board.number}",
+        f"/tenants/lab/missions/7/calibration-target/{board.number}",
         headers=_bearer(ADMIN),
     )
-    stamped = (await _links(owner_engine, dive)).calibration_links_changed_at
+    stamped = (await _links(owner_engine, mission)).calibration_links_changed_at
 
     first = await client.delete(
-        "/tenants/lab/dives/7/calibration-target", headers=_bearer(ADMIN)
+        "/tenants/lab/missions/7/calibration-target", headers=_bearer(ADMIN)
     )
     again = await client.delete(
-        "/tenants/lab/dives/7/calibration-target", headers=_bearer(ADMIN)
+        "/tenants/lab/missions/7/calibration-target", headers=_bearer(ADMIN)
     )
 
     assert (first.status_code, again.status_code) == (204, 204)
-    links = await _links(owner_engine, dive)
+    links = await _links(owner_engine, mission)
     assert links.calibration_target_id is None
     assert links.calibration_links_changed_at == stamped
 
 
 async def test_a_missing_calibration_target_is_a_404(client, tenants, owner_engine):
-    dive = await _dive(owner_engine, tenants["lab"], 7)
+    mission = await _dive(owner_engine, tenants["lab"], 7)
 
     response = await client.put(
-        "/tenants/lab/dives/7/calibration-target/999999", headers=_bearer(ADMIN)
+        "/tenants/lab/missions/7/calibration-target/999999", headers=_bearer(ADMIN)
     )
 
     assert response.status_code == 404
     assert response.json()["detail"] == "calibration target 999999 not found"
-    assert (await _links(owner_engine, dive)).calibration_target_id is None
+    assert (await _links(owner_engine, mission)).calibration_target_id is None
 
 
 _LEVERS = [
-    ("DELETE", "/tenants/lab/dives/{n}/calibration-refusal"),
-    ("PUT", "/tenants/lab/dives/{n}/calibration-target/{board}"),
-    ("DELETE", "/tenants/lab/dives/{n}/calibration-target"),
+    ("DELETE", "/tenants/lab/missions/{n}/calibration-refusal"),
+    ("PUT", "/tenants/lab/missions/{n}/calibration-target/{board}"),
+    ("DELETE", "/tenants/lab/missions/{n}/calibration-target"),
 ]
 
 
@@ -746,8 +747,8 @@ async def test_the_calibration_levers_are_an_admins(
     """They change what is fitted, hence every measured length, so the API
     reserves them to the tenant's admins; another tenant's admin sees no
     dive, and a missing dive is a 404."""
-    dive = await _dive(owner_engine, tenants["lab"], 7)
-    refusal = await _refused(owner_engine, tenants["lab"], dive)
+    mission = await _dive(owner_engine, tenants["lab"], 7)
+    refusal = await _refused(owner_engine, tenants["lab"], mission)
     board = await _board(owner_engine)
 
     def url(n):
@@ -759,6 +760,6 @@ async def test_the_calibration_levers_are_an_admins(
 
     assert (member.status_code, outsider.status_code) == (403, 404)
     assert missing.status_code == 404
-    assert missing.json()["detail"] == "dive 999 not found"
+    assert missing.json()["detail"] == "mission 999 not found"
     assert await _clears(owner_engine, refusal) == []
-    assert (await _links(owner_engine, dive)).calibration_target_id is None
+    assert (await _links(owner_engine, mission)).calibration_target_id is None

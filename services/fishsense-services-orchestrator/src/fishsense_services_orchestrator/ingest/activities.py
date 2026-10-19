@@ -27,7 +27,7 @@ from temporalio.exceptions import ApplicationError
 from fishsense_services_orchestrator.ingest.catalog import Catalog, ResolvedDevice
 from fishsense_services_orchestrator.ingest.contracts import (
     DuplicateOverlap,
-    IngestDiveRequest,
+    IngestMissionRequest,
     IngestPreflight,
     IngestReport,
     PreflightImage,
@@ -68,7 +68,7 @@ __all__ = [
     "BatchResult",
     "IngestTotals",
     "MAX_PATH_LENGTH",
-    "DiveFolderListing",
+    "MissionFolderListing",
     "IngestActivities",
     "resolve_nas_folder",
     "stored_path",
@@ -76,7 +76,7 @@ __all__ = [
 
 
 @dataclass
-class DiveFolderListing:
+class MissionFolderListing:
     """What is in the folder, before anything has been read or written."""
 
     #: The absolute NAS path actually listed, after root resolution.
@@ -167,9 +167,11 @@ class IngestActivities:
         )
 
     @activity.defn(name="list_dive_folder")
-    async def list_dive_folder(self, request: IngestDiveRequest) -> DiveFolderListing:
+    async def list_mission_folder(
+        self, request: IngestMissionRequest
+    ) -> MissionFolderListing:
         client = self._nas_client_factory()
-        folder_path = resolve_nas_folder(request.dive_path, self._nas_settings)
+        folder_path = resolve_nas_folder(request.mission_path, self._nas_settings)
 
         entries = await _list(client, folder_path)
         # Name-sorted, because batching and heartbeat-resume both index into this
@@ -194,13 +196,13 @@ class IngestActivities:
             len(files),
             len(subfolders),
         )
-        return DiveFolderListing(
+        return MissionFolderListing(
             folder_path=folder_path, files=files, subfolders=subfolders
         )
 
     @activity.defn(name="preflight")
     async def preflight(
-        self, request: IngestDiveRequest, listing: DiveFolderListing
+        self, request: IngestMissionRequest, listing: MissionFolderListing
     ) -> IngestPreflight:
         """Decide whether the folder can become a dive, and say so completely:
         **every problem at once, never first-wins.** Writes nothing."""
@@ -222,12 +224,12 @@ class IngestActivities:
             )
 
         errors.extend(_check_calibration_intent(request))
-        source_dive_id = None
+        source_mission_id = None
         if request.calibration_source_path and tenant_id is not None:
-            source_dive_id = await catalog.dive_by_path(
+            source_mission_id = await catalog.mission_by_path(
                 tenant_id, request.calibration_source_path
             )
-            if source_dive_id is None:
+            if source_mission_id is None:
                 errors.append(
                     f"No dive at {request.calibration_source_path!r} in tenant "
                     f"{request.tenant!r} to borrow calibration from."
@@ -312,20 +314,22 @@ class IngestActivities:
         if tenant_id is not None:
             leaf = listing.folder_path.rstrip("/").rsplit("/", 1)[-1]
             here = stored_path(listing.folder_path, self._nas_settings)
-            for dive_id, dive_path in await catalog.dives_with_leaf(tenant_id, leaf):
-                if dive_path == here:
+            for mission_id, mission_path in await catalog.missions_with_leaf(
+                tenant_id, leaf
+            ):
+                if mission_path == here:
                     # Not "may be": create upserts on the path, so this re-opens
                     # that dive at low until finalize promotes it again.
                     warnings.append(
-                        f"Dive {dive_id} is already ingested at this path. "
+                        f"Dive {mission_id} is already ingested at this path. "
                         "Ingesting again re-opens it at low -- out of every "
                         "hourly cohort -- until finalize promotes it; frames "
                         "already registered are skipped."
                     )
                     continue
                 warnings.append(
-                    f"Dive {dive_id} has the same folder name ({leaf!r}) at "
-                    f"{dive_path}. Dive names are not unique; this may be a "
+                    f"Dive {mission_id} has the same folder name ({leaf!r}) at "
+                    f"{mission_path}. Dive names are not unique; this may be a "
                     "re-ingest."
                 )
 
@@ -337,9 +341,9 @@ class IngestActivities:
             len(warnings),
         )
         return IngestPreflight(
-            dive_path=listing.folder_path,
+            mission_path=listing.folder_path,
             tenant_id=tenant_id,
-            resolved_calibration_source_dive_id=source_dive_id,
+            resolved_calibration_source_mission_id=source_mission_id,
             resolved_slate_template_id=slate_template_id,
             images=images,
             subfolders=list(listing.subfolders),
@@ -351,8 +355,8 @@ class IngestActivities:
         )
 
     @activity.defn(name="create_dive")
-    async def create_dive(
-        self, request: IngestDiveRequest, preflight: IngestPreflight
+    async def create_mission(
+        self, request: IngestMissionRequest, preflight: IngestPreflight
     ) -> uuid.UUID:
         """Create the dive, always at **low** -- half of a two-phase commit.
 
@@ -369,7 +373,7 @@ class IngestActivities:
                 + "; ".join(preflight.errors[:3] or ["no tenant resolved"]),
                 non_retryable=True,
             )
-        # `dived_at` is NOT NULL and no frame has been hashed yet, so seed it
+        # `started_at` is NOT NULL and no frame has been hashed yet, so seed it
         # from preflight's headers. Finalize replaces it with the scan's max,
         # which read every frame rather than a 1 MB prefix.
         stamps = [i.taken_datetime for i in preflight.images if i.taken_datetime]
@@ -380,31 +384,31 @@ class IngestActivities:
                 non_retryable=True,
             )
 
-        dive_id = await self._catalog.create_dive(
+        mission_id = await self._catalog.create_mission(
             preflight.tenant_id,
-            source_path=request.dive_path,
-            name=request.dive_name or leaf_name(request.dive_path),
-            dived_at=max(stamps),
+            source_path=request.mission_path,
+            name=request.mission_name or leaf_name(request.mission_path),
+            started_at=max(stamps),
             device_id=preflight.resolved_device_id,
             slate_template_id=preflight.resolved_slate_template_id,
             # NULL means "self-calibrates". A link on a self-calibrating dive
             # would be a lie the resolver happens to ignore (own wins).
-            calibration_source_dive_id=preflight.resolved_calibration_source_dive_id,
-            flip_dive_slate=request.flip_dive_slate,
+            calibration_source_mission_id=preflight.resolved_calibration_source_mission_id,
+            flip_mission_slate=request.flip_mission_slate,
         )
         activity.logger.info(
             "created dive id=%s path=%s at low (commit flag closed)",
-            dive_id,
-            request.dive_path,
+            mission_id,
+            request.mission_path,
         )
-        return dive_id
+        return mission_id
 
     @activity.defn(name="finalize_dive")
-    async def finalize_dive(
+    async def finalize_mission(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
-        request: IngestDiveRequest,
+        mission_id: uuid.UUID,
+        request: IngestMissionRequest,
         totals: IngestTotals,
     ) -> IngestReport:
         """Verify the set is complete, then flip the dive to its real priority.
@@ -427,7 +431,7 @@ class IngestActivities:
         accounted = totals.registered + totals.skipped_existing
         if totals.rejected:
             raise ApplicationError(
-                f"refusing to promote dive {dive_id}: {len(totals.rejected)} "
+                f"refusing to promote dive {mission_id}: {len(totals.rejected)} "
                 "frame(s) rejected -- "
                 f"{'; '.join(r.reason for r in totals.rejected[:3])}. The dive "
                 "stays at low so no pipeline stage picks up a partial set.",
@@ -436,7 +440,7 @@ class IngestActivities:
             )
         if accounted != totals.total:
             raise ApplicationError(
-                f"refusing to promote dive {dive_id}: {accounted} of "
+                f"refusing to promote dive {mission_id}: {accounted} of "
                 f"{totals.total} frames accounted for. A frame was neither "
                 "written nor recognised as already present, which is silence "
                 "rather than a reported failure.",
@@ -446,42 +450,42 @@ class IngestActivities:
 
         overlap = [
             DuplicateOverlap(
-                dive_id=o.dive_id,
-                dive_path=o.dive_path,
+                mission_id=o.mission_id,
+                mission_path=o.mission_path,
                 shared_images=o.shared_images,
                 containment=o.containment,
             )
-            for o in await self._catalog.content_overlap(tenant_id, dive_id)
+            for o in await self._catalog.content_overlap(tenant_id, mission_id)
         ]
         # THE COMMIT FLAG. The scan read every frame in full, so its max is the
         # dive's datetime -- how every existing dive's was derived.
-        await self._catalog.finalize_dive(
+        await self._catalog.finalize_mission(
             tenant_id,
-            dive_id,
+            mission_id,
             priority=request.priority,
-            dived_at=totals.max_taken_datetime,
+            started_at=totals.max_taken_datetime,
         )
 
         for item in overlap:
             activity.logger.warning(
                 "dive %s shares %d/%d frames with dive %s (containment %.2f); "
                 "those images are non-canonical",
-                dive_id,
+                mission_id,
                 item.shared_images,
                 totals.total,
-                item.dive_id,
+                item.mission_id,
                 item.containment,
             )
         activity.logger.info(
             "committed dive %s at %s: registered=%d skipped=%d",
-            dive_id,
+            mission_id,
             request.priority,
             totals.registered,
             totals.skipped_existing,
         )
         return IngestReport(
-            dive_path=request.dive_path,
-            dive_id=dive_id,
+            mission_path=request.mission_path,
+            mission_id=mission_id,
             total=totals.total,
             registered=totals.registered,
             skipped_existing=totals.skipped_existing,
@@ -495,7 +499,7 @@ class IngestActivities:
     async def scan_and_register(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         paths: List[str],
         device_id: uuid.UUID | None,
     ) -> BatchResult:
@@ -526,7 +530,7 @@ class IngestActivities:
         nas = self._nas_client_factory()
         # One call, not one per frame: the point is to skip BEFORE paying for a
         # download.
-        existing = await self._catalog.registered_captures(tenant_id, dive_id)
+        existing = await self._catalog.registered_captures(tenant_id, mission_id)
 
         for index, path in enumerate(paths):
             # Heartbeat for liveness and progress only -- NOT as a resume
@@ -560,7 +564,7 @@ class IngestActivities:
 
             await self._catalog.register_capture(
                 tenant_id,
-                dive_id=dive_id,
+                mission_id=mission_id,
                 device_id=device_id,
                 source_path=path,
                 captured_at=taken,
@@ -571,7 +575,7 @@ class IngestActivities:
 
         activity.logger.info(
             "scanned dive_id=%s frames=%d registered=%d skipped=%d rejected=%d",
-            dive_id,
+            mission_id,
             len(paths),
             result.registered,
             result.skipped_existing,
@@ -633,7 +637,7 @@ async def _read_header(nas: NasClient, file_path: str) -> bytes:
         raise
 
 
-def _check_calibration_intent(request: IngestDiveRequest) -> List[str]:
+def _check_calibration_intent(request: IngestMissionRequest) -> List[str]:
     """Exactly one of the two must be given. Both is contradictory: own-wins
     would silently ignore the link. Neither leaves a dive that can never be
     measured and never says why."""
@@ -658,7 +662,7 @@ def _check_calibration_intent(request: IngestDiveRequest) -> List[str]:
 async def _resolve_device(
     catalog: Catalog,
     tenant_id: uuid.UUID,
-    request: IngestDiveRequest,
+    request: IngestMissionRequest,
     serials: set[str],
     artists: set[str],
     errors: List[str],

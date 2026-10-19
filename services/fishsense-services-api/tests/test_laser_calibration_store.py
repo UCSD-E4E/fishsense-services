@@ -59,7 +59,7 @@ from _slate_calibration_seed import (
     calibration_target,
     capture,
     device_with_camera,
-    dive as _seed_dive,
+    mission as _seed_mission,
     later,
     laser_calibration,
     laser_label,
@@ -75,55 +75,55 @@ from fishsense_services_api.laser_calibration_store import (
     LaserCalibrationCatalog,
     checkerboard_calibration_inputs,
     clear_calibration_refusal,
-    dive_for_number,
-    next_dive_for_checkerboard_calibration,
-    next_dive_for_laser_calibration,
+    mission_for_number,
+    next_mission_for_checkerboard_calibration,
+    next_mission_for_laser_calibration,
     record_laser_calibration,
     slate_calibration_inputs,
 )
 from fishsense_services_api.species_store import (
-    set_dive_calibration_target,
-    set_dive_slate_template,
+    set_mission_calibration_target,
+    set_mission_slate_template,
 )
 
 ORCHESTRATOR = "service:fishsense-orchestrator"
 
-#: `dive`'s default: a device of its own with a current camera calibration.
+#: `mission`'s default: a device of its own with a current camera calibration.
 _A_CAMERA = object()
 
 
-async def dive(owner_engine, lab, *, device=_A_CAMERA, **kwargs):
+async def mission(owner_engine, lab, *, device=_A_CAMERA, **kwargs):
     """A dive whose device has a camera calibration, as every dive the cohorts
     offer must (the resolvers refuse one without); `device=None` for none."""
     if device is _A_CAMERA:
         device, _ = await device_with_camera(owner_engine, lab)
-    return await _seed_dive(owner_engine, lab, device=device, **kwargs)
+    return await _seed_mission(owner_engine, lab, device=device, **kwargs)
 
 
 async def _stage13(app_engine, lab):
     async with tenant_transaction(app_engine, lab) as conn:
-        candidate = await next_dive_for_laser_calibration(conn, lab)
-    return None if candidate is None else candidate.dive_id
+        candidate = await next_mission_for_laser_calibration(conn, lab)
+    return None if candidate is None else candidate.mission_id
 
 
 async def _board(app_engine, lab):
     async with tenant_transaction(app_engine, lab) as conn:
-        candidate = await next_dive_for_checkerboard_calibration(conn, lab)
-    return None if candidate is None else candidate.dive_id
+        candidate = await next_mission_for_checkerboard_calibration(conn, lab)
+    return None if candidate is None else candidate.mission_id
 
 
-async def _observation(owner_engine, lab, dive_id, *, dot=True, completed=True,
+async def _observation(owner_engine, lab, mission_id, *, dot=True, completed=True,
                        canonical=True, **dot_kwargs):  # fmt: skip
     """A slate frame; with `dot`, one calibration observation."""
-    frame = await capture(owner_engine, lab, dive_id, canonical=canonical)
+    frame = await capture(owner_engine, lab, mission_id, canonical=canonical)
     await slate_label(owner_engine, lab, frame, completed=completed)
     if dot:
         await laser_label(owner_engine, lab, frame, **dot_kwargs)
     return frame
 
 
-async def _slate_dive(owner_engine, lab, observations=2, **kwargs):
-    only = await dive(
+async def _slate_mission(owner_engine, lab, observations=2, **kwargs):
+    only = await mission(
         owner_engine, lab, slate=await slate_template(owner_engine), **kwargs
     )
     for _ in range(observations):
@@ -131,8 +131,8 @@ async def _slate_dive(owner_engine, lab, observations=2, **kwargs):
     return only
 
 
-async def _board_dive(owner_engine, lab, dots=2, target=None, **kwargs):
-    only = await dive(
+async def _board_mission(owner_engine, lab, dots=2, target=None, **kwargs):
+    only = await mission(
         owner_engine,
         lab,
         target=target or await calibration_target(owner_engine),
@@ -191,9 +191,11 @@ async def test_laser_calibration_requires_min_completed_slate_labels(
     # dive 1: 1 observation -> below threshold, excluded.
     # dive 2: 2 observations -> picked.
     # dive 3: 3 observations but already calibrated -> excluded.
-    await _slate_dive(owner_engine, lab, observations=1, created_at=T0)
-    second = await _slate_dive(owner_engine, lab, observations=2, created_at=later(1))
-    third = await _slate_dive(owner_engine, lab, observations=3, created_at=later(2))
+    await _slate_mission(owner_engine, lab, observations=1, created_at=T0)
+    second = await _slate_mission(
+        owner_engine, lab, observations=2, created_at=later(1)
+    )
+    third = await _slate_mission(owner_engine, lab, observations=3, created_at=later(2))
     await laser_calibration(owner_engine, lab, third)
 
     assert await _stage13(app_engine, lab) == second
@@ -206,7 +208,7 @@ async def test_laser_calibration_needs_two_images_with_laser_dots(
     labels and still be uncalibratable, because a slate label without a laser
     dot on the same image contributes no observation."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab, observations=1)
+    only = await _slate_mission(owner_engine, lab, observations=1)
     for _ in range(2):
         await _observation(owner_engine, lab, only, dot=False)
 
@@ -216,7 +218,7 @@ async def test_laser_calibration_needs_two_images_with_laser_dots(
 async def test_laser_calibration_selects_once_two_dots_exist(owner_engine, app_engine):
     """The converse: two observations is exactly `MIN_LASER_POINTS`."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab, observations=2)
+    only = await _slate_mission(owner_engine, lab, observations=2)
 
     assert await _stage13(app_engine, lab) == only
 
@@ -227,7 +229,7 @@ async def test_laser_calibration_ignores_a_superseded_laser_dot(
     """A dead-lettered dot is invisible to the fit and must be invisible here.
     This is exactly how dive 347 got into its state."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab, observations=1)
+    only = await _slate_mission(owner_engine, lab, observations=1)
     await _observation(owner_engine, lab, only, superseded=True)
 
     assert await _stage13(app_engine, lab) is None
@@ -239,7 +241,7 @@ async def test_laser_calibration_ignores_a_dotless_laser_label(
     """A populate-seeded placeholder carries no x/y, so it is not an
     observation."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab, observations=1)
+    only = await _slate_mission(owner_engine, lab, observations=1)
     await _observation(owner_engine, lab, only, x=None, y=None)
 
     assert await _stage13(app_engine, lab) is None
@@ -251,15 +253,15 @@ async def test_laser_calibration_does_not_count_a_dot_without_a_slate_label(
     """An observation needs BOTH. A laser dot on a frame with no slate label
     gives the fit no plane to project onto."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab, observations=1)
+    only = await _slate_mission(owner_engine, lab, observations=1)
     await laser_label(owner_engine, lab, await capture(owner_engine, lab, only))
 
     assert await _stage13(app_engine, lab) is None
 
 
-async def test_laser_calibration_requires_dive_slate_id(owner_engine, app_engine):
+async def test_laser_calibration_requires_mission_slate_id(owner_engine, app_engine):
     lab = await tenant(owner_engine)
-    only = await dive(owner_engine, lab)
+    only = await mission(owner_engine, lab)
     for _ in range(2):
         await _observation(owner_engine, lab, only)
 
@@ -272,7 +274,7 @@ async def test_an_incomplete_or_non_canonical_slate_label_is_no_observation(
     """The cohort counts completed slate labels on canonical frames, v1's
     `_usable_slate_observation_count`."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab, observations=1)
+    only = await _slate_mission(owner_engine, lab, observations=1)
     await _observation(owner_engine, lab, only, completed=False)
     await _observation(owner_engine, lab, only, canonical=False)
 
@@ -281,14 +283,14 @@ async def test_an_incomplete_or_non_canonical_slate_label_is_no_observation(
 
 async def test_stage_13_drains_oldest_first(owner_engine, app_engine):
     lab = await tenant(owner_engine)
-    await _slate_dive(owner_engine, lab, created_at=later(5))
-    oldest = await _slate_dive(owner_engine, lab, created_at=later(1))
+    await _slate_mission(owner_engine, lab, created_at=later(5))
+    oldest = await _slate_mission(owner_engine, lab, created_at=later(1))
 
     assert await _stage13(app_engine, lab) == oldest
 
 
-async def _slate_dive_with(owner_engine, lab, *, device=_A_CAMERA, **template):
-    only = await dive(
+async def _slate_mission_with(owner_engine, lab, *, device=_A_CAMERA, **template):
+    only = await mission(
         owner_engine,
         lab,
         slate=await slate_template(owner_engine, **template),
@@ -299,7 +301,7 @@ async def _slate_dive_with(owner_engine, lab, *, device=_A_CAMERA, **template):
     return only
 
 
-async def test_stage_13_offers_no_dive_its_resolver_cannot_resolve(
+async def test_stage_13_offers_no_mission_its_resolver_cannot_resolve(
     owner_engine, app_engine
 ):
     """v2: the resolver refuses a dive whose device has no camera calibration,
@@ -309,9 +311,9 @@ async def test_stage_13_offers_no_dive_its_resolver_cannot_resolve(
     fixed by a refit; each is an operator's fix to reference data, and the
     dive comes back by itself once it is made."""
     lab = await tenant(owner_engine)
-    await _slate_dive_with(owner_engine, lab, device=None)
-    await _slate_dive_with(owner_engine, lab, dpi=None)
-    await _slate_dive_with(owner_engine, lab, reference_points=[])
+    await _slate_mission_with(owner_engine, lab, device=None)
+    await _slate_mission_with(owner_engine, lab, dpi=None)
+    await _slate_mission_with(owner_engine, lab, reference_points=[])
 
     assert await _stage13(app_engine, lab) is None
 
@@ -319,12 +321,12 @@ async def test_stage_13_offers_no_dive_its_resolver_cannot_resolve(
 # ---------- the checkerboard cohort ----------
 
 
-async def test_picks_a_linked_dive_with_enough_live_dots(owner_engine, app_engine):
+async def test_picks_a_linked_mission_with_enough_live_dots(owner_engine, app_engine):
     lab = await tenant(owner_engine)
-    unlinked = await dive(owner_engine, lab, created_at=T0)
+    unlinked = await mission(owner_engine, lab, created_at=T0)
     for _ in range(5):
         await laser_label(owner_engine, lab, await capture(owner_engine, lab, unlinked))
-    linked = await _board_dive(owner_engine, lab, dots=5, created_at=later(1))
+    linked = await _board_mission(owner_engine, lab, dots=5, created_at=later(1))
 
     assert await _board(app_engine, lab) == linked
 
@@ -332,59 +334,61 @@ async def test_picks_a_linked_dive_with_enough_live_dots(owner_engine, app_engin
 async def test_requires_min_observations(owner_engine, app_engine):
     """Below the floor the fit is refused, so do not offer it."""
     lab = await tenant(owner_engine)
-    await _board_dive(owner_engine, lab, dots=1, created_at=T0)
-    enough = await _board_dive(owner_engine, lab, dots=2, created_at=later(1))
+    await _board_mission(owner_engine, lab, dots=1, created_at=T0)
+    enough = await _board_mission(owner_engine, lab, dots=2, created_at=later(1))
 
     assert await _board(app_engine, lab) == enough
 
 
-async def test_skips_a_dive_that_already_has_its_own_calibration(
+async def test_skips_a_mission_that_already_has_its_own_calibration(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
-    first = await _board_dive(owner_engine, lab, dots=5, created_at=T0)
-    second = await _board_dive(owner_engine, lab, dots=5, created_at=later(1))
+    first = await _board_mission(owner_engine, lab, dots=5, created_at=T0)
+    second = await _board_mission(owner_engine, lab, dots=5, created_at=later(1))
     await laser_calibration(owner_engine, lab, first, producer="checkerboard")
 
     assert await _board(app_engine, lab) == second
 
 
-async def test_a_borrowed_calibration_does_not_exclude_a_dive(owner_engine, app_engine):
+async def test_a_borrowed_calibration_does_not_exclude_a_mission(
+    owner_engine, app_engine
+):
     """Borrowing is not a substitute for calibrating yourself: a dive that can
     fit its own is exactly the dive to fit, and the effective calibration is
     own-wins-then-link, so its own answer takes over the moment it exists."""
     lab = await tenant(owner_engine)
-    source = await dive(owner_engine, lab, priority="low")
+    source = await mission(owner_engine, lab, priority="low")
     await laser_calibration(owner_engine, lab, source)
-    borrower = await _board_dive(owner_engine, lab, dots=5, source=source)
+    borrower = await _board_mission(owner_engine, lab, dots=5, source=source)
 
     assert await _board(app_engine, lab) == borrower
 
 
-async def test_ignores_dives_with_no_calibration_target(owner_engine, app_engine):
+async def test_ignores_missions_with_no_calibration_target(owner_engine, app_engine):
     """No link means no known scale, so there is nothing to fit against."""
     lab = await tenant(owner_engine)
-    only = await dive(owner_engine, lab)
+    only = await mission(owner_engine, lab)
     for _ in range(9):
         await laser_label(owner_engine, lab, await capture(owner_engine, lab, only))
 
     assert await _board(app_engine, lab) is None
 
 
-async def test_ignores_non_high_priority_dives(owner_engine, app_engine):
+async def test_ignores_non_high_priority_missions(owner_engine, app_engine):
     lab = await tenant(owner_engine)
-    await _board_dive(owner_engine, lab, dots=3, priority="none")
+    await _board_mission(owner_engine, lab, dots=3, priority="none")
 
     assert await _board(app_engine, lab) is None
 
 
-async def test_the_board_offers_no_dive_without_a_camera_calibration(
+async def test_the_board_offers_no_mission_without_a_camera_calibration(
     owner_engine, app_engine
 ):
     """As for stage 13: the resolver refuses it with nothing recorded, so
     offered it would be handed back hourly, ahead of every younger dive."""
     lab = await tenant(owner_engine)
-    await _board_dive(owner_engine, lab, device=None)
+    await _board_mission(owner_engine, lab, device=None)
 
     assert await _board(app_engine, lab) is None
 
@@ -400,7 +404,7 @@ async def test_unusable_laser_labels_do_not_count(
     owner_engine, app_engine, kwargs, why
 ):
     lab = await tenant(owner_engine)
-    only = await _board_dive(owner_engine, lab, dots=1)
+    only = await _board_mission(owner_engine, lab, dots=1)
     for _ in range(2):
         await laser_label(
             owner_engine, lab, await capture(owner_engine, lab, only), **kwargs
@@ -411,7 +415,7 @@ async def test_unusable_laser_labels_do_not_count(
 
 async def test_non_canonical_images_do_not_count(owner_engine, app_engine):
     lab = await tenant(owner_engine)
-    only = await _board_dive(owner_engine, lab, dots=1)
+    only = await _board_mission(owner_engine, lab, dots=1)
     await laser_label(
         owner_engine, lab, await capture(owner_engine, lab, only, canonical=False)
     )
@@ -419,25 +423,25 @@ async def test_non_canonical_images_do_not_count(owner_engine, app_engine):
     assert await _board(app_engine, lab) is None
 
 
-async def test_a_dive_whose_frames_hide_the_board_is_still_offered(
+async def test_a_mission_whose_frames_hide_the_board_is_still_offered(
     owner_engine, app_engine
 ):
     """The known over-approximation, pinned so it stays known: SQL cannot tell
     whether the detector will find a board. Such a dive is offered, refused,
     and the refusal takes it out of the cohort (below)."""
     lab = await tenant(owner_engine)
-    only = await _board_dive(owner_engine, lab, dots=4)
+    only = await _board_mission(owner_engine, lab, dots=4)
 
     assert await _board(app_engine, lab) == only
 
 
-async def test_a_dive_stage_13_can_calibrate_is_left_to_stage_13(
+async def test_a_mission_stage_13_can_calibrate_is_left_to_stage_13(
     owner_engine, app_engine
 ):
     """The two calibration cohorts must be disjoint, not merely different, or
     both producers fit the same dive from different targets."""
     lab = await tenant(owner_engine)
-    only = await dive(
+    only = await mission(
         owner_engine,
         lab,
         slate=await slate_template(owner_engine),
@@ -455,7 +459,7 @@ async def test_a_slate_link_that_stage_13_cannot_use_does_not_block_the_board(
 ):
     """Exclusion is on stage-13 *eligibility*, not on the link existing."""
     lab = await tenant(owner_engine)
-    only = await _board_dive(
+    only = await _board_mission(
         owner_engine, lab, dots=2, slate=await slate_template(owner_engine)
     )
 
@@ -463,12 +467,12 @@ async def test_a_slate_link_that_stage_13_cannot_use_does_not_block_the_board(
     assert await _board(app_engine, lab) == only
 
 
-async def test_a_slate_dive_below_the_threshold_falls_through_to_the_board(
+async def test_a_slate_mission_below_the_threshold_falls_through_to_the_board(
     owner_engine, app_engine
 ):
     """One usable slate observation is not enough for stage 13."""
     lab = await tenant(owner_engine)
-    only = await dive(
+    only = await mission(
         owner_engine,
         lab,
         slate=await slate_template(owner_engine),
@@ -483,9 +487,9 @@ async def test_a_slate_dive_below_the_threshold_falls_through_to_the_board(
 
 async def test_the_board_drains_oldest_first(owner_engine, app_engine):
     lab = await tenant(owner_engine)
-    await _board_dive(owner_engine, lab, created_at=later(5))
-    oldest = await _board_dive(owner_engine, lab, created_at=later(2))
-    await _board_dive(owner_engine, lab, created_at=later(9))
+    await _board_mission(owner_engine, lab, created_at=later(5))
+    oldest = await _board_mission(owner_engine, lab, created_at=later(2))
+    await _board_mission(owner_engine, lab, created_at=later(9))
 
     assert await _board(app_engine, lab) == oldest
 
@@ -498,7 +502,7 @@ async def test_an_implausible_calibration_counts_as_none(owner_engine, app_engin
     22.22 cm backed 663 of 3,104 measurements at -75% to +45% error, and a
     cohort keyed on "has a row" would never refit them."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     await laser_calibration(owner_engine, lab, only, position=BAD_POSITION)
 
     assert await _stage13(app_engine, lab) == only
@@ -508,24 +512,24 @@ async def test_re_entry_candidates_are_offered_last(owner_engine, app_engine):
     """A dive that refits to the same bad baseline and is refused again must
     not head-of-line block the healthy ones behind it (the dive-347 shape)."""
     lab = await tenant(owner_engine)
-    broken = await _slate_dive(owner_engine, lab, created_at=T0)
+    broken = await _slate_mission(owner_engine, lab, created_at=T0)
     await laser_calibration(owner_engine, lab, broken, position=BAD_POSITION)
-    fresh = await _slate_dive(owner_engine, lab, created_at=later(3))
+    fresh = await _slate_mission(owner_engine, lab, created_at=later(3))
 
     async with tenant_transaction(app_engine, lab) as conn:
-        candidate = await next_dive_for_laser_calibration(conn, lab)
-    assert (candidate.dive_id, candidate.reentry) == (fresh, False)
+        candidate = await next_mission_for_laser_calibration(conn, lab)
+    assert (candidate.mission_id, candidate.reentry) == (fresh, False)
 
     await laser_calibration(owner_engine, lab, fresh)
     async with tenant_transaction(app_engine, lab) as conn:
-        candidate = await next_dive_for_laser_calibration(conn, lab)
-    assert (candidate.dive_id, candidate.reentry) == (broken, True)
+        candidate = await next_mission_for_laser_calibration(conn, lab)
+    assert (candidate.mission_id, candidate.reentry) == (broken, True)
 
 
 async def test_the_board_re_enters_implausible_fits_too(owner_engine, app_engine):
     """Six of the eight bad fits came from the checkerboard producer."""
     lab = await tenant(owner_engine)
-    only = await _board_dive(owner_engine, lab)
+    only = await _board_mission(owner_engine, lab)
     await laser_calibration(
         owner_engine, lab, only, position=BAD_POSITION, producer="checkerboard"
     )
@@ -540,7 +544,7 @@ async def test_a_refit_is_appended_and_is_the_current_calibration(
     was invisible to the provenance-mismatch cohorts. v2 appends: the refit is
     a new row, the old one stays as history, and the dive leaves the cohort."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     old = await laser_calibration(owner_engine, lab, only, position=BAD_POSITION)
 
     async with tenant_transaction(app_engine, lab) as conn:
@@ -551,7 +555,7 @@ async def test_a_refit_is_appended_and_is_the_current_calibration(
             (
                 await conn.execute(
                     text(
-                        "SELECT id FROM laser_calibrations WHERE dive_id = :d ORDER BY seq"
+                        "SELECT id FROM laser_calibrations WHERE mission_id = :d ORDER BY seq"
                     ),
                     {"d": only},
                 )
@@ -561,7 +565,7 @@ async def test_a_refit_is_appended_and_is_the_current_calibration(
         )
         current = (
             await conn.execute(
-                text("SELECT id FROM current_laser_calibrations WHERE dive_id = :d"),
+                text("SELECT id FROM current_laser_calibrations WHERE mission_id = :d"),
                 {"d": only},
             )
         ).scalar_one()
@@ -605,16 +609,18 @@ def _refused(**overrides) -> CalibrationRecord:
     return _accepted(**values)
 
 
-async def _refuse(app_engine, lab, dive_id, **overrides):
+async def _refuse(app_engine, lab, mission_id, **overrides):
     async with tenant_transaction(app_engine, lab) as conn:
-        return await record_laser_calibration(conn, lab, dive_id, _refused(**overrides))
+        return await record_laser_calibration(
+            conn, lab, mission_id, _refused(**overrides)
+        )
 
 
-async def _refused_board_dive(owner_engine, app_engine, lab, *, label_at=T0, **kw):
+async def _refused_board_mission(owner_engine, app_engine, lab, *, label_at=T0, **kw):
     """A checkerboard dive with two dotted frames, refused at `inputs_as_of`
     (default: the labels' own timestamp, as a fresh refusal would be)."""
     target = await calibration_target(owner_engine)
-    only = await dive(owner_engine, lab, target=target)
+    only = await mission(owner_engine, lab, target=target)
     for _ in range(2):
         await laser_label(
             owner_engine, lab, await capture(owner_engine, lab, only),
@@ -627,18 +633,18 @@ async def _refused_board_dive(owner_engine, app_engine, lab, *, label_at=T0, **k
     return only, target
 
 
-async def test_a_dive_with_no_refusal_is_offered(owner_engine, app_engine):
+async def test_a_mission_with_no_refusal_is_offered(owner_engine, app_engine):
     """The control: without a refusal the cohort behaves as it always did."""
     lab = await tenant(owner_engine)
-    only = await _board_dive(owner_engine, lab)
+    only = await _board_mission(owner_engine, lab)
 
     assert await _board(app_engine, lab) == only
 
 
-async def test_a_refused_dive_is_not_offered(owner_engine, app_engine):
+async def test_a_refused_mission_is_not_offered(owner_engine, app_engine):
     """The whole point -- otherwise it is re-selected hourly forever."""
     lab = await tenant(owner_engine)
-    await _refused_board_dive(owner_engine, app_engine, lab)
+    await _refused_board_mission(owner_engine, app_engine, lab)
 
     assert await _board(app_engine, lab) is None
 
@@ -647,7 +653,7 @@ async def test_relabelling_brings_it_back(owner_engine, app_engine):
     """A label newer than the refusal's inputs means the inputs changed.
     Nobody has to clear anything: fixing the labels is the signal."""
     lab = await tenant(owner_engine)
-    only, _ = await _refused_board_dive(owner_engine, app_engine, lab)
+    only, _ = await _refused_board_mission(owner_engine, app_engine, lab)
     await laser_label(
         owner_engine, lab, await capture(owner_engine, lab, only),
         ls_updated_at=later(1),
@@ -661,7 +667,7 @@ async def test_a_label_updated_before_the_refusal_does_not_bring_it_back(
 ):
     """Guards the comparison direction."""
     lab = await tenant(owner_engine)
-    only, _ = await _refused_board_dive(owner_engine, app_engine, lab)
+    only, _ = await _refused_board_mission(owner_engine, app_engine, lab)
     await laser_label(
         owner_engine, lab, await capture(owner_engine, lab, only),
         ls_updated_at=T0,
@@ -680,7 +686,7 @@ async def test_any_label_state_counts_as_a_change(owner_engine, app_engine):
         {"completed": False},
         {"x": None, "y": None},
     ):
-        only, _ = await _refused_board_dive(owner_engine, app_engine, lab)
+        only, _ = await _refused_board_mission(owner_engine, app_engine, lab)
         await laser_label(
             owner_engine, lab, await capture(owner_engine, lab, only),
             ls_updated_at=later(1), **newer,
@@ -693,7 +699,7 @@ async def test_a_newer_slate_label_counts_too(owner_engine, app_engine):
     """Both human inputs either producer consumes: the dot, and the slate's
     reference points."""
     lab = await tenant(owner_engine)
-    only, _ = await _refused_board_dive(owner_engine, app_engine, lab)
+    only, _ = await _refused_board_mission(owner_engine, app_engine, lab)
     await slate_label(
         owner_engine, lab, await capture(owner_engine, lab, only),
         ls_updated_at=later(1), superseded=True,
@@ -708,24 +714,24 @@ async def test_a_refusal_with_no_input_snapshot_expires_on_any_label(
     """NULL means the dive had no labels when refused, so any label at all is
     newer -- `IS NULL OR >`, not a bare `>` that NULL would make permanent."""
     lab = await tenant(owner_engine)
-    only, _ = await _refused_board_dive(
+    only, _ = await _refused_board_mission(
         owner_engine, app_engine, lab, inputs_as_of=None
     )
 
     assert await _board(app_engine, lab) == only
 
 
-async def test_a_refused_dive_does_not_block_a_healthy_one(owner_engine, app_engine):
+async def test_a_refused_mission_does_not_block_a_healthy_one(owner_engine, app_engine):
     lab = await tenant(owner_engine)
-    await _refused_board_dive(owner_engine, app_engine, lab)
-    healthy = await _board_dive(owner_engine, lab)
+    await _refused_board_mission(owner_engine, app_engine, lab)
+    healthy = await _board_mission(owner_engine, lab)
 
     assert await _board(app_engine, lab) == healthy
 
 
 async def test_a_refusal_also_holds_the_slate_cohort(owner_engine, app_engine):
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     await _refuse(
         app_engine, lab, only, producer="slate", inputs_as_of=later(99),
         slate_template_id=await _slate_of(owner_engine, only),
@@ -734,12 +740,12 @@ async def test_a_refusal_also_holds_the_slate_cohort(owner_engine, app_engine):
     assert await _stage13(app_engine, lab) is None
 
 
-async def _slate_of(owner_engine, dive_id):
+async def _slate_of(owner_engine, mission_id):
     async with owner_engine.connect() as conn:
         return (
             await conn.execute(
-                text("SELECT slate_template_id FROM dives WHERE id = :d"),
-                {"d": dive_id},
+                text("SELECT slate_template_id FROM missions WHERE id = :d"),
+                {"d": mission_id},
             )
         ).scalar_one()
 
@@ -749,11 +755,11 @@ async def test_a_new_calibration_target_expires_the_refusal(owner_engine, app_en
     board is exactly the change a refusal should not outlive. The species
     slice writes the link; the refusal recorded which target it used."""
     lab = await tenant(owner_engine)
-    only, _ = await _refused_board_dive(owner_engine, app_engine, lab)
+    only, _ = await _refused_board_mission(owner_engine, app_engine, lab)
     other = await calibration_target(owner_engine)
     async with owner_engine.begin() as conn:
         await conn.execute(
-            text("UPDATE dives SET calibration_target_id = :g WHERE id = :d"),
+            text("UPDATE missions SET calibration_target_id = :g WHERE id = :d"),
             {"g": other, "d": only},
         )
 
@@ -767,7 +773,7 @@ async def test_a_pitch_correction_expires_the_refusal(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     name = f"E4E {uuid.uuid4()}"
     first = await calibration_target(owner_engine, name=name, pitch_x_m=0.042)
-    only = await dive(owner_engine, lab, target=first)
+    only = await mission(owner_engine, lab, target=first)
     for _ in range(2):
         await laser_label(owner_engine, lab, await capture(owner_engine, lab, only),
                           ls_updated_at=T0)  # fmt: skip
@@ -783,7 +789,7 @@ async def test_a_pitch_correction_expires_the_refusal(owner_engine, app_engine):
 async def test_a_new_slate_template_expires_a_slate_refusal(owner_engine, app_engine):
     """v1's `set_dive_slate` cleared the refusal."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     await _refuse(
         app_engine, lab, only, producer="slate", inputs_as_of=later(99),
         slate_template_id=await _slate_of(owner_engine, only),
@@ -792,7 +798,7 @@ async def test_a_new_slate_template_expires_a_slate_refusal(owner_engine, app_en
 
     async with owner_engine.begin() as conn:
         await conn.execute(
-            text("UPDATE dives SET slate_template_id = :s WHERE id = :d"),
+            text("UPDATE missions SET slate_template_id = :s WHERE id = :d"),
             {"s": await slate_template(owner_engine), "d": only},
         )
 
@@ -805,7 +811,7 @@ async def test_a_migrated_refusal_expires_only_on_labels(owner_engine, app_engin
     on a newer label, a link write (see the species-sync seam below), and an
     operator's clear."""
     lab = await tenant(owner_engine)
-    only = await _board_dive(owner_engine, lab)
+    only = await _board_mission(owner_engine, lab)
     await laser_calibration(
         owner_engine, lab, only, outcome="refused", producer=None,
         inputs_as_of=later(1), v1_refusal_dive_id=347,
@@ -814,11 +820,11 @@ async def test_a_migrated_refusal_expires_only_on_labels(owner_engine, app_engin
     assert await _board(app_engine, lab) is None
 
 
-async def test_clearing_the_refusal_re_offers_the_dive(owner_engine, app_engine):
+async def test_clearing_the_refusal_re_offers_the_mission(owner_engine, app_engine):
     """The operator override, for changes the labels do not capture -- an
     appended clear, since refusals are never edited."""
     lab = await tenant(owner_engine)
-    only, _ = await _refused_board_dive(owner_engine, app_engine, lab)
+    only, _ = await _refused_board_mission(owner_engine, app_engine, lab)
 
     async with tenant_transaction(app_engine, lab) as conn:
         assert await clear_calibration_refusal(conn, lab, only, reason="retry") is True
@@ -827,11 +833,11 @@ async def test_clearing_the_refusal_re_offers_the_dive(owner_engine, app_engine)
     assert await _board(app_engine, lab) == only
 
 
-async def test_clearing_a_dive_with_no_standing_refusal_does_nothing(
+async def test_clearing_a_mission_with_no_standing_refusal_does_nothing(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
-    only = await _board_dive(owner_engine, lab)
+    only = await _board_mission(owner_engine, lab)
     await laser_calibration(owner_engine, lab, only, producer="checkerboard")
 
     async with tenant_transaction(app_engine, lab) as conn:
@@ -842,7 +848,7 @@ async def test_an_accepted_fit_retires_the_refusal(owner_engine, app_engine):
     """v1's PUT extrinsics cleared the refusal; appended, the accepted row is
     simply the dive's current one."""
     lab = await tenant(owner_engine)
-    only, target = await _refused_board_dive(owner_engine, app_engine, lab)
+    only, target = await _refused_board_mission(owner_engine, app_engine, lab)
 
     async with tenant_transaction(app_engine, lab) as conn:
         await record_laser_calibration(
@@ -852,7 +858,7 @@ async def test_an_accepted_fit_retires_the_refusal(owner_engine, app_engine):
         standing = (
             await conn.execute(
                 text(
-                    "SELECT outcome FROM current_laser_calibrations WHERE dive_id = :d"
+                    "SELECT outcome FROM current_laser_calibrations WHERE mission_id = :d"
                 ),
                 {"d": only},
             )
@@ -869,7 +875,7 @@ async def test_a_record_carries_its_provenance(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     device, calibration = await device_with_camera(owner_engine, lab)
     target = await calibration_target(owner_engine)
-    only = await dive(owner_engine, lab, device=device, target=target)
+    only = await mission(owner_engine, lab, device=device, target=target)
     record = _accepted(
         producer="checkerboard",
         camera_calibration_id=calibration,
@@ -887,7 +893,7 @@ async def test_a_record_carries_its_provenance(owner_engine, app_engine):
                 text("SELECT * FROM laser_calibrations WHERE id = :i"), {"i": written}
             )
         ).one()
-    assert (row.producer, row.outcome, row.dive_id) == (
+    assert (row.producer, row.outcome, row.mission_id) == (
         "checkerboard",
         "accepted",
         only,
@@ -907,9 +913,11 @@ async def test_a_record_carries_its_provenance(owner_engine, app_engine):
     assert row.gate_verdicts == record.gate_verdicts
 
 
-async def test_a_record_cannot_land_on_another_tenants_dive(owner_engine, app_engine):
+async def test_a_record_cannot_land_on_another_tenants_mission(
+    owner_engine, app_engine
+):
     lab, reef = await tenant(owner_engine), await tenant(owner_engine, "reef")
-    theirs = await dive(owner_engine, reef)
+    theirs = await mission(owner_engine, reef)
 
     with pytest.raises(Exception, match="foreign key"):
         async with tenant_transaction(app_engine, lab) as conn:
@@ -924,7 +932,7 @@ async def test_recording_the_same_attempt_twice_appends_it_once(
     dive's current calibration and restarts the refusal's clock. The caller
     names the attempt; a repeat of that name is the row already written."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     attempt = uuid.uuid4()
 
     async with tenant_transaction(app_engine, lab) as conn:
@@ -936,7 +944,9 @@ async def test_recording_the_same_attempt_twice_appends_it_once(
     async with owner_engine.connect() as conn:
         rows = (
             await conn.execute(
-                text("SELECT id, outcome FROM laser_calibrations WHERE dive_id = :d"),
+                text(
+                    "SELECT id, outcome FROM laser_calibrations WHERE mission_id = :d"
+                ),
                 {"d": only},
             )
         ).all()
@@ -947,7 +957,7 @@ async def test_an_unnamed_attempt_is_appended_under_a_fresh_id(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
 
     async with tenant_transaction(app_engine, lab) as conn:
         first = await record_laser_calibration(conn, lab, only, _accepted())
@@ -959,9 +969,9 @@ async def test_an_unnamed_attempt_is_appended_under_a_fresh_id(
 # ---------- inputs: stage 13 ----------
 
 
-async def _slate_inputs(app_engine, lab, dive_id):
+async def _slate_inputs(app_engine, lab, mission_id):
     async with tenant_transaction(app_engine, lab) as conn:
-        return await slate_calibration_inputs(conn, lab, dive_id)
+        return await slate_calibration_inputs(conn, lab, mission_id)
 
 
 async def test_stage_13_inputs_carry_the_template_camera_and_observations(
@@ -970,7 +980,7 @@ async def test_stage_13_inputs_carry_the_template_camera_and_observations(
     lab = await tenant(owner_engine)
     device, calibration = await device_with_camera(owner_engine, lab)
     slate = await slate_template(owner_engine)
-    only = await dive(owner_engine, lab, slate=slate, device=device)
+    only = await mission(owner_engine, lab, slate=slate, device=device)
     frame = await capture(owner_engine, lab, only)
     await slate_label(owner_engine, lab, frame, completed=True,
                       reference_points=[[1.0, 2.0], [3.0, 4.0]], skipped_points=[1],
@@ -1002,7 +1012,7 @@ async def test_stage_13_walks_every_live_slate_label_like_v1(owner_engine, app_e
     frame with no live dot has no observation."""
     lab = await tenant(owner_engine)
     device, _ = await device_with_camera(owner_engine, lab)
-    only = await dive(owner_engine, lab, slate=await slate_template(owner_engine),
+    only = await mission(owner_engine, lab, slate=await slate_template(owner_engine),
                       device=device)  # fmt: skip
     kept = []
     for completed, canonical in ((True, True), (False, True), (True, False)):
@@ -1028,7 +1038,7 @@ async def test_each_frame_uses_its_lowest_live_laser_label(owner_engine, app_eng
     points. A superseded label with a lower number never shadows a live one."""
     lab = await tenant(owner_engine)
     device, _ = await device_with_camera(owner_engine, lab)
-    only = await dive(owner_engine, lab, slate=await slate_template(owner_engine),
+    only = await mission(owner_engine, lab, slate=await slate_template(owner_engine),
                       device=device)  # fmt: skip
     frame = await capture(owner_engine, lab, only)
     await slate_label(owner_engine, lab, frame, completed=True)
@@ -1042,13 +1052,13 @@ async def test_each_frame_uses_its_lowest_live_laser_label(owner_engine, app_eng
     assert [o.laser_x for o in inputs.observations] == [600.0]
 
 
-async def test_the_dives_dots_are_every_live_dot_it_holds(owner_engine, app_engine):
+async def test_the_missions_dots_are_every_live_dot_it_holds(owner_engine, app_engine):
     """v1's `get_laser_labels(dive)`: non-superseded with x/y set, incomplete
     and non-canonical included -- the population the describes-the-dive gate
     judges the fit against."""
     lab = await tenant(owner_engine)
     device, _ = await device_with_camera(owner_engine, lab)
-    only = await dive(owner_engine, lab, slate=await slate_template(owner_engine),
+    only = await mission(owner_engine, lab, slate=await slate_template(owner_engine),
                       device=device)  # fmt: skip
     await slate_label(owner_engine, lab, await capture(owner_engine, lab, only))
     await laser_label(owner_engine, lab, await capture(owner_engine, lab, only),
@@ -1062,18 +1072,18 @@ async def test_the_dives_dots_are_every_live_dot_it_holds(owner_engine, app_engi
 
     inputs = await _slate_inputs(app_engine, lab, only)
 
-    assert sorted(x for x, _ in inputs.dive_dots) == [1.0, 2.0]
+    assert sorted(x for x, _ in inputs.mission_dots) == [1.0, 2.0]
 
 
-async def test_a_dive_with_no_slate_labels_has_nothing_to_calibrate(
+async def test_a_mission_with_no_slate_labels_has_nothing_to_calibrate(
     owner_engine, app_engine
 ):
     """v1's activity returned None (a genuine no-op) for a dive with no slate
     or no slate labels; the orchestrator now dispatches nothing."""
     lab = await tenant(owner_engine)
     device, _ = await device_with_camera(owner_engine, lab)
-    no_slate = await dive(owner_engine, lab, device=device)
-    no_labels = await dive(owner_engine, lab, slate=await slate_template(owner_engine),
+    no_slate = await mission(owner_engine, lab, device=device)
+    no_labels = await mission(owner_engine, lab, slate=await slate_template(owner_engine),
                            device=device)  # fmt: skip
 
     assert await _slate_inputs(app_engine, lab, no_slate) is None
@@ -1083,7 +1093,7 @@ async def test_a_dive_with_no_slate_labels_has_nothing_to_calibrate(
 async def test_stage_13_refuses_a_template_it_cannot_scale(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     device, _ = await device_with_camera(owner_engine, lab)
-    only = await dive(owner_engine, lab, slate=await slate_template(owner_engine, dpi=None),
+    only = await mission(owner_engine, lab, slate=await slate_template(owner_engine, dpi=None),
                       device=device)  # fmt: skip
     await _observation(owner_engine, lab, only)
 
@@ -1094,15 +1104,15 @@ async def test_stage_13_refuses_a_template_it_cannot_scale(owner_engine, app_eng
 # ---------- inputs: the board ----------
 
 
-async def _board_inputs(app_engine, lab, dive_id):
+async def _board_inputs(app_engine, lab, mission_id):
     async with tenant_transaction(app_engine, lab) as conn:
-        return await checkerboard_calibration_inputs(conn, lab, dive_id)
+        return await checkerboard_calibration_inputs(conn, lab, mission_id)
 
 
 async def _board_scene(owner_engine, lab, **target):
     device, calibration = await device_with_camera(owner_engine, lab)
     board = await calibration_target(owner_engine, **target)
-    only = await dive(owner_engine, lab, target=board, device=device)
+    only = await mission(owner_engine, lab, target=board, device=device)
     return only, board, calibration
 
 
@@ -1205,20 +1215,20 @@ async def test_a_pitch_correction_reaches_the_next_fit(owner_engine, app_engine)
     assert inputs.calibration_target_id == corrected != first
 
 
-async def test_resolver_refuses_an_unlinked_dive(owner_engine, app_engine):
+async def test_resolver_refuses_an_unlinked_mission(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     device, _ = await device_with_camera(owner_engine, lab)
-    only = await dive(owner_engine, lab, device=device)
+    only = await mission(owner_engine, lab, device=device)
 
     with pytest.raises(CalibrationInputsUnavailable, match="no calibration target"):
         await _board_inputs(app_engine, lab, only)
 
 
-async def test_resolver_refuses_a_dive_with_no_camera_calibration(
+async def test_resolver_refuses_a_mission_with_no_camera_calibration(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
-    only = await dive(
+    only = await mission(
         owner_engine, lab, target=await calibration_target(owner_engine), device=None
     )
 
@@ -1233,15 +1243,15 @@ async def test_the_catalog_works_within_a_served_tenant(
     owner_engine, app_engine, seed_memberships
 ):
     lab = (await seed_memberships({ORCHESTRATOR: {"lab": "member"}}))["lab"]
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     catalog = LaserCalibrationCatalog(app_engine, sub=ORCHESTRATOR)
 
-    assert (await catalog.next_dive_for_laser_calibration(lab)).dive_id == only
-    assert await catalog.next_dive_for_checkerboard_calibration(lab) is None
+    assert (await catalog.next_mission_for_laser_calibration(lab)).mission_id == only
+    assert await catalog.next_mission_for_checkerboard_calibration(lab) is None
     await catalog.record_laser_calibration(lab, only, _accepted())
-    assert await catalog.next_dive_for_laser_calibration(lab) is None
+    assert await catalog.next_mission_for_laser_calibration(lab) is None
     assert await catalog.clear_calibration_refusal(lab, only) is False
-    assert await catalog.dive_for_number(lab, -1) is None
+    assert await catalog.mission_for_number(lab, -1) is None
 
 
 @pytest.mark.parametrize(
@@ -1252,7 +1262,7 @@ async def test_the_catalog_works_within_a_served_tenant(
         {"reference_points": []},
     ],
 )
-async def test_an_unresolvable_dive_does_not_hold_up_another_tenants(
+async def test_an_unresolvable_mission_does_not_hold_up_another_tenants(
     owner_engine, app_engine, seed_memberships, unresolvable
 ):
     """The orchestrator takes the oldest candidate across every tenant it
@@ -1262,74 +1272,76 @@ async def test_an_unresolvable_dive_does_not_hold_up_another_tenants(
     tenants = await seed_memberships(
         {ORCHESTRATOR: {"lab": "member", "reef": "member"}}
     )
-    await _slate_dive_with(owner_engine, tenants["lab"], **unresolvable)
-    younger = await _slate_dive_with(owner_engine, tenants["reef"])
+    await _slate_mission_with(owner_engine, tenants["lab"], **unresolvable)
+    younger = await _slate_mission_with(owner_engine, tenants["reef"])
     catalog = LaserCalibrationCatalog(app_engine, sub=ORCHESTRATOR)
 
     offered = [
         candidate
         for tenant_id in await catalog.member_tenants()
-        if (candidate := await catalog.next_dive_for_laser_calibration(tenant_id))
+        if (candidate := await catalog.next_mission_for_laser_calibration(tenant_id))
     ]
-    assert [c.dive_id for c in offered] == [younger]
+    assert [c.mission_id for c in offered] == [younger]
 
 
-async def test_a_board_dive_with_no_camera_does_not_hold_up_another_tenants(
+async def test_a_board_mission_with_no_camera_does_not_hold_up_another_tenants(
     owner_engine, app_engine, seed_memberships
 ):
     tenants = await seed_memberships(
         {ORCHESTRATOR: {"lab": "member", "reef": "member"}}
     )
-    await _board_dive(owner_engine, tenants["lab"], device=None, created_at=T0)
-    younger = await _board_dive(owner_engine, tenants["reef"], created_at=later(1))
+    await _board_mission(owner_engine, tenants["lab"], device=None, created_at=T0)
+    younger = await _board_mission(owner_engine, tenants["reef"], created_at=later(1))
     catalog = LaserCalibrationCatalog(app_engine, sub=ORCHESTRATOR)
 
-    assert await catalog.next_dive_for_checkerboard_calibration(tenants["lab"]) is None
     assert (
-        await catalog.next_dive_for_checkerboard_calibration(tenants["reef"])
-    ).dive_id == younger
+        await catalog.next_mission_for_checkerboard_calibration(tenants["lab"]) is None
+    )
+    assert (
+        await catalog.next_mission_for_checkerboard_calibration(tenants["reef"])
+    ).mission_id == younger
 
 
 # ---------- the lattice study names dives by number ----------
 
 
-async def test_a_dive_is_found_by_its_number_within_its_tenant(
+async def test_a_mission_is_found_by_its_number_within_its_tenant(
     owner_engine, app_engine
 ):
     """v1's study took dive ids ("dive_ids": [493, 495, ...]); v2's dives are
     UUIDs, and a migrated dive's number is its v1 id, so the operator's list
     still reads the same. Another tenant's dive of that number is not found."""
     lab, reef = await tenant(owner_engine), await tenant(owner_engine, "reef")
-    mine = await dive(owner_engine, lab, v1_id=493)
-    await dive(owner_engine, reef, v1_id=495)
+    mine = await mission(owner_engine, lab, v1_id=493)
+    await mission(owner_engine, reef, v1_id=495)
 
     async with tenant_transaction(app_engine, lab) as conn:
-        assert await dive_for_number(conn, lab, 493) == mine
-        assert await dive_for_number(conn, lab, 495) is None
+        assert await mission_for_number(conn, lab, 493) == mine
+        assert await mission_for_number(conn, lab, 495) is None
 
 
 # -- the seam with the species sync: a link write expires a refusal -----------------
 
 
-async def _link_written(owner_engine, dive_id, *, when):
+async def _link_written(owner_engine, mission_id, *, when):
     """What the species sync does on writing a dive's slate or calibration
     target, changed or not (species_store.set_dive_*; migration 0022)."""
     async with owner_engine.begin() as conn:
         await conn.execute(
-            text(f"UPDATE dives SET calibration_links_changed_at = {when} "
+            text(f"UPDATE missions SET calibration_links_changed_at = {when} "
                  "WHERE id = :d"),
-            {"d": dive_id},
+            {"d": mission_id},
         )  # fmt: skip
 
 
-async def test_a_link_written_after_the_refusal_re_offers_the_dive(
+async def test_a_link_written_after_the_refusal_re_offers_the_mission(
     owner_engine, app_engine
 ):
     """v1's `_clear_refusal` ran on every set_dive_slate/set_calibration_target,
     even to the same value: a labeler re-choosing the target says "try again".
     The value comparison alone misses that; the species sync's stamp doesn't."""
     lab = await tenant(owner_engine)
-    only, _ = await _refused_board_dive(owner_engine, app_engine, lab)
+    only, _ = await _refused_board_mission(owner_engine, app_engine, lab)
     await _link_written(owner_engine, only, when="now() + interval '1 second'")
 
     assert await _board(app_engine, lab) == only
@@ -1339,7 +1351,7 @@ async def test_a_link_written_after_a_migrated_refusal_re_offers_it_too(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
-    only = await _board_dive(owner_engine, lab)
+    only = await _board_mission(owner_engine, lab)
     await laser_calibration(
         owner_engine, lab, only, outcome="refused", producer=None,
         inputs_as_of=later(1), v1_refusal_dive_id=347,
@@ -1353,7 +1365,7 @@ async def test_a_link_written_before_the_refusal_does_not_expire_it(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
-    only, _ = await _refused_board_dive(owner_engine, app_engine, lab)
+    only, _ = await _refused_board_mission(owner_engine, app_engine, lab)
     await _link_written(owner_engine, only, when="now() - interval '1 day'")
 
     assert await _board(app_engine, lab) is None
@@ -1364,23 +1376,23 @@ async def test_a_link_written_before_the_refusal_does_not_expire_it(
 # column by hand; these pin that the setters are what stamps it.)
 
 
-async def _set_target(app_engine, lab, dive_id, target):
+async def _set_target(app_engine, lab, mission_id, target):
     async with tenant_transaction(app_engine, lab) as conn:
-        assert await set_dive_calibration_target(conn, lab, dive_id, target)
+        assert await set_mission_calibration_target(conn, lab, mission_id, target)
 
 
-async def _set_slate(app_engine, lab, dive_id, slate):
+async def _set_slate(app_engine, lab, mission_id, slate):
     async with tenant_transaction(app_engine, lab) as conn:
-        assert await set_dive_slate_template(conn, lab, dive_id, slate)
+        assert await set_mission_slate_template(conn, lab, mission_id, slate)
 
 
-async def test_re_choosing_the_same_target_re_offers_a_refused_board_dive(
+async def test_re_choosing_the_same_target_re_offers_a_refused_board_mission(
     owner_engine, app_engine
 ):
     """v1's `set_dive_calibration_target` cleared the refusal on every write,
     the same target included: a labeler re-choosing it says "try again"."""
     lab = await tenant(owner_engine)
-    only, target = await _refused_board_dive(owner_engine, app_engine, lab)
+    only, target = await _refused_board_mission(owner_engine, app_engine, lab)
     assert await _board(app_engine, lab) is None
 
     await _set_target(app_engine, lab, only, target)
@@ -1388,11 +1400,11 @@ async def test_re_choosing_the_same_target_re_offers_a_refused_board_dive(
     assert await _board(app_engine, lab) == only
 
 
-async def test_re_choosing_the_same_slate_re_offers_a_refused_slate_dive(
+async def test_re_choosing_the_same_slate_re_offers_a_refused_slate_mission(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     slate = await _slate_of(owner_engine, only)
     await _refuse(
         app_engine, lab, only, producer="slate", inputs_as_of=later(99),
@@ -1405,7 +1417,7 @@ async def test_re_choosing_the_same_slate_re_offers_a_refused_slate_dive(
     assert await _stage13(app_engine, lab) == only
 
 
-async def test_a_target_set_after_a_slate_refusal_offers_the_dive_to_the_board(
+async def test_a_target_set_after_a_slate_refusal_offers_the_mission_to_the_board(
     owner_engine, app_engine
 ):
     """Across producers. Stage 13 refused the dive and it has too few slate
@@ -1413,7 +1425,7 @@ async def test_a_target_set_after_a_slate_refusal_offers_the_dive_to_the_board(
     refusal compared no target, so only the link write can expire it -- and
     without that the dive would sit out of both cohorts."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab, observations=1)
+    only = await _slate_mission(owner_engine, lab, observations=1)
     await laser_label(owner_engine, lab, await capture(owner_engine, lab, only))
     await _refuse(
         app_engine, lab, only, producer="slate", inputs_as_of=later(99),
@@ -1430,7 +1442,7 @@ async def test_a_link_write_re_offers_a_migrated_refusal(owner_engine, app_engin
     """A refusal carried over from v1 names no template or target, so a
     link can only expire it by being written."""
     lab = await tenant(owner_engine)
-    only = await _slate_dive(owner_engine, lab)
+    only = await _slate_mission(owner_engine, lab)
     await laser_calibration(
         owner_engine, lab, only, outcome="refused", producer=None,
         inputs_as_of=later(99), v1_refusal_dive_id=347,
@@ -1446,7 +1458,7 @@ async def test_a_refusal_recorded_after_the_link_write_stands(owner_engine, app_
     """The write expires what was refused before it, not what is refused
     after: a refit that is refused again stays out of the cohort."""
     lab = await tenant(owner_engine)
-    only, target = await _refused_board_dive(owner_engine, app_engine, lab)
+    only, target = await _refused_board_mission(owner_engine, app_engine, lab)
     await _set_target(app_engine, lab, only, target)
     assert await _board(app_engine, lab) == only
 

@@ -99,7 +99,7 @@ def _facts(prediction, labels, measured, current, *, priority="high",
     )
 
 
-def _dive_341(current=((307, [300, 301]), (305, [302, 303, 434, 437])), stray=305):
+def _mission_341(current=((307, [300, 301]), (305, [302, 303, 434, 437])), stray=305):
     return _facts(
         prediction=[[300, 301], [302, 303], [434, 437]],
         labels=[(300, HOG), (301, HOG), (302, HOG, CONTINUE), (303, HOG),
@@ -110,8 +110,8 @@ def _dive_341(current=((307, [300, 301]), (305, [302, 303, 434, 437])), stray=30
     )  # fmt: skip
 
 
-def test_dive_341_the_stray_hogfish_frame_rejoins_hogfish_307():
-    plan = plan_regroup(_dive_341())
+def test_mission_341_the_stray_hogfish_frame_rejoins_hogfish_307():
+    plan = plan_regroup(_mission_341())
 
     assert plan.clusters == [
         NewCluster([cap(300), cap(301), cap(302), cap(303)], fish_id=fish(307)),
@@ -123,7 +123,7 @@ def test_dive_341_the_stray_hogfish_frame_rejoins_hogfish_307():
     assert not plan.noop
 
 
-def test_dive_465_one_parrotfish_not_two():
+def test_mission_465_one_parrotfish_not_two():
     plan = plan_regroup(
         _facts(
             prediction=[[274, 275], [276, 277, 278]],
@@ -142,7 +142,7 @@ def test_dive_465_one_parrotfish_not_two():
     ]
 
 
-def test_dive_383_the_grouper_gets_an_animal_of_its_own():
+def test_mission_383_the_grouper_gets_an_animal_of_its_own():
     plan = plan_regroup(
         _facts(
             prediction=[[922, 923, 924, 925, 926, 927]],
@@ -181,9 +181,11 @@ def test_a_cluster_with_no_measured_frame_is_unbound():
     assert plan.moves == []
 
 
-def test_a_dive_already_grouped_this_way_is_a_noop():
+def test_a_mission_already_grouped_this_way_is_a_noop():
     plan = plan_regroup(
-        _dive_341(current=((307, [300, 301, 302, 303]), (305, [434, 437])), stray=307)
+        _mission_341(
+            current=((307, [300, 301, 302, 303]), (305, [434, 437])), stray=307
+        )
     )
 
     assert plan.noop
@@ -191,12 +193,12 @@ def test_a_dive_already_grouped_this_way_is_a_noop():
 
 
 def test_the_digest_is_stable_and_follows_the_clusters_planned_from():
-    assert plan_regroup(_dive_341()).sha256 == plan_regroup(_dive_341()).sha256
-    moved = _dive_341(current=((307, [300, 301, 302]), (305, [303, 434, 437])))
-    assert plan_regroup(moved).sha256 != plan_regroup(_dive_341()).sha256
+    assert plan_regroup(_mission_341()).sha256 == plan_regroup(_mission_341()).sha256
+    moved = _mission_341(current=((307, [300, 301, 302]), (305, [303, 434, 437])))
+    assert plan_regroup(moved).sha256 != plan_regroup(_mission_341()).sha256
 
 
-def test_a_dive_stage_14_will_not_measure_is_flagged():
+def test_a_mission_stage_14_will_not_measure_is_flagged():
     plan = plan_regroup(
         _facts(
             prediction=[[1]], labels=[(1, HOG)], measured={1: (7, HOG)},
@@ -228,7 +230,7 @@ def test_a_cluster_bound_since_the_apply_keeps_its_fish_before_stage_14():
     assert plan.clusters[0].fish_id == fish(307)
 
 
-def test_a_recalibrated_dive_keeps_every_binding():
+def test_a_recalibrated_mission_keeps_every_binding():
     """A new calibration leaves no measurement current until stage 14 runs;
     the clusters' fish are still who the frames are."""
     plan = plan_regroup(
@@ -277,7 +279,7 @@ def test_no_move_is_reported_when_the_cluster_cannot_be_bound():
     assert any("no species name" in w for w in plan.warnings)
 
 
-def test_a_duplicate_frame_is_left_out_so_a_regrouped_dive_is_a_noop():
+def test_a_duplicate_frame_is_left_out_so_a_regrouped_mission_is_a_noop():
     """The store drops a dive's non-canonical duplicates from the clusters it
     writes (as stage 6.1 does), so the plan must too."""
     plan = plan_regroup(

@@ -6,11 +6,13 @@ It returns the capture ids grouped into clusters (``list[list[UUID]]``).
 """
 
 from uuid import UUID
+from typing import Annotated
 
-from pydantic import AwareDatetime, BaseModel
+from pydantic import AwareDatetime, BaseModel, ConfigDict
+from fishsense_services_contracts.renamed import renamed_from
 
 
-class ClusterDiveFrameImage(BaseModel):
+class ClusterMissionFrameImage(BaseModel):
     """One canonical capture's timestamp."""
 
     capture_id: UUID
@@ -19,6 +21,7 @@ class ClusterDiveFrameImage(BaseModel):
     taken_datetime: AwareDatetime
 
 
-class ClusterDiveFramesInput(BaseModel):
-    dive_id: UUID
-    images: list[ClusterDiveFrameImage]
+class ClusterMissionFramesInput(BaseModel):
+    model_config = ConfigDict(validate_by_name=True)
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
+    images: list[ClusterMissionFrameImage]

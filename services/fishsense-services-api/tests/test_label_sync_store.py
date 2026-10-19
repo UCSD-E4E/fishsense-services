@@ -29,7 +29,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import text
 
 from fishsense_services_api.db import tenant_transaction
-from fishsense_services_api.ingest_store import create_dive, register_capture
+from fishsense_services_api.ingest_store import create_mission, register_capture
 from fishsense_services_api.label_sync_store import (
     LabelSyncCatalog,
     LaserSync,
@@ -55,13 +55,13 @@ async def _tenant(owner_engine, slug="lab") -> uuid.UUID:
 
 async def _capture(app_engine, tenant) -> uuid.UUID:
     async with tenant_transaction(app_engine, tenant) as conn:
-        dive = await create_dive(
-            conn, tenant, source_path=f"d-{uuid.uuid4()}", name="d", dived_at=T0
+        mission = await create_mission(
+            conn, tenant, source_path=f"d-{uuid.uuid4()}", name="d", started_at=T0
         )
         return (
             await register_capture(
-                conn, tenant, dive_id=dive, device_id=None,
-                source_path=f"{dive}/P.ORF", captured_at=T0,
+                conn, tenant, mission_id=mission, device_id=None,
+                source_path=f"{mission}/P.ORF", captured_at=T0,
                 checksum=uuid.uuid4().hex,
             )  # fmt: skip
         ).capture_id

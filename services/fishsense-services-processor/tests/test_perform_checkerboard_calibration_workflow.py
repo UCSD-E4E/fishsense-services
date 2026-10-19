@@ -28,7 +28,7 @@ import uuid
 import numpy as np
 import pytest
 from temporalio import activity
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -50,12 +50,12 @@ from fishsense_services_processor.checkerboard.workflows import (
     PerformCheckerboardCalibrationWorkflow,
 )
 
-from ._calibration_fixtures import dive_dots_on_ray
+from ._calibration_fixtures import mission_dots_on_ray
 
 CAMERA_MATRIX = [[1800.0, 0.0, 640.0], [0.0, 1800.0, 480.0], [0.0, 0.0, 1.0]]
 SQUARE_SIZE_M = 0.0254
 TASK_QUEUE = "test-checkerboard-calibration"
-DIVE = uuid.UUID(int=488)
+MISSION = uuid.UUID(int=488)
 TENANT = "7b0c7d4e-3f58-4d8e-9a3c-0c5f1f7f2d11"
 TARGET = CheckerboardTarget(
     rows=10, cols=14, pitch_x_m=SQUARE_SIZE_M, pitch_y_m=SQUARE_SIZE_M
@@ -68,7 +68,7 @@ def _capture(n: int) -> uuid.UUID:
 
 def _input(*, images=2, **overrides):
     kwargs = {
-        "dive_id": DIVE,
+        "mission_id": MISSION,
         "camera_matrix": CAMERA_MATRIX,
         "distortion_coefficients": [0.0] * 5,
         "target": TARGET,
@@ -83,7 +83,7 @@ def _input(*, images=2, **overrides):
             )
             for n in range(images)
         ],
-        "dive_dots": [(600.0, 500.0)],
+        "mission_dots": [(600.0, 500.0)],
     }
     kwargs.update(overrides)
     return PerformCheckerboardCalibrationInput(**kwargs)
@@ -103,7 +103,7 @@ def _accepted() -> LaserCalibrationResult:
 
 async def _execute(activities, payload, workflow_id):
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,
@@ -168,7 +168,7 @@ async def test_every_frame_is_dispatched_with_the_board_geometry():
     }
 
 
-async def test_unusable_frames_reach_the_fit_and_do_not_fail_the_dive():
+async def test_unusable_frames_reach_the_fit_and_do_not_fail_the_mission():
     """A frame with no detectable board is ordinary, not an error.
 
     The fit sees every observation, including the empty ones — it is the
@@ -200,8 +200,8 @@ async def test_unusable_frames_reach_the_fit_and_do_not_fail_the_dive():
     observations = received[0].observations
     assert len(observations) == 3
     assert [o.point is None for o in observations] == [False, True, False]
-    assert received[0].dive_dots == [(600.0, 500.0)]
-    assert received[0].dive_id == DIVE
+    assert received[0].mission_dots == [(600.0, 500.0)]
+    assert received[0].mission_id == MISSION
 
 
 # ---------- the fit ----------
@@ -233,10 +233,10 @@ def _fit_input(observations):
     these tests mean to describe. A fit the dive disagrees with is covered by
     `test_calibration_gates_are_wired.py`."""
     return FitCheckerboardExtrinsicsInput(
-        dive_id=DIVE,
+        mission_id=MISSION,
         camera_matrix=CAMERA_MATRIX,
         observations=observations,
-        dive_dots=dive_dots_on_ray(
+        mission_dots=mission_dots_on_ray(
             (*_GOOD_ORIGIN_XY, 0.0), (0.0, 0.0, 1.0), CAMERA_MATRIX
         ),
     )

@@ -14,7 +14,7 @@ import uuid
 from typing import List
 
 from temporalio import activity
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -31,7 +31,7 @@ from fishsense_services_processor.measurement.workflow import MeasureFishWorkflo
 from fishsense_services_processor.registry import ROLE_LIGHT
 
 K = ((3000.0, 0.0, 2048.0), (0.0, 3000.0, 1536.0), (0.0, 0.0, 1.0))
-DIVE = uuid.uuid4()
+MISSION = uuid.uuid4()
 GEOMETRY = LaserCalibrationGeometry(
     laser_calibration_id=uuid.uuid4(),
     laser_position=(-0.03, -0.10, 0.0),
@@ -41,7 +41,7 @@ GEOMETRY = LaserCalibrationGeometry(
 
 async def _execute(workflow_cls, activity_fn, payload, result_type):
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,
@@ -60,7 +60,9 @@ async def _execute(workflow_cls, activity_fn, payload, result_type):
 
 async def test_depth_workflow_invokes_activity_with_payload_and_returns_result():
     calls: List[ComputeLaserDepthsInput] = []
-    expected = ComputeLaserDepthsResult(dive_id=DIVE, core_version="4.1.0", captures=[])
+    expected = ComputeLaserDepthsResult(
+        mission_id=MISSION, core_version="4.1.0", captures=[]
+    )
 
     @activity.defn(name="compute_laser_depths")
     async def stub(payload: ComputeLaserDepthsInput) -> ComputeLaserDepthsResult:
@@ -68,7 +70,7 @@ async def test_depth_workflow_invokes_activity_with_payload_and_returns_result()
         return expected
 
     payload = ComputeLaserDepthsInput(
-        dive_id=DIVE, camera_matrix=K, calibration=GEOMETRY, captures=[]
+        mission_id=MISSION, camera_matrix=K, calibration=GEOMETRY, captures=[]
     )
     result = await _execute(
         ComputeLaserDepthsWorkflow, stub, payload, ComputeLaserDepthsResult
@@ -81,7 +83,7 @@ async def test_depth_workflow_invokes_activity_with_payload_and_returns_result()
 async def test_measure_workflow_invokes_activity_with_payload_and_returns_result():
     calls: List[MeasureFishInput] = []
     expected = MeasureFishResult(
-        dive_id=DIVE,
+        mission_id=MISSION,
         algorithm="laser_depth_fronto_parallel",
         algorithm_version="1",
         core_version="4.1.0",
@@ -94,7 +96,7 @@ async def test_measure_workflow_invokes_activity_with_payload_and_returns_result
         return expected
 
     payload = MeasureFishInput(
-        dive_id=DIVE, camera_matrix=K, calibration=GEOMETRY, captures=[]
+        mission_id=MISSION, camera_matrix=K, calibration=GEOMETRY, captures=[]
     )
     result = await _execute(MeasureFishWorkflow, stub, payload, MeasureFishResult)
 

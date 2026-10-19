@@ -66,20 +66,20 @@ CLEANUP_CONCURRENCY = 8
 _UNKNOWN_HOLDER = "<temporal-unreachable>"
 
 
-async def scratch_in_use(dive_id: uuid.UUID) -> str | None:
+async def scratch_in_use(mission_id: uuid.UUID) -> str | None:
     """The id of a still-running raw reader of this dive, or None if the
     scratch is free. Any failure to ask is an answer of "in use"."""
     try:
         client = activity.client()
         async for execution in client.list_workflows(
-            query=build_scratch_in_use_query(dive_id)
+            query=build_scratch_in_use_query(mission_id)
         ):
             return execution.id
     except Exception as exc:  # pylint: disable=broad-except
         activity.logger.warning(
             "cannot determine whether dive=%s scratch is in use (%s); "
             "declining to delete",
-            dive_id,
+            mission_id,
             type(exc).__name__,
         )
         return _UNKNOWN_HOLDER
@@ -96,25 +96,25 @@ class RawCleanupActivities:
         self._store = store
 
     @activity.defn(name="cleanup_raw_bytes_for_dive")
-    async def cleanup_raw_bytes_for_dive(
+    async def cleanup_raw_bytes_for_mission(
         self, target: StagingTarget
     ) -> CleanupRawBytesResult:
-        holder = await scratch_in_use(target.dive_id)
+        holder = await scratch_in_use(target.mission_id)
         if holder is not None:
             activity.logger.info(
                 "skipping raw cleanup dive=%s: %s is still reading the scratch",
-                target.dive_id,
+                target.mission_id,
                 holder,
             )
             return CleanupRawBytesResult(deleted=0)
 
         checksums = await self._catalog.checksums_to_clean(
-            target.tenant_id, target.dive_id
+            target.tenant_id, target.mission_id
         )
         activity.logger.info(
             "cleaning up raw bytes tenant=%s dive=%s objects=%d",
             target.tenant_id,
-            target.dive_id,
+            target.mission_id,
             len(checksums),
         )
 
@@ -133,6 +133,6 @@ class RawCleanupActivities:
                 tg.create_task(_delete_one(checksum))
 
         activity.logger.info(
-            "raw cleanup done dive=%s deleted=%d", target.dive_id, deleted
+            "raw cleanup done dive=%s deleted=%d", target.mission_id, deleted
         )
         return CleanupRawBytesResult(deleted=deleted)

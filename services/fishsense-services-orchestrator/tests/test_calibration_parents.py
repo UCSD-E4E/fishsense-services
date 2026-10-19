@@ -32,7 +32,7 @@ import pytest
 from temporalio import activity, workflow
 from temporalio.client import WorkflowFailureError
 from temporalio.common import RetryPolicy
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
@@ -55,7 +55,7 @@ from fishsense_services_contracts.slate_calibration import (
 from fishsense_services_orchestrator.calibration.contracts import (
     CalibrationProvenance,
     CheckerboardCalibrationPlan,
-    LatticeDive,
+    LatticeMission,
     LatticeImport,
     LatticePlan,
     LatticeProject,
@@ -76,8 +76,8 @@ from fishsense_services_orchestrator.object_store.contracts import (
 
 _K = [[1800.0, 0.0, 640.0], [0.0, 1800.0, 480.0], [0.0, 0.0, 1.0]]
 TENANT = uuid.UUID(int=1)
-DIVE = uuid.UUID(int=440)
-TARGET = StagingTarget(tenant_id=TENANT, dive_id=DIVE)
+MISSION = uuid.UUID(int=440)
+TARGET = StagingTarget(tenant_id=TENANT, mission_id=MISSION)
 CAMERA = uuid.UUID(int=9)
 BOARD = CheckerboardTarget(rows=10, cols=14, pitch_x_m=0.042, pitch_y_m=0.042)
 
@@ -165,12 +165,12 @@ async def _cleanup(target: StagingTarget) -> CleanupRawBytesResult:
 def _slate_plan() -> SlateCalibrationPlan:
     return SlateCalibrationPlan(
         payload=SlateCalibrationInput(
-            dive_id=DIVE,
+            mission_id=MISSION,
             camera_matrix=_K,
             template_points=[(0.0, 0.0)],
             dpi=300,
             observations=[],
-            dive_dots=[],
+            mission_dots=[],
         ),
         provenance=CalibrationProvenance(
             producer="slate",
@@ -219,7 +219,7 @@ def _stage13_stubs(selected, plan):
 async def _run_stage13(selected, plan, result=ACCEPTED, *, before=None):
     _RESULT["value"] = result
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with (
             Worker(
@@ -244,25 +244,25 @@ async def _run_stage13(selected, plan, result=ACCEPTED, *, before=None):
             )
 
 
-async def test_dispatches_child_with_deterministic_id_and_dive_payload():
+async def test_dispatches_child_with_deterministic_id_and_mission_payload():
     result = await _run_stage13(TARGET, _slate_plan())
 
     assert result == TARGET
-    assert f"child:perform-laser-calibration-{DIVE}" in _CALLS
+    assert f"child:perform-laser-calibration-{MISSION}" in _CALLS
     (recorded,) = _RECORDED
-    assert (recorded.tenant_id, recorded.dive_id) == (TENANT, DIVE)
+    assert (recorded.tenant_id, recorded.mission_id) == (TENANT, MISSION)
     assert recorded.result == ACCEPTED
     assert recorded.provenance == _slate_plan().provenance
 
 
-async def test_returns_none_when_selector_finds_no_dive():
+async def test_returns_none_when_selector_finds_no_mission():
     result = await _run_stage13(None, None)
 
     assert result is None
     assert _CALLS == ["select"]
 
 
-async def test_a_dive_with_nothing_to_calibrate_wakes_nothing():
+async def test_a_mission_with_nothing_to_calibrate_wakes_nothing():
     """v1's child returned None for a dive with no slate or no slate labels;
     v2 resolves first, so it dispatches -- and wakes -- nothing."""
     result = await _run_stage13(TARGET, None)
@@ -296,7 +296,7 @@ async def test_a_refusal_is_recorded_and_then_fails_the_run():
     assert isinstance(cause, ApplicationError)
     assert cause.type == "CalibrationImplausibleError"
     assert cause.non_retryable
-    assert str(DIVE) in str(cause)
+    assert str(MISSION) in str(cause)
 
 
 async def test_a_failure_to_record_does_not_mask_the_refusal():
@@ -326,7 +326,7 @@ async def test_a_child_already_running_records_nothing():
         await client.start_workflow(
             "PerformLaserCalibrationWorkflow",
             _slate_plan().payload,
-            id=f"perform-laser-calibration-{DIVE}",
+            id=f"perform-laser-calibration-{MISSION}",
             task_queue="no-worker-serves-this-queue",
         )
 
@@ -342,7 +342,7 @@ async def test_a_child_already_running_records_nothing():
 def _board_plan(frames: int) -> CheckerboardCalibrationPlan:
     return CheckerboardCalibrationPlan(
         payload=PerformCheckerboardCalibrationInput(
-            dive_id=DIVE,
+            mission_id=MISSION,
             camera_matrix=_K,
             distortion_coefficients=[0.0] * 5,
             target=BOARD,
@@ -355,7 +355,7 @@ def _board_plan(frames: int) -> CheckerboardCalibrationPlan:
                 )
                 for n in range(frames)
             ],
-            dive_dots=[],
+            mission_dots=[],
         ),
         provenance=CalibrationProvenance(
             producer="checkerboard",
@@ -407,7 +407,7 @@ async def _run_board(
 ):
     _RESULT["value"] = result
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with (
             Worker(
@@ -428,7 +428,7 @@ async def _run_board(
                 await env.client.start_workflow(
                     _StubBoardChild.run,
                     _board_plan(frames).payload,
-                    id=f"perform-checkerboard-calibration-{DIVE}",
+                    id=f"perform-checkerboard-calibration-{MISSION}",
                     task_queue="no-worker-serves-this-queue",
                 )
             return await env.client.execute_workflow(
@@ -516,11 +516,11 @@ async def test_a_board_refusal_is_recorded_after_cleanup_and_raised():
 
 
 def _lattice_plan(number: int, frames: int, sample_limit) -> LatticePlan:
-    dive = uuid.UUID(int=number)
+    mission = uuid.UUID(int=number)
     return LatticePlan(
-        target=StagingTarget(tenant_id=TENANT, dive_id=dive),
+        target=StagingTarget(tenant_id=TENANT, mission_id=mission),
         payload=VerifyCheckerboardLatticeInput(
-            dive_id=dive,
+            mission_id=mission,
             camera_matrix=_K,
             distortion_coefficients=[0.0] * 5,
             target=BOARD,
@@ -573,12 +573,12 @@ def _lattice_stubs(frames: int):
         return TENANT
 
     @activity.defn(name="resolve_lattice_inputs")
-    async def resolve(dive: LatticeDive) -> LatticePlan:
-        if dive.number in _STATE["resolve_fails"]:
+    async def resolve(mission: LatticeMission) -> LatticePlan:
+        if mission.number in _STATE["resolve_fails"]:
             raise ApplicationError(
-                f"dive {dive.number} has no calibration target", non_retryable=True
+                f"dive {mission.number} has no calibration target", non_retryable=True
             )
-        return _lattice_plan(dive.number, frames, dive.sample_limit)
+        return _lattice_plan(mission.number, frames, mission.sample_limit)
 
     @activity.defn(name="create_checkerboard_lattice_label_studio_project")
     async def create(project: LatticeProject) -> int:
@@ -595,7 +595,7 @@ def _lattice_stubs(frames: int):
 
 async def _run_lattice(numbers, *, frames=3, sample_limit=None):
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with (
             Worker(
@@ -613,7 +613,7 @@ async def _run_lattice(numbers, *, frames=3, sample_limit=None):
             return await env.client.execute_workflow(
                 VerifyCheckerboardLatticeParentWorkflow.run,
                 VerifyCheckerboardLatticeParentInput(
-                    tenant="lab", dives=numbers, sample_limit=sample_limit
+                    tenant="lab", missions=numbers, sample_limit=sample_limit
                 ),
                 id=f"wf-lattice-{uuid.uuid4()}",
                 task_queue="lattice-parent-test",
@@ -621,7 +621,7 @@ async def _run_lattice(numbers, *, frames=3, sample_limit=None):
             )
 
 
-async def test_imports_every_render_across_every_dive():
+async def test_imports_every_render_across_every_mission():
     imported = await _run_lattice([1, 2, 3], frames=4)
 
     assert imported == 12
@@ -637,7 +637,7 @@ async def test_the_import_is_chunked_rather_than_one_payload():
     assert all(len(chunk) <= 100 for chunk in _IMPORT_CHUNKS)
 
 
-async def test_chunks_are_shuffled_across_dives_not_grouped_by_dive():
+async def test_chunks_are_shuffled_across_missions_not_grouped_by_mission():
     """Chunking before the shuffle would restore per-dive ordering, and Label
     Studio serves tasks in import order -- the blinding the shuffle is for."""
     await _run_lattice([1, 2, 3, 4, 5], frames=50)
@@ -645,11 +645,11 @@ async def test_chunks_are_shuffled_across_dives_not_grouped_by_dive():
     # v1 asserted "more than one dive", which an unshuffled import also
     # passes: 100 renders in dive order span two dives of 50. Shuffled, a
     # chunk of 100 from 5 x 50 misses a dive with negligible probability.
-    first_chunk_dives = {capture // 1000 for capture in _IMPORT_CHUNKS[0]}
-    assert first_chunk_dives == {1, 2, 3, 4, 5}
+    first_chunk_missions = {capture // 1000 for capture in _IMPORT_CHUNKS[0]}
+    assert first_chunk_missions == {1, 2, 3, 4, 5}
 
 
-async def test_one_failing_dive_does_not_discard_the_others():
+async def test_one_failing_mission_does_not_discard_the_others():
     """The expensive failure: staging is done by the time this could bite."""
     _STATE["resolve_fails"] = {2}
 
@@ -659,7 +659,7 @@ async def test_one_failing_dive_does_not_discard_the_others():
     assert {c // 1000 for chunk in _IMPORT_CHUNKS for c in chunk} == {1, 3}
 
 
-async def test_every_dive_failing_imports_nothing_and_does_not_raise():
+async def test_every_mission_failing_imports_nothing_and_does_not_raise():
     """A study of nothing is a reportable outcome, not a crash."""
     _STATE["resolve_fails"] = {1, 2}
 
@@ -675,7 +675,7 @@ async def test_sample_limit_reaches_the_child():
     assert imported == 6
 
 
-async def test_every_dive_is_staged_and_cleaned_up():
+async def test_every_mission_is_staged_and_cleaned_up():
     await _run_lattice([1, 2], frames=2)
 
     assert _CALLS.count("stage") == 2

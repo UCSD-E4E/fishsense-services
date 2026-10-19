@@ -33,7 +33,7 @@ class MeasureFishWorkflow:
     async def run(self, payload: MeasureFishInput) -> MeasureFishResult:
         workflow.logger.info(
             "measure fish dive_id=%s captures=%d",
-            payload.dive_id,
+            payload.mission_id,
             len(payload.captures),
         )
         return await workflow.execute_activity(

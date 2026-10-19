@@ -31,7 +31,7 @@ from fishsense_services_orchestrator.species.workflows import (
     PopulateSpeciesLabelStudioProjectWorkflow,
     PreprocessSpeciesImagesParentWorkflow,
     SyncLabelStudioSpeciesLabelsWorkflow,
-    UpdateDiveImageGroupsWorkflow,
+    UpdateMissionImageGroupsWorkflow,
 )
 
 from .test_registry import NAS
@@ -52,7 +52,7 @@ def test_it_serves_every_species_workflow():
         PopulateSpeciesLabelStudioProjectWorkflow,
         PopulateSpeciesLabelStudioProjectParentWorkflow,
         SyncLabelStudioSpeciesLabelsWorkflow,
-        UpdateDiveImageGroupsWorkflow,
+        UpdateMissionImageGroupsWorkflow,
     }
 
 
@@ -92,7 +92,7 @@ def test_the_species_sync_is_scheduled_hourly_on_the_hour():
 def test_on_demand_workflows_have_no_schedule():
     """6.1 runs per dive when its labeling is complete; create is manual."""
     scheduled = {s.workflow for s in STAGE.schedules}
-    assert UpdateDiveImageGroupsWorkflow not in scheduled
+    assert UpdateMissionImageGroupsWorkflow not in scheduled
     assert CreateSpeciesLabelStudioProjectWorkflow not in scheduled
     assert PopulateSpeciesLabelStudioProjectWorkflow not in scheduled
 

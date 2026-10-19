@@ -44,7 +44,7 @@ from fishsense_services_orchestrator.calibration.activities import (
 )
 from fishsense_services_orchestrator.calibration.contracts import (
     CalibrationProvenance,
-    LatticeDive,
+    LatticeMission,
     RecordCalibration,
 )
 from fishsense_services_orchestrator.object_store.contracts import StagingTarget
@@ -54,7 +54,7 @@ from fishsense_services_orchestrator.object_store.store import (
 )
 
 LAB, REEF = uuid.UUID(int=1), uuid.UUID(int=2)
-DIVE = uuid.UUID(int=488)
+MISSION = uuid.UUID(int=488)
 CAMERA = uuid.UUID(int=9)
 BOARD = uuid.UUID(int=4)
 SLATE = uuid.UUID(int=7)
@@ -74,23 +74,23 @@ class FakeCatalog:
     async def resolve_tenant(self, slug):
         return {"lab": LAB}.get(slug)
 
-    async def next_dive_for_laser_calibration(self, tenant_id):
+    async def next_mission_for_laser_calibration(self, tenant_id):
         return self.answers.get("stage13", {}).get(tenant_id)
 
-    async def next_dive_for_checkerboard_calibration(self, tenant_id):
+    async def next_mission_for_checkerboard_calibration(self, tenant_id):
         return self.answers.get("board", {}).get(tenant_id)
 
-    async def slate_calibration_inputs(self, tenant_id, dive_id):
+    async def slate_calibration_inputs(self, tenant_id, mission_id):
         return self._answer("slate_inputs")
 
-    async def checkerboard_calibration_inputs(self, tenant_id, dive_id):
+    async def checkerboard_calibration_inputs(self, tenant_id, mission_id):
         return self._answer("board_inputs")
 
-    async def dive_for_number(self, tenant_id, number):
-        return {488: DIVE}.get(number)
+    async def mission_for_number(self, tenant_id, number):
+        return {488: MISSION}.get(number)
 
-    async def record_laser_calibration(self, tenant_id, dive_id, record):
-        self.recorded.append((tenant_id, dive_id, record))
+    async def record_laser_calibration(self, tenant_id, mission_id, record):
+        self.recorded.append((tenant_id, mission_id, record))
         return uuid.UUID(int=77)
 
     def _answer(self, name):
@@ -137,10 +137,10 @@ async def test_returns_the_oldest_candidate_across_tenants(store):
     catalog = FakeCatalog(stage13={LAB: _candidate(10, 2), REEF: _candidate(20, 0)})
 
     target = await _run(
-        _activities(catalog, store).select_next_dive_for_laser_calibration
+        _activities(catalog, store).select_next_mission_for_laser_calibration
     )
 
-    assert target == StagingTarget(tenant_id=REEF, dive_id=uuid.UUID(int=20))
+    assert target == StagingTarget(tenant_id=REEF, mission_id=uuid.UUID(int=20))
 
 
 async def test_a_re_entry_candidate_comes_after_every_fresh_one(store):
@@ -152,22 +152,24 @@ async def test_a_re_entry_candidate_comes_after_every_fresh_one(store):
     )
 
     target = await _run(
-        _activities(catalog, store).select_next_dive_for_checkerboard_calibration
+        _activities(catalog, store).select_next_mission_for_checkerboard_calibration
     )
 
-    assert target == StagingTarget(tenant_id=REEF, dive_id=uuid.UUID(int=20))
+    assert target == StagingTarget(tenant_id=REEF, mission_id=uuid.UUID(int=20))
 
 
-async def test_returns_none_when_selector_finds_no_dive(store):
+async def test_returns_none_when_selector_finds_no_mission(store):
     catalog = FakeCatalog()
 
     assert (
-        await _run(_activities(catalog, store).select_next_dive_for_laser_calibration)
+        await _run(
+            _activities(catalog, store).select_next_mission_for_laser_calibration
+        )
         is None
     )
     assert (
         await _run(
-            _activities(catalog, store).select_next_dive_for_checkerboard_calibration
+            _activities(catalog, store).select_next_mission_for_checkerboard_calibration
         )
         is None
     )
@@ -178,7 +180,7 @@ async def test_returns_none_when_selector_finds_no_dive(store):
 
 def _slate_inputs() -> SlateCalibrationInputs:
     return SlateCalibrationInputs(
-        dive_id=DIVE,
+        mission_id=MISSION,
         slate_template_id=SLATE,
         camera_calibration_id=CAMERA,
         camera_matrix=K,
@@ -193,7 +195,7 @@ def _slate_inputs() -> SlateCalibrationInputs:
                 laser_y=500.0,
             )
         ],
-        dive_dots=[(600.0, 500.0)],
+        mission_dots=[(600.0, 500.0)],
         inputs_as_of=T0,
     )
 
@@ -203,15 +205,15 @@ async def test_stage_13_resolves_its_payload_and_provenance(store):
 
     plan = await _run(
         _activities(catalog, store).resolve_slate_calibration_inputs,
-        StagingTarget(tenant_id=LAB, dive_id=DIVE),
+        StagingTarget(tenant_id=LAB, mission_id=MISSION),
     )
 
-    assert plan.payload.dive_id == DIVE
+    assert plan.payload.mission_id == MISSION
     assert plan.payload.template_points == [(0.0, 0.0), (2400.0, 0.0)]
     assert plan.payload.dpi == 300
     (observation,) = plan.payload.observations
     assert observation.reference_points == [(1.0, 2.0), (3.0, 4.0)]
-    assert plan.payload.dive_dots == [(600.0, 500.0)]
+    assert plan.payload.mission_dots == [(600.0, 500.0)]
     assert plan.provenance == CalibrationProvenance(
         producer="slate",
         camera_calibration_id=CAMERA,
@@ -225,7 +227,7 @@ async def test_stage_13_with_nothing_to_fit_resolves_to_none(store):
         _activities(
             FakeCatalog(slate_inputs=None), store
         ).resolve_slate_calibration_inputs,
-        StagingTarget(tenant_id=LAB, dive_id=DIVE),
+        StagingTarget(tenant_id=LAB, mission_id=MISSION),
     )
 
     assert plan is None
@@ -233,7 +235,7 @@ async def test_stage_13_with_nothing_to_fit_resolves_to_none(store):
 
 def _board_inputs(**overrides) -> CheckerboardInputs:
     values = {
-        "dive_id": DIVE,
+        "mission_id": MISSION,
         "calibration_target_id": BOARD,
         "camera_calibration_id": CAMERA,
         "camera_matrix": K,
@@ -246,7 +248,7 @@ def _board_inputs(**overrides) -> CheckerboardInputs:
             BoardFrame(uuid.UUID(int=101), f"{101:032x}", False, 600.0, 500.0),
             BoardFrame(uuid.UUID(int=102), f"{102:032x}", True, 610.0, 505.0),
         ],
-        "dive_dots": [(600.0, 500.0)],
+        "mission_dots": [(600.0, 500.0)],
         "inputs_as_of": T0,
     }
     values.update(overrides)
@@ -261,7 +263,7 @@ async def test_resolver_carries_the_board_geometry(store):
 
     plan = await _run(
         _activities(catalog, store).resolve_checkerboard_calibration_inputs,
-        StagingTarget(tenant_id=LAB, dive_id=DIVE),
+        StagingTarget(tenant_id=LAB, mission_id=MISSION),
     )
 
     target = plan.payload.target
@@ -284,7 +286,7 @@ async def test_resolver_carries_the_board_geometry(store):
     )
 
 
-async def test_resolver_refuses_an_unlinked_dive_for_good(store):
+async def test_resolver_refuses_an_unlinked_mission_for_good(store):
     catalog = FakeCatalog(
         board_inputs=CalibrationInputsUnavailable("dive has no calibration target")
     )
@@ -292,7 +294,7 @@ async def test_resolver_refuses_an_unlinked_dive_for_good(store):
     with pytest.raises(ApplicationError, match="no calibration target") as excinfo:
         await _run(
             _activities(catalog, store).resolve_checkerboard_calibration_inputs,
-            StagingTarget(tenant_id=LAB, dive_id=DIVE),
+            StagingTarget(tenant_id=LAB, mission_id=MISSION),
         )
 
     assert excinfo.value.non_retryable
@@ -334,13 +336,13 @@ async def test_an_accepted_fit_is_appended_with_its_provenance(store):
     written = await _run(
         _activities(catalog, store).record_laser_calibration,
         RecordCalibration(
-            tenant_id=LAB, dive_id=DIVE, result=_result(), provenance=provenance
+            tenant_id=LAB, mission_id=MISSION, result=_result(), provenance=provenance
         ),
     )
 
     assert written == str(uuid.UUID(int=77))
-    ((tenant, dive, record),) = catalog.recorded
-    assert (tenant, dive) == (LAB, DIVE)
+    ((tenant, mission, record),) = catalog.recorded
+    assert (tenant, mission) == (LAB, MISSION)
     assert (record.producer, record.outcome) == ("checkerboard", "accepted")
     assert record.laser_position == [0.0624, 0.0832, 0.0]
     assert record.refusal_reason is None
@@ -367,7 +369,7 @@ async def test_a_refusal_is_appended_with_its_reason_and_type(store):
         _activities(catalog, store).record_laser_calibration,
         RecordCalibration(
             tenant_id=LAB,
-            dive_id=DIVE,
+            mission_id=MISSION,
             result=_result("refused"),
             provenance=CalibrationProvenance(
                 producer="slate", camera_calibration_id=CAMERA, slate_template_id=SLATE
@@ -390,7 +392,7 @@ async def _record_in_run(catalog, store, run_id, producer="slate"):
         _activities(catalog, store).record_laser_calibration,
         RecordCalibration(
             tenant_id=LAB,
-            dive_id=DIVE,
+            mission_id=MISSION,
             result=_result(),
             provenance=CalibrationProvenance(
                 producer=producer, camera_calibration_id=CAMERA
@@ -428,7 +430,7 @@ async def test_the_study_resolves_its_tenant_by_slug(store):
     assert excinfo.value.non_retryable
 
 
-async def test_the_study_resolves_a_dive_by_number_to_its_frames(store):
+async def test_the_study_resolves_a_mission_by_number_to_its_frames(store):
     """The calibration's own frames -- the population the fit consumed --
     each with the raw key it is staged to and the key its render goes to (its
     own folder: a render keyed like the stage-0.1 JPEG would overwrite what a
@@ -437,10 +439,10 @@ async def test_the_study_resolves_a_dive_by_number_to_its_frames(store):
 
     plan = await _run(
         _activities(catalog, store).resolve_lattice_inputs,
-        LatticeDive(tenant_id=LAB, number=488, sample_limit=5),
+        LatticeMission(tenant_id=LAB, number=488, sample_limit=5),
     )
 
-    assert plan.target == StagingTarget(tenant_id=LAB, dive_id=DIVE)
+    assert plan.target == StagingTarget(tenant_id=LAB, mission_id=MISSION)
     assert plan.payload.sample_limit == 5
     assert (plan.payload.target.pitch_x_m, plan.payload.target.pitch_y_m) == (
         0.04223,
@@ -454,11 +456,11 @@ async def test_the_study_resolves_a_dive_by_number_to_its_frames(store):
     )
 
 
-async def test_an_unknown_dive_number_is_refused_for_good(store):
+async def test_an_unknown_mission_number_is_refused_for_good(store):
     with pytest.raises(ApplicationError, match="999") as excinfo:
         await _run(
             _activities(FakeCatalog(), store).resolve_lattice_inputs,
-            LatticeDive(tenant_id=LAB, number=999),
+            LatticeMission(tenant_id=LAB, number=999),
         )
 
     assert excinfo.value.non_retryable

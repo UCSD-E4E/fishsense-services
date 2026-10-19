@@ -39,7 +39,7 @@ from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
 
 from fishsense_services_api.laser_store import (
-    DiveCamera,
+    MissionCamera,
     GateInputs,
     GateRow,
     LabelPopulation,
@@ -52,7 +52,7 @@ from fishsense_services_api.laser_store import (
 from fishsense_services_api.laser_store import LASER_PREDICTOR_VERSION as STORE_VERSION
 from fishsense_services_contracts.laser import (
     LASER_PREDICTOR_VERSION,
-    DivePlan,
+    MissionPlan,
     LaserAutoAcceptResult,
     LaserAutoAcceptSummary,
     LaserFrameVerdict,
@@ -76,7 +76,7 @@ from fishsense_services_orchestrator.laser.annotations import (
 )
 from fishsense_services_orchestrator.laser.contracts import (
     ClearReprocessFlags,
-    DiveRemediationRequest,
+    MissionRemediationRequest,
     LaserTarget,
     RemediationTarget,
     ReviveLabels,
@@ -96,8 +96,8 @@ from ._laser_fakes import (
 )
 
 LAB, OTHER = uuid.UUID(int=1), uuid.UUID(int=2)
-DIVE = uuid.UUID(int=10)
-TARGET = LaserTarget(tenant_id=LAB, dive_id=DIVE)
+MISSION = uuid.UUID(int=10)
+TARGET = LaserTarget(tenant_id=LAB, mission_id=MISSION)
 
 
 def _activities(catalog=None, *, store=None, ls=None, projects=None, bot=0):
@@ -126,47 +126,48 @@ def test_the_store_and_the_contract_agree_on_the_stage_version():
 @pytest.mark.parametrize(
     ("selector", "key"),
     [
-        ("select_next_dive_for_laser_preprocessing", "preprocess"),
-        ("select_next_dive_for_laser_prediction", "predict"),
-        ("select_next_dive_for_laser_auto_accept", "gate"),
+        ("select_next_mission_for_laser_preprocessing", "preprocess"),
+        ("select_next_mission_for_laser_prediction", "predict"),
+        ("select_next_mission_for_laser_auto_accept", "gate"),
     ],
 )
 async def test_a_selector_takes_the_oldest_candidate_across_tenants(selector, key):
-    lab_dive, other_dive = uuid.UUID(int=11), uuid.UUID(int=12)
+    lab_mission, other_mission = uuid.UUID(int=11), uuid.UUID(int=12)
     catalog = FakeCatalog(
         tenants=[LAB, OTHER],
-        next_dive={
-            (key, LAB): candidate(lab_dive, age_days=1),
-            (key, OTHER): candidate(other_dive, age_days=5),
+        next_mission={
+            (key, LAB): candidate(lab_mission, age_days=1),
+            (key, OTHER): candidate(other_mission, age_days=5),
         },
     )
 
     target = await _run(getattr(_activities(catalog), selector))
 
-    assert target == LaserTarget(tenant_id=OTHER, dive_id=other_dive)
+    assert target == LaserTarget(tenant_id=OTHER, mission_id=other_mission)
 
 
 async def test_a_selector_returns_none_when_no_tenant_has_a_candidate():
     catalog = FakeCatalog(tenants=[LAB, OTHER])
 
     assert (
-        await _run(_activities(catalog).select_next_dive_for_laser_prediction) is None
+        await _run(_activities(catalog).select_next_mission_for_laser_prediction)
+        is None
     )
 
 
-async def test_the_populate_cohort_is_every_dive_of_every_tenant_oldest_first():
+async def test_the_populate_cohort_is_every_mission_of_every_tenant_oldest_first():
     a, b, c = (uuid.UUID(int=i) for i in (21, 22, 23))
     catalog = FakeCatalog(
         tenants=[LAB, OTHER],
-        dive_lists={
+        mission_lists={
             ("populate", LAB): [candidate(a, age_days=2), candidate(b, age_days=0)],
             ("populate", OTHER): [candidate(c, age_days=1)],
         },
     )
 
-    targets = await _run(_activities(catalog).select_dives_needing_laser_population)
+    targets = await _run(_activities(catalog).select_missions_needing_laser_population)
 
-    assert [t.dive_id for t in targets] == [a, c, b]
+    assert [t.mission_id for t in targets] == [a, c, b]
 
 
 # -- stage 0.1 ------------------------------------------------------------------
@@ -178,7 +179,7 @@ async def test_the_preprocess_input_names_the_staged_frame_and_the_jpeg_target()
     migrated = capture(1, checksum="a" * 32, from_v1=True)
     new = capture(2, checksum="b" * 32)
     catalog = FakeCatalog(
-        tenants=[LAB], captures=[migrated, new], camera=DiveCamera(K, D)
+        tenants=[LAB], captures=[migrated, new], camera=MissionCamera(K, D)
     )
     store = FakeStore(present={"a" * 32})
 
@@ -205,7 +206,7 @@ async def test_the_bbox_is_the_region_polygons_bounding_box():
     assert DEFAULT_LASER_BBOX == [min(xs), min(ys), max(xs), max(ys)]
 
 
-async def test_a_dive_without_intrinsics_is_refused():
+async def test_a_mission_without_intrinsics_is_refused():
     """v1 raised; the dive stays in the cohort (PLAN.md §9.16 is the fix for
     that wedge, not this port)."""
     catalog = FakeCatalog(tenants=[LAB], captures=[capture(1)], camera=None)
@@ -245,7 +246,9 @@ async def test_clearing_flags_passes_the_scope_through():
 
 
 async def test_the_predict_input_carries_the_staged_frames_and_the_region():
-    catalog = FakeCatalog(tenants=[LAB], captures=[capture(1)], camera=DiveCamera(K, D))
+    catalog = FakeCatalog(
+        tenants=[LAB], captures=[capture(1)], camera=MissionCamera(K, D)
+    )
 
     inputs = await _run(_activities(catalog).resolve_laser_predict_inputs, TARGET)
 
@@ -294,7 +297,7 @@ async def test_a_prediction_for_a_foreign_capture_is_refused_for_good():
 # -- the gate ----------------------------------------------------------------------
 
 
-async def test_the_gate_input_is_the_dives_current_predictions_by_number():
+async def test_the_gate_input_is_the_missions_current_predictions_by_number():
     prediction = uuid.uuid4()
     catalog = FakeCatalog(
         tenants=[LAB],
@@ -303,7 +306,7 @@ async def test_the_gate_input_is_the_dives_current_predictions_by_number():
 
     payload = await _run(_activities(catalog).resolve_laser_gate_inputs, TARGET)
 
-    assert payload.dive_id == DIVE and payload.dive_number == 442
+    assert payload.mission_id == MISSION and payload.mission_number == 442
     (row,) = payload.predictions
     assert (row.prediction_id, row.capture_number, row.predictor_version) == (
         prediction, 132158, 2)  # fmt: skip
@@ -315,7 +318,9 @@ async def test_recording_the_verdicts_reports_how_many_were_written():
                               gate_verdict="auto_accepted", line_offset_px=0.5,
                               line_position_z=0.1)  # fmt: skip
     result = LaserAutoAcceptResult(
-        summary=LaserAutoAcceptSummary(dive_id=DIVE, eligible=True, auto_accepted=1),
+        summary=LaserAutoAcceptSummary(
+            mission_id=MISSION, eligible=True, auto_accepted=1
+        ),
         frames=[frame],
     )
 
@@ -332,7 +337,7 @@ async def test_recording_the_verdicts_reports_how_many_were_written():
 # -- Label Studio: create, populate ------------------------------------------------
 
 
-async def test_create_is_the_dives_laser_project_with_v1s_title_and_config():
+async def test_create_is_the_missions_laser_project_with_v1s_title_and_config():
     projects = FakeLabelProjects(project_id=274728)
 
     project = await _run(
@@ -341,12 +346,12 @@ async def test_create_is_the_dives_laser_project_with_v1s_title_and_config():
 
     assert project == 274728
     assert projects.calls == [
-        (LAB, DIVE, "laser", LASER_PROJECT_TITLE_SUFFIX, LASER_LABELING_CONFIG_XML)
+        (LAB, MISSION, "laser", LASER_PROJECT_TITLE_SUFFIX, LASER_LABELING_CONFIG_XML)
     ]
 
 
 def _population(*items, colors=("red",)):
-    return LaserPopulation(dive_number=31, items=list(items), colors=list(colors))
+    return LaserPopulation(mission_number=31, items=list(items), colors=list(colors))
 
 
 def _item(number, *, auto_accept=False, from_v1=False, x=2000.0, y=1500.0):
@@ -472,7 +477,7 @@ async def test_does_not_publish_an_empty_project():
     assert ls.updates == []
 
 
-async def test_the_whole_dive_gets_one_colour():
+async def test_the_whole_mission_gets_one_colour():
     items = [_item(1), _item(2)]
     catalog = FakeCatalog(
         tenants=[LAB], population=_population(*items, colors=["green"] * 9 + ["red"])
@@ -499,7 +504,7 @@ async def test_the_whole_dive_gets_one_colour():
 
 def _targets(*task_ids, colors=("red",)):
     return TaskTargets(
-        dive_number=94,
+        mission_number=94,
         colors=list(colors),
         targets=[
             TaskTarget(uuid.uuid4(), task, 500, 2000.0, 1500.0, 4000, 3000)
@@ -513,7 +518,7 @@ async def test_backfill_attaches_to_an_open_task_and_shows_the_version():
     ls = FakeLabelStudio(title="Dive #94 - Laser Calibration Labeling")
 
     attached = await _run(
-        _activities(catalog, ls=ls).backfill_laser_predictions_for_dive, TARGET
+        _activities(catalog, ls=ls).backfill_laser_predictions_for_mission, TARGET
     )
 
     assert attached == 1
@@ -531,7 +536,7 @@ async def test_backfill_is_idempotent_against_the_current_version():
     ]})  # fmt: skip
 
     attached = await _run(
-        _activities(catalog, ls=ls).backfill_laser_predictions_for_dive, TARGET
+        _activities(catalog, ls=ls).backfill_laser_predictions_for_mission, TARGET
     )
 
     assert attached == 1  # task 2 was seeded by an older version: re-attached
@@ -542,7 +547,8 @@ async def test_backfill_with_nothing_eligible_never_touches_label_studio():
     ls = FakeLabelStudio()
 
     assert (
-        await _run(_activities(ls=ls).backfill_laser_predictions_for_dive, TARGET) == 0
+        await _run(_activities(ls=ls).backfill_laser_predictions_for_mission, TARGET)
+        == 0
     )
     assert ls.created_predictions == [] and ls.updates == []
 
@@ -552,7 +558,7 @@ async def test_apply_annotates_only_tasks_nobody_has_started():
     ls = FakeLabelStudio(untouched={500: {1, 3}})
 
     applied = await _run(
-        _activities(catalog, ls=ls).apply_laser_auto_accept_for_dive, TARGET
+        _activities(catalog, ls=ls).apply_laser_auto_accept_for_mission, TARGET
     )
 
     assert applied == 2
@@ -579,7 +585,9 @@ async def test_a_failure_mid_apply_keeps_the_provenance_of_what_it_annotated():
     ls = FailsOnTask3(untouched={500: {1, 2, 3}})
 
     with pytest.raises(RuntimeError, match="went away"):
-        await _run(_activities(catalog, ls=ls).apply_laser_auto_accept_for_dive, TARGET)
+        await _run(
+            _activities(catalog, ls=ls).apply_laser_auto_accept_for_mission, TARGET
+        )
 
     assert [a[0] for a in ls.annotations] == [1, 2]
     marked = [task for c in catalog.calls if c[0] == "mark" for task in c[2]]
@@ -590,7 +598,7 @@ async def test_an_auto_accepted_annotation_is_not_marked_ground_truth():
     catalog = FakeCatalog(tenants=[LAB], targets={True: _targets(1)})
     ls = FakeLabelStudio(untouched={500: {1}})
 
-    await _run(_activities(catalog, ls=ls).apply_laser_auto_accept_for_dive, TARGET)
+    await _run(_activities(catalog, ls=ls).apply_laser_auto_accept_for_mission, TARGET)
 
     ((_, _, result, ground_truth),) = ls.annotations
     assert ground_truth is False and result[0]["origin"] == "prediction"
@@ -601,24 +609,24 @@ async def test_a_task_missing_from_label_studio_is_skipped_not_fatal():
     ls = FakeLabelStudio(untouched={500: set()})
 
     assert await _run(
-        _activities(catalog, ls=ls).apply_laser_auto_accept_for_dive, TARGET
+        _activities(catalog, ls=ls).apply_laser_auto_accept_for_mission, TARGET
     ) == 0  # fmt: skip
 
 
 # -- validation ---------------------------------------------------------------------
 
 
-async def test_the_complete_dives_of_every_tenant_are_validated():
+async def test_the_complete_missions_of_every_tenant_are_validated():
     a, b = uuid.UUID(int=31), uuid.UUID(int=32)
     catalog = FakeCatalog(
         tenants=[LAB, OTHER],
-        dive_lists={("complete", LAB): [candidate(a)],
+        mission_lists={("complete", LAB): [candidate(a)],
                     ("complete", OTHER): [candidate(b)]},
     )  # fmt: skip
 
-    targets = await _run(_activities(catalog).laser_dives_with_complete_labeling)
+    targets = await _run(_activities(catalog).laser_missions_with_complete_labeling)
 
-    assert {(t.tenant_id, t.dive_id) for t in targets} == {(LAB, a), (OTHER, b)}
+    assert {(t.tenant_id, t.mission_id) for t in targets} == {(LAB, a), (OTHER, b)}
 
 
 def _rows():
@@ -645,7 +653,7 @@ async def test_applying_a_judgement_writes_its_supersedes_and_line():
                         inlier_fraction=0.9, residual_std=1.0, label_noise_mad=1.0,
                         line_confidence=10.0)  # fmt: skip
     result = LaserValidationResult(
-        dive_id=DIVE, status="flagged", positives=10, flagged=1, line=line,
+        mission_id=MISSION, status="flagged", positives=10, flagged=1, line=line,
         supersede=[LaserSupersede(label_id=label,
                                   reason=SupersedeReason.VALIDATOR_3SIGMA)],
     )  # fmt: skip
@@ -661,32 +669,34 @@ async def test_applying_a_judgement_writes_its_supersedes_and_line():
 # -- remediation --------------------------------------------------------------------
 
 
-async def test_remediation_resolves_dive_numbers_across_tenants():
+async def test_remediation_resolves_mission_numbers_across_tenants():
     a, b = uuid.UUID(int=41), uuid.UUID(int=42)
     catalog = FakeCatalog(tenants=[LAB, OTHER], numbers={(LAB, 7): a, (OTHER, 9): b})
 
-    targets = await _run(_activities(catalog).resolve_laser_remediation_dives, [9, 7])
+    targets = await _run(
+        _activities(catalog).resolve_laser_remediation_missions, [9, 7]
+    )
 
-    assert [(t.number, t.tenant_id, t.dive_id) for t in targets] == [
+    assert [(t.number, t.tenant_id, t.mission_id) for t in targets] == [
         (7, LAB, a), (9, OTHER, b)]  # fmt: skip
 
 
-async def test_no_numbers_means_every_dive():
+async def test_no_numbers_means_every_mission():
     catalog = FakeCatalog(tenants=[LAB], numbers={(LAB, 7): uuid.uuid4(),
                                                   (LAB, 3): uuid.uuid4()})  # fmt: skip
 
-    targets = await _run(_activities(catalog).resolve_laser_remediation_dives, None)
+    targets = await _run(_activities(catalog).resolve_laser_remediation_missions, None)
 
     assert [t.number for t in targets] == [3, 7]
 
 
-async def test_an_unknown_dive_number_is_refused():
+async def test_an_unknown_mission_number_is_refused():
     with pytest.raises(ApplicationError) as raised:
-        await _run(_activities().resolve_laser_remediation_dives, [404])
+        await _run(_activities().resolve_laser_remediation_missions, [404])
     assert raised.value.non_retryable
 
 
-REMEDIATION = RemediationTarget(tenant_id=LAB, dive_id=DIVE, number=7)
+REMEDIATION = RemediationTarget(tenant_id=LAB, mission_id=MISSION, number=7)
 
 
 async def test_the_plan_input_carries_the_rows_and_the_exclusions():
@@ -694,14 +704,14 @@ async def test_the_plan_input_carries_the_rows_and_the_exclusions():
 
     inputs = await _run(
         _activities(catalog).resolve_laser_remediation_inputs,
-        DiveRemediationRequest(target=REMEDIATION, excluded_label_ids=[3],
-                               dive_excluded=True),
+        MissionRemediationRequest(target=REMEDIATION, excluded_label_ids=[3],
+                               mission_excluded=True),
     )  # fmt: skip
 
     assert isinstance(inputs.plan_input, PlanLaserRemediationInput)
-    assert inputs.plan_input.dive_id == 7
+    assert inputs.plan_input.mission_id == 7
     assert inputs.plan_input.excluded_label_ids == [3]
-    assert inputs.plan_input.dive_excluded is True
+    assert inputs.plan_input.mission_excluded is True
     assert inputs.fingerprint == "fp"
 
 
@@ -716,7 +726,7 @@ async def test_apply_revives_exactly_the_reviewed_ids_and_logs_each(caplog):
         )  # fmt: skip
 
     assert written == 2
-    assert catalog.calls == [("revive", LAB, DIVE, [41, 42], "fp")]
+    assert catalog.calls == [("revive", LAB, MISSION, [41, 42], "fp")]
     assert (
         sum("REVIVED laser_label_number=" in r.getMessage() for r in caplog.records)
         == 2
@@ -737,7 +747,7 @@ async def test_apply_refuses_an_id_the_current_plan_does_not_contain():
     assert raised.value.non_retryable and catalog.calls == []
 
 
-async def test_apply_refuses_if_the_dive_changed_since_the_plan():
+async def test_apply_refuses_if_the_mission_changed_since_the_plan():
     catalog = FakeCatalog(tenants=[LAB], revive_raises=PopulationChanged("edited"))
 
     with pytest.raises(ApplicationError) as raised:
@@ -763,6 +773,6 @@ async def test_nothing_pending_is_a_clean_no_op():
 
 def test_the_plan_row_names_numbers():
     """The operator's report reads as v1's: dives and labels by number."""
-    plan = DivePlan(dive_id=7, status="flagged", positives=3, superseded_now=1,
+    plan = MissionPlan(mission_id=7, status="flagged", positives=3, superseded_now=1,
                     superseded_after=0, revive_ids=[41])  # fmt: skip
     assert plan.to_dict()["revive_ids"] == [41]

@@ -85,12 +85,12 @@ from fishsense_services_orchestrator.laser.annotations import (
     Dot,
     auto_accepted_annotations,
     build_laser_task,
-    dive_laser_label,
+    mission_laser_label,
     prediction_annotations,
 )
 from fishsense_services_orchestrator.laser.contracts import (
     ClearReprocessFlags,
-    DiveRemediationRequest,
+    MissionRemediationRequest,
     LaserTarget,
     RemediationInputs,
     RemediationTarget,
@@ -151,7 +151,7 @@ class LaserActivities:
                 continue
             key = (found.created_at, found.number)
             if best_key is None or key < best_key:
-                best = LaserTarget(tenant_id=tenant_id, dive_id=found.dive_id)
+                best = LaserTarget(tenant_id=tenant_id, mission_id=found.mission_id)
                 best_key = key
         if best is None:
             activity.logger.info("no high-priority dives needing %s", what)
@@ -160,7 +160,7 @@ class LaserActivities:
                 "next high-priority dive needing %s: tenant=%s dive=%s",
                 what,
                 best.tenant_id,
-                best.dive_id,
+                best.mission_id,
             )
         return best
 
@@ -169,37 +169,41 @@ class LaserActivities:
         for tenant_id in await self._catalog.member_tenants():
             for candidate in await getattr(self._catalog, selector)(tenant_id):
                 found.append((candidate.created_at, candidate.number, tenant_id,
-                              candidate.dive_id))  # fmt: skip
+                              candidate.mission_id))  # fmt: skip
         return [
-            LaserTarget(tenant_id=tenant, dive_id=dive)
-            for _, _, tenant, dive in sorted(found, key=lambda f: (f[0], f[1]))
+            LaserTarget(tenant_id=tenant, mission_id=mission)
+            for _, _, tenant, mission in sorted(found, key=lambda f: (f[0], f[1]))
         ]
 
     @activity.defn(name="select_next_dive_for_laser_preprocessing")
-    async def select_next_dive_for_laser_preprocessing(self) -> Optional[LaserTarget]:
+    async def select_next_mission_for_laser_preprocessing(
+        self,
+    ) -> Optional[LaserTarget]:
         return await self._oldest(
-            "next_dive_for_laser_preprocessing", "laser preprocessing"
+            "next_mission_for_laser_preprocessing", "laser preprocessing"
         )
 
     @activity.defn(name="select_next_dive_for_laser_prediction")
-    async def select_next_dive_for_laser_prediction(self) -> Optional[LaserTarget]:
-        return await self._oldest("next_dive_for_laser_prediction", "laser prediction")
+    async def select_next_mission_for_laser_prediction(self) -> Optional[LaserTarget]:
+        return await self._oldest(
+            "next_mission_for_laser_prediction", "laser prediction"
+        )
 
     @activity.defn(name="select_next_dive_for_laser_auto_accept")
-    async def select_next_dive_for_laser_auto_accept(self) -> Optional[LaserTarget]:
+    async def select_next_mission_for_laser_auto_accept(self) -> Optional[LaserTarget]:
         return await self._oldest(
-            "next_dive_for_laser_auto_accept", "the laser auto-accept gate"
+            "next_mission_for_laser_auto_accept", "the laser auto-accept gate"
         )
 
     @activity.defn(name="select_dives_needing_laser_population")
-    async def select_dives_needing_laser_population(self) -> List[LaserTarget]:
+    async def select_missions_needing_laser_population(self) -> List[LaserTarget]:
         """Every dive in the populate cohort, oldest first."""
-        return await self._every("dives_needing_laser_population")
+        return await self._every("missions_needing_laser_population")
 
     @activity.defn(name="laser_dives_with_complete_labeling")
-    async def laser_dives_with_complete_labeling(self) -> List[LaserTarget]:
+    async def laser_missions_with_complete_labeling(self) -> List[LaserTarget]:
         """The validation cohort: dives whose laser labeling is complete."""
-        return await self._every("dives_with_complete_laser_labeling")
+        return await self._every("missions_with_complete_laser_labeling")
 
     # -- stage 0.1 ---------------------------------------------------------------
 
@@ -207,10 +211,10 @@ class LaserActivities:
         # The cohorts select only dives with a camera (laser_store
         # `_HAS_CAMERA`), so this fails only on a calibration removed between
         # the select and the resolve: a one-off, not a dive re-selected hourly.
-        camera = await self._catalog.dive_camera(target.tenant_id, target.dive_id)
+        camera = await self._catalog.mission_camera(target.tenant_id, target.mission_id)
         if camera is None:
             raise ApplicationError(
-                f"dive {target.dive_id} has no camera calibration to rectify with",
+                f"dive {target.mission_id} has no camera calibration to rectify with",
                 type="DiveHasNoCamera",
                 non_retryable=True,
             )
@@ -223,7 +227,9 @@ class LaserActivities:
         """The dive's canonical captures needing a laser JPEG (the cohort's
         predicate), each with its staged raw frame and where its JPEG goes."""
         tenant = target.tenant_id
-        captures = await self._catalog.laser_preprocess_captures(tenant, target.dive_id)
+        captures = await self._catalog.laser_preprocess_captures(
+            tenant, target.mission_id
+        )
         images = [
             LaserPreprocessImage(
                 capture_id=c.capture_id,
@@ -236,19 +242,19 @@ class LaserActivities:
         ]
         activity.logger.info(
             "resolved laser preprocess inputs dive=%s images=%d",
-            target.dive_id,
+            target.mission_id,
             len(images),
         )
         if not images:
             # No camera needed for no work; the parent lowers the flags.
             return PreprocessLaserImagesInput(
-                dive_id=target.dive_id, images=[],
+                mission_id=target.mission_id, images=[],
                 camera_matrix=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
                 distortion_coefficients=[0.0] * 5, bbox=list(DEFAULT_LASER_BBOX),
             )  # fmt: skip
         camera = await self._camera(target)
         return PreprocessLaserImagesInput(
-            dive_id=target.dive_id,
+            mission_id=target.mission_id,
             images=images,
             camera_matrix=camera.camera_matrix,
             distortion_coefficients=camera.distortion_coefficients,
@@ -262,11 +268,11 @@ class LaserActivities:
         term that never goes false by itself. Idempotent."""
         target = request.target
         cleared = await self._catalog.clear_laser_reprocess_flags(
-            target.tenant_id, target.dive_id, request.capture_ids
+            target.tenant_id, target.mission_id, request.capture_ids
         )
         activity.logger.info(
             "cleared laser reprocess flags dive=%s rows=%d scope=%s",
-            target.dive_id,
+            target.mission_id,
             cleared,
             "whole dive" if request.capture_ids is None else len(request.capture_ids),
         )
@@ -281,10 +287,10 @@ class LaserActivities:
         """The dive's canonical captures whose prediction is missing or stale
         and that no human finished, each with its staged raw frame."""
         tenant = target.tenant_id
-        captures = await self._catalog.laser_predict_captures(tenant, target.dive_id)
+        captures = await self._catalog.laser_predict_captures(tenant, target.mission_id)
         activity.logger.info(
             "resolved laser predict inputs dive=%s needing=%d",
-            target.dive_id,
+            target.mission_id,
             len(captures),
         )
         images = [
@@ -295,13 +301,13 @@ class LaserActivities:
         ]
         if not images:
             return PredictLaserImagesInput(
-                dive_id=target.dive_id, images=[],
+                mission_id=target.mission_id, images=[],
                 camera_matrix=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
                 distortion_coefficients=[0.0] * 5,
             )  # fmt: skip
         camera = await self._camera(target)
         return PredictLaserImagesInput(
-            dive_id=target.dive_id,
+            mission_id=target.mission_id,
             images=images,
             camera_matrix=camera.camera_matrix,
             distortion_coefficients=camera.distortion_coefficients,
@@ -319,7 +325,7 @@ class LaserActivities:
         try:
             return await self._catalog.persist_laser_predictions(
                 target.tenant_id,
-                target.dive_id,
+                target.mission_id,
                 [
                     NewLaserPrediction(
                         capture_id=r.capture_id,
@@ -348,10 +354,12 @@ class LaserActivities:
         self, target: LaserTarget
     ) -> EvaluateLaserAutoAcceptInput:
         """The dive's WHOLE current prediction set: the gate is a consensus."""
-        inputs = await self._catalog.laser_gate_inputs(target.tenant_id, target.dive_id)
+        inputs = await self._catalog.laser_gate_inputs(
+            target.tenant_id, target.mission_id
+        )
         return EvaluateLaserAutoAcceptInput(
-            dive_id=target.dive_id,
-            dive_number=inputs.dive_number,
+            mission_id=target.mission_id,
+            mission_number=inputs.mission_number,
             predictions=[
                 GatePrediction(
                     prediction_id=p.prediction_id,
@@ -373,7 +381,7 @@ class LaserActivities:
         try:
             written = await self._catalog.record_laser_gate_verdicts(
                 target.tenant_id,
-                target.dive_id,
+                target.mission_id,
                 [
                     GateVerdict(
                         f.prediction_id,
@@ -391,7 +399,7 @@ class LaserActivities:
         activity.logger.info(
             "dive=%s auto-accept gate wrote %d/%d verdicts; %d frames may skip "
             "review (%d would have, gate enabled=%s)",
-            target.dive_id,
+            target.mission_id,
             written,
             len(result.frames),
             summary.auto_accepted,
@@ -406,15 +414,15 @@ class LaserActivities:
     async def create_laser_label_studio_project(self, target: LaserTarget) -> int:
         """The dive's laser project, `{name} #{number} - Laser Calibration
         Labeling`: the registry first, then v1's title search, then create."""
-        project_id = await self._projects.ensure_dive_project(
+        project_id = await self._projects.ensure_mission_project(
             target.tenant_id,
-            target.dive_id,
+            target.mission_id,
             "laser",
             suffix=LASER_PROJECT_TITLE_SUFFIX,
             labeling_config_xml=LASER_LABELING_CONFIG_XML,
         )
         activity.logger.info(
-            "laser LS project dive=%s project_id=%d", target.dive_id, project_id
+            "laser LS project dive=%s project_id=%d", target.mission_id, project_id
         )
         return project_id
 
@@ -426,11 +434,11 @@ class LaserActivities:
         completed label, then record its row. Prediction-gated and JPEG-gated
         (v1's); publishes only a complete task set. Returns rows recorded."""
         tenant = target.tenant_id
-        population = await self._catalog.laser_populate_items(tenant, target.dive_id)
-        laser_label = dive_laser_label(population.colors)
+        population = await self._catalog.laser_populate_items(tenant, target.mission_id)
+        laser_label = mission_laser_label(population.colors)
         activity.logger.info(
             "dive=%s laser colour %s from %d/%d predictions with a reading",
-            target.dive_id,
+            target.mission_id,
             laser_label,
             sum(1 for c in population.colors if c),
             len(population.colors),
@@ -456,11 +464,11 @@ class LaserActivities:
 
         if not located:
             activity.logger.info(
-                "dive %s has no capture needing a laser task", target.dive_id
+                "dive %s has no capture needing a laser task", target.mission_id
             )
             # The task set is complete; publish iff the project holds tasks.
-            if await self._catalog.dive_has_laser_labels_in_project(
-                tenant, target.dive_id, project_id
+            if await self._catalog.mission_has_laser_labels_in_project(
+                tenant, target.mission_id, project_id
             ):
                 await publish_label_studio_project(self._ls, project_id)
             return 0
@@ -498,19 +506,21 @@ class LaserActivities:
     # -- backfill, and the auto-accept apply -----------------------------------------
 
     @activity.defn(name="backfill_laser_predictions_for_dive")
-    async def backfill_laser_predictions_for_dive(self, target: LaserTarget) -> int:
+    async def backfill_laser_predictions_for_mission(self, target: LaserTarget) -> int:
         """Attach current-version predictions to the dive's open tasks (a
         re-prediction changes nothing a labeler sees otherwise), then point
         each per-dive project's `model_version` at the tier it holds.
         Idempotent by the version tag. Returns the number attached."""
-        found = await self._catalog.laser_task_targets(target.tenant_id, target.dive_id)
+        found = await self._catalog.laser_task_targets(
+            target.tenant_id, target.mission_id
+        )
         if not found.targets:
             activity.logger.info(
                 "dive %s: no placeable predictions with attachable LS tasks",
-                target.dive_id,
+                target.mission_id,
             )
             return 0
-        laser_label = dive_laser_label(found.colors)
+        laser_label = mission_laser_label(found.colors)
         tag = laser_model_version_tag()
         already: set[int] = set()
         for project_id in {t.ls_project_id for t in found.targets}:
@@ -537,18 +547,18 @@ class LaserActivities:
             heartbeat_again()
 
         await ensure_project_shows_predictions(
-            self._ls, found.dive_number, tags_by_project, tag
+            self._ls, found.mission_number, tags_by_project, tag
         )
         activity.logger.info(
             "dive %s: attached %d laser predictions to existing LS tasks (%s)",
-            target.dive_id,
+            target.mission_id,
             attached,
             laser_label,
         )
         return attached
 
     @activity.defn(name="apply_laser_auto_accept_for_dive")
-    async def apply_laser_auto_accept_for_dive(self, target: LaserTarget) -> int:
+    async def apply_laser_auto_accept_for_mission(self, target: LaserTarget) -> int:
         """Annotate the dive's open tasks whose predictions the gate cleared --
         only a task Label Studio says nobody started (no annotation, no
         draft): never overwrite a human, never discard work in progress, and
@@ -559,15 +569,15 @@ class LaserActivities:
         and skips it, and the mark no longer applies once the sync completes
         the row, so a mark deferred past a failure would be lost for good."""
         found = await self._catalog.laser_task_targets(
-            target.tenant_id, target.dive_id, auto_accepted_only=True
+            target.tenant_id, target.mission_id, auto_accepted_only=True
         )
         if not found.targets:
             activity.logger.info(
                 "dive %s: no auto-accepted predictions with attachable LS tasks",
-                target.dive_id,
+                target.mission_id,
             )
             return 0
-        laser_label = dive_laser_label(found.colors)
+        laser_label = mission_laser_label(found.colors)
         untouched: set[int] = set()
         for project_id in {t.ls_project_id for t in found.targets}:
             untouched |= await self._ls.untouched_task_ids(project_id)
@@ -594,7 +604,7 @@ class LaserActivities:
             heartbeat_again()
         activity.logger.info(
             "dive %s: auto-accepted %d/%d open tasks (%d were already started)",
-            target.dive_id,
+            target.mission_id,
             len(applied),
             len(found.targets),
             len(found.targets) - len(applied),
@@ -603,8 +613,8 @@ class LaserActivities:
 
     # -- per-dive validation -----------------------------------------------------------
 
-    async def _population(self, tenant, dive):
-        population = await self._catalog.laser_label_population(tenant, dive)
+    async def _population(self, tenant, mission):
+        population = await self._catalog.laser_label_population(tenant, mission)
         rows = [
             LaserLabelRow(
                 label_id=r.label_id,
@@ -626,15 +636,15 @@ class LaserActivities:
         """The dive's FULL population, superseded included (#927), and its
         calibration frames -- read before the fit, so a failure fails the
         run rather than falling back to the tight rule (v1)."""
-        population, rows = await self._population(target.tenant_id, target.dive_id)
+        population, rows = await self._population(target.tenant_id, target.mission_id)
         activity.logger.info(
             "dive=%s validation inputs: %d positives, %d calibration frames",
-            target.dive_id,
+            target.mission_id,
             len(rows),
             len(population.calibration_capture_numbers),
         )
         return ValidateLaserLabelsInput(
-            dive_id=target.dive_id,
+            mission_id=target.mission_id,
             labels=rows,
             calibration_capture_numbers=population.calibration_capture_numbers,
         )
@@ -651,7 +661,7 @@ class LaserActivities:
         try:
             written = await self._catalog.apply_laser_validation(
                 target.tenant_id,
-                target.dive_id,
+                target.mission_id,
                 [(s.label_id, s.reason.value) for s in result.supersede],
                 line,
             )
@@ -660,7 +670,7 @@ class LaserActivities:
         activity.logger.info(
             "dive=%s validation status=%s superseded %d/%d positive laser labels "
             "(%d flagged in all); line %s",
-            target.dive_id,
+            target.mission_id,
             result.status,
             written.superseded,
             result.positives,
@@ -672,7 +682,7 @@ class LaserActivities:
     # -- remediation --------------------------------------------------------------------
 
     @activity.defn(name="resolve_laser_remediation_dives")
-    async def resolve_laser_remediation_dives(
+    async def resolve_laser_remediation_missions(
         self, numbers: Optional[List[int]]
     ) -> List[RemediationTarget]:
         """The dives a run names, by number -- every dive of every served
@@ -682,12 +692,12 @@ class LaserActivities:
         for tenant_id in tenants:
             wanted = numbers
             if wanted is None:
-                wanted = await self._catalog.dive_numbers(tenant_id)
+                wanted = await self._catalog.mission_numbers(tenant_id)
             for number in wanted:
-                dive = await self._catalog.dive_by_number(tenant_id, number)
-                if dive is not None:
+                mission = await self._catalog.mission_by_number(tenant_id, number)
+                if mission is not None:
                     found[number] = RemediationTarget(
-                        tenant_id=tenant_id, dive_id=dive, number=number
+                        tenant_id=tenant_id, mission_id=mission, number=number
                     )
         if numbers is not None and (missing := sorted(set(numbers) - set(found))):
             raise ApplicationError(
@@ -699,18 +709,18 @@ class LaserActivities:
 
     @activity.defn(name="resolve_laser_remediation_inputs")
     async def resolve_laser_remediation_inputs(
-        self, request: DiveRemediationRequest
+        self, request: MissionRemediationRequest
     ) -> RemediationInputs:
         """One dive's rows for its plan, and the digest of exactly those rows."""
         target = request.target
-        population, rows = await self._population(target.tenant_id, target.dive_id)
+        population, rows = await self._population(target.tenant_id, target.mission_id)
         return RemediationInputs(
             plan_input=PlanLaserRemediationInput(
-                dive_id=target.number,
+                mission_id=target.number,
                 labels=rows,
                 calibration_capture_numbers=population.calibration_capture_numbers,
                 excluded_label_ids=list(request.excluded_label_ids),
-                dive_excluded=request.dive_excluded,
+                mission_excluded=request.mission_excluded,
             ),
             fingerprint=population.fingerprint,
         )
@@ -734,7 +744,10 @@ class LaserActivities:
             return 0
         try:
             written = await self._catalog.revive_laser_labels(
-                target.tenant_id, target.dive_id, request.pending, request.fingerprint
+                target.tenant_id,
+                target.mission_id,
+                request.pending,
+                request.fingerprint,
             )
         except (PopulationChanged, ForeignRows) as exc:
             raise ApplicationError(

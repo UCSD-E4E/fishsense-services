@@ -18,7 +18,7 @@ from datetime import timedelta
 from typing import List, Optional, Tuple
 
 from temporalio import activity
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -63,7 +63,7 @@ def _positional(clusters):
 
 async def _run(payload, stub, queue):
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,
@@ -94,7 +94,7 @@ async def test_workflow_fans_out_one_activity_per_image_with_correct_indices():
 
     await _run(
         PreprocessSpeciesImagesInput(
-            dive_id=uuid.uuid4(),
+            mission_id=uuid.uuid4(),
             cluster_members=_positional([["c1", "c2", "c3"], ["c4", "c5"]]),
             camera_matrix=_K,
             distortion_coefficients=_D,
@@ -139,7 +139,7 @@ async def test_workflow_uses_start_to_close_not_schedule_to_close():
 
     await _run(
         PreprocessSpeciesImagesInput(
-            dive_id=uuid.uuid4(),
+            mission_id=uuid.uuid4(),
             cluster_members=_positional([["a"]]),
             camera_matrix=_K,
             distortion_coefficients=_D,
@@ -160,7 +160,7 @@ async def test_workflow_with_no_clusters_makes_no_activity_calls():
 
     await _run(
         PreprocessSpeciesImagesInput(
-            dive_id=uuid.uuid4(),
+            mission_id=uuid.uuid4(),
             cluster_members=[],
             camera_matrix=_K,
             distortion_coefficients=_D,
@@ -184,7 +184,7 @@ async def test_partial_redraw_keeps_each_frame_position_in_the_whole_cluster():
 
     await _run(
         PreprocessSpeciesImagesInput(
-            dive_id=uuid.uuid4(),
+            mission_id=uuid.uuid4(),
             cluster_members=[[_member("c3", 3, 7), _member("c6", 6, 7)]],
             camera_matrix=_K,
             distortion_coefficients=_D,
@@ -210,7 +210,7 @@ async def test_clusters_are_drawn_one_at_a_time():
 
     await _run(
         PreprocessSpeciesImagesInput(
-            dive_id=uuid.uuid4(),
+            mission_id=uuid.uuid4(),
             cluster_members=_positional([["a1", "a2"], ["b1"], ["c1", "c2"]]),
             camera_matrix=_K,
             distortion_coefficients=_D,

@@ -37,7 +37,7 @@ v2 changes:
   its activities). The drain's run timeout is still v1's 1 h: the child's
   budget gave up the minutes the read and the write need;
 * per-dive validation and remediation are orchestrator children of their own
-  (`ValidateDiveLaserLabelsWorkflow`, `RemediateDiveLaserSupersedesWorkflow`),
+  (`ValidateMissionLaserLabelsWorkflow`, `RemediateMissionLaserSupersedesWorkflow`),
   so a dive's rows cross a workflow's history only once rather than piling
   into one parent's.
 """
@@ -65,7 +65,7 @@ with workflow.unsafe.imports_passed_through():
     )
     from fishsense_services_contracts.laser import (
         GATE_CHILD_EXECUTION_TIMEOUT,
-        DivePlan,
+        MissionPlan,
         EvaluateLaserAutoAcceptInput,
         LaserAutoAcceptResult,
         LaserAutoAcceptSummary,
@@ -79,8 +79,8 @@ with workflow.unsafe.imports_passed_through():
     )
     from fishsense_services_orchestrator.laser.contracts import (
         ClearReprocessFlags,
-        DiveRemediation,
-        DiveRemediationRequest,
+        MissionRemediation,
+        MissionRemediationRequest,
         LaserTarget,
         RemediationInputs,
         RemediationTarget,
@@ -109,9 +109,9 @@ __all__ = [
     "PopulateLaserLabelStudioProjectWorkflow",
     "PredictLaserImagesParentWorkflow",
     "PreprocessLaserImagesParentWorkflow",
-    "RemediateDiveLaserSupersedesWorkflow",
+    "RemediateMissionLaserSupersedesWorkflow",
     "RemediateLaserSupersedesParentWorkflow",
-    "ValidateDiveLaserLabelsWorkflow",
+    "ValidateMissionLaserLabelsWorkflow",
 ]
 
 #: v1's `SDK_FAIL_FAST_RETRY_POLICY` for database round trips: one retry for a
@@ -141,7 +141,7 @@ REMEDIATION_BATCH = 8
 
 
 def _staging(target: LaserTarget) -> StagingTarget:
-    return StagingTarget(target.tenant_id, target.dive_id)
+    return StagingTarget(target.tenant_id, target.mission_id)
 
 
 async def _db(name: str, *args, result_type=None, timeout=SELECT_TIMEOUT):
@@ -205,7 +205,7 @@ async def _gate(target: LaserTarget) -> Optional[LaserAutoAcceptSummary]:
         "EvaluateLaserAutoAcceptWorkflow",
         payload,
         # Shared with the other parent, so a dive is never judged twice at once.
-        child_id=f"auto-accept-laser-{target.dive_id}",
+        child_id=f"auto-accept-laser-{target.mission_id}",
         task_queue=PROCESSOR_LIGHT_TASK_QUEUE,
         # Outlasts the activity's own budget, so the activity's timeout fires.
         execution_timeout=GATE_CHILD_EXECUTION_TIMEOUT,
@@ -225,7 +225,7 @@ async def _gate(target: LaserTarget) -> Optional[LaserAutoAcceptSummary]:
     workflow.logger.info(
         "auto-accept gate dive=%s enabled=%s eligible=%s reason=%s "
         "auto_accepted=%d/%d verdicts=%s written=%d",
-        target.dive_id,
+        target.mission_id,
         summary.enabled,
         summary.eligible,
         summary.reason,
@@ -242,7 +242,7 @@ async def _gate(target: LaserTarget) -> Optional[LaserAutoAcceptSummary]:
         )
         workflow.logger.info(
             "auto-accept applied to existing tasks dive=%s applied=%s",
-            target.dive_id,
+            target.mission_id,
             applied,
         )
     return summary
@@ -272,7 +272,7 @@ class PreprocessLaserImagesParentWorkflow:
         )
         workflow.logger.info(
             "dispatching laser preprocess dive=%s images=%d",
-            target.dive_id,
+            target.mission_id,
             len(inputs.images),
         )
         if not inputs.images:
@@ -280,7 +280,7 @@ class PreprocessLaserImagesParentWorkflow:
             # cohort term that never goes false by itself (v1).
             workflow.logger.warning(
                 "reprocess flag resolved to no work; lowering it dive=%s",
-                target.dive_id,
+                target.mission_id,
             )
             await _db("clear_laser_reprocess_flags", ClearReprocessFlags(target=target))
             return target
@@ -290,7 +290,7 @@ class PreprocessLaserImagesParentWorkflow:
         ran, _ = await _child(
             "PreprocessLaserImagesWorkflow",
             inputs,
-            child_id=raw_scratch_reader_id("preprocess-laser", target.dive_id),
+            child_id=raw_scratch_reader_id("preprocess-laser", target.mission_id),
             task_queue=PROCESSOR_TASK_QUEUE,
             execution_timeout=timedelta(hours=1),
         )
@@ -331,7 +331,7 @@ class PredictLaserImagesParentWorkflow:
         )
         workflow.logger.info(
             "dispatching laser predict dive=%s images=%d",
-            target.dive_id,
+            target.mission_id,
             len(inputs.images),
         )
         if not inputs.images:
@@ -343,7 +343,7 @@ class PredictLaserImagesParentWorkflow:
             # it hangs until its execution timeout. The dive stays in the cohort.
             workflow.logger.warning(
                 "no worker available for the laser-predict queue; skipping dive=%s",
-                target.dive_id,
+                target.mission_id,
             )
             return None
         workflow.logger.info("laser predict running on %s capacity", mode)
@@ -351,7 +351,7 @@ class PredictLaserImagesParentWorkflow:
         ran, results = await _child(
             "PredictLaserImagesWorkflow",
             inputs,
-            child_id=raw_scratch_reader_id("predict-laser", target.dive_id),
+            child_id=raw_scratch_reader_id("predict-laser", target.mission_id),
             task_queue=PROCESSOR_GPU_TASK_QUEUE,
             # Covers the CPU fallback, far slower per image.
             execution_timeout=timedelta(hours=6),
@@ -468,7 +468,7 @@ class PopulateLaserLabelStudioProjectParentWorkflow:
                 await _child(
                     "PopulateLaserLabelStudioProjectWorkflow",
                     target,
-                    child_id=f"populate-laser-{target.dive_id}",
+                    child_id=f"populate-laser-{target.mission_id}",
                     task_queue=workflow.info().task_queue,
                     execution_timeout=timedelta(minutes=30),
                 )
@@ -479,7 +479,7 @@ class PopulateLaserLabelStudioProjectParentWorkflow:
         for target, outcome in zip(targets, outcomes):
             if isinstance(outcome, BaseException):
                 workflow.logger.error(
-                    "laser populate failed for dive=%s: %s", target.dive_id, outcome
+                    "laser populate failed for dive=%s: %s", target.mission_id, outcome
                 )
         return targets
 
@@ -501,8 +501,8 @@ class BackfillLaserPredictionsWorkflow:
 # -- per-dive validation -------------------------------------------------------------
 
 
-@workflow.defn
-class ValidateDiveLaserLabelsWorkflow:
+@workflow.defn(name="ValidateDiveLaserLabelsWorkflow")
+class ValidateMissionLaserLabelsWorkflow:
     # pylint: disable=too-few-public-methods
     """One dive's laser-label validation: read its full population, judge it
     once on the light processor, write the supersedes and the line. Started
@@ -520,7 +520,7 @@ class ValidateDiveLaserLabelsWorkflow:
         ran, result = await _child(
             "ValidateLaserLabelsForDiveWorkflow",
             payload,
-            child_id=f"judge-laser-labels-{target.dive_id}",
+            child_id=f"judge-laser-labels-{target.mission_id}",
             task_queue=PROCESSOR_LIGHT_TASK_QUEUE,
             # v1's: at least the activity's 15 minutes.
             execution_timeout=timedelta(minutes=20),
@@ -540,15 +540,15 @@ class ValidateDiveLaserLabelsWorkflow:
 # -- remediation ------------------------------------------------------------------
 
 
-@workflow.defn
-class RemediateDiveLaserSupersedesWorkflow:
+@workflow.defn(name="RemediateDiveLaserSupersedesWorkflow")
+class RemediateMissionLaserSupersedesWorkflow:
     # pylint: disable=too-few-public-methods
     """Plan one dive -- and, given reviewed `revive_ids`, apply them: re-plan
     from current state and refuse any id the fresh plan does not contain
     (v1's apply activity), writing nothing."""
 
     @workflow.run
-    async def run(self, request: DiveRemediationRequest) -> DiveRemediation:
+    async def run(self, request: MissionRemediationRequest) -> MissionRemediation:
         inputs: RemediationInputs = await _db(
             "resolve_laser_remediation_inputs",
             request,
@@ -561,10 +561,10 @@ class RemediateDiveLaserSupersedesWorkflow:
             child_id=f"{workflow.info().workflow_id}-judge",
             task_queue=PROCESSOR_LIGHT_TASK_QUEUE,
             execution_timeout=timedelta(minutes=20),
-            result_type=DivePlan,
+            result_type=MissionPlan,
         )
         if not request.revive_ids:
-            return DiveRemediation(plan=plan)
+            return MissionRemediation(plan=plan)
         live = {r.number for r in inputs.plan_input.labels if not r.superseded}
         written = await workflow.execute_activity(
             "apply_laser_remediation",
@@ -582,7 +582,7 @@ class RemediateDiveLaserSupersedesWorkflow:
             ),
             result_type=int,
         )
-        return DiveRemediation(plan=plan, written=written)
+        return MissionRemediation(plan=plan, written=written)
 
 
 @workflow.defn(name="RemediateLaserSupersedesParentWorkflow")
@@ -597,27 +597,27 @@ class RemediateLaserSupersedesParentWorkflow:
     async def run(self, request: RemediateLaserSupersedesInput) -> dict:
         targets: List[RemediationTarget] = await _db(
             "resolve_laser_remediation_dives",
-            None if request.all_dives else sorted(set(request.dive_ids)),
+            None if request.all_missions else sorted(set(request.mission_ids)),
             result_type=List[RemediationTarget],
         )
         # The light processor is torn down when idle, and a child on an
         # unserved queue hangs rather than fails.
         await wake_light_processor()
-        excluded = set(request.excluded_dive_ids)
+        excluded = set(request.excluded_mission_ids)
         me = workflow.info().workflow_id
 
         async def _dive(target: RemediationTarget, revive_ids, step: str):
             return await workflow.execute_child_workflow(
                 "RemediateDiveLaserSupersedesWorkflow",
-                DiveRemediationRequest(
+                MissionRemediationRequest(
                     target=target,
                     excluded_label_ids=list(request.excluded_label_ids),
-                    dive_excluded=target.number in excluded,
+                    mission_excluded=target.number in excluded,
                     revive_ids=list(revive_ids),
                 ),
                 id=f"{me}-{step}-{target.number}",
                 execution_timeout=timedelta(hours=1),
-                result_type=DiveRemediation,
+                result_type=MissionRemediation,
             )
 
         rows: list[dict] = []
@@ -626,14 +626,14 @@ class RemediateLaserSupersedesParentWorkflow:
             outcomes = await asyncio.gather(*(_dive(t, [], "plan") for t in batch))
             rows += [outcome.plan.to_dict() for outcome in outcomes]
 
-        digest = revival_digest((row["dive_id"], row["revive_ids"]) for row in rows)
+        digest = revival_digest((row["mission_id"], row["revive_ids"]) for row in rows)
         report = {
             "mode": "dry_run",
             "plan_sha256": digest,
-            "excluded_dive_ids": sorted(excluded),
+            "excluded_mission_ids": sorted(excluded),
             "excluded_label_ids": sorted(set(request.excluded_label_ids)),
             "totals": {
-                "dives": len(rows),
+                "missions": len(rows),
                 "positives": sum(row["positives"] for row in rows),
                 "superseded_now": sum(row["superseded_now"] for row in rows),
                 "superseded_after": sum(row["superseded_after"] for row in rows),
@@ -642,7 +642,7 @@ class RemediateLaserSupersedesParentWorkflow:
                     1 for row in rows if row["reflection_suspect"] is not None
                 ),
             },
-            "dives": rows,
+            "missions": rows,
             "applied": None,
         }
         if not request.apply:
@@ -667,12 +667,12 @@ class RemediateLaserSupersedesParentWorkflow:
             batch = to_apply[start : start + REMEDIATION_BATCH]
             outcomes = await asyncio.gather(
                 *(
-                    _dive(by_number[row["dive_id"]], row["revive_ids"], "apply")
+                    _dive(by_number[row["mission_id"]], row["revive_ids"], "apply")
                     for row in batch
                 )
             )
             applied.update(
-                {str(row["dive_id"]): o.written for row, o in zip(batch, outcomes)}
+                {str(row["mission_id"]): o.written for row, o in zip(batch, outcomes)}
             )
         report["mode"] = "apply"
         report["applied"] = applied

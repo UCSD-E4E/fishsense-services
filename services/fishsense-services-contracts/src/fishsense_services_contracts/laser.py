@@ -33,9 +33,10 @@ from typing import Annotated, Iterable, Literal, Sequence, Tuple
 from uuid import UUID
 
 from annotated_types import Len
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 from fishsense_services_contracts.object_store import ObjectRef
+from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = [
     "GATE_ACTIVITY_TIMEOUT",
@@ -45,7 +46,7 @@ __all__ = [
     "GATE_VERDICTS",
     "LASER_PREDICTOR_VERSION",
     "NOISE_ESTIMATOR",
-    "DivePlan",
+    "MissionPlan",
     "EvaluateLaserAutoAcceptInput",
     "GatePrediction",
     "LaserAutoAcceptResult",
@@ -63,7 +64,7 @@ __all__ = [
     "PreprocessLaserImagesInput",
     "ReflectionReport",
     "RemediateLaserSupersedesInput",
-    "RemediationDiveRequest",
+    "RemediationMissionRequest",
     "SupersedeReason",
     "ValidateLaserLabelsInput",
     "laser_model_version_tag",
@@ -134,7 +135,9 @@ class PreprocessLaserImagesInput(BaseModel):
     `bbox` is its bounding box, kept for v1's rolling-deploy reason (a
     processor predating the polygon draws the rectangle)."""
 
-    dive_id: UUID
+    model_config = ConfigDict(validate_by_name=True)
+
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     images: list[LaserPreprocessImage]
     camera_matrix: Matrix3
     distortion_coefficients: list[float]
@@ -155,7 +158,9 @@ class PredictLaserImagesInput(BaseModel):
     unknown-wavelength channel (v1 always sent None); a prediction outside
     `laser_region` is not believed, and None disables that gate."""
 
-    dive_id: UUID
+    model_config = ConfigDict(validate_by_name=True)
+
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     images: list[LaserPredictImage]
     camera_matrix: Matrix3
     distortion_coefficients: list[float]
@@ -220,10 +225,11 @@ class GatePrediction(BaseModel):
 
 
 class EvaluateLaserAutoAcceptInput(BaseModel):
-    dive_id: UUID
+    model_config = ConfigDict(validate_by_name=True)
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     #: v1's dive id for a migrated dive: the audit sample is keyed on
     #: (dive, image), so a migrated dive samples the frames v1 did.
-    dive_number: int
+    mission_number: Annotated[int, renamed_from("dive_number", "mission_number")]
     predictions: list[GatePrediction]
 
 
@@ -242,7 +248,9 @@ class LaserAutoAcceptSummary(BaseModel):
     the flag (`auto_accepted`), not the verdict histogram -- with the gate
     disabled the two disagree on purpose."""
 
-    dive_id: UUID
+    model_config = ConfigDict(validate_by_name=True)
+
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     enabled: bool = True
     eligible: bool = False
     reason: str | None = None
@@ -284,7 +292,8 @@ class LaserLabelRow(BaseModel):
 
 
 class ValidateLaserLabelsInput(BaseModel):
-    dive_id: UUID
+    model_config = ConfigDict(validate_by_name=True)
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     labels: list[LaserLabelRow]
     #: Frames carrying a completed, live slate label: judged at the coarse
     #: calibration bound, not 3 sigma.
@@ -331,7 +340,9 @@ class LaserValidationResult(BaseModel):
     the line (whenever one was fitted, as v1 wrote it) and the rows to
     supersede -- flagged *and still live*, never anything else."""
 
-    dive_id: UUID
+    model_config = ConfigDict(validate_by_name=True)
+
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     status: str
     positives: int
     flagged: int = 0
@@ -344,17 +355,23 @@ class PlanLaserRemediationInput(BaseModel):
     """One dive's plan request, with its rows (v1's RemediationDiveRequest,
     read by the data-worker itself)."""
 
-    dive_id: int
+    model_config = ConfigDict(validate_by_name=True)
+
+    mission_id: Annotated[int, renamed_from("dive_id", "mission_id")]
     labels: list[LaserLabelRow]
     calibration_capture_numbers: list[int] = Field(default_factory=list)
     excluded_label_ids: list[int] = Field(default_factory=list)
-    dive_excluded: bool = False
+    mission_excluded: Annotated[
+        bool, renamed_from("dive_excluded", "mission_excluded")
+    ] = False
 
 
-class DivePlan(BaseModel):
+class MissionPlan(BaseModel):
     """One dive's row of the remediation report (v1's), by number."""
 
-    dive_id: int
+    model_config = ConfigDict(validate_by_name=True)
+
+    mission_id: Annotated[int, renamed_from("dive_id", "mission_id")]
     status: str
     positives: int
     superseded_now: int
@@ -375,23 +392,31 @@ class RemediateLaserSupersedesInput(BaseModel):
     """One remediation run, by dive and label number. Dry run unless `apply`
     AND a matching digest."""
 
-    dive_ids: list[int]
+    model_config = ConfigDict(validate_by_name=True)
+
+    mission_ids: Annotated[list[int], renamed_from("dive_ids", "mission_ids")]
     #: Plan every dive of every served tenant (v1's CLI listed them itself;
     #: the v2 CLI has no database connection).
-    all_dives: bool = False
-    excluded_dive_ids: list[int] = Field(default_factory=list)
+    all_missions: Annotated[bool, renamed_from("all_dives", "all_missions")] = False
+    excluded_mission_ids: Annotated[
+        list[int], renamed_from("excluded_dive_ids", "excluded_mission_ids")
+    ] = Field(default_factory=list)
     excluded_label_ids: list[int] = Field(default_factory=list)
     apply: bool = False
     #: The `plan_sha256` of the reviewed dry-run report.
     expected_plan_sha256: str | None = None
 
 
-class RemediationDiveRequest(BaseModel):
+class RemediationMissionRequest(BaseModel):
     """Plan (or apply) one dive. `revive_ids` is read by apply only."""
 
-    dive_id: int
+    model_config = ConfigDict(validate_by_name=True)
+
+    mission_id: Annotated[int, renamed_from("dive_id", "mission_id")]
     excluded_label_ids: list[int] = Field(default_factory=list)
-    dive_excluded: bool = False
+    mission_excluded: Annotated[
+        bool, renamed_from("dive_excluded", "mission_excluded")
+    ] = False
     revive_ids: list[int] = Field(default_factory=list)
 
 
@@ -399,6 +424,8 @@ def revival_digest(rows: Iterable[Tuple[int, Sequence[int]]]) -> str:
     """sha256 over exactly the revivals `(dive, revive ids)`, order-free (v1's,
     byte for byte: numbers are v1's ids, so v1's digests still match)."""
     canonical = sorted(
-        (int(dive_id), sorted(int(i) for i in ids)) for dive_id, ids in rows if ids
+        (int(mission_id), sorted(int(i) for i in ids))
+        for mission_id, ids in rows
+        if ids
     )
     return hashlib.sha256(json.dumps(canonical).encode()).hexdigest()

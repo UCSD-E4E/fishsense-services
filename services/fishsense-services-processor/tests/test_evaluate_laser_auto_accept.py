@@ -37,7 +37,7 @@ from fishsense_services_processor.laser_validation.settings import (
     LaserAutoAcceptSettings,
 )
 
-DIVE = uuid.uuid4()
+MISSION = uuid.uuid4()
 
 
 def _prediction(i, xy, version=LASER_PREDICTOR_VERSION):
@@ -73,11 +73,11 @@ def no_audit(monkeypatch):
     monkeypatch.setenv("FISHSENSE_LASER_AUTO_ACCEPT_AUDIT_SAMPLE_RATE", "0")
 
 
-async def _run(predictions, *, dive_number=7):
+async def _run(predictions, *, mission_number=7):
     return await ActivityEnvironment().run(
         evaluate_laser_auto_accept,
         EvaluateLaserAutoAcceptInput(
-            dive_id=DIVE, dive_number=dive_number, predictions=predictions
+            mission_id=MISSION, mission_number=mission_number, predictions=predictions
         ),
     )
 
@@ -91,11 +91,11 @@ async def test_no_predictions_judges_nothing():
     result = await _run([])
 
     assert result.frames == []
-    assert result.summary.dive_id == DIVE
+    assert result.summary.mission_id == MISSION
     assert not result.summary.eligible
 
 
-async def test_healthy_dive_auto_accepts_its_predictions():
+async def test_healthy_mission_auto_accepts_its_predictions():
     predictions = _on_line(40)
 
     result = await _run(predictions)
@@ -107,7 +107,7 @@ async def test_healthy_dive_auto_accepts_its_predictions():
     assert all(f.line_offset_px is not None for f in result.frames)
 
 
-async def test_dive_without_consensus_auto_accepts_nothing():
+async def test_mission_without_consensus_auto_accepts_nothing():
     """The v1 shape. Every frame routes to a human, and the summary says why."""
     result = await _run(_scattered(40))
 
@@ -128,7 +128,7 @@ async def test_off_line_prediction_is_not_auto_accepted():
     assert frames[1012].line_offset_px > 10.0
 
 
-async def test_a_dive_that_loses_consensus_returns_verdicts_that_clear_standing_ones():
+async def test_a_mission_that_loses_consensus_returns_verdicts_that_clear_standing_ones():
     """The safety case: a re-predicted dive can lose the consensus it had.
     Every frame comes back not auto-accepted, so an `auto_accept` left standing
     from an earlier fit is overwritten by the orchestrator's write."""
@@ -207,7 +207,7 @@ def test_settings_values_are_coerced(monkeypatch):
 # --- the stale-predictor refusal ---------------------------------------------
 
 
-async def test_a_dive_with_a_pre_versioning_prediction_is_refused():
+async def test_a_mission_with_a_pre_versioning_prediction_is_refused():
     """NULL version -- every row written before the stage was versioned."""
     predictions = _on_line(40)
     predictions[0] = _prediction(0, (predictions[0].x, predictions[0].y), None)
@@ -219,7 +219,7 @@ async def test_a_dive_with_a_pre_versioning_prediction_is_refused():
     assert {f.gate_verdict for f in result.frames} == {"dive_ineligible"}
 
 
-async def test_a_dive_with_an_older_detector_version_is_refused():
+async def test_a_mission_with_an_older_detector_version_is_refused():
     """Explicit v1, not just NULL: the version that got the colour wrong."""
     result = await _run(_on_line(40, version=1))
 
@@ -227,7 +227,7 @@ async def test_a_dive_with_an_older_detector_version_is_refused():
     assert not any(f.auto_accept for f in result.frames)
 
 
-async def test_the_whole_dive_is_refused_not_just_the_stale_frames():
+async def test_the_whole_mission_is_refused_not_just_the_stale_frames():
     """A line fitted across two detector behaviours is not a meaningful fit."""
     predictions = _on_line(40)
     predictions[39] = _prediction(39, (predictions[39].x, predictions[39].y), 1)
@@ -241,7 +241,7 @@ async def test_the_whole_dive_is_refused_not_just_the_stale_frames():
     assert result.summary.verdicts == {"dive_ineligible": 40}
 
 
-async def test_an_all_current_dive_is_unaffected():
+async def test_an_all_current_mission_is_unaffected():
     result = await _run(_on_line(40))
 
     assert result.summary.reason is None
@@ -258,7 +258,7 @@ async def test_the_audit_sample_is_keyed_on_numbers(monkeypatch):
     monkeypatch.setenv("FISHSENSE_LASER_AUTO_ACCEPT_AUDIT_SAMPLE_RATE", "0.1")
     predictions = _on_line(200)
 
-    frames = _by_capture(await _run(predictions, dive_number=442), predictions)
+    frames = _by_capture(await _run(predictions, mission_number=442), predictions)
 
     audited = {n for n, f in frames.items() if f.gate_verdict == "audit_sample"}
     assert audited == {

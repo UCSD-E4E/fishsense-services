@@ -44,8 +44,8 @@ from ._species import LAYOUT
 
 T0 = datetime(2026, 9, 1, tzinfo=UTC)
 LAB, REEF = uuid.uuid4(), uuid.uuid4()
-DIVE = uuid.uuid4()
-TARGET = StagingTarget(LAB, DIVE)
+MISSION = uuid.uuid4()
+TARGET = StagingTarget(LAB, MISSION)
 K = [[3500.0, 0.0, 2000.0], [0.0, 3500.0, 1500.0], [0.0, 0.0, 1.0]]
 D = [-0.1, 0.05, 0.0, 0.0, 0.0]
 SHA = "b8d377ba22d155e7056a5e9ae747fdd0970c7c73dee981bbee17d95c8156cf78"
@@ -65,23 +65,23 @@ class FakeCatalog:
     async def member_tenants(self):
         return [LAB, REEF]
 
-    async def next_dive_for_slate_detection(
+    async def next_mission_for_slate_detection(
         self, tenant_id, *, model_version, exclude=()
     ):
         self.versions.append(model_version)
         self.excluded.append((tenant_id, list(exclude)))
         return self.candidates.get(tenant_id)
 
-    async def slate_detection_inputs(self, tenant_id, dive_id, *, model_version):
+    async def slate_detection_inputs(self, tenant_id, mission_id, *, model_version):
         self.versions.append(model_version)
         if isinstance(self.refuse, SlateDetectionUnavailable):
             raise self.refuse
         return self.inputs
 
-    async def persist_slate_presence(self, tenant_id, dive_id, rows):
+    async def persist_slate_presence(self, tenant_id, mission_id, rows):
         if isinstance(self.refuse, ForeignCapture):
             raise self.refuse
-        self.persisted.append((tenant_id, dive_id, list(rows)))
+        self.persisted.append((tenant_id, mission_id, list(rows)))
         return len(rows)
 
 
@@ -93,43 +93,43 @@ async def _run(fn, *args):
     return await ActivityEnvironment().run(fn, *args)
 
 
-async def test_selects_the_oldest_dive_across_tenants():
+async def test_selects_the_oldest_mission_across_tenants():
     catalog = FakeCatalog(
         candidates={
             LAB: SlateDetectionCandidate(uuid.uuid4(), T0 + timedelta(hours=1)),
-            REEF: SlateDetectionCandidate(DIVE, T0),
+            REEF: SlateDetectionCandidate(MISSION, T0),
         }
     )
 
-    target = await _run(_activities(catalog).select_next_dive_for_slate_detection)
+    target = await _run(_activities(catalog).select_next_mission_for_slate_detection)
 
-    assert target == StagingTarget(REEF, DIVE)
+    assert target == StagingTarget(REEF, MISSION)
     assert catalog.versions == [SLATE_DETECTOR_VERSION] * 2
 
 
-async def test_the_dives_a_run_already_took_are_excluded_in_every_tenant():
-    taken = [DIVE, uuid.uuid4()]
+async def test_the_missions_a_run_already_took_are_excluded_in_every_tenant():
+    taken = [MISSION, uuid.uuid4()]
     catalog = FakeCatalog()
 
-    await _run(_activities(catalog).select_next_dive_for_slate_detection, taken)
+    await _run(_activities(catalog).select_next_mission_for_slate_detection, taken)
 
     assert catalog.excluded == [(LAB, taken), (REEF, taken)]
 
 
 async def test_no_candidate_is_none():
     assert (
-        await _run(_activities(FakeCatalog()).select_next_dive_for_slate_detection)
+        await _run(_activities(FakeCatalog()).select_next_mission_for_slate_detection)
         is None
     )
 
 
-async def test_resolves_each_frames_staged_raw_and_the_dives_intrinsics():
+async def test_resolves_each_frames_staged_raw_and_the_missions_intrinsics():
     captures = [SlateDetectionCapture(uuid.uuid4(), f"{n:032x}") for n in (1, 2)]
-    catalog = FakeCatalog(inputs=SlateDetectionInputs(DIVE, K, D, captures))
+    catalog = FakeCatalog(inputs=SlateDetectionInputs(MISSION, K, D, captures))
 
     payload = await _run(_activities(catalog).resolve_slate_detection_inputs, TARGET)
 
-    assert (payload.tenant_id, payload.dive_id) == (LAB, DIVE)
+    assert (payload.tenant_id, payload.mission_id) == (LAB, MISSION)
     assert (payload.camera_matrix, payload.distortion_coefficients) == (K, D)
     assert payload.images == [
         DetectSlateImage(capture_id=c.capture_id, raw=LAYOUT.raw(LAB, c.checksum))
@@ -138,7 +138,7 @@ async def test_resolves_each_frames_staged_raw_and_the_dives_intrinsics():
     assert catalog.versions == [SLATE_DETECTOR_VERSION]
 
 
-async def test_a_dive_that_cannot_be_resolved_is_final():
+async def test_a_mission_that_cannot_be_resolved_is_final():
     catalog = FakeCatalog(refuse=SlateDetectionUnavailable("no pinhole camera"))
 
     with pytest.raises(ApplicationError) as raised:
@@ -169,8 +169,8 @@ async def test_persists_each_result_as_the_processor_stamped_it():
     )
 
     assert written == 3
-    ((tenant, dive, rows),) = catalog.persisted
-    assert (tenant, dive) == (LAB, DIVE)
+    ((tenant, mission, rows),) = catalog.persisted
+    assert (tenant, mission) == (LAB, MISSION)
     assert rows == [
         SlatePresenceRow(
             capture_id=r.capture_id, status=r.status, probability=r.probability,

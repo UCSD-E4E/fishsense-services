@@ -1291,8 +1291,14 @@ the UI as it lands (decided 2026-10-17)*
    and its detail, and the web's `/fish` browser for Lite and Mobile together. The detail
    shows the method's evidence and a fish model's error against its known length. Lite
    fish show no photo, and the map waits until Lite has locations (step 2's sites).
-2. Rename dives to missions and add deployments, mission purpose and the port with its
-   provenance (backfill dry-run first).
+2. Dives become missions.
+   - ***2a, built 2026-10-18:*** the full rename (migration 0046). The schema,
+     the code, the API (`/tenants/{slug}/missions`) and the portal all say
+     mission. Temporal names, wire field names (contract v7, byte-identical
+     payloads to v6), stored values, and the research / Superset surfaces keep
+     their old names (CLAUDE.md).
+   - 2b: deployments, mission purpose, and the port with its provenance
+     (backfill dry-run first).
 3. Direct e4edm ingest (the never-ingested Canyonview / Scripps Pier / Sealab / NIWC
    datasets are the first users).
 4. **Lite photo upload** (the owner's direction, 2026-10-18). Lite photos are uploaded into

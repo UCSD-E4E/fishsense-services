@@ -179,7 +179,7 @@ class SyncedLabel:
 
     capture_id: uuid.UUID
     #: None for a capture filed under no dive.
-    dive_id: uuid.UUID | None
+    mission_id: uuid.UUID | None
 
 
 async def apply_species_sync(
@@ -207,7 +207,7 @@ async def apply_species_sync(
                 WHERE s.tenant_id = :tenant AND s.ls_task_id = :task
                   AND NOT s.superseded
                   AND c.tenant_id = s.tenant_id AND c.id = s.capture_id
-                RETURNING s.capture_id, c.dive_id
+                RETURNING s.capture_id, c.mission_id
                 """),
             {
                 "completed": sync.completed,
@@ -225,7 +225,7 @@ async def apply_species_sync(
             },
         )
     ).one_or_none()
-    return None if row is None else SyncedLabel(row.capture_id, row.dive_id)
+    return None if row is None else SyncedLabel(row.capture_id, row.mission_id)
 
 
 async def apply_head_tail_sync(

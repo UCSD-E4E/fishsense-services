@@ -31,10 +31,10 @@ from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
     "KINDS",
-    "DiveForTitle",
+    "MissionForTitle",
     "LabelProjectCatalog",
     "RecordedProject",
-    "dive_for_title",
+    "mission_for_title",
     "record_project",
     "recorded_project",
 ]
@@ -45,7 +45,7 @@ KINDS = ("laser", "head_tail", "slate", "species", "checkerboard_lattice")
 
 
 @dataclass(frozen=True)
-class DiveForTitle:
+class MissionForTitle:
     """What a per-dive project title is built from."""
 
     #: v1's dive id for a migrated dive (migration 0019).
@@ -59,17 +59,17 @@ class RecordedProject:
     title: str
 
 
-async def dive_for_title(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
-) -> DiveForTitle | None:
+async def mission_for_title(
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
+) -> MissionForTitle | None:
     """The tenant's dive's number and name; None if it has no such dive."""
     row = (
         await conn.execute(
-            text("SELECT number, name FROM dives WHERE tenant_id = :t AND id = :d"),
-            {"t": tenant_id, "d": dive_id},
+            text("SELECT number, name FROM missions WHERE tenant_id = :t AND id = :d"),
+            {"t": tenant_id, "d": mission_id},
         )
     ).one_or_none()
-    return None if row is None else DiveForTitle(number=row.number, name=row.name)
+    return None if row is None else MissionForTitle(number=row.number, name=row.name)
 
 
 async def recorded_project(
@@ -77,7 +77,7 @@ async def recorded_project(
     tenant_id: uuid.UUID,
     kind: str,
     *,
-    dive_id: uuid.UUID | None,
+    mission_id: uuid.UUID | None,
     title: str,
 ) -> RecordedProject | None:
     """The newest titled project recorded for the dive and kind.
@@ -87,10 +87,10 @@ async def recorded_project(
     Newest first: a project recreated after its predecessor was deleted in
     Label Studio is the one to use.
     """
-    if dive_id is None:
-        match, params = "dive_id IS NULL AND title = :title", {"title": title}
+    if mission_id is None:
+        match, params = "mission_id IS NULL AND title = :title", {"title": title}
     else:
-        match, params = "dive_id = :dive", {"dive": dive_id}
+        match, params = "mission_id = :mission", {"mission": mission_id}
     row = (
         await conn.execute(
             text(f"""
@@ -111,7 +111,7 @@ async def record_project(
     tenant_id: uuid.UUID,
     kind: str,
     *,
-    dive_id: uuid.UUID | None,
+    mission_id: uuid.UUID | None,
     ls_project_id: int,
     title: str,
 ) -> None:
@@ -123,14 +123,14 @@ async def record_project(
     await conn.execute(
         text("""
             INSERT INTO label_studio_projects
-                (tenant_id, dive_id, kind, ls_project_id, title)
-            VALUES (:tenant, :dive, :kind, :project, :title)
+                (tenant_id, mission_id, kind, ls_project_id, title)
+            VALUES (:tenant, :mission, :kind, :project, :title)
             ON CONFLICT (tenant_id, kind, ls_project_id) DO UPDATE SET
-                dive_id = excluded.dive_id, title = excluded.title
-            WHERE (label_studio_projects.dive_id, label_studio_projects.title)
-                IS DISTINCT FROM (excluded.dive_id, excluded.title)
+                mission_id = excluded.mission_id, title = excluded.title
+            WHERE (label_studio_projects.mission_id, label_studio_projects.title)
+                IS DISTINCT FROM (excluded.mission_id, excluded.title)
             """),
-        {"tenant": tenant_id, "dive": dive_id, "kind": kind,
+        {"tenant": tenant_id, "mission": mission_id, "kind": kind,
          "project": ls_project_id, "title": title},
     )  # fmt: skip
 
@@ -138,23 +138,23 @@ async def record_project(
 class LabelProjectCatalog(ServicePrincipal):
     """Label Studio project records, as the orchestrator's service principal."""
 
-    async def dive_for_title(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
-    ) -> DiveForTitle | None:
+    async def mission_for_title(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
+    ) -> MissionForTitle | None:
         async with self._tenant(tenant_id) as conn:
-            return await dive_for_title(conn, tenant_id, dive_id)
+            return await mission_for_title(conn, tenant_id, mission_id)
 
     async def recorded_project(
         self,
         tenant_id: uuid.UUID,
         kind: str,
         *,
-        dive_id: uuid.UUID | None,
+        mission_id: uuid.UUID | None,
         title: str,
     ) -> RecordedProject | None:
         async with self._tenant(tenant_id) as conn:
             return await recorded_project(
-                conn, tenant_id, kind, dive_id=dive_id, title=title
+                conn, tenant_id, kind, mission_id=mission_id, title=title
             )
 
     async def record_project(
@@ -162,7 +162,7 @@ class LabelProjectCatalog(ServicePrincipal):
         tenant_id: uuid.UUID,
         kind: str,
         *,
-        dive_id: uuid.UUID | None,
+        mission_id: uuid.UUID | None,
         ls_project_id: int,
         title: str,
     ) -> None:
@@ -171,7 +171,7 @@ class LabelProjectCatalog(ServicePrincipal):
                 conn,
                 tenant_id,
                 kind,
-                dive_id=dive_id,
+                mission_id=mission_id,
                 ls_project_id=ls_project_id,
                 title=title,
             )

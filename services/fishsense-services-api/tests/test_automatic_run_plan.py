@@ -17,7 +17,7 @@ from depth_measure_seed import (  # noqa: F401  (forget_identities: a fixture)
     calibrated_dive,
     capture,
     device,
-    dive,
+    mission,
     exec_,
     fish,
     forget_identities,
@@ -40,35 +40,35 @@ async def _in(app_engine, tenant_id, fn, *args, **kwargs):
         return await fn(conn, tenant_id, *args, **kwargs)
 
 
-async def _number(owner_engine, dive_id) -> int:
+async def _number(owner_engine, mission_id) -> int:
     async with owner_engine.connect() as conn:
         return (
             await conn.execute(
-                text("SELECT number FROM dives WHERE id = :d"), {"d": dive_id}
+                text("SELECT number FROM missions WHERE id = :d"), {"d": mission_id}
             )
         ).scalar_one()
 
 
 async def _dive(owner_engine, lab, **kwargs):
-    return await dive(owner_engine, lab, device_id=await device(owner_engine, lab),
+    return await mission(owner_engine, lab, device_id=await device(owner_engine, lab),
                       priority="low", **kwargs)  # fmt: skip
 
 
 async def test_sessions_run_first_then_the_order_given(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     session = await _dive(owner_engine, lab)
-    fish_a = await _dive(owner_engine, lab, source_dive=session)
+    fish_a = await _dive(owner_engine, lab, source_mission=session)
     reef = await _dive(owner_engine, lab)
     numbers = [await _number(owner_engine, d) for d in (reef, fish_a, session)]
 
     plan = await _in(app_engine, lab, automatic_run_plan, numbers, headtail_version=HV)
 
-    assert [p.dive_id for p in plan.dives] == [session, reef, fish_a]
-    assert [p.calibration_session for p in plan.dives] == [True, False, False]
+    assert [p.mission_id for p in plan.missions] == [session, reef, fish_a]
+    assert [p.calibration_session for p in plan.missions] == [True, False, False]
     assert plan.missing == []
 
 
-async def test_a_number_with_no_dive_is_reported(owner_engine, app_engine):
+async def test_a_number_with_no_mission_is_reported(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     d = await _dive(owner_engine, lab)
     n = await _number(owner_engine, d)
@@ -77,7 +77,7 @@ async def test_a_number_with_no_dive_is_reported(owner_engine, app_engine):
         app_engine, lab, automatic_run_plan, [n, 999_999], headtail_version=HV
     )
 
-    assert [p.number for p in plan.dives] == [n]
+    assert [p.number for p in plan.missions] == [n]
     assert plan.missing == [999_999]
 
 
@@ -91,13 +91,13 @@ async def test_the_plan_counts_the_frames_still_owed(owner_engine, app_engine):
                                  predictor_version=HV)])  # fmt: skip
 
     (p,) = (await _in(app_engine, lab, automatic_run_plan,
-                      [await _number(owner_engine, d)], headtail_version=HV)).dives  # fmt: skip
+                      [await _number(owner_engine, d)], headtail_version=HV)).missions  # fmt: skip
 
     assert (p.frames, p.frames_owed) == (3, 2)
     assert p.folder.startswith("/dives/")
 
 
-async def test_the_plan_says_which_dives_are_excluded_or_human_measured(
+async def test_the_plan_says_which_missions_are_excluded_or_human_measured(
     owner_engine, app_engine
 ):
     """By hand, an excluded dive still runs (0039): the validation names
@@ -105,7 +105,7 @@ async def test_the_plan_says_which_dives_are_excluded_or_human_measured(
     lab = await tenant(owner_engine)
     excluded = await _dive(owner_engine, lab)
     await exec_(owner_engine, "INSERT INTO automatic_results_exclusions "
-                "(tenant_id, dive_id, reason) VALUES (:t, :d, 'test')",
+                "(tenant_id, mission_id, reason) VALUES (:t, :d, 'test')",
                 t=lab, d=excluded)  # fmt: skip
     measured, cal = await calibrated_dive(owner_engine, lab, priority="low")
     c = await measurable_capture(owner_engine, lab, measured)
@@ -115,7 +115,7 @@ async def test_the_plan_says_which_dives_are_excluded_or_human_measured(
                      [await _number(owner_engine, excluded),
                       await _number(owner_engine, measured)], headtail_version=HV)  # fmt: skip
 
-    by_id = {p.dive_id: p for p in plan.dives}
+    by_id = {p.mission_id: p for p in plan.missions}
     assert by_id[excluded].excluded and not by_id[excluded].human_measured
     assert by_id[measured].human_measured and not by_id[measured].excluded
 
@@ -132,4 +132,4 @@ async def test_the_catalog_plans_for_a_member_tenant_named_by_slug(
     assert await catalog.tenant_by_slug("lab") == tenants["lab"]
     assert await catalog.tenant_by_slug("nobody") is None
     plan = await catalog.automatic_run_plan(tenants["lab"], [1], headtail_version=HV)
-    assert plan.dives == [] and plan.missing == [1]
+    assert plan.missions == [] and plan.missing == [1]

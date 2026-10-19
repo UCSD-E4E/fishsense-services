@@ -46,7 +46,7 @@ from fishsense_services_orchestrator.ingest.nas_frames import (
     resolve_nas_path,
 )
 from fishsense_services_orchestrator.ops.checksums.activities import (
-    DIVE_NOT_FOUND_TYPE,
+    MISSION_NOT_FOUND_TYPE,
 )
 from fishsense_services_orchestrator.ops.paths.contracts import (
     MovedFrame,
@@ -62,12 +62,12 @@ class PathRepairCatalog(Protocol):
 
     async def member_tenants(self) -> list[uuid.UUID]: ...
 
-    async def dive_by_number(
+    async def mission_by_number(
         self, tenant_id: uuid.UUID, number: int
     ) -> uuid.UUID | None: ...
 
     async def captures_with_paths(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> list[PathCapture]: ...
 
     async def path_holder(
@@ -135,27 +135,29 @@ class PathRepairActivities:
             lambda: build_nas_client(nas_settings)
         )
 
-    async def _find_dive(self, dive_number: int) -> tuple[uuid.UUID, uuid.UUID]:
+    async def _find_mission(self, mission_number: int) -> tuple[uuid.UUID, uuid.UUID]:
         for tenant_id in await self._catalog.member_tenants():
-            dive_id = await self._catalog.dive_by_number(tenant_id, dive_number)
-            if dive_id is not None:
-                return tenant_id, dive_id
+            mission_id = await self._catalog.mission_by_number(
+                tenant_id, mission_number
+            )
+            if mission_id is not None:
+                return tenant_id, mission_id
         raise ApplicationError(
-            f"no dive numbered {dive_number} in any tenant the orchestrator serves",
-            type=DIVE_NOT_FOUND_TYPE,
+            f"no dive numbered {mission_number} in any tenant the orchestrator serves",
+            type=MISSION_NOT_FOUND_TYPE,
             non_retryable=True,
         )
 
     @activity.defn(name="repair_moved_capture_paths")
     async def repair_moved_capture_paths(
-        self, dive_number: int, apply: bool = False
+        self, mission_number: int, apply: bool = False
     ) -> PathRepairReport:
         """Find the dive's frames that are not at their paths, and (with
         ``apply``) point each verified one at where it went."""
-        tenant_id, dive_id = await self._find_dive(dive_number)
-        captures = await self._catalog.captures_with_paths(tenant_id, dive_id)
+        tenant_id, mission_id = await self._find_mission(mission_number)
+        captures = await self._catalog.captures_with_paths(tenant_id, mission_id)
         report = PathRepairReport(
-            dive_number=dive_number, applied=apply, frames=len(captures)
+            mission_number=mission_number, applied=apply, frames=len(captures)
         )
         nas = await asyncio.to_thread(self._nas_client_factory)
 
@@ -174,7 +176,7 @@ class PathRepairActivities:
         activity.logger.info(
             "path repair dive=%d applied=%s frames=%d at_path=%d repaired=%d "
             "would_repair=%d left_alone=%d",
-            dive_number,
+            mission_number,
             apply,
             report.frames,
             report.at_path,

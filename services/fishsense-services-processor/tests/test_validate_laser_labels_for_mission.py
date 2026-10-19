@@ -31,17 +31,17 @@ from fishsense_services_contracts.laser import (
 )
 from fishsense_services_processor.laser_validation import judgement
 from fishsense_services_processor.laser_validation.activities import (
-    validate_laser_labels_for_dive,
+    validate_laser_labels_for_mission,
 )
 
-from ._laser import DIVE, colinear_labels, label, label_uuid, reflection_dive
+from ._laser import MISSION, colinear_labels, label, label_uuid, reflection_mission
 
 
 async def _validate(labels, calibration=()):
     return await ActivityEnvironment().run(
-        validate_laser_labels_for_dive,
+        validate_laser_labels_for_mission,
         ValidateLaserLabelsInput(
-            dive_id=DIVE,
+            mission_id=MISSION,
             labels=labels,
             calibration_capture_numbers=list(calibration),
         ),
@@ -63,7 +63,7 @@ async def test_returns_nothing_below_minimum_positives():
     assert result.line is None
 
 
-async def test_clean_dive_flags_no_outliers_and_supersedes_nothing():
+async def test_clean_mission_flags_no_outliers_and_supersedes_nothing():
     result = await _validate(colinear_labels(40))
 
     assert result.status == "no_outliers"
@@ -152,7 +152,8 @@ async def test_refuses_to_supersede_when_outlier_fraction_exceeds_safety_gate(
     assert result.status == "gate"
     assert result.supersede == []
     assert any(
-        "refusing" in rec.getMessage().lower() and f"dive_id={DIVE}" in rec.getMessage()
+        "refusing" in rec.getMessage().lower()
+        and f"dive_id={MISSION}" in rec.getMessage()
         for rec in caplog.records
     )
 
@@ -160,7 +161,7 @@ async def test_refuses_to_supersede_when_outlier_fraction_exceeds_safety_gate(
 async def test_reflection_split_logs_error_and_stands_down(caplog):
     """Prod dive 77: name the failure loudly and supersede neither line."""
     with caplog.at_level(logging.ERROR):
-        result = await _validate(reflection_dive())
+        result = await _validate(reflection_mission())
 
     assert result.status == "reflection"
     assert result.supersede == []
@@ -168,10 +169,10 @@ async def test_reflection_split_logs_error_and_stands_down(caplog):
     assert any("REFLECTION SUSPECT" in rec.getMessage() for rec in caplog.records)
 
 
-async def test_the_line_is_still_returned_when_the_dive_stands_down():
+async def test_the_line_is_still_returned_when_the_mission_stands_down():
     """v1 wrote the dive's line on every run that fitted one, reflection and
     refusal included, before deciding anything else."""
-    result = await _validate(reflection_dive())
+    result = await _validate(reflection_mission())
 
     assert result.line is not None
 

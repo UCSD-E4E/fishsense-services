@@ -139,9 +139,9 @@ class DetectSlatePresenceParentWorkflow:
                 retry_policy=_DB_FAIL_FAST,
                 result_type=Optional[StagingTarget],
             )
-            if target is None or target.dive_id in taken:
+            if target is None or target.mission_id in taken:
                 break
-            taken.append(target.dive_id)
+            taken.append(target.mission_id)
             outcome = await self._detect(target)
             if outcome is None:
                 break
@@ -164,7 +164,7 @@ class DetectSlatePresenceParentWorkflow:
         )
         workflow.logger.info(
             "dispatching slate detection dive=%s images=%d",
-            target.dive_id,
+            target.mission_id,
             len(inputs.images),
         )
         if not inputs.images:
@@ -174,7 +174,7 @@ class DetectSlatePresenceParentWorkflow:
         if mode == MODE_UNAVAILABLE:
             workflow.logger.warning(
                 "no worker available for the slate-detect queue; skipping dive=%s",
-                target.dive_id,
+                target.mission_id,
             )
             return None
         workflow.logger.info("slate detection running on %s capacity", mode)
@@ -190,7 +190,7 @@ class DetectSlatePresenceParentWorkflow:
                 raise
             workflow.logger.error(
                 "skipping dive=%s: a raw is missing from the NAS (%s)",
-                target.dive_id,
+                target.mission_id,
                 cause.message,
             )
             await cleanup_raw(target)
@@ -199,7 +199,7 @@ class DetectSlatePresenceParentWorkflow:
             results: List[SlatePresenceResult] = await workflow.execute_child_workflow(
                 "DetectSlatePresenceWorkflow",
                 inputs,
-                id=raw_scratch_reader_id("detect-slate", target.dive_id),
+                id=raw_scratch_reader_id("detect-slate", target.mission_id),
                 task_queue=PROCESSOR_GPU_TASK_QUEUE,
                 execution_timeout=DETECT_CHILD_TIMEOUT,
                 id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
@@ -209,7 +209,7 @@ class DetectSlatePresenceParentWorkflow:
             workflow.logger.info(
                 "detect-slate-%s is still running under another firing; it owns "
                 "the scratch and persists",
-                target.dive_id,
+                target.mission_id,
             )
             return _STOP
 

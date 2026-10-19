@@ -127,8 +127,8 @@ class TestOnlyADevDatabase:
         async with dev_engine.begin() as conn:
             await conn.execute(
                 text(
-                    "INSERT INTO dives (tenant_id, source_path, name, dived_at, v1_id) "
-                    "VALUES (:t, '/real/dive', 'real', now(), 17)"
+                    "INSERT INTO missions (tenant_id, source_path, name, started_at, v1_id) "
+                    "VALUES (:t, '/real/mission', 'real', now(), 17)"
                 ),
                 {"t": tenants["lab"]},
             )

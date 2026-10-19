@@ -65,8 +65,8 @@ from ._species import LAYOUT, FakeSpeciesCatalog, species
 
 T0 = datetime(2026, 9, 1, tzinfo=UTC)
 LAB, REEF = uuid.uuid4(), uuid.uuid4()
-DIVE = uuid.uuid4()
-TARGET = SpeciesPredictTarget(LAB, DIVE)
+MISSION = uuid.uuid4()
+TARGET = SpeciesPredictTarget(LAB, MISSION)
 HOGFISH = "Fish, Hogfish (Lachnolaimus maximus)"
 TAG = "bioclip-v1 other<0.5"
 PROJECT = 70
@@ -95,21 +95,25 @@ class FakeCatalog:
     async def member_tenants(self):
         return [LAB, REEF]
 
-    async def next_dive_for_species_prediction(self, tenant_id, *, predictor_version):
+    async def next_mission_for_species_prediction(
+        self, tenant_id, *, predictor_version
+    ):
         self.versions.append(predictor_version)
         return self.candidates.get(tenant_id)
 
-    async def species_predict_captures(self, tenant_id, dive_id, *, predictor_version):
+    async def species_predict_captures(
+        self, tenant_id, mission_id, *, predictor_version
+    ):
         self.versions.append(predictor_version)
         return self.captures
 
-    async def persist_species_predictions(self, tenant_id, dive_id, rows):
+    async def persist_species_predictions(self, tenant_id, mission_id, rows):
         if self.refuse:
             raise self.refuse
         self.persisted.extend(rows)
         return len(rows)
 
-    async def species_prediction_state(self, tenant_id, dive_id):
+    async def species_prediction_state(self, tenant_id, mission_id):
         return self.state
 
 
@@ -174,7 +178,7 @@ async def test_never_predicted_work_first_then_the_oldest_across_tenants():
         }
     )
     picked = await ActivityEnvironment().run(
-        _activities(catalog).select_next_dive_for_species_prediction
+        _activities(catalog).select_next_mission_for_species_prediction
     )
     assert picked == SpeciesPredictTarget(REEF, _cid(2))
     assert set(catalog.versions) == {SPECIES_PREDICTOR_VERSION}
@@ -182,7 +186,7 @@ async def test_never_predicted_work_first_then_the_oldest_across_tenants():
 
 async def test_nothing_to_predict_is_none():
     picked = await ActivityEnvironment().run(
-        _activities(FakeCatalog()).select_next_dive_for_species_prediction
+        _activities(FakeCatalog()).select_next_mission_for_species_prediction
     )
     assert picked is None
 
@@ -208,7 +212,7 @@ async def test_resolves_each_fish_with_its_jpeg_box_and_the_candidates():
         _activities(catalog, store=store).resolve_species_predict_inputs, TARGET
     )
 
-    assert (inputs.tenant_id, inputs.dive_id) == (LAB, DIVE)
+    assert (inputs.tenant_id, inputs.mission_id) == (LAB, MISSION)
     assert inputs.candidates == species_candidates()
     (image,) = inputs.images
     assert (image.capture_id, image.headtail_prediction_id, image.jpeg) == (
@@ -318,7 +322,9 @@ def _task(n, *, completed=False):
 
 async def _backfill(catalog, sdk, **kwargs):
     return await ActivityEnvironment().run(
-        _activities(catalog, sdk=sdk, **kwargs).backfill_species_predictions_for_dive,
+        _activities(
+            catalog, sdk=sdk, **kwargs
+        ).backfill_species_predictions_for_mission,
         TARGET,
     )
 

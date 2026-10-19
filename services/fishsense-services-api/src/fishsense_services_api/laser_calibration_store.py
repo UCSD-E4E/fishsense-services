@@ -5,8 +5,8 @@ controllers/dive_cohort_controller.py (`select_next_for_laser_calibration`,
 `select_next_for_checkerboard_laser_calibration`, `_has_live_laser_dot`,
 `_usable_slate_observation_count`, `_stage_13_can_calibrate`,
 `_calibration_refusal_still_stands`, `_reentry_last`,
-`implausible_calibration_dive_ids`, `MIN_SLATE_LASER_POINTS`) and
-dive_controller.py (`put_laser_extrinsics_for_dive`, `set_calibration_refused`,
+`implausible_calibration_mission_ids`, `MIN_SLATE_LASER_POINTS`) and
+dive_controller.py (`put_laser_extrinsics_for_mission`, `set_calibration_refused`,
 `clear_calibration_refused`, `_newest_label_timestamp`, `_clear_refusal`); the
 reads v1's stage-13 data-worker activity made through the SDK
 (perform_laser_calibration_activity.py); and
@@ -48,7 +48,7 @@ v2 changes:
 * **a refusal is a row**: the dive's current `laser_calibrations` row is
   `refused`, so it stands only while nothing newer was appended. v1's
   `_clear_refusal` ran on a successful fit (here an accepted row simply
-  becomes current), on `set_dive_slate` / `set_calibration_target` (here the
+  becomes current), on `set_mission_slate` / `set_calibration_target` (here the
   refusal records the template or board version it used, and a dive whose
   link now differs is no longer refused -- so a board's pitch correction,
   a new version row, expires it too), and on the operator's DELETE (here an
@@ -96,9 +96,9 @@ __all__ = [
     "SlateObservationRow",
     "checkerboard_calibration_inputs",
     "clear_calibration_refusal",
-    "dive_for_number",
-    "next_dive_for_checkerboard_calibration",
-    "next_dive_for_laser_calibration",
+    "mission_for_number",
+    "next_mission_for_checkerboard_calibration",
+    "next_mission_for_laser_calibration",
     "record_laser_calibration",
     "slate_calibration_inputs",
 ]
@@ -116,7 +116,7 @@ class CalibrationInputsUnavailable(ValueError):
 
 @dataclass(frozen=True)
 class CalibrationCandidate:
-    dive_id: uuid.UUID
+    mission_id: uuid.UUID
     created_at: datetime
     #: Its latest accepted fit is implausible: offered after everything else.
     reentry: bool
@@ -133,14 +133,14 @@ class SlateObservationRow:
 
 @dataclass(frozen=True)
 class SlateCalibrationInputs:
-    dive_id: uuid.UUID
+    mission_id: uuid.UUID
     slate_template_id: uuid.UUID
     camera_calibration_id: uuid.UUID
     camera_matrix: list[list[float]]
     template_points: list[tuple[float, float]]
     dpi: int
     observations: list[SlateObservationRow]
-    dive_dots: list[tuple[float, float]]
+    mission_dots: list[tuple[float, float]]
     #: The newest laser or slate label on the dive, in Label Studio's clock.
     inputs_as_of: datetime | None
 
@@ -156,7 +156,7 @@ class BoardFrame:
 
 @dataclass(frozen=True)
 class CheckerboardInputs:
-    dive_id: uuid.UUID
+    mission_id: uuid.UUID
     #: The *current* version of the dive's target, which the fit records.
     calibration_target_id: uuid.UUID
     camera_calibration_id: uuid.UUID
@@ -168,7 +168,7 @@ class CheckerboardInputs:
     pitch_x_m: float
     pitch_y_m: float
     frames: list[BoardFrame]
-    dive_dots: list[tuple[float, float]]
+    mission_dots: list[tuple[float, float]]
     inputs_as_of: datetime | None
 
 
@@ -210,7 +210,7 @@ _LIVE_DOT = """
 _HAS_OWN_CALIBRATION = """
     EXISTS (
         SELECT 1 FROM current_laser_calibrations cur
-        WHERE cur.tenant_id = d.tenant_id AND cur.dive_id = d.id
+        WHERE cur.tenant_id = d.tenant_id AND cur.mission_id = d.id
           AND cur.outcome = 'accepted'
           AND plausible_laser_baseline(cur.laser_position)
     )
@@ -222,7 +222,7 @@ _REENTRY = """
     coalesce((
         SELECT NOT plausible_laser_baseline(a.laser_position)
         FROM laser_calibrations a
-        WHERE a.tenant_id = d.tenant_id AND a.dive_id = d.id
+        WHERE a.tenant_id = d.tenant_id AND a.mission_id = d.id
           AND a.outcome = 'accepted'
         ORDER BY a.seq DESC LIMIT 1
     ), false)
@@ -232,7 +232,7 @@ _REENTRY = """
 _SLATE_OBSERVATIONS = f"""
     (SELECT count(*) FROM slate_labels s
      JOIN captures c ON c.tenant_id = s.tenant_id AND c.id = s.capture_id
-     WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id AND c.is_canonical
+     WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id AND c.is_canonical
        AND s.completed AND NOT s.superseded AND {_LIVE_DOT})
 """
 
@@ -274,7 +274,7 @@ _NEWER_LABEL = """
     EXISTS (
         SELECT 1 FROM {table} x
         JOIN captures c ON c.tenant_id = x.tenant_id AND c.id = x.capture_id
-        WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+        WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id
           AND (r.inputs_as_of IS NULL OR x.ls_updated_at > r.inputs_as_of)
     )
 """
@@ -287,7 +287,7 @@ _REFUSAL_STANDS = f"""
     EXISTS (
         SELECT 1 FROM (
             SELECT * FROM laser_calibrations z
-            WHERE z.tenant_id = d.tenant_id AND z.dive_id = d.id
+            WHERE z.tenant_id = d.tenant_id AND z.mission_id = d.id
             ORDER BY z.seq DESC LIMIT 1
         ) r
         WHERE r.outcome = 'refused'
@@ -333,7 +333,7 @@ CHECKERBOARD_CALIBRATION_COHORT = _cohort(f"""
     AND {_HAS_CAMERA}
     AND NOT {_STAGE_13_CAN_CALIBRATE}
     AND (SELECT count(*) FROM captures c
-         WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+         WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id
            AND c.is_canonical AND {_LIVE_DOT}) >= {MIN_SLATE_LASER_POINTS}
 """)
 
@@ -342,7 +342,7 @@ async def _next(conn, tenant_id, cohort: str) -> CalibrationCandidate | None:
     row = (
         await conn.execute(
             text(f"""
-                SELECT d.id, d.created_at, {_REENTRY} AS reentry FROM dives d
+                SELECT d.id, d.created_at, {_REENTRY} AS reentry FROM missions d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
                   AND {cohort}
                 ORDER BY reentry, d.created_at, d.id
@@ -358,14 +358,14 @@ async def _next(conn, tenant_id, cohort: str) -> CalibrationCandidate | None:
     )
 
 
-async def next_dive_for_laser_calibration(
+async def next_mission_for_laser_calibration(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> CalibrationCandidate | None:
     """The tenant's next dive in the stage-13 (slate) cohort."""
     return await _next(conn, tenant_id, LASER_CALIBRATION_COHORT)
 
 
-async def next_dive_for_checkerboard_calibration(
+async def next_mission_for_checkerboard_calibration(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> CalibrationCandidate | None:
     """The tenant's next dive in the checkerboard cohort."""
@@ -375,49 +375,49 @@ async def next_dive_for_checkerboard_calibration(
 # --- inputs ---------------------------------------------------------------------
 
 
-async def _dive_and_camera(conn, tenant_id, dive_id):
+async def _mission_and_camera(conn, tenant_id, mission_id):
     row = (
         await conn.execute(
             text(f"""
                 SELECT d.slate_template_id, {_EFFECTIVE_TARGET} AS target_id,
                        cc.id AS camera_calibration_id, cc.camera_matrix,
                        cc.distortion_coefficients
-                FROM dives d
+                FROM missions d
                 LEFT JOIN current_camera_calibrations cc
                   ON cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
-                WHERE d.tenant_id = :tenant AND d.id = :dive
+                WHERE d.tenant_id = :tenant AND d.id = :mission
                 """),
-            {"tenant": tenant_id, "dive": dive_id},
+            {"tenant": tenant_id, "mission": mission_id},
         )
     ).one_or_none()
     if row is None:
-        raise CalibrationInputsUnavailable(f"dive_id={dive_id} not found")
+        raise CalibrationInputsUnavailable(f"dive_id={mission_id} not found")
     return row
 
 
-def _require_camera(row, dive_id) -> None:
+def _require_camera(row, mission_id) -> None:
     if row.camera_calibration_id is None:
         raise CalibrationInputsUnavailable(
-            f"dive_id={dive_id} has no camera calibration for its device"
+            f"dive_id={mission_id} has no camera calibration for its device"
         )
 
 
-async def _dive_dots(conn, tenant_id, dive_id) -> list[tuple[float, float]]:
+async def _mission_dots(conn, tenant_id, mission_id) -> list[tuple[float, float]]:
     """Every live dot in the dive (incomplete and non-canonical included)."""
     rows = await conn.execute(
         text("""
             SELECT l.x, l.y FROM laser_labels l
             JOIN captures c ON c.tenant_id = l.tenant_id AND c.id = l.capture_id
-            WHERE l.tenant_id = :tenant AND c.dive_id = :dive
+            WHERE l.tenant_id = :tenant AND c.mission_id = :mission
               AND NOT l.superseded AND l.x IS NOT NULL AND l.y IS NOT NULL
             ORDER BY c.number, l.number
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     return [(float(r.x), float(r.y)) for r in rows]
 
 
-async def _inputs_as_of(conn, tenant_id, dive_id) -> datetime | None:
+async def _inputs_as_of(conn, tenant_id, mission_id) -> datetime | None:
     """The newest laser or slate label on the dive, any state (v1's
     `_newest_label_timestamp`), in Label Studio's clock."""
     return (
@@ -426,14 +426,14 @@ async def _inputs_as_of(conn, tenant_id, dive_id) -> datetime | None:
                 SELECT max(at) FROM (
                     SELECT x.ls_updated_at AS at FROM laser_labels x
                     JOIN captures c ON c.tenant_id = x.tenant_id AND c.id = x.capture_id
-                    WHERE x.tenant_id = :tenant AND c.dive_id = :dive
+                    WHERE x.tenant_id = :tenant AND c.mission_id = :mission
                     UNION ALL
                     SELECT x.ls_updated_at FROM slate_labels x
                     JOIN captures c ON c.tenant_id = x.tenant_id AND c.id = x.capture_id
-                    WHERE x.tenant_id = :tenant AND c.dive_id = :dive
+                    WHERE x.tenant_id = :tenant AND c.mission_id = :mission
                 ) labels
                 """),
-            {"tenant": tenant_id, "dive": dive_id},
+            {"tenant": tenant_id, "mission": mission_id},
         )
     ).scalar_one()
 
@@ -449,11 +449,11 @@ _LOWEST_LIVE_DOT = """
 
 
 async def slate_calibration_inputs(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> SlateCalibrationInputs | None:
     """What stage 13's fit reads; None when the dive has no slate template or
     no live slate labels (v1's no-op)."""
-    setup = await _dive_and_camera(conn, tenant_id, dive_id)
+    setup = await _mission_and_camera(conn, tenant_id, mission_id)
     if setup.slate_template_id is None:
         return None
     template = (
@@ -470,23 +470,23 @@ async def slate_calibration_inputs(
                 FROM slate_labels s
                 JOIN captures c ON c.tenant_id = s.tenant_id AND c.id = s.capture_id
                 LEFT JOIN ({_LOWEST_LIVE_DOT}) dot ON dot.capture_id = s.capture_id
-                WHERE s.tenant_id = :tenant AND c.dive_id = :dive
+                WHERE s.tenant_id = :tenant AND c.mission_id = :mission
                   AND NOT s.superseded
                 ORDER BY c.number, s.number
                 """),
-            {"tenant": tenant_id, "dive": dive_id},
+            {"tenant": tenant_id, "mission": mission_id},
         )
     ).all()
     if not labels:
         return None
-    _require_camera(setup, dive_id)
+    _require_camera(setup, mission_id)
     if template.dpi is None or not template.reference_points:
         raise CalibrationInputsUnavailable(
             f"slate_template_id={setup.slate_template_id} missing dpi or "
             "reference_points"
         )
     return SlateCalibrationInputs(
-        dive_id=dive_id,
+        mission_id=mission_id,
         slate_template_id=setup.slate_template_id,
         camera_calibration_id=setup.camera_calibration_id,
         camera_matrix=setup.camera_matrix,
@@ -507,23 +507,23 @@ async def slate_calibration_inputs(
             for row in labels
             if row.x is not None
         ],
-        dive_dots=await _dive_dots(conn, tenant_id, dive_id),
-        inputs_as_of=await _inputs_as_of(conn, tenant_id, dive_id),
+        mission_dots=await _mission_dots(conn, tenant_id, mission_id),
+        inputs_as_of=await _inputs_as_of(conn, tenant_id, mission_id),
     )
 
 
 async def checkerboard_calibration_inputs(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> CheckerboardInputs:
     """What the checkerboard fit (and the lattice study) reads: the current
     version of the dive's board, its camera, and one frame per canonical
     image with a live dot."""
-    setup = await _dive_and_camera(conn, tenant_id, dive_id)
+    setup = await _mission_and_camera(conn, tenant_id, mission_id)
     if setup.target_id is None:
         raise CalibrationInputsUnavailable(
-            f"dive_id={dive_id} has no calibration target"
+            f"dive_id={mission_id} has no calibration target"
         )
-    _require_camera(setup, dive_id)
+    _require_camera(setup, mission_id)
     board = (
         await conn.execute(
             text("""
@@ -538,13 +538,13 @@ async def checkerboard_calibration_inputs(
             SELECT c.id, c.checksum, c.v1_id IS NOT NULL AS from_v1, dot.x, dot.y
             FROM captures c
             JOIN ({_LOWEST_LIVE_DOT}) dot ON dot.capture_id = c.id
-            WHERE c.tenant_id = :tenant AND c.dive_id = :dive AND c.is_canonical
+            WHERE c.tenant_id = :tenant AND c.mission_id = :mission AND c.is_canonical
             ORDER BY c.number
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     return CheckerboardInputs(
-        dive_id=dive_id,
+        mission_id=mission_id,
         calibration_target_id=setup.target_id,
         camera_calibration_id=setup.camera_calibration_id,
         camera_matrix=setup.camera_matrix,
@@ -557,19 +557,19 @@ async def checkerboard_calibration_inputs(
             BoardFrame(r.id, r.checksum, r.from_v1, float(r.x), float(r.y))
             for r in frames
         ],
-        dive_dots=await _dive_dots(conn, tenant_id, dive_id),
-        inputs_as_of=await _inputs_as_of(conn, tenant_id, dive_id),
+        mission_dots=await _mission_dots(conn, tenant_id, mission_id),
+        inputs_as_of=await _inputs_as_of(conn, tenant_id, mission_id),
     )
 
 
-async def dive_for_number(
+async def mission_for_number(
     conn: AsyncConnection, tenant_id: uuid.UUID, number: int
 ) -> uuid.UUID | None:
     """The tenant's dive with this number (v1's id for a migrated dive): how
     an operator names the dives of a lattice study (v1: `dive_ids`)."""
     return (
         await conn.execute(
-            text("SELECT id FROM dives WHERE tenant_id = :tenant AND number = :n"),
+            text("SELECT id FROM missions WHERE tenant_id = :tenant AND number = :n"),
             {"tenant": tenant_id, "n": number},
         )
     ).scalar_one_or_none()
@@ -581,7 +581,7 @@ async def dive_for_number(
 async def record_laser_calibration(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     record: CalibrationRecord,
 ) -> uuid.UUID:
     """Append one attempt to the dive's calibrations. Returns its id.
@@ -594,11 +594,11 @@ async def record_laser_calibration(
         await conn.execute(
             text("""
                 INSERT INTO laser_calibrations
-                    (id, tenant_id, dive_id, camera_calibration_id, producer,
+                    (id, tenant_id, mission_id, camera_calibration_id, producer,
                      outcome, laser_position, laser_axis, refusal_reason,
                      inputs_as_of, gate_verdicts, lever_arm_m, observation_count,
                      core_version, slate_template_id, calibration_target_id)
-                VALUES (:id, :tenant, :dive, :camera, :producer, :outcome,
+                VALUES (:id, :tenant, :mission, :camera, :producer, :outcome,
                         CAST(:position AS jsonb), CAST(:axis AS jsonb), :reason,
                         :inputs_as_of, CAST(:verdicts AS jsonb), :lever, :count,
                         :core, :slate, :target)
@@ -608,7 +608,7 @@ async def record_laser_calibration(
             {
                 "id": attempt,
                 "tenant": tenant_id,
-                "dive": dive_id,
+                "mission": mission_id,
                 "camera": record.camera_calibration_id,
                 "producer": record.producer,
                 "outcome": record.outcome,
@@ -635,7 +635,7 @@ def _json(value) -> str | None:
 async def clear_calibration_refusal(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     *,
     reason: str | None = None,
 ) -> bool:
@@ -647,12 +647,12 @@ async def clear_calibration_refusal(
             INSERT INTO laser_calibration_refusal_clears
                 (tenant_id, laser_calibration_id, reason)
             SELECT r.tenant_id, r.id, :reason FROM current_laser_calibrations r
-            WHERE r.tenant_id = :tenant AND r.dive_id = :dive
+            WHERE r.tenant_id = :tenant AND r.mission_id = :mission
               AND r.outcome = 'refused'
             ON CONFLICT ON CONSTRAINT laser_calibration_refusal_clears_refusal_key
                 DO NOTHING
             """),
-        {"tenant": tenant_id, "dive": dive_id, "reason": reason},
+        {"tenant": tenant_id, "mission": mission_id, "reason": reason},
     )
     return written.rowcount > 0
 
@@ -660,46 +660,46 @@ async def clear_calibration_refusal(
 class LaserCalibrationCatalog(ServicePrincipal):
     """Laser calibration's database side, as the orchestrator's principal."""
 
-    async def next_dive_for_laser_calibration(
+    async def next_mission_for_laser_calibration(
         self, tenant_id: uuid.UUID
     ) -> CalibrationCandidate | None:
         async with self._tenant(tenant_id) as conn:
-            return await next_dive_for_laser_calibration(conn, tenant_id)
+            return await next_mission_for_laser_calibration(conn, tenant_id)
 
-    async def next_dive_for_checkerboard_calibration(
+    async def next_mission_for_checkerboard_calibration(
         self, tenant_id: uuid.UUID
     ) -> CalibrationCandidate | None:
         async with self._tenant(tenant_id) as conn:
-            return await next_dive_for_checkerboard_calibration(conn, tenant_id)
+            return await next_mission_for_checkerboard_calibration(conn, tenant_id)
 
     async def slate_calibration_inputs(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> SlateCalibrationInputs | None:
         async with self._tenant(tenant_id) as conn:
-            return await slate_calibration_inputs(conn, tenant_id, dive_id)
+            return await slate_calibration_inputs(conn, tenant_id, mission_id)
 
     async def checkerboard_calibration_inputs(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> CheckerboardInputs:
         async with self._tenant(tenant_id) as conn:
-            return await checkerboard_calibration_inputs(conn, tenant_id, dive_id)
+            return await checkerboard_calibration_inputs(conn, tenant_id, mission_id)
 
-    async def dive_for_number(
+    async def mission_for_number(
         self, tenant_id: uuid.UUID, number: int
     ) -> uuid.UUID | None:
         async with self._tenant(tenant_id) as conn:
-            return await dive_for_number(conn, tenant_id, number)
+            return await mission_for_number(conn, tenant_id, number)
 
     async def record_laser_calibration(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, record: CalibrationRecord
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, record: CalibrationRecord
     ) -> uuid.UUID:
         async with self._tenant(tenant_id) as conn:
-            return await record_laser_calibration(conn, tenant_id, dive_id, record)
+            return await record_laser_calibration(conn, tenant_id, mission_id, record)
 
     async def clear_calibration_refusal(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, *, reason: str | None = None
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, reason: str | None = None
     ) -> bool:
         async with self._tenant(tenant_id) as conn:
             return await clear_calibration_refusal(
-                conn, tenant_id, dive_id, reason=reason
+                conn, tenant_id, mission_id, reason=reason
             )

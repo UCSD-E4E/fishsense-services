@@ -2,11 +2,11 @@
 
 Ported from fishsense-lite@77e8f8e5 services/fishsense-api/src/fishsense_api/
 controllers/: the laser cohorts (dive_cohort_controller.py
-`select_next_for_laser_preprocessing`, `select_dives_needing_laser_population`,
+`select_next_for_laser_preprocessing`, `select_missions_needing_laser_population`,
 `select_next_for_laser_auto_accept`; dive_prediction_cohort_controller.py
 `select_next_for_laser_prediction`), the laser-label reads and writes
 (label_controller.py: `get_laser_labels(include_superseded)`,
-`get_dives_with_complete_laser_labeling`, `get_laser_label_studio_project_ids`
+`get_missions_with_complete_laser_labeling`, `get_laser_label_studio_project_ids`
 with `gated`, the label PUT), the reprocess flags
 (label_reprocess_controller.py `_set_needs_reprocess`), the prediction upsert
 (laser_prediction_controller.py) and the dive line (dive_controller.py) -- plus
@@ -51,7 +51,10 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from fishsense_services_api.camera_sql import RECTIFIABLE_CAMERA_MODEL, RECTIFIABLE_DIVE
+from fishsense_services_api.camera_sql import (
+    RECTIFIABLE_CAMERA_MODEL,
+    RECTIFIABLE_MISSION,
+)
 from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
@@ -59,7 +62,7 @@ __all__ = [
     "LASER_PREPROCESS_WORK",
     "NEEDS_LASER_JPEG",
     "LASER_PREDICTOR_VERSION",
-    "DiveCamera",
+    "MissionCamera",
     "ForeignRows",
     "GateInputs",
     "GateRow",
@@ -102,7 +105,7 @@ class PopulationChanged(RuntimeError):
 
 @dataclass(frozen=True)
 class LaserCandidate:
-    dive_id: uuid.UUID
+    mission_id: uuid.UUID
     created_at: datetime
     #: v1's dive id for a migrated dive: the tiebreak of the cohort order.
     number: int
@@ -120,7 +123,7 @@ class LaserCapture:
 
 
 @dataclass(frozen=True)
-class DiveCamera:
+class MissionCamera:
     camera_matrix: list[list[float]]
     distortion_coefficients: list[float]
 
@@ -154,7 +157,7 @@ class GateRow:
 
 @dataclass(frozen=True)
 class GateInputs:
-    dive_number: int
+    mission_number: int
     predictions: list[GateRow]
 
 
@@ -180,7 +183,7 @@ class PopulateItem:
 
 @dataclass(frozen=True)
 class LaserPopulation:
-    dive_number: int
+    mission_number: int
     items: list[PopulateItem]
     #: Every current prediction's colour in the dive: the majority vote's input.
     colors: list[str | None]
@@ -208,7 +211,7 @@ class TaskTarget:
 
 @dataclass(frozen=True)
 class TaskTargets:
-    dive_number: int
+    mission_number: int
     colors: list[str | None]
     targets: list[TaskTarget]
 
@@ -256,27 +259,29 @@ class ValidationWrite:
 # -- shared SQL ----------------------------------------------------------------
 
 #: A canonical capture of dive `d`.
-_CANONICAL = "c.tenant_id = d.tenant_id AND c.dive_id = d.id AND c.is_canonical"
+_CANONICAL = "c.tenant_id = d.tenant_id AND c.mission_id = d.id AND c.is_canonical"
 
 _ORDER = "ORDER BY d.created_at, d.number"
 
 #: Dive `d` can be rectified, which the preprocess and predict resolvers need
-#: (`dive_camera`). v2 only; see `camera_sql`.
-_HAS_CAMERA = RECTIFIABLE_DIVE
+#: (`mission_camera`). v2 only; see `camera_sql`.
+_HAS_CAMERA = RECTIFIABLE_MISSION
 
 
-async def _lock_dive(conn: AsyncConnection, what: str, dive_id: uuid.UUID) -> None:
+async def _lock_mission(
+    conn: AsyncConnection, what: str, mission_id: uuid.UUID
+) -> None:
     """Serialise writes of one kind to one dive."""
     await conn.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-        {"key": f"laser-{what}:{dive_id}"},
+        {"key": f"laser-{what}:{mission_id}"},
     )
 
 
 async def _candidates(conn, tenant_id, where: str, *, limit: bool) -> list:
     rows = await conn.execute(
         text(f"""
-            SELECT d.id, d.created_at, d.number FROM dives d
+            SELECT d.id, d.created_at, d.number FROM missions d
             WHERE d.tenant_id = :tenant AND d.priority = 'high' AND ({where})
             {_ORDER} {"LIMIT 1" if limit else ""}
             """),
@@ -285,15 +290,15 @@ async def _candidates(conn, tenant_id, where: str, *, limit: bool) -> list:
     return [LaserCandidate(r.id, r.created_at, r.number) for r in rows]
 
 
-async def _dive_number(conn, tenant_id, dive_id) -> int:
+async def _mission_number(conn, tenant_id, mission_id) -> int:
     number = (
         await conn.execute(
-            text("SELECT number FROM dives WHERE tenant_id = :t AND id = :d"),
-            {"t": tenant_id, "d": dive_id},
+            text("SELECT number FROM missions WHERE tenant_id = :t AND id = :d"),
+            {"t": tenant_id, "d": mission_id},
         )
     ).scalar_one_or_none()
     if number is None:
-        raise ForeignRows(f"tenant {tenant_id} has no dive {dive_id}")
+        raise ForeignRows(f"tenant {tenant_id} has no dive {mission_id}")
     return number
 
 
@@ -343,7 +348,7 @@ LASER_PREPROCESS_WORK = (
 LASER_PREPROCESS_COHORT = f"{LASER_PREPROCESS_WORK} AND {_HAS_CAMERA}"
 
 
-async def next_dive_for_laser_preprocessing(
+async def next_mission_for_laser_preprocessing(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> LaserCandidate | None:
     """Stage 0.1: the tenant's oldest high-priority dive with a canonical
@@ -353,26 +358,26 @@ async def next_dive_for_laser_preprocessing(
 
 
 async def laser_preprocess_captures(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> list[LaserCapture]:
     """The dive's canonical captures needing a laser JPEG -- the cohort's
     predicate, per capture."""
     rows = await conn.execute(
         text(f"""
             SELECT {_CAPTURE_COLUMNS} FROM captures c
-            JOIN dives d ON d.tenant_id = c.tenant_id AND d.id = c.dive_id
-            WHERE d.tenant_id = :tenant AND d.id = :dive AND {_CANONICAL}
+            JOIN missions d ON d.tenant_id = c.tenant_id AND d.id = c.mission_id
+            WHERE d.tenant_id = :tenant AND d.id = :mission AND {_CANONICAL}
               AND {NEEDS_LASER_JPEG}
             ORDER BY c.captured_at, c.number
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     return [_capture(r) for r in rows]
 
 
-async def dive_camera(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
-) -> DiveCamera | None:
+async def mission_camera(
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
+) -> MissionCamera | None:
     """The intrinsics that rectify the dive: its device's current camera
     calibration (v1: the dive's camera's intrinsics). None when the dive has
     no device, the device no calibration, or its calibration is not a
@@ -381,24 +386,28 @@ async def dive_camera(
         await conn.execute(
             text("""
                 SELECT cc.camera_matrix, cc.distortion_coefficients
-                FROM dives d
+                FROM missions d
                 JOIN current_camera_calibrations cc
                   ON cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
-                WHERE d.tenant_id = :tenant AND d.id = :dive
+                WHERE d.tenant_id = :tenant AND d.id = :mission
                   AND cc.camera_model = :model
                 """),
-            {"tenant": tenant_id, "dive": dive_id, "model": RECTIFIABLE_CAMERA_MODEL},
+            {
+                "tenant": tenant_id,
+                "mission": mission_id,
+                "model": RECTIFIABLE_CAMERA_MODEL,
+            },
         )
     ).one_or_none()
     if row is None:
         return None
-    return DiveCamera(row.camera_matrix, list(row.distortion_coefficients))
+    return MissionCamera(row.camera_matrix, list(row.distortion_coefficients))
 
 
 async def raise_laser_reprocess_flags(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     *,
     only_incomplete: bool = True,
 ) -> int:
@@ -411,11 +420,11 @@ async def raise_laser_reprocess_flags(
             UPDATE laser_labels l SET needs_reprocess = true
             FROM captures c
             WHERE l.tenant_id = :tenant AND c.tenant_id = l.tenant_id
-              AND c.id = l.capture_id AND c.dive_id = :dive AND c.is_canonical
+              AND c.id = l.capture_id AND c.mission_id = :mission AND c.is_canonical
               AND NOT l.superseded
               {"AND NOT l.completed" if only_incomplete else ""}
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     return updated.rowcount
 
@@ -423,7 +432,7 @@ async def raise_laser_reprocess_flags(
 async def clear_laser_reprocess_flags(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     capture_ids: list[uuid.UUID] | None,
 ) -> int:
     """Lower the flag once the JPEGs are redrawn (v1's DELETE): canonical
@@ -439,10 +448,10 @@ async def clear_laser_reprocess_flags(
             UPDATE laser_labels l SET needs_reprocess = false
             FROM captures c
             WHERE l.tenant_id = :tenant AND c.tenant_id = l.tenant_id
-              AND c.id = l.capture_id AND c.dive_id = :dive AND c.is_canonical
+              AND c.id = l.capture_id AND c.mission_id = :mission AND c.is_canonical
               AND l.needs_reprocess {scope}
             """),
-        {"tenant": tenant_id, "dive": dive_id, "captures": capture_ids},
+        {"tenant": tenant_id, "mission": mission_id, "captures": capture_ids},
     )
     return updated.rowcount
 
@@ -495,7 +504,7 @@ def laser_prediction_cohort(version: str) -> str:
     return f"({unpredicted} OR ({being_labeled} AND {stale})) AND {_HAS_CAMERA}"
 
 
-async def next_dive_for_laser_prediction(
+async def next_mission_for_laser_prediction(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> LaserCandidate | None:
     """v1's two ways in: a canonical capture with no prediction and no live
@@ -509,7 +518,7 @@ async def next_dive_for_laser_prediction(
 
 
 async def laser_predict_captures(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> list[LaserCapture]:
     """The dive's canonical captures whose current prediction is missing or
     stale, and that no human has finished labeling (v1's resolver; the
@@ -518,13 +527,17 @@ async def laser_predict_captures(
     rows = await conn.execute(
         text(f"""
             SELECT {_CAPTURE_COLUMNS} FROM captures c
-            JOIN dives d ON d.tenant_id = c.tenant_id AND d.id = c.dive_id
-            WHERE d.tenant_id = :tenant AND d.id = :dive AND {_CANONICAL}
+            JOIN missions d ON d.tenant_id = c.tenant_id AND d.id = c.mission_id
+            WHERE d.tenant_id = :tenant AND d.id = :mission AND {_CANONICAL}
               AND {_CURRENT_PREDICTION} IS DISTINCT FROM :version
               AND NOT {_HAS_LIVE_COMPLETED_LABEL}
             ORDER BY c.captured_at, c.number
             """),
-        {"tenant": tenant_id, "dive": dive_id, "version": LASER_PREDICTOR_VERSION},
+        {
+            "tenant": tenant_id,
+            "mission": mission_id,
+            "version": LASER_PREDICTOR_VERSION,
+        },
     )
     return [_capture(r) for r in rows]
 
@@ -532,7 +545,7 @@ async def laser_predict_captures(
 async def persist_laser_predictions(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     predictions: list[NewLaserPrediction],
 ) -> int:
     """Append one prediction per result. It has no verdict of its own, so it
@@ -546,16 +559,16 @@ async def persist_laser_predictions(
             await conn.execute(
                 text("""
                     SELECT id FROM captures
-                    WHERE tenant_id = :tenant AND dive_id = :dive
+                    WHERE tenant_id = :tenant AND mission_id = :mission
                       AND id = ANY(:ids)
                     """),
-                {"tenant": tenant_id, "dive": dive_id, "ids": captures},
+                {"tenant": tenant_id, "mission": mission_id, "ids": captures},
             )
         ).scalars()
     )
     if foreign := set(captures) - known:
         raise ForeignRows(
-            f"not captures of dive {dive_id}: {sorted(map(str, foreign))}"
+            f"not captures of dive {mission_id}: {sorted(map(str, foreign))}"
         )
     await conn.execute(
         text("""
@@ -592,7 +605,7 @@ async def persist_laser_predictions(
 # -- the auto-accept gate ------------------------------------------------------------
 
 
-async def next_dive_for_laser_auto_accept(
+async def next_mission_for_laser_auto_accept(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> LaserCandidate | None:
     """The gate's backlog: a canonical capture whose current prediction carries
@@ -614,23 +627,23 @@ async def next_dive_for_laser_auto_accept(
 
 
 async def laser_gate_inputs(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> GateInputs:
     """The dive's WHOLE current prediction set (v1: every prediction of the
     dive's images, canonical or not) -- the gate is a consensus of the dive."""
-    number = await _dive_number(conn, tenant_id, dive_id)
+    number = await _mission_number(conn, tenant_id, mission_id)
     rows = await conn.execute(
         text("""
             SELECT p.id, c.number AS capture_number, p.x, p.y, p.predictor_version
             FROM current_laser_predictions_gated p
             JOIN captures c ON c.tenant_id = p.tenant_id AND c.id = p.capture_id
-            WHERE c.tenant_id = :tenant AND c.dive_id = :dive
+            WHERE c.tenant_id = :tenant AND c.mission_id = :mission
             ORDER BY c.number
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     return GateInputs(
-        dive_number=number,
+        mission_number=number,
         predictions=[
             GateRow(r.id, r.capture_number, r.x, r.y, r.predictor_version) for r in rows
         ],
@@ -656,7 +669,7 @@ def _verdict_changed(row, verdict: GateVerdict) -> bool:
 async def record_laser_gate_verdicts(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     verdicts: list[GateVerdict],
 ) -> int:
     """Append each verdict that differs from its prediction's standing one
@@ -664,7 +677,7 @@ async def record_laser_gate_verdicts(
     appended. Every prediction must be one of the dive's."""
     if not verdicts:
         return 0
-    await _lock_dive(conn, "gate", dive_id)
+    await _lock_mission(conn, "gate", mission_id)
     ids = [v.prediction_id for v in verdicts]
     standing = {
         r.id: r
@@ -685,15 +698,15 @@ async def record_laser_gate_verdicts(
                     WHERE lv.tenant_id = p.tenant_id AND lv.prediction_id = p.id
                     ORDER BY lv.seq DESC LIMIT 1
                 ) v ON true
-                WHERE p.tenant_id = :tenant AND c.dive_id = :dive
+                WHERE p.tenant_id = :tenant AND c.mission_id = :mission
                   AND p.id = ANY(:ids)
                 """),
-            {"tenant": tenant_id, "dive": dive_id, "ids": ids},
+            {"tenant": tenant_id, "mission": mission_id, "ids": ids},
         )
     }
     if foreign := set(ids) - set(standing):
         raise ForeignRows(
-            f"not predictions of dive {dive_id}: {sorted(map(str, foreign))}"
+            f"not predictions of dive {mission_id}: {sorted(map(str, foreign))}"
         )
     changed = [v for v in verdicts if _verdict_changed(standing[v.prediction_id], v)]
     if changed:
@@ -722,7 +735,7 @@ async def record_laser_gate_verdicts(
 # -- Label Studio: populate, backfill, apply auto-accept -----------------------------
 
 
-async def dives_needing_laser_population(
+async def missions_needing_laser_population(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> list[LaserCandidate]:
     """Every high-priority dive with a canonical capture that has a prediction
@@ -747,47 +760,50 @@ async def dives_needing_laser_population(
     )
 
 
-async def _colors(conn, tenant_id, dive_id) -> list[str | None]:
+async def _colors(conn, tenant_id, mission_id) -> list[str | None]:
     rows = await conn.execute(
         text("""
             SELECT p.color FROM current_laser_predictions_gated p
             JOIN captures c ON c.tenant_id = p.tenant_id AND c.id = p.capture_id
-            WHERE c.tenant_id = :tenant AND c.dive_id = :dive
+            WHERE c.tenant_id = :tenant AND c.mission_id = :mission
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     return list(rows.scalars())
 
 
 async def laser_populate_items(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> LaserPopulation:
     """The dive's canonical captures that need a laser task: a current
     prediction and no live completed label (v1's populate filter). Each with
     its prediction and effective gate flag, and every prediction's colour."""
-    number = await _dive_number(conn, tenant_id, dive_id)
+    number = await _mission_number(conn, tenant_id, mission_id)
     rows = await conn.execute(
         text(f"""
             SELECT {_CAPTURE_COLUMNS}, p.x, p.y, p.width, p.height, p.auto_accept
             FROM captures c
-            JOIN dives d ON d.tenant_id = c.tenant_id AND d.id = c.dive_id
+            JOIN missions d ON d.tenant_id = c.tenant_id AND d.id = c.mission_id
             JOIN current_laser_predictions_gated p
               ON p.tenant_id = c.tenant_id AND p.capture_id = c.id
-            WHERE d.tenant_id = :tenant AND d.id = :dive AND {_CANONICAL}
+            WHERE d.tenant_id = :tenant AND d.id = :mission AND {_CANONICAL}
               AND NOT {_HAS_LIVE_COMPLETED_LABEL}
             ORDER BY c.captured_at, c.number
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     items = [
         PopulateItem(_capture(r), r.x, r.y, r.width, r.height, r.auto_accept)
         for r in rows
     ]
-    return LaserPopulation(number, items, await _colors(conn, tenant_id, dive_id))
+    return LaserPopulation(number, items, await _colors(conn, tenant_id, mission_id))
 
 
-async def dive_has_laser_labels_in_project(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID, ls_project_id: int
+async def mission_has_laser_labels_in_project(
+    conn: AsyncConnection,
+    tenant_id: uuid.UUID,
+    mission_id: uuid.UUID,
+    ls_project_id: int,
 ) -> bool:
     """Whether the dive holds live labels in the project: populate publishes
     an already-complete project only if it has tasks (v1)."""
@@ -797,11 +813,11 @@ async def dive_has_laser_labels_in_project(
                 SELECT EXISTS (
                     SELECT 1 FROM laser_labels l
                     JOIN captures c ON c.tenant_id = l.tenant_id AND c.id = l.capture_id
-                    WHERE l.tenant_id = :tenant AND c.dive_id = :dive
+                    WHERE l.tenant_id = :tenant AND c.mission_id = :mission
                       AND l.ls_project_id = :project AND NOT l.superseded
                 )
                 """),
-            {"tenant": tenant_id, "dive": dive_id, "project": ls_project_id},
+            {"tenant": tenant_id, "mission": mission_id, "project": ls_project_id},
         )
     ).scalar_one()
 
@@ -838,7 +854,7 @@ async def record_populated_laser_labels(
 async def laser_task_targets(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     *,
     auto_accepted_only: bool = False,
 ) -> TaskTargets:
@@ -846,7 +862,7 @@ async def laser_task_targets(
     incomplete label with a task, whose capture's current prediction has a dot
     (and, for the auto-accept apply, the gate's flag). First task per capture
     wins, in v1's (image, label) order."""
-    number = await _dive_number(conn, tenant_id, dive_id)
+    number = await _mission_number(conn, tenant_id, mission_id)
     rows = await conn.execute(
         text(f"""
             SELECT DISTINCT ON (c.number)
@@ -856,21 +872,21 @@ async def laser_task_targets(
             JOIN captures c ON c.tenant_id = l.tenant_id AND c.id = l.capture_id
             JOIN current_laser_predictions_gated p
               ON p.tenant_id = c.tenant_id AND p.capture_id = c.id
-            WHERE l.tenant_id = :tenant AND c.dive_id = :dive
+            WHERE l.tenant_id = :tenant AND c.mission_id = :mission
               AND NOT l.completed AND NOT l.superseded
               AND l.ls_task_id IS NOT NULL AND l.ls_project_id IS NOT NULL
               AND p.x IS NOT NULL AND p.y IS NOT NULL
               {"AND p.auto_accept" if auto_accepted_only else ""}
             ORDER BY c.number, l.number
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     targets = [
         TaskTarget(r.capture_id, r.ls_task_id, r.ls_project_id, r.x, r.y,
                    r.width, r.height)
         for r in rows
     ]  # fmt: skip
-    return TaskTargets(number, await _colors(conn, tenant_id, dive_id), targets)
+    return TaskTargets(number, await _colors(conn, tenant_id, mission_id), targets)
 
 
 async def mark_laser_labels_auto_accepted(
@@ -934,7 +950,7 @@ async def laser_label_studio_project_ids(
 # -- per-dive laser-label validation, and its remediation ------------------------------
 
 
-async def dives_with_complete_laser_labeling(
+async def missions_with_complete_laser_labeling(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> list[LaserCandidate]:
     """Dives whose laser labeling is complete: at least one live completed
@@ -942,18 +958,18 @@ async def dives_with_complete_laser_labeling(
     filter, as in v1)."""
     rows = await conn.execute(
         text(f"""
-            SELECT d.id, d.created_at, d.number FROM dives d
+            SELECT d.id, d.created_at, d.number FROM missions d
             WHERE d.tenant_id = :tenant
               AND EXISTS (
                   SELECT 1 FROM laser_labels l
                   JOIN captures c ON c.tenant_id = l.tenant_id AND c.id = l.capture_id
-                  WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+                  WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id
                     AND l.completed AND NOT l.superseded
               )
               AND NOT EXISTS (
                   SELECT 1 FROM laser_labels l
                   JOIN captures c ON c.tenant_id = l.tenant_id AND c.id = l.capture_id
-                  WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+                  WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id
                     AND NOT l.completed AND NOT l.superseded
               )
             {_ORDER}
@@ -968,7 +984,7 @@ _POPULATION = """
            l.superseded, l.completed
     FROM laser_labels l
     JOIN captures c ON c.tenant_id = l.tenant_id AND c.id = l.capture_id
-    WHERE l.tenant_id = :tenant AND c.dive_id = :dive
+    WHERE l.tenant_id = :tenant AND c.mission_id = :mission
       AND l.x IS NOT NULL AND l.y IS NOT NULL
     ORDER BY c.number, l.number
 """
@@ -981,22 +997,22 @@ def _fingerprint(rows: list[LabelRow], calibration: list[int]) -> str:
     return hashlib.sha256(json.dumps([canonical, calibration]).encode()).hexdigest()
 
 
-async def _calibration(conn, tenant_id, dive_id) -> list[int]:
+async def _calibration(conn, tenant_id, mission_id) -> list[int]:
     rows = await conn.execute(
         text("""
             SELECT DISTINCT c.number FROM slate_labels s
             JOIN captures c ON c.tenant_id = s.tenant_id AND c.id = s.capture_id
-            WHERE s.tenant_id = :tenant AND c.dive_id = :dive
+            WHERE s.tenant_id = :tenant AND c.mission_id = :mission
               AND s.completed AND NOT s.superseded
             ORDER BY c.number
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     return list(rows.scalars())
 
 
 async def laser_label_population(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID, *, lock=False
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, lock=False
 ) -> LabelPopulation:
     """The dive's full positive population, superseded included (#927), and
     its calibration frames: captures with a completed, live slate label --
@@ -1005,23 +1021,23 @@ async def laser_label_population(
     rows = [
         LabelRow(r.id, r.number, r.capture_number, r.x, r.y, r.superseded,
                  r.completed)
-        for r in await conn.execute(text(sql), {"tenant": tenant_id, "dive": dive_id})
+        for r in await conn.execute(text(sql), {"tenant": tenant_id, "mission": mission_id})
     ]  # fmt: skip
-    calibration = await _calibration(conn, tenant_id, dive_id)
+    calibration = await _calibration(conn, tenant_id, mission_id)
     return LabelPopulation(rows, calibration, _fingerprint(rows, calibration))
 
 
 async def apply_laser_validation(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     supersedes: list[tuple[uuid.UUID, str]],
     line: LineFit | None,
 ) -> ValidationWrite:
     """Write one judgement: supersede each flagged row that is still live,
     recording the rule that took it, and append the dive's line if it
     changed. Never revives. Every label must be one of the dive's."""
-    await _lock_dive(conn, "validation", dive_id)
+    await _lock_mission(conn, "validation", mission_id)
     superseded = 0
     if supersedes:
         ids = [label_id for label_id, _ in supersedes]
@@ -1032,16 +1048,16 @@ async def apply_laser_validation(
                         SELECT l.id FROM laser_labels l
                         JOIN captures c
                           ON c.tenant_id = l.tenant_id AND c.id = l.capture_id
-                        WHERE l.tenant_id = :tenant AND c.dive_id = :dive
+                        WHERE l.tenant_id = :tenant AND c.mission_id = :mission
                           AND l.id = ANY(:ids)
                         """),
-                    {"tenant": tenant_id, "dive": dive_id, "ids": ids},
+                    {"tenant": tenant_id, "mission": mission_id, "ids": ids},
                 )
             ).scalars()
         )
         if foreign := set(ids) - mine:
             raise ForeignRows(
-                f"not laser labels of dive {dive_id}: {sorted(map(str, foreign))}"
+                f"not laser labels of dive {mission_id}: {sorted(map(str, foreign))}"
             )
         for label_id, reason in supersedes:
             updated = await conn.execute(
@@ -1055,7 +1071,7 @@ async def apply_laser_validation(
             superseded += updated.rowcount
     appended = False
     if line is not None:
-        appended = await _append_line_if_changed(conn, tenant_id, dive_id, line)
+        appended = await _append_line_if_changed(conn, tenant_id, mission_id, line)
     return ValidationWrite(superseded=superseded, line_appended=appended)
 
 
@@ -1073,24 +1089,24 @@ _LINE_COLUMNS = (
 )
 
 
-async def _append_line_if_changed(conn, tenant_id, dive_id, line: LineFit) -> bool:
+async def _append_line_if_changed(conn, tenant_id, mission_id, line: LineFit) -> bool:
     columns = ", ".join(_LINE_COLUMNS)
     params = ", ".join(f":{c}" for c in _LINE_COLUMNS)
     same = " AND ".join(f"cur.{c} IS NOT DISTINCT FROM :{c}" for c in _LINE_COLUMNS)
     inserted = await conn.execute(
         text(f"""
-            INSERT INTO dive_laser_lines (tenant_id, dive_id, {columns})
-            SELECT :tenant, :dive, {params}
+            INSERT INTO mission_laser_lines (tenant_id, mission_id, {columns})
+            SELECT :tenant, :mission, {params}
             WHERE NOT EXISTS (
                 SELECT 1 FROM (
-                    SELECT * FROM dive_laser_lines
-                    WHERE tenant_id = :tenant AND dive_id = :dive
+                    SELECT * FROM mission_laser_lines
+                    WHERE tenant_id = :tenant AND mission_id = :mission
                     ORDER BY seq DESC LIMIT 1
                 ) cur
                 WHERE {same}
             )
             """),
-        {"tenant": tenant_id, "dive": dive_id,
+        {"tenant": tenant_id, "mission": mission_id,
          **{c: getattr(line, c) for c in _LINE_COLUMNS}},
     )  # fmt: skip
     return inserted.rowcount > 0
@@ -1099,7 +1115,7 @@ async def _append_line_if_changed(conn, tenant_id, dive_id, line: LineFit) -> bo
 async def revive_laser_labels(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     label_numbers: list[int],
     fingerprint: str,
 ) -> int:
@@ -1108,17 +1124,17 @@ async def revive_laser_labels(
     nothing, if the dive's population is not the one the plan was made from,
     or a label is not the dive's. Labels already live are skipped, so
     re-applying is a no-op. Returns how many were revived."""
-    await _lock_dive(conn, "validation", dive_id)
-    population = await laser_label_population(conn, tenant_id, dive_id, lock=True)
+    await _lock_mission(conn, "validation", mission_id)
+    population = await laser_label_population(conn, tenant_id, mission_id, lock=True)
     by_number = {r.number: r for r in population.rows}
     if foreign := set(label_numbers) - set(by_number):
-        raise ForeignRows(f"not laser labels of dive {dive_id}: {sorted(foreign)}")
+        raise ForeignRows(f"not laser labels of dive {mission_id}: {sorted(foreign)}")
     pending = [n for n in label_numbers if by_number[n].superseded]
     if not pending:
         return 0
     if population.fingerprint != fingerprint:
         raise PopulationChanged(
-            f"dive {dive_id}'s laser labels changed since the plan was made"
+            f"dive {mission_id}'s laser labels changed since the plan was made"
         )
     updated = await conn.execute(
         text("""
@@ -1132,20 +1148,20 @@ async def revive_laser_labels(
     return updated.rowcount
 
 
-async def dive_by_number(
+async def mission_by_number(
     conn: AsyncConnection, tenant_id: uuid.UUID, number: int
 ) -> uuid.UUID | None:
     return (
         await conn.execute(
-            text("SELECT id FROM dives WHERE tenant_id = :t AND number = :n"),
+            text("SELECT id FROM missions WHERE tenant_id = :t AND number = :n"),
             {"t": tenant_id, "n": number},
         )
     ).scalar_one_or_none()
 
 
-async def dive_numbers(conn: AsyncConnection, tenant_id: uuid.UUID) -> list[int]:
+async def mission_numbers(conn: AsyncConnection, tenant_id: uuid.UUID) -> list[int]:
     rows = await conn.execute(
-        text("SELECT number FROM dives WHERE tenant_id = :t ORDER BY number"),
+        text("SELECT number FROM missions WHERE tenant_id = :t ORDER BY number"),
         {"t": tenant_id},
     )
     return list(rows.scalars())
@@ -1162,63 +1178,63 @@ class LaserCatalog(ServicePrincipal):
         async with self._tenant(tenant_id) as conn:
             return await fn(conn, tenant_id, *args, **kwargs)
 
-    async def next_dive_for_laser_preprocessing(self, tenant_id):
-        return await self._call(next_dive_for_laser_preprocessing, tenant_id)
+    async def next_mission_for_laser_preprocessing(self, tenant_id):
+        return await self._call(next_mission_for_laser_preprocessing, tenant_id)
 
-    async def laser_preprocess_captures(self, tenant_id, dive_id):
-        return await self._call(laser_preprocess_captures, tenant_id, dive_id)
+    async def laser_preprocess_captures(self, tenant_id, mission_id):
+        return await self._call(laser_preprocess_captures, tenant_id, mission_id)
 
-    async def dive_camera(self, tenant_id, dive_id):
-        return await self._call(dive_camera, tenant_id, dive_id)
+    async def mission_camera(self, tenant_id, mission_id):
+        return await self._call(mission_camera, tenant_id, mission_id)
 
-    async def raise_laser_reprocess_flags(self, tenant_id, dive_id, **kwargs):
+    async def raise_laser_reprocess_flags(self, tenant_id, mission_id, **kwargs):
         return await self._call(
-            raise_laser_reprocess_flags, tenant_id, dive_id, **kwargs
+            raise_laser_reprocess_flags, tenant_id, mission_id, **kwargs
         )
 
-    async def clear_laser_reprocess_flags(self, tenant_id, dive_id, capture_ids):
+    async def clear_laser_reprocess_flags(self, tenant_id, mission_id, capture_ids):
         return await self._call(
-            clear_laser_reprocess_flags, tenant_id, dive_id, capture_ids
+            clear_laser_reprocess_flags, tenant_id, mission_id, capture_ids
         )
 
-    async def next_dive_for_laser_prediction(self, tenant_id):
-        return await self._call(next_dive_for_laser_prediction, tenant_id)
+    async def next_mission_for_laser_prediction(self, tenant_id):
+        return await self._call(next_mission_for_laser_prediction, tenant_id)
 
-    async def laser_predict_captures(self, tenant_id, dive_id):
-        return await self._call(laser_predict_captures, tenant_id, dive_id)
+    async def laser_predict_captures(self, tenant_id, mission_id):
+        return await self._call(laser_predict_captures, tenant_id, mission_id)
 
-    async def persist_laser_predictions(self, tenant_id, dive_id, predictions):
+    async def persist_laser_predictions(self, tenant_id, mission_id, predictions):
         return await self._call(
-            persist_laser_predictions, tenant_id, dive_id, predictions
+            persist_laser_predictions, tenant_id, mission_id, predictions
         )
 
-    async def next_dive_for_laser_auto_accept(self, tenant_id):
-        return await self._call(next_dive_for_laser_auto_accept, tenant_id)
+    async def next_mission_for_laser_auto_accept(self, tenant_id):
+        return await self._call(next_mission_for_laser_auto_accept, tenant_id)
 
-    async def laser_gate_inputs(self, tenant_id, dive_id):
-        return await self._call(laser_gate_inputs, tenant_id, dive_id)
+    async def laser_gate_inputs(self, tenant_id, mission_id):
+        return await self._call(laser_gate_inputs, tenant_id, mission_id)
 
-    async def record_laser_gate_verdicts(self, tenant_id, dive_id, verdicts):
+    async def record_laser_gate_verdicts(self, tenant_id, mission_id, verdicts):
         return await self._call(
-            record_laser_gate_verdicts, tenant_id, dive_id, verdicts
+            record_laser_gate_verdicts, tenant_id, mission_id, verdicts
         )
 
-    async def dives_needing_laser_population(self, tenant_id):
-        return await self._call(dives_needing_laser_population, tenant_id)
+    async def missions_needing_laser_population(self, tenant_id):
+        return await self._call(missions_needing_laser_population, tenant_id)
 
-    async def laser_populate_items(self, tenant_id, dive_id):
-        return await self._call(laser_populate_items, tenant_id, dive_id)
+    async def laser_populate_items(self, tenant_id, mission_id):
+        return await self._call(laser_populate_items, tenant_id, mission_id)
 
-    async def dive_has_laser_labels_in_project(self, tenant_id, dive_id, project):
+    async def mission_has_laser_labels_in_project(self, tenant_id, mission_id, project):
         return await self._call(
-            dive_has_laser_labels_in_project, tenant_id, dive_id, project
+            mission_has_laser_labels_in_project, tenant_id, mission_id, project
         )
 
     async def record_populated_laser_labels(self, tenant_id, labels):
         return await self._call(record_populated_laser_labels, tenant_id, labels)
 
-    async def laser_task_targets(self, tenant_id, dive_id, **kwargs):
-        return await self._call(laser_task_targets, tenant_id, dive_id, **kwargs)
+    async def laser_task_targets(self, tenant_id, mission_id, **kwargs):
+        return await self._call(laser_task_targets, tenant_id, mission_id, **kwargs)
 
     async def mark_laser_labels_auto_accepted(self, tenant_id, ls_task_ids):
         return await self._call(mark_laser_labels_auto_accepted, tenant_id, ls_task_ids)
@@ -1226,24 +1242,24 @@ class LaserCatalog(ServicePrincipal):
     async def laser_label_studio_project_ids(self, tenant_id, **kwargs):
         return await self._call(laser_label_studio_project_ids, tenant_id, **kwargs)
 
-    async def dives_with_complete_laser_labeling(self, tenant_id):
-        return await self._call(dives_with_complete_laser_labeling, tenant_id)
+    async def missions_with_complete_laser_labeling(self, tenant_id):
+        return await self._call(missions_with_complete_laser_labeling, tenant_id)
 
-    async def laser_label_population(self, tenant_id, dive_id):
-        return await self._call(laser_label_population, tenant_id, dive_id)
+    async def laser_label_population(self, tenant_id, mission_id):
+        return await self._call(laser_label_population, tenant_id, mission_id)
 
-    async def apply_laser_validation(self, tenant_id, dive_id, supersedes, line):
+    async def apply_laser_validation(self, tenant_id, mission_id, supersedes, line):
         return await self._call(
-            apply_laser_validation, tenant_id, dive_id, supersedes, line
+            apply_laser_validation, tenant_id, mission_id, supersedes, line
         )
 
-    async def revive_laser_labels(self, tenant_id, dive_id, numbers, fingerprint):
+    async def revive_laser_labels(self, tenant_id, mission_id, numbers, fingerprint):
         return await self._call(
-            revive_laser_labels, tenant_id, dive_id, numbers, fingerprint
+            revive_laser_labels, tenant_id, mission_id, numbers, fingerprint
         )
 
-    async def dive_by_number(self, tenant_id, number):
-        return await self._call(dive_by_number, tenant_id, number)
+    async def mission_by_number(self, tenant_id, number):
+        return await self._call(mission_by_number, tenant_id, number)
 
-    async def dive_numbers(self, tenant_id):
-        return await self._call(dive_numbers, tenant_id)
+    async def mission_numbers(self, tenant_id):
+        return await self._call(mission_numbers, tenant_id)

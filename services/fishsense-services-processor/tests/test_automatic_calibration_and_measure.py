@@ -97,7 +97,7 @@ def _calibration_input(zs, *, line_dots=None):
                                       x=float(dot[0]), y=float(dot[1]))  # fmt: skip
         )
     payload = FitAutomaticCalibrationInput(
-        tenant_id=uuid.uuid4(), dive_id=uuid.uuid4(), camera_matrix=K.tolist(),
+        tenant_id=uuid.uuid4(), mission_id=uuid.uuid4(), camera_matrix=K.tolist(),
         frames=frames, line_dots=line_dots or [],
     )  # fmt: skip
     return payload, _Store(jpegs)
@@ -127,7 +127,7 @@ async def test_recovers_the_beam_from_frames_of_an_unknown_object():
     assert r.core_version
 
 
-async def test_the_dive_line_comes_from_every_automatic_dot():
+async def test_the_mission_line_comes_from_every_automatic_dot():
     """Given the dive's dots, their line is used, not the frames' own."""
     turn = np.radians(1.0)
     rot = np.array([[np.cos(turn), -np.sin(turn)], [np.sin(turn), np.cos(turn)]])
@@ -137,9 +137,9 @@ async def test_the_dive_line_comes_from_every_automatic_dot():
     r = await _fit(payload, store)
 
     direction = [*r.line_direction, 0]
-    dive = np.subtract(line_dots[0], line_dots[-1])
+    mission = np.subtract(line_dots[0], line_dots[-1])
     frames = _dot_at(1.0) - _dot_at(5.0)
-    assert _angle(direction, [*dive, 0]) < 0.01
+    assert _angle(direction, [*mission, 0]) < 0.01
     assert _angle(direction, [*frames, 0]) > 0.9
 
 
@@ -178,7 +178,7 @@ def _cscw_length(k, z, hx, hy, tx, ty):
 
 def _measure_input(*captures):
     return MeasureAutomaticInput(
-        tenant_id=uuid.uuid4(), dive_id=uuid.uuid4(), camera_matrix=K.tolist(),
+        tenant_id=uuid.uuid4(), mission_id=uuid.uuid4(), camera_matrix=K.tolist(),
         laser_position=TRUE_O.tolist(), laser_axis=TRUE_D.tolist(),
         captures=list(captures),
     )  # fmt: skip
@@ -242,7 +242,7 @@ def test_a_spread_keeps_the_extremes_and_evenly_covers_the_dot_travel():
     assert cal.spread(dots[:7], 10) == list(range(7))
 
 
-async def test_a_slate_heavy_dive_is_fitted_on_a_capped_spread(monkeypatch):
+async def test_a_slate_heavy_mission_is_fitted_on_a_capped_spread(monkeypatch):
     """2026-10-15 audit: registration is quadratic in frames (100 slate
     frames are 4,950 pairs) and a calibration session can hold hundreds; the
     fit takes at most `MAX_CALIBRATION_FRAMES`, spread along the dot's travel

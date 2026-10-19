@@ -47,14 +47,14 @@ import asyncio
 import tempfile
 from collections import Counter
 from pathlib import Path
-from typing import List
+from typing import List, Annotated
 from uuid import UUID
 
 import numpy as np
 from fishsense_core.camera_intrinsics import CameraIntrinsics
 from fishsense_core.image.raw_image import RawImage
 from fishsense_core.image.rectified_image import RectifiedImage
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from temporalio import activity
 
 from fishsense_services_contracts.laser_region import point_in_laser_region
@@ -81,6 +81,7 @@ from fishsense_services_processor.checkerboard.lattice_overlay import (
 )
 from fishsense_services_processor.jpeg import encode_jpeg
 from fishsense_services_processor.object_store import ProcessorObjectStore
+from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = [
     "DetectCheckerboardLaserPointInput",
@@ -111,10 +112,12 @@ class DetectCheckerboardLaserPointInput(BaseModel):
 class FitCheckerboardExtrinsicsInput(BaseModel):
     """Dive-level payload for `fit_checkerboard_laser_extrinsics`."""
 
-    dive_id: UUID
+    model_config = ConfigDict(validate_by_name=True)
+
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     camera_matrix: List[List[float]]
     observations: List[CheckerboardObservation]
-    dive_dots: List[Point]
+    mission_dots: Annotated[List[Point], renamed_from("dive_dots", "mission_dots")]
 
 
 class RenderCheckerboardLatticeInput(BaseModel):
@@ -302,7 +305,7 @@ async def fit_checkerboard_laser_extrinsics(
     activity.logger.info(
         "checkerboard calibration dive_id=%s usable=%d of %d observations "
         "skipped=%s",
-        payload.dive_id,
+        payload.mission_id,
         len(points),
         len(payload.observations),
         skipped or "{}",
@@ -311,7 +314,7 @@ async def fit_checkerboard_laser_extrinsics(
         points,
         dots,
         payload.camera_matrix,
-        payload.dive_dots,
+        payload.mission_dots,
         too_few_type="InsufficientCheckerboardPoints",
         too_few_reason=lambda count, minimum: (
             f"insufficient checkerboard laser points ({count} < {minimum}) "
@@ -321,7 +324,7 @@ async def fit_checkerboard_laser_extrinsics(
     if result.observations_trimmed:
         activity.logger.info(
             "dive_id=%s: trimmed %d of %d checkerboard observations as outliers",
-            payload.dive_id,
+            payload.mission_id,
             result.observations_trimmed,
             result.observation_count,
         )

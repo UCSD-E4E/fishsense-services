@@ -33,7 +33,7 @@ from fishsense_services_orchestrator.species.activities import SpeciesActivities
 from ._species import TENANT, FakeSpeciesCatalog, FakeStore
 
 REEF = uuid.uuid4()
-DIVE_7 = uuid.UUID(int=7)
+MISSION_7 = uuid.UUID(int=7)
 H_SLATE, V_SLATE_2, BOARD = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
 
 
@@ -86,9 +86,9 @@ class FakeSyncCatalog:
     async def apply_species_sync(self, tenant_id, ls_task_id, sync):
         if ls_task_id not in self.labels:
             return None
-        image, dive = self.labels[ls_task_id]
+        image, mission = self.labels[ls_task_id]
         self.applied.append((tenant_id, ls_task_id, sync))
-        return SyncedLabel(uuid.UUID(int=image), dive)
+        return SyncedLabel(uuid.UUID(int=image), mission)
 
 
 def _species_catalog():
@@ -142,7 +142,7 @@ async def test_unmapped_annotator_does_not_crash_sync():
     """A task annotated by someone v2 doesn't know still syncs; the labeler id
     is recorded as Label Studio gives it (v2 keeps Label Studio ids)."""
     sync_catalog, _ = await _sync(
-        [_task(1, annotators=[999])], labels={1: (11, DIVE_7)}
+        [_task(1, annotators=[999])], labels={1: (11, MISSION_7)}
     )
 
     ((_, _, sync),) = sync_catalog.applied
@@ -160,7 +160,7 @@ async def test_writes_parsed_fields_when_annotation_present():
         ]
     }
     sync_catalog, _ = await _sync(
-        [_task(101, annotations=[annotation])], labels={101: (42, DIVE_7)}
+        [_task(101, annotations=[annotation])], labels={101: (42, MISSION_7)}
     )
 
     ((_, task_id, sync),) = sync_catalog.applied
@@ -172,7 +172,7 @@ async def test_writes_parsed_fields_when_annotation_present():
 # ----------------------- slate identification -------------------------
 
 
-async def test_sync_sets_dive_slate_from_slate_choice():
+async def test_sync_sets_mission_slate_from_slate_choice():
     task = _task(
         101,
         annotations=[
@@ -182,20 +182,20 @@ async def test_sync_sets_dive_slate_from_slate_choice():
         updated_at="2026-05-02T10:00:00Z",
     )
 
-    _, catalog = await _sync([task], labels={101: (42, DIVE_7)})
+    _, catalog = await _sync([task], labels={101: (42, MISSION_7)})
 
     # V-Slate 2 -> its template, image 42 -> dive 7.
-    assert catalog.links == [("slate", DIVE_7, V_SLATE_2)]
+    assert catalog.links == [("slate", MISSION_7, V_SLATE_2)]
 
 
-async def test_sync_does_not_touch_dive_slate_without_a_slate_choice():
+async def test_sync_does_not_touch_mission_slate_without_a_slate_choice():
     task = _task(
         101,
         annotations=[_species_annotation(["Fish", "Hogfish"])],
         is_labeled=True,
     )
 
-    _, catalog = await _sync([task], labels={101: (42, DIVE_7)})
+    _, catalog = await _sync([task], labels={101: (42, MISSION_7)})
 
     assert catalog.links == []
 
@@ -206,7 +206,7 @@ async def test_sync_ignores_incomplete_slate_choice():
         101, annotations=[_species_annotation(["Slate", "V-Slate 2"])], is_labeled=False
     )
 
-    _, catalog = await _sync([task], labels={101: (42, DIVE_7)})
+    _, catalog = await _sync([task], labels={101: (42, MISSION_7)})
 
     assert catalog.links == []
 
@@ -226,14 +226,14 @@ async def test_sync_most_recent_completed_slate_choice_wins():
     )
 
     _, catalog = await _sync(
-        [t_old, t_new], labels={101: (41, DIVE_7), 102: (42, DIVE_7)}  # same dive
+        [t_old, t_new], labels={101: (41, MISSION_7), 102: (42, MISSION_7)}  # same dive
     )
 
     # H-Slate is the most-recent completed choice for dive 7.
-    assert catalog.links == [("slate", DIVE_7, H_SLATE)]
+    assert catalog.links == [("slate", MISSION_7, H_SLATE)]
 
 
-async def test_a_label_filed_under_no_dive_votes_for_nothing():
+async def test_a_label_filed_under_no_mission_votes_for_nothing():
     """v1 looked the image's dive up and skipped a vote with none."""
     task = _task(
         101, annotations=[_species_annotation(["Slate", "V-Slate 2"])], is_labeled=True
@@ -247,7 +247,7 @@ async def test_a_label_filed_under_no_dive_votes_for_nothing():
 # --- the "slate not in list" sentinel --------------------------------------
 
 
-async def test_sync_notes_the_dive_when_the_slate_is_not_in_the_list():
+async def test_sync_notes_the_mission_when_the_slate_is_not_in_the_list():
     task = _task(
         101,
         annotations=[
@@ -259,31 +259,31 @@ async def test_sync_notes_the_dive_when_the_slate_is_not_in_the_list():
         updated_at="2026-08-27T10:00:00Z",
     )
 
-    _, catalog = await _sync([task], labels={101: (42, DIVE_7)})
+    _, catalog = await _sync([task], labels={101: (42, MISSION_7)})
 
     # No slate assigned...
     assert catalog.links == []
     # ...and the reason recorded on the dive.
-    assert taxonomy.SLATE_NOT_IN_LIST_LEAF.lower() in catalog.notes[DIVE_7].lower()
+    assert taxonomy.SLATE_NOT_IN_LIST_LEAF.lower() in catalog.notes[MISSION_7].lower()
 
 
 async def test_sync_does_not_clobber_an_existing_note():
     """`notes` is an operator field; an hourly sync must not overwrite it.
     (The catalog writes only an empty note: test_species_store.py.)"""
     catalog = _species_catalog()
-    catalog.notes[DIVE_7] = "operator: re-shoot scheduled"
+    catalog.notes[MISSION_7] = "operator: re-shoot scheduled"
     task = _task(
         101,
         annotations=[_species_annotation(["Slate", taxonomy.SLATE_NOT_IN_LIST_LEAF])],
         is_labeled=True,
     )
 
-    await _sync([task], labels={101: (42, DIVE_7)}, species_catalog=catalog)
+    await _sync([task], labels={101: (42, MISSION_7)}, species_catalog=catalog)
 
-    assert catalog.notes[DIVE_7] == "operator: re-shoot scheduled"
+    assert catalog.notes[MISSION_7] == "operator: re-shoot scheduled"
 
 
-async def test_a_dive_identified_on_another_frame_is_not_noted():
+async def test_a_mission_identified_on_another_frame_is_not_noted():
     """A dive that got a real slate on some *other* frame is identified; only
     the ones left with no answer at all are noted."""
     unsure = _task(
@@ -296,11 +296,11 @@ async def test_a_dive_identified_on_another_frame_is_not_noted():
     )
 
     _, catalog = await _sync(
-        [unsure, sure], labels={101: (41, DIVE_7), 102: (42, DIVE_7)}
+        [unsure, sure], labels={101: (41, MISSION_7), 102: (42, MISSION_7)}
     )
 
-    assert catalog.links == [("slate", DIVE_7, H_SLATE)]
-    assert DIVE_7 not in catalog.notes
+    assert catalog.links == [("slate", MISSION_7, H_SLATE)]
+    assert MISSION_7 not in catalog.notes
 
 
 # --------------- the calibration-target pass (checkerboard) ---------------
@@ -318,10 +318,10 @@ async def test_sync_links_the_board_on_a_frame_also_marked_laser_on_slate():
         is_labeled=True,
     )
 
-    _, catalog = await _sync([task], labels={101: (42, DIVE_7)})
+    _, catalog = await _sync([task], labels={101: (42, MISSION_7)})
 
     # And no slate template was invented from the marker.
-    assert catalog.links == [("target", DIVE_7, BOARD)]
+    assert catalog.links == [("target", MISSION_7, BOARD)]
 
 
 async def test_sync_sets_calibration_target_from_the_board_choice():
@@ -332,10 +332,10 @@ async def test_sync_sets_calibration_target_from_the_board_choice():
         updated_at="2026-05-02T10:00:00Z",
     )
 
-    _, catalog = await _sync([task], labels={101: (42, DIVE_7)})
+    _, catalog = await _sync([task], labels={101: (42, MISSION_7)})
 
     # E4E Checkerboard -> its current target row, image 42 -> dive 7.
-    assert catalog.links == [("target", DIVE_7, BOARD)]
+    assert catalog.links == [("target", MISSION_7, BOARD)]
 
 
 async def test_sync_does_not_touch_the_link_without_a_board_choice():
@@ -343,7 +343,7 @@ async def test_sync_does_not_touch_the_link_without_a_board_choice():
         101, annotations=[_species_annotation(["Fish", "Hogfish"])], is_labeled=True
     )
 
-    _, catalog = await _sync([task], labels={101: (42, DIVE_7)})
+    _, catalog = await _sync([task], labels={101: (42, MISSION_7)})
 
     assert catalog.links == []
 
@@ -352,7 +352,7 @@ async def test_sync_ignores_an_incomplete_board_choice():
     """Only completed annotations vote — a labeler mid-task has not decided."""
     task = _task(101, annotations=[_checkerboard_annotation()], is_labeled=False)
 
-    _, catalog = await _sync([task], labels={101: (42, DIVE_7)})
+    _, catalog = await _sync([task], labels={101: (42, MISSION_7)})
 
     assert catalog.links == []
 
@@ -365,10 +365,10 @@ async def test_the_slate_pass_and_the_target_pass_are_independent():
         is_labeled=True,
     )
 
-    _, catalog = await _sync([task], labels={101: (42, DIVE_7)})
+    _, catalog = await _sync([task], labels={101: (42, MISSION_7)})
 
     assert sorted(catalog.links) == sorted(
-        [("slate", DIVE_7, V_SLATE_2), ("target", DIVE_7, BOARD)]
+        [("slate", MISSION_7, V_SLATE_2), ("target", MISSION_7, BOARD)]
     )
 
 
@@ -382,6 +382,6 @@ async def test_nothing_is_read_for_the_links_when_nothing_completed():
             Counting.reads += 1
             return {}
 
-    await _sync([_task(1)], labels={1: (1, DIVE_7)}, species_catalog=Counting())
+    await _sync([_task(1)], labels={1: (1, MISSION_7)}, species_catalog=Counting())
 
     assert Counting.reads == 0

@@ -30,7 +30,7 @@ import numpy as np
 import pytest
 import rawpy
 from botocore.exceptions import ClientError
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
 from temporalio.worker import Worker
@@ -318,11 +318,11 @@ async def test_the_workflow_fans_out_one_activity_per_frame():
         for _ in range(3)
     ]
     payload = PredictAutomaticFramesInput(
-        tenant_id=TENANT, dive_id=uuid.uuid4(), camera_matrix=K,
+        tenant_id=TENANT, mission_id=uuid.uuid4(), camera_matrix=K,
         distortion_coefficients=[0.0] * 5, frames=frames,
     )  # fmt: skip
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(env.client, task_queue="t-auto", activities=[stub],
                           workflows=[PredictAutomaticFramesWorkflow]):  # fmt: skip
@@ -364,11 +364,11 @@ async def test_a_frame_that_keeps_failing_does_not_lose_the_others():
         for c in (good[0], bad, good[1])
     ]
     payload = PredictAutomaticFramesInput(
-        tenant_id=TENANT, dive_id=uuid.uuid4(), camera_matrix=K,
+        tenant_id=TENANT, mission_id=uuid.uuid4(), camera_matrix=K,
         distortion_coefficients=[0.0] * 5, frames=frames,
     )  # fmt: skip
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(env.client, task_queue="t-auto", activities=[stub],
                           workflows=[PredictAutomaticFramesWorkflow]):  # fmt: skip
@@ -395,13 +395,13 @@ async def test_no_gpu_fails_the_whole_run_with_its_cause():
         raise ApplicationError("no GPU", type="NoGpuForSam3", non_retryable=True)
 
     payload = PredictAutomaticFramesInput(
-        tenant_id=TENANT, dive_id=uuid.uuid4(), camera_matrix=K,
+        tenant_id=TENANT, mission_id=uuid.uuid4(), camera_matrix=K,
         distortion_coefficients=[0.0] * 5,
         frames=[AutomaticFrame(capture_id=uuid.uuid4(), raw=ObjectRef(bucket="s", key="r"),
                                jpeg=_ref("preprocess_headtail_jpeg"))],
     )  # fmt: skip
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(env.client, task_queue="t-auto", activities=[stub],
                           workflows=[PredictAutomaticFramesWorkflow]):  # fmt: skip

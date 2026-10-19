@@ -50,8 +50,8 @@ class Observation:
     captured_at: datetime
     device_kind: str | None
     device_name: str | None
-    dive_number: int | None
-    dive_name: str | None
+    mission_number: int | None
+    mission_name: str | None
     scientific_name: str | None
     common_name: str | None
     fish_model: str | None
@@ -105,7 +105,7 @@ class ObservationDetail:
 
 
 _COLUMNS = """o.capture_id, o.fish_id, o.method, o.length_m, o.captured_at,
-    o.device_kind, o.device_name, o.dive_number, o.dive_name,
+    o.device_kind, o.device_name, o.mission_number, o.mission_name,
     o.scientific_name, o.common_name, o.fish_model, o.known_length_m,
     o.latitude, o.longitude, o.place_name, pn.place_name AS derived_place_name,
     o.client_capture_uuid, o.photo_key"""
@@ -257,8 +257,8 @@ def _observation(row) -> Observation:
         captured_at=row.captured_at,
         device_kind=row.device_kind,
         device_name=row.device_name,
-        dive_number=row.dive_number,
-        dive_name=row.dive_name,
+        mission_number=row.mission_number,
+        mission_name=row.mission_name,
         scientific_name=row.scientific_name,
         common_name=row.common_name,
         fish_model=row.fish_model,

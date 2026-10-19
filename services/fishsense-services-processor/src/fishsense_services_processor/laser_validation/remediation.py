@@ -5,13 +5,13 @@ workflow-worker/src/fishsense_data_processing_workflow_worker/
 laser_label_validation/remediation.py. Pure: given a dive's labels
 (superseded included) and its calibration frames, say which superseded labels
 to revive. The dry run, the apply step's safety check and the tests all go
-through `plan_dive`, so there is one definition of "what remediation would
+through `plan_mission`, so there is one definition of "what remediation would
 do".
 
-The judgement is `judge_dive` -- the validator's own -- so a revived label is
+The judgement is `judge_mission` -- the validator's own -- so a revived label is
 exactly one the next hourly validator run keeps.
 
-v2 change: the plan is the contract's `DivePlan`, and names the dive and its
+v2 change: the plan is the contract's `MissionPlan`, and names the dive and its
 labels by `number` (v1's ids for a migrated row).
 """
 
@@ -22,32 +22,32 @@ from dataclasses import asdict
 from typing import Iterable
 
 from fishsense_services_contracts.laser import (
-    DivePlan,
+    MissionPlan,
     LaserLabelRow,
     revival_digest,
 )
-from fishsense_services_processor.laser_validation.judgement import judge_dive
+from fishsense_services_processor.laser_validation.judgement import judge_mission
 
-__all__ = ["EXCLUDED", "plan_digest", "plan_dive"]
+__all__ = ["EXCLUDED", "plan_digest", "plan_mission"]
 
 EXCLUDED = "excluded"
 
 
-def plan_dive(  # pylint: disable=too-many-arguments
-    dive_id: int,
+def plan_mission(  # pylint: disable=too-many-arguments
+    mission_id: int,
     labels: Iterable[LaserLabelRow],
     calibration_image_ids: set,
     *,
     excluded_label_ids: set | None = None,
-    dive_excluded: bool = False,
-) -> DivePlan:
+    mission_excluded: bool = False,
+) -> MissionPlan:
     """What remediation would do to one dive (by number)."""
-    judgement = judge_dive(list(labels), calibration_image_ids)
+    judgement = judge_mission(list(labels), calibration_image_ids)
     positives = judgement.positives
     superseded = [label for label in positives if label.superseded]
-    plan = DivePlan(
-        dive_id=dive_id,
-        status=EXCLUDED if dive_excluded else judgement.status,
+    plan = MissionPlan(
+        mission_id=mission_id,
+        status=EXCLUDED if mission_excluded else judgement.status,
         positives=len(positives),
         superseded_now=len(superseded),
         superseded_after=len(superseded),
@@ -57,7 +57,7 @@ def plan_dive(  # pylint: disable=too-many-arguments
             key: float(value) if isinstance(value, float) else value
             for key, value in asdict(judgement.reflection).items()
         }
-    if dive_excluded:
+    if mission_excluded:
         return plan
     if not judgement.judged:
         plan.unjudged_superseded = len(superseded)
@@ -91,6 +91,6 @@ def plan_dive(  # pylint: disable=too-many-arguments
     return plan
 
 
-def plan_digest(plans: Iterable[DivePlan]) -> str:
+def plan_digest(plans: Iterable[MissionPlan]) -> str:
     """sha256 over exactly the revivals, independent of dive order."""
-    return revival_digest((plan.dive_id, plan.revive_ids) for plan in plans)
+    return revival_digest((plan.mission_id, plan.revive_ids) for plan in plans)
