@@ -81,8 +81,9 @@ class IngestMissionRequest(BaseModel):
 
     #: The camera port, when the operator knows it; recorded as theirs
     #: (``operator``, with ``port_note``). A device labelled with the ``D``
-    #: suffix (``FSL-10D``, on the path or in every frame's Artist) is the
-    #: corrective optic without being told, and a statement contradicting it
+    #: suffix (``FSL-10D``) in the folder path is the corrective optic
+    #: without being told -- file names only, never the EXIF Artist (the
+    #: owner, 2026-10-18) -- and a statement contradicting it
     #: fails preflight. Otherwise the port is ``unknown`` -- a missing ``D``
     #: is not evidence of a flat port (the owner's rules, 2026-10-16) -- and
     #: the stages that measure refuse it (PLAN.md §4.9).

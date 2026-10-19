@@ -2,10 +2,11 @@
 
 The owner's rules (2026-10-16): a device labelled with the ``D`` suffix is the
 corrective optic, and nothing else is known -- a missing ``D`` is not evidence
-of a flat port. So preflight takes a ``D`` from the folder path (e4edm's
-``ED-00/FSL-10D/...``) or from every frame's EXIF Artist, records an
-operator's statement as theirs, refuses a statement that contradicts a ``D``,
-and warns when the port stays unknown. Purpose is stored only when stated;
+of a flat port. Only file names are trusted for the ``D`` (the owner,
+2026-10-18): preflight takes it from the folder path (e4edm's
+``ED-00/FSL-10D/...``), never from the EXIF Artist, which is free text typed
+into the camera. It records an operator's statement as theirs, refuses a
+statement that contradicts a ``D``, and warns when the port stays unknown. Purpose is stored only when stated;
 otherwise preflight says what the name suggests.
 """
 
@@ -60,14 +61,16 @@ async def test_a_d_on_the_path_is_the_corrective_optic():
     assert "FSL-07D" in preflight.resolved_port_note
 
 
-async def test_a_d_in_every_artist_is_the_corrective_optic_and_names_the_device():
+async def test_a_d_in_the_artist_says_nothing_about_the_port():
+    """The Artist is free text typed into the camera, not a file name: even
+    in every frame, a D there is not evidence (the owner, 2026-10-18)."""
     preflight = await _run(_request(), _listing(), headers=_artist("FSL-07D"))
 
     assert (preflight.resolved_port, preflight.resolved_port_source) == (
-        "corrective_optic",
-        "device_suffix",
+        "unknown",
+        None,
     )
-    # FSL-07D is the body named FSL-07: the suffix is the port, not a mismatch.
+    # FSL-07D is the body named FSL-07: still no mismatch to warn about.
     assert not any("disagrees" in w for w in preflight.warnings)
 
 
@@ -133,29 +136,6 @@ async def test_a_stated_purpose_is_kept():
 
     assert preflight.resolved_purpose == "known_length"
     assert not any("purpose" in w for w in preflight.warnings)
-
-
-async def test_one_tagged_frame_is_not_every_frame():
-    """A D in one frame's Artist and none in the rest is partial evidence; a
-    port from the owner's rule cannot be changed afterwards, so it must not be
-    recorded from part of the folder."""
-    tagged = build_orf(
-        date_time="2024:08:21 08:56:51", serial_number=SERIAL, artist="FSL-07D"
-    )
-    untagged = build_orf(
-        date_time="2024:08:21 08:56:52", serial_number=SERIAL, artist=None
-    )
-
-    preflight = await _run(
-        _request(),
-        _listing(),
-        headers={"PA010001.ORF": tagged, "PA010002.ORF": untagged},
-    )
-
-    assert (preflight.resolved_port, preflight.resolved_port_source) == (
-        "unknown",
-        None,
-    )
 
 
 async def test_a_device_named_with_its_d_matches_its_own_artist():

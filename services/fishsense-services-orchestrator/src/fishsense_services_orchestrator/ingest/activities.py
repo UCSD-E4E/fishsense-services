@@ -29,7 +29,6 @@ from fishsense_services_api.mission_facts import (
     RULED,
     device_label_in_path,
     infer_purpose,
-    port_from_device_label,
     strip_port_suffix,
 )
 
@@ -318,11 +317,7 @@ class IngestActivities:
             )
 
         port, port_source, port_note = _resolve_port(
-            request,
-            listing.folder_path,
-            [image.artist for image in images],
-            errors,
-            warnings,
+            request, listing.folder_path, errors, warnings
         )
         if tenant_id is not None and port != "unknown":
             await _check_ruled_port(
@@ -707,25 +702,17 @@ def _check_calibration_intent(request: IngestMissionRequest) -> List[str]:
 def _resolve_port(
     request: IngestMissionRequest,
     folder_path: str,
-    frame_artists: list[str | None],
     errors: list[str],
     warnings: list[str],
 ) -> tuple[str, str | None, str | None]:
     """(port, source, note): a ``D`` label, else the operator's statement,
     else ``unknown`` -- the owner's rules, 2026-10-16 (PLAN.md §4.9).
 
-    ``frame_artists`` has one entry per frame read, blank or not: a D in some
-    frames' Artist and none in the others is partial evidence, and a port by
-    the owner's rule cannot be changed afterwards."""
+    Only file names are trusted for the ``D`` (the owner, 2026-10-18): the
+    folder path, never the EXIF Artist, which is free text typed into the
+    camera and is only a cross-check on the device's name."""
     label = device_label_in_path(folder_path)
     where = "on the folder path"
-    if (
-        label is None
-        and frame_artists
-        and all(port_from_device_label(a) for a in frame_artists)
-    ):
-        label = sorted(a for a in frame_artists if a)[0]
-        where = "in every frame's EXIF Artist"
     if label is not None:
         if request.port not in (None, "corrective_optic"):
             errors.append(

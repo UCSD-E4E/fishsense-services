@@ -1300,8 +1300,9 @@ the UI as it lands (decided 2026-10-17)*
    - ***2b-1, built 2026-10-18:*** migration 0047 adds `deployments` and, on
      each mission, `purpose`, `port` + `port_source` + `port_note`, place, and
      raw e4edm metadata. The port defaults to `unknown`, and the database
-     refuses a known port without a source. Ingest takes a `D` label from the
-     path or the frames' Artist, or an operator's `port`. The API and web show
+     refuses a known port without a source. Ingest takes a `D` label only from
+     file names (the folder path; never the EXIF Artist, which is typed into
+     the camera: the owner, 2026-10-18), or an operator's `port`. The API and web show
      missions and deployments, and admins can state a port only where the
      owner's rules haven't already set it. `backfill-mission-facts` is a dry
      run by default, and applies only the fingerprint of a reviewed plan.
