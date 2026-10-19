@@ -32,6 +32,13 @@ dot), and a kept mask whose SAM score can't be named under the dot is
 ``laser_off_all_fish``, not an unscored prediction. No version-1 row was ever
 written in production.
 
+`AUTOMATIC_CALIBRATION_VERSION` 2 (2026-10-19): slate dots more than 10 px off
+the dive line are not fitted (processor `automatic_calibration.activities`),
+and a frame whose size disagrees with its place on the line is dropped
+(`size_constancy.trim_frames`). Version 1 fitted both: a reflection's run of
+off-line dots moved session 77's vanishing point by 1,600 px, and one
+wrong-range dot moved mission 80's by 360 px.
+
 Not in ``MODELS``: integration publishes schemas once for every slice.
 """
 
@@ -68,7 +75,7 @@ __all__ = [
 
 #: See the module docstring.
 AUTOMATIC_HEADTAIL_PREDICTOR_VERSION = 2
-AUTOMATIC_CALIBRATION_VERSION = "1"
+AUTOMATIC_CALIBRATION_VERSION = "2"
 AUTOMATIC_MEASUREMENT_VERSION = "1"
 
 #: Stage 14's single-depth fronto-parallel projection (processor

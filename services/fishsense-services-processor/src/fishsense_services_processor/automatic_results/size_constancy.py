@@ -37,7 +37,18 @@ What v2 changes, and only where it must:
   paper's ~1.5x), and an optimum pinned at the search bracket (unconstrained);
 * frames come with their dive line when one is known (cscw's `lines.psv`, the
   production dive line), else the line through the frames' own dots (cscw's
-  fallback). Oriented to negative y, cscw's FSL-mount convention.
+  fallback). Oriented to negative y, cscw's FSL-mount convention;
+* **a frame whose size disagrees with its place on the line is dropped**
+  (`trim_frames`, 2026-10-19), one at a time, worst first, refitting each
+  time, while one is more than `FRAME_RESIDUAL_MAX` off. A detector dot can
+  sit on the line at the wrong range -- mission 80 had one far down the line
+  on a slate as near as its nearest frames, and with it the vanishing point
+  was 360 px off (standard error 324 px), without it 11 px (0.9 px). The
+  pairs already have their own loop check (`solve_log_sizes`); this is the
+  same idea a level up. On cscw's own frames (human dots) it drops one, on
+  session 114, whose error against the known-size calibration goes from
+  0.129 to 0.048 deg: Table 3 becomes 10 of 10 within 0.05 deg, where cscw
+  had 9. A fit pinned at the bracket is refused before any trim.
 """
 
 from __future__ import annotations
@@ -50,6 +61,7 @@ import numpy as np
 
 __all__ = [
     "BOOTSTRAP_DRAWS",
+    "FRAME_RESIDUAL_MAX",
     "FrameFeatures",
     "LabelFreeFit",
     "LogSizes",
@@ -69,6 +81,7 @@ __all__ = [
     "pair_scale",
     "pair_scales",
     "solve_log_sizes",
+    "trim_frames",
 ]
 
 #: The laser's offset from the camera, metres: the fleet median of 31 stored
@@ -95,6 +108,11 @@ MIN_FRAMES = 8
 #: Apparent-size spread a fit needs: the paper's "at least about 1.5x in
 #: distance" (§4.3); sessions under 1.12x are unconstrained.
 MIN_SIZE_RATIO = 1.5
+#: The most a frame's log size may sit off the fitted ``log(t - t_v)`` (after
+#: the median offset): 5 % in size. Pairs carry ~1 % (register's floor); the
+#: paper's sessions' frames are under it but one on session 114; mission 80's
+#: bad frame was 0.92 (2026-10-19).
+FRAME_RESIDUAL_MAX = 0.05
 #: Bootstrap draws for the standard error (register / slate_unknown: 200).
 BOOTSTRAP_DRAWS = 200
 #: fit_tv's bracket: from 4000 px below to 5 px below the nearest dot.
@@ -303,6 +321,25 @@ def fit_vanishing_position(t: np.ndarray, s: np.ndarray) -> float:
     )
 
 
+def trim_frames(
+    t: np.ndarray, s: np.ndarray, max_residual: float = FRAME_RESIDUAL_MAX
+) -> np.ndarray:
+    """Indices of the frames kept: while the worst frame's
+    ``log s - log(t - t_v)`` (less the median) is beyond `max_residual`, drop
+    it and refit."""
+    t, s = np.asarray(t, float), np.asarray(s, float)
+    keep = np.arange(len(t))
+    while len(keep) > 2:
+        tv = fit_vanishing_position(t[keep], s[keep])
+        r = np.log(s[keep]) - np.log(t[keep] - tv)
+        r = np.abs(r - np.median(r))
+        worst = int(np.argmax(r))
+        if r[worst] <= max_residual:
+            break
+        keep = np.delete(keep, worst)
+    return keep
+
+
 def bootstrap_se(
     t: np.ndarray,
     s: np.ndarray,
@@ -387,8 +424,21 @@ def fit_label_free(
     seen["size_ratio"] = float(s.max() / s.min())
     if seen["size_ratio"] < min_size_ratio:
         return _refused("too_little_range_spread", **seen)
+    u = line_direction(line, dots[used])
+    t = dots[used] @ u
+    hi = t.min() - _BRACKET_GAP_PX
+    tv = fit_vanishing_position(t, s)
+    if tv > hi - _AT_BOUND_PX or tv < hi - _BRACKET_PX + _AT_BOUND_PX:
+        return _refused("unconstrained", **seen)
+    kept = trim_frames(t, s)
+    used, s = used[kept], s[kept]
+    seen.update(used=[int(i) for i in used], frames_used=len(used))
+    if len(used) < min_frames:
+        return _refused("too_few_frames", **seen)
+    seen["size_ratio"] = float(s.max() / s.min())
+    if seen["size_ratio"] < min_size_ratio:
+        return _refused("too_little_range_spread", **seen)
     xy = dots[used]
-    u = line_direction(line, xy)
     t = xy @ u
     tv = fit_vanishing_position(t, s)
     offset = float(np.median(xy @ np.array([-u[1], u[0]])))
