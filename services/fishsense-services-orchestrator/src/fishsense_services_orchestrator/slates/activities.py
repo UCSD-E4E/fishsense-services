@@ -65,16 +65,20 @@ class SlateCatalog(Protocol):
 
     async def member_tenants(self) -> list[uuid.UUID]: ...
 
-    async def next_dive_for_slate_preprocessing(
+    async def next_mission_for_slate_preprocessing(
         self, tenant_id: uuid.UUID
     ) -> SlatePreprocessCandidate | None: ...
 
     async def slate_preprocess_inputs(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> SlatePreprocessInputs: ...
 
     async def clear_slate_reprocess_flags(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, *, checksums: list[str] | None
+        self,
+        tenant_id: uuid.UUID,
+        mission_id: uuid.UUID,
+        *,
+        checksums: list[str] | None,
     ) -> int: ...
 
 
@@ -87,19 +91,21 @@ class SlateActivities:
         self._pdfs = pdfs
 
     @activity.defn(name="select_next_dive_for_slate_preprocessing")
-    async def select_next_dive_for_slate_preprocessing(
+    async def select_next_mission_for_slate_preprocessing(
         self,
     ) -> Optional[StagingTarget]:
         """The oldest dive in the stage-9 cohort, across tenants."""
         best: StagingTarget | None = None
         best_key = None
         for tenant_id in await self._catalog.member_tenants():
-            candidate = await self._catalog.next_dive_for_slate_preprocessing(tenant_id)
+            candidate = await self._catalog.next_mission_for_slate_preprocessing(
+                tenant_id
+            )
             if candidate is None:
                 continue
-            key = (candidate.created_at, str(candidate.dive_id))
+            key = (candidate.created_at, str(candidate.mission_id))
             if best_key is None or key < best_key:
-                best, best_key = StagingTarget(tenant_id, candidate.dive_id), key
+                best, best_key = StagingTarget(tenant_id, candidate.mission_id), key
         if best is None:
             activity.logger.info("no high-priority dives needing slate preprocessing")
         else:
@@ -107,7 +113,7 @@ class SlateActivities:
                 "next high-priority dive needing slate preprocessing: "
                 "tenant=%s dive=%s",
                 best.tenant_id,
-                best.dive_id,
+                best.mission_id,
             )
         return best
 
@@ -117,11 +123,11 @@ class SlateActivities:
     ) -> SlatePreprocessPlan:
         try:
             inputs = await self._catalog.slate_preprocess_inputs(
-                target.tenant_id, target.dive_id
+                target.tenant_id, target.mission_id
             )
         except SlateInputsUnavailable as exc:
             raise ApplicationError(
-                f"cannot resolve stage 9 for dive {target.dive_id}: {exc}",
+                f"cannot resolve stage 9 for dive {target.mission_id}: {exc}",
                 type="SlateInputsUnavailable",
                 non_retryable=True,
             ) from exc
@@ -145,13 +151,13 @@ class SlateActivities:
         template = inputs.slate_template
         activity.logger.info(
             "resolved slate preprocess inputs dive=%s slate=%s images=%d",
-            target.dive_id,
+            target.mission_id,
             template.id,
             len(images),
         )
         return SlatePreprocessPlan(
             payload=PreprocessSlateImagesInput(
-                dive_id=target.dive_id,
+                mission_id=target.mission_id,
                 slate_template_id=template.id,
                 slate_pdf=layout.slate_pdf(target.tenant_id, template.id),
                 slate_dpi=template.dpi,
@@ -177,11 +183,11 @@ class SlateActivities:
     async def clear_slate_reprocess_flags(self, payload: ClearSlateFlagsInput) -> int:
         """Lower the dive's stage-9 redraw flags, scoped as the parent says."""
         cleared = await self._catalog.clear_slate_reprocess_flags(
-            payload.tenant_id, payload.dive_id, checksums=payload.checksums
+            payload.tenant_id, payload.mission_id, checksums=payload.checksums
         )
         activity.logger.info(
             "cleared slate reprocess flags dive=%s rows=%d scope=%s",
-            payload.dive_id,
+            payload.mission_id,
             cleared,
             "whole dive" if payload.checksums is None else len(payload.checksums),
         )

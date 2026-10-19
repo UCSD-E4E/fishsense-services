@@ -16,11 +16,11 @@ from __future__ import annotations
 from datetime import timedelta
 
 from temporalio.client import ScheduleOverlapPolicy
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 
 from fishsense_services_orchestrator.clustering.workflow import (
-    ClusterDiveFramesParentWorkflow,
+    ClusterMissionFramesParentWorkflow,
 )
 from fishsense_services_orchestrator.schedules import SCHEDULES, ensure_schedules
 
@@ -33,7 +33,7 @@ async def _describe(client, schedule_id):
 
 async def test_clustering_is_scheduled_hourly_at_5_and_skips_overlap():
     async with await WorkflowEnvironment.start_local(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         await ensure_schedules(env.client, task_queue=QUEUE)
         schedule = (await _describe(env.client, "cluster-dive-frames")).schedule
@@ -49,7 +49,7 @@ async def test_clustering_is_scheduled_hourly_at_5_and_skips_overlap():
 
 async def test_an_existing_schedule_is_left_as_it_is():
     async with await WorkflowEnvironment.start_local(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         await ensure_schedules(env.client, task_queue="the-original-queue")
         await ensure_schedules(env.client, task_queue="a-typo")
@@ -62,7 +62,7 @@ def test_every_scheduled_workflow_is_one_the_worker_serves():
     from fishsense_services_orchestrator.worker import WORKFLOWS
 
     assert {s.workflow for s in SCHEDULES} <= set(WORKFLOWS)
-    assert ClusterDiveFramesParentWorkflow in WORKFLOWS
+    assert ClusterMissionFramesParentWorkflow in WORKFLOWS
 
 
 async def test_the_laser_label_sync_is_scheduled_hourly_and_may_overlap():
@@ -70,7 +70,7 @@ async def test_the_laser_label_sync_is_scheduled_hourly_and_may_overlap():
     backlog project pages every task), and overlap allowed -- the cursor only
     moves forward, so two runs can't rewind each other."""
     async with await WorkflowEnvironment.start_local(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         await ensure_schedules(env.client, task_queue=QUEUE)
         schedule = (
@@ -90,7 +90,7 @@ async def test_the_processor_sweeper_is_scheduled_hourly_at_55_and_skips_overlap
     have fired, so it doesn't race one still standing a processor up; a
     10-minute run timeout; and an overlapping firing is skipped."""
     async with await WorkflowEnvironment.start_local(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         await ensure_schedules(env.client, task_queue=QUEUE)
         schedule = (await _describe(env.client, "tear-down-idle-processors")).schedule

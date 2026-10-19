@@ -122,7 +122,7 @@ def test_the_models_are_contract():
 def test_the_workflow_input_round_trips():
     payload = DetectSlateImagesInput(
         tenant_id=uuid4(),
-        dive_id=uuid4(),
+        mission_id=uuid4(),
         camera_matrix=K,
         distortion_coefficients=D,
         images=[DetectSlateImage(capture_id=uuid4(), raw=RAW)],

@@ -3,32 +3,32 @@
 // Ported from fishsense-lite@77e8f8e5 apps/fishsense-lite-web/app/portal/calibration/calibration-links.tsx.
 
 import { useMemo, useState, useTransition } from "react";
-import type { Dive } from "@/lib/dives";
+import type { Mission } from "@/lib/missions";
 import {
   clearCalibrationSourceAction,
   setCalibrationSourceAction,
 } from "./actions";
 
-function diveLabel(dive: Dive): string {
-  return `${dive.name?.trim() || `Dive ${dive.number}`} #${dive.number}`;
+function missionLabel(mission: Mission): string {
+  return `${mission.name?.trim() || `Mission ${mission.number}`} #${mission.number}`;
 }
 
-function diveDate(dive: Dive): string {
-  if (!dive.dived_at) return "—";
-  const date = new Date(dive.dived_at);
+function missionDate(mission: Mission): string {
+  if (!mission.started_at) return "—";
+  const date = new Date(mission.started_at);
   return Number.isNaN(date.getTime())
     ? "—"
     : date.toISOString().slice(0, 10);
 }
 
 type RowProps = {
-  dive: Dive;
-  sources: Dive[];
+  mission: Mission;
+  sources: Mission[];
   sourceLabel: (id: number) => string;
 };
 
-function CalibrationRow({ dive, sources, sourceLabel }: RowProps) {
-  const persisted = dive.calibration_source_number;
+function CalibrationRow({ mission, sources, sourceLabel }: RowProps) {
+  const persisted = mission.calibration_source_number;
   const [selected, setSelected] = useState<number | "">(persisted ?? "");
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +40,7 @@ function CalibrationRow({ dive, sources, sourceLabel }: RowProps) {
     if (selected === "") return;
     const sourceId = selected;
     startTransition(async () => {
-      const result = await setCalibrationSourceAction(dive.number, sourceId);
+      const result = await setCalibrationSourceAction(mission.number, sourceId);
       if (!result.ok) setError(result.error);
     });
   }
@@ -49,7 +49,7 @@ function CalibrationRow({ dive, sources, sourceLabel }: RowProps) {
     setError(null);
     setSelected("");
     startTransition(async () => {
-      const result = await clearCalibrationSourceAction(dive.number);
+      const result = await clearCalibrationSourceAction(mission.number);
       if (!result.ok) setError(result.error);
     });
   }
@@ -57,11 +57,11 @@ function CalibrationRow({ dive, sources, sourceLabel }: RowProps) {
   return (
     <tr className="border-t border-slate-200 dark:border-slate-800">
       <td className="py-2 pr-4 align-top">
-        <div className="font-medium">{diveLabel(dive)}</div>
-        <div className="text-xs text-slate-500">{diveDate(dive)}</div>
+        <div className="font-medium">{missionLabel(mission)}</div>
+        <div className="text-xs text-slate-500">{missionDate(mission)}</div>
       </td>
       <td className="py-2 pr-4 align-top text-center">
-        {dive.slate_template_number != null ? (
+        {mission.slate_template_number != null ? (
           <span title="Has its own slate — self-calibrates">✓</span>
         ) : (
           <span className="text-slate-400">—</span>
@@ -78,7 +78,7 @@ function CalibrationRow({ dive, sources, sourceLabel }: RowProps) {
         >
           <option value="">— none (self-calibrate) —</option>
           {sources
-            .filter((source) => source.number !== dive.number)
+            .filter((source) => source.number !== mission.number)
             .map((source) => (
               <option key={source.number} value={source.number}>
                 {sourceLabel(source.number)}
@@ -113,46 +113,46 @@ function CalibrationRow({ dive, sources, sourceLabel }: RowProps) {
   );
 }
 
-export function CalibrationLinks({ dives }: { dives: Dive[] }) {
+export function CalibrationLinks({ missions }: { missions: Mission[] }) {
   const [query, setQuery] = useState("");
   const [onlyNeedingLink, setOnlyNeedingLink] = useState(true);
 
-  // Sources are slate-bearing dives — the ones stage 13 can calibrate and so
+  // Sources are slate-bearing missions — the ones stage 13 can calibrate and so
   // the only ones worth borrowing from.
   const sources = useMemo(
     () =>
-      dives
-        .filter((dive) => dive.slate_template_number != null)
+      missions
+        .filter((mission) => mission.slate_template_number != null)
         .sort((a, b) => a.number - b.number),
-    [dives],
+    [missions],
   );
 
   const sourceLabelById = useMemo(() => {
     const map = new Map<number, string>();
-    for (const dive of dives) {
-      map.set(dive.number, `${diveLabel(dive)} — ${diveDate(dive)}`);
+    for (const mission of missions) {
+      map.set(mission.number, `${missionLabel(mission)} — ${missionDate(mission)}`);
     }
     return map;
-  }, [dives]);
+  }, [missions]);
 
   const rows = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return dives
-      .filter((dive) => {
-        if (onlyNeedingLink && dive.slate_template_number != null) return false;
+    return missions
+      .filter((mission) => {
+        if (onlyNeedingLink && mission.slate_template_number != null) return false;
         if (!needle) return true;
         return (
-          diveLabel(dive).toLowerCase().includes(needle) ||
-          String(dive.number).includes(needle)
+          missionLabel(mission).toLowerCase().includes(needle) ||
+          String(mission.number).includes(needle)
         );
       })
       .sort((a, b) => {
         // Newest first when we have dates; fall back to id.
-        const at = a.dived_at ? Date.parse(a.dived_at) : 0;
-        const bt = b.dived_at ? Date.parse(b.dived_at) : 0;
+        const at = a.started_at ? Date.parse(a.started_at) : 0;
+        const bt = b.started_at ? Date.parse(b.started_at) : 0;
         return bt - at || b.number - a.number;
       });
-  }, [dives, query, onlyNeedingLink]);
+  }, [missions, query, onlyNeedingLink]);
 
   return (
     <div>
@@ -161,7 +161,7 @@ export function CalibrationLinks({ dives }: { dives: Dive[] }) {
           type="search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search dives by name or id…"
+          placeholder="Search missions by name or id…"
           className="w-64 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm shadow-xs dark:border-slate-700 dark:bg-slate-900"
         />
         <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
@@ -170,17 +170,17 @@ export function CalibrationLinks({ dives }: { dives: Dive[] }) {
             checked={onlyNeedingLink}
             onChange={(event) => setOnlyNeedingLink(event.target.checked)}
           />
-          Only dives without their own slate
+          Only missions without their own slate
         </label>
         <span className="text-xs text-slate-500">
-          {rows.length} dive{rows.length === 1 ? "" : "s"} · {sources.length} slate
-          dive{sources.length === 1 ? "" : "s"} available as sources
+          {rows.length} mission{rows.length === 1 ? "" : "s"} · {sources.length} slate
+          mission{sources.length === 1 ? "" : "s"} available as sources
         </span>
       </div>
 
       {sources.length === 0 ? (
         <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
-          No slate-bearing dives found to borrow calibration from.
+          No slate-bearing missions found to borrow calibration from.
         </p>
       ) : null}
 
@@ -188,25 +188,25 @@ export function CalibrationLinks({ dives }: { dives: Dive[] }) {
         <table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
-              <th className="pb-2 pr-4 font-medium">Dive</th>
+              <th className="pb-2 pr-4 font-medium">Mission</th>
               <th className="pb-2 pr-4 text-center font-medium">Own slate</th>
               <th className="pb-2 pr-4 font-medium">Calibration source</th>
               <th className="pb-2 font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((dive) => (
+            {rows.map((mission) => (
               <CalibrationRow
-                key={dive.number}
-                dive={dive}
+                key={mission.number}
+                mission={mission}
                 sources={sources}
-                sourceLabel={(id) => sourceLabelById.get(id) ?? `Dive ${id}`}
+                sourceLabel={(id) => sourceLabelById.get(id) ?? `Mission ${id}`}
               />
             ))}
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={4} className="py-6 text-center text-slate-500">
-                  No dives match.
+                  No missions match.
                 </td>
               </tr>
             ) : null}

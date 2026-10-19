@@ -27,7 +27,7 @@ from fishsense_services_orchestrator.species.activities import SpeciesActivities
 from fishsense_services_orchestrator.species.contracts import SpeciesTarget
 
 from ._species import (
-    DIVE,
+    MISSION,
     TENANT,
     FakeSpeciesCatalog,
     FakeStore,
@@ -129,7 +129,7 @@ async def _run(grouping):
     catalog = FakeSpeciesCatalog(grouping=grouping)
     activities = SpeciesActivities(catalog=catalog, store=FakeStore())
     result = await ActivityEnvironment().run(
-        activities.update_dive_image_groups, SpeciesTarget(TENANT, DIVE)
+        activities.update_mission_image_groups, SpeciesTarget(TENANT, MISSION)
     )
     return result, catalog
 
@@ -168,8 +168,8 @@ async def test_activity_creates_one_cluster_per_group():
     assert result.skipped_already_grouped is False
     assert result.new_clusters_created == 2
     assert result.species_labels_seen == 4
-    ((dive, groups),) = catalog.persisted
-    assert dive == DIVE
+    ((mission, groups),) = catalog.persisted
+    assert mission == MISSION
     assert _ids(groups) == [[101, 102, 103], [104]]
 
 
@@ -246,7 +246,7 @@ def test_the_choice_among_several_real_rows_is_deterministic():
         assert chosen[capture(5)].number == 200
 
 
-def test_the_prod_dive_5_shape_yields_one_group_not_two():
+def test_the_prod_mission_5_shape_yields_one_group_not_two():
     """The regression this exists for, end to end through the real regrouper."""
     clusters = _clusters(
         [1393, 1394],
@@ -283,13 +283,13 @@ def test_the_prod_dive_5_shape_yields_one_group_not_two():
 # --- v2 --------------------------------------------------------------------------
 
 
-async def test_a_dive_grouped_since_the_read_is_reported_as_a_skip():
+async def test_a_mission_grouped_since_the_read_is_reported_as_a_skip():
     """The catalog re-checks under its lock and writes nothing when another
     run grouped the dive first; the activity says so rather than claiming
     the clusters it didn't write."""
 
     class Racing(FakeSpeciesCatalog):
-        async def persist_label_studio_clusters(self, tenant_id, dive_id, groups):
+        async def persist_label_studio_clusters(self, tenant_id, mission_id, groups):
             return None
 
     catalog = Racing(
@@ -300,8 +300,10 @@ async def test_a_dive_grouped_since_the_read_is_reported_as_a_skip():
         )
     )
     result = await ActivityEnvironment().run(
-        SpeciesActivities(catalog=catalog, store=FakeStore()).update_dive_image_groups,
-        SpeciesTarget(TENANT, DIVE),
+        SpeciesActivities(
+            catalog=catalog, store=FakeStore()
+        ).update_mission_image_groups,
+        SpeciesTarget(TENANT, MISSION),
     )
 
     assert result.skipped_already_grouped is True
@@ -317,7 +319,7 @@ async def test_a_refused_group_set_fails_without_retrying(refusal):
     regroups them into the same refused set, so retrying only burns attempts."""
 
     class Refusing(FakeSpeciesCatalog):
-        async def persist_label_studio_clusters(self, tenant_id, dive_id, groups):
+        async def persist_label_studio_clusters(self, tenant_id, mission_id, groups):
             raise refusal
 
     catalog = Refusing(
@@ -331,8 +333,8 @@ async def test_a_refused_group_set_fails_without_retrying(refusal):
         await ActivityEnvironment().run(
             SpeciesActivities(
                 catalog=catalog, store=FakeStore()
-            ).update_dive_image_groups,
-            SpeciesTarget(TENANT, DIVE),
+            ).update_mission_image_groups,
+            SpeciesTarget(TENANT, MISSION),
         )
 
     assert excinfo.value.non_retryable

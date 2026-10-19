@@ -20,7 +20,7 @@ from datetime import timedelta
 from typing import List
 
 from temporalio import activity, workflow
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -43,8 +43,8 @@ from fishsense_services_orchestrator.species_predict.workflow import (
 )
 
 TENANT = uuid.uuid4()
-DIVE = uuid.uuid4()
-TARGET = SpeciesPredictTarget(TENANT, DIVE)
+MISSION = uuid.uuid4()
+TARGET = SpeciesPredictTarget(TENANT, MISSION)
 QUEUE = "test-species-predict-parent"
 
 EVENTS: list[tuple] = []
@@ -54,7 +54,7 @@ CHILD_RESULTS: list[SpeciesPredictionResult] = []
 def _inputs(n=1):
     return PredictSpeciesImagesInput(
         tenant_id=TENANT,
-        dive_id=DIVE,
+        mission_id=MISSION,
         candidates=[SpeciesCandidate(choice="Fish, A (A a)", scientific_name="A a")],
         images=[
             PredictSpeciesImage(
@@ -122,7 +122,7 @@ def _stubs(*, mode="gpu", images=1, selected=TARGET):
 
     @activity.defn(name="backfill_species_predictions_for_dive")
     async def backfill(target: SpeciesPredictTarget) -> int:
-        EVENTS.append(("backfill", target.dive_id))
+        EVENTS.append(("backfill", target.mission_id))
         return 0
 
     return [select, resolve, wake, persist, backfill, _record, _child_results]
@@ -133,7 +133,7 @@ async def _run(child_results=(), before=None, **stubs):
     CHILD_RESULTS.clear()
     CHILD_RESULTS.extend(child_results)
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with (
             Worker(
@@ -173,9 +173,9 @@ async def test_persists_and_backfills_a_normal_run():
     assert await _run([_result()]) == TARGET
     assert EVENTS == [
         ("wake",),
-        ("child", f"predict-species-{DIVE}"),
+        ("child", f"predict-species-{MISSION}"),
         ("persist", ["predicted"]),
-        ("backfill", DIVE),
+        ("backfill", MISSION),
     ]
 
 
@@ -187,7 +187,7 @@ async def test_skips_are_never_persisted():
 async def test_an_all_skip_run_still_backfills():
     await _run([_result(SPECIES_STATUS_NO_UPGRADE_AVAILABLE)])
     assert "persist" not in _kinds()
-    assert ("backfill", DIVE) in EVENTS
+    assert ("backfill", MISSION) in EVENTS
 
 
 async def test_no_worker_available_means_no_child():
@@ -197,7 +197,7 @@ async def test_no_worker_available_means_no_child():
 
 async def test_the_cpu_fallback_serves_the_same_queue():
     assert await _run([_result()], mode="cpu_fallback") == TARGET
-    assert ("backfill", DIVE) in EVENTS
+    assert ("backfill", MISSION) in EVENTS
 
 
 async def test_no_images_needs_no_worker():
@@ -205,7 +205,7 @@ async def test_no_images_needs_no_worker():
     assert not EVENTS
 
 
-async def test_no_dive_is_none():
+async def test_no_mission_is_none():
     assert await _run(selected=None) is None
     assert not EVENTS
 
@@ -215,7 +215,7 @@ async def test_a_child_already_running_means_do_nothing_more():
         await client.start_workflow(
             "PredictSpeciesImagesWorkflow",
             _inputs(),
-            id=f"predict-species-{DIVE}",
+            id=f"predict-species-{MISSION}",
             task_queue="nobody-polls-this",
         )
 
@@ -234,7 +234,7 @@ def test_the_run_outlives_every_step_it_waits_on():
     )
 
 
-async def test_the_backfill_workflow_runs_the_dives_backfill():
+async def test_the_backfill_workflow_runs_the_missions_backfill():
     @activity.defn(name="backfill_species_predictions_for_dive")
     async def backfill(target: SpeciesPredictTarget) -> int:
         EVENTS.append(("backfill", target))
@@ -242,7 +242,7 @@ async def test_the_backfill_workflow_runs_the_dives_backfill():
 
     EVENTS.clear()
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,

@@ -68,7 +68,7 @@ async def measure_fish(payload: MeasureFishInput) -> MeasureFishResult:
         except ValueError as exc:
             raise ApplicationError(
                 f"laser calibration {payload.calibration.laser_calibration_id}"
-                f" of dive {payload.dive_id} is unusable: {exc}",
+                f" of dive {payload.mission_id} is unusable: {exc}",
                 type="UnusableLaserCalibration",
                 non_retryable=True,
             ) from exc
@@ -84,7 +84,7 @@ async def measure_fish(payload: MeasureFishInput) -> MeasureFishResult:
         if refusal is not None:
             activity.logger.warning(
                 "dive_id=%s capture_id=%s: length=%s; refusing it (%s)",
-                payload.dive_id,
+                payload.mission_id,
                 capture.capture_id,
                 length_m,
                 refusal,
@@ -104,12 +104,12 @@ async def measure_fish(payload: MeasureFishInput) -> MeasureFishResult:
 
     activity.logger.info(
         "dive_id=%s measured=%d refused=%d",
-        payload.dive_id,
+        payload.mission_id,
         sum(1 for length in lengths if length.refusal is None),
         sum(1 for length in lengths if length.refusal is not None),
     )
     return MeasureFishResult(
-        dive_id=payload.dive_id,
+        mission_id=payload.mission_id,
         algorithm=ALGORITHM,
         algorithm_version=ALGORITHM_VERSION,
         core_version=core_version(),

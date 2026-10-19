@@ -3,7 +3,7 @@
 Ported from fishsense-lite@77e8f8e5 services/fishsense-api-workflow-worker/src/
 fishsense_api_workflow_worker/activities/reprocess_scope.py
 (`ClearReprocessFlagsInput`) and update_dive_image_groups_activity.py
-(`UpdateDiveImageGroupsResult`). v2 change: the target is (tenant, dive), and
+(`UpdateMissionImageGroupsResult`). v2 change: the target is (tenant, dive), and
 the flag clear names captures rather than checksums (only a canonical capture
 is ever drawn, so they are the same frames). These never cross to the
 processor, so they are not part of the processing contract. A `SpeciesTarget`
@@ -15,15 +15,20 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Annotated
+from fishsense_services_contracts.renamed import renamed_from
 
-__all__ = ["ClearReprocessFlagsInput", "SpeciesTarget", "UpdateDiveImageGroupsResult"]
+__all__ = [
+    "ClearReprocessFlagsInput",
+    "SpeciesTarget",
+    "UpdateMissionImageGroupsResult",
+]
 
 
 @dataclass(frozen=True)
 class SpeciesTarget:
     tenant_id: uuid.UUID
-    dive_id: uuid.UUID
+    mission_id: Annotated[uuid.UUID, renamed_from("dive_id", "mission_id")]
 
 
 @dataclass(frozen=True)
@@ -38,12 +43,12 @@ class ClearReprocessFlagsInput:
     """
 
     tenant_id: uuid.UUID
-    dive_id: uuid.UUID
+    mission_id: Annotated[uuid.UUID, renamed_from("dive_id", "mission_id")]
     capture_ids: Optional[List[uuid.UUID]] = None
 
 
 @dataclass
-class UpdateDiveImageGroupsResult:
+class UpdateMissionImageGroupsResult:
     """Outcome of one stage-6.1 reconciliation for a single dive.
 
     `skipped_already_grouped` differentiates "no work to do" (label-studio

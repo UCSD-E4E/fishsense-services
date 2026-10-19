@@ -37,7 +37,7 @@ from sqlalchemy import text
 
 from fishsense_services_api import taxonomy_sql as sut
 from fishsense_services_api.db import tenant_transaction
-from fishsense_services_api.ingest_store import create_dive, register_capture
+from fishsense_services_api.ingest_store import create_mission, register_capture
 from fishsense_services_contracts import taxonomy
 
 T0 = datetime(2026, 4, 10, tzinfo=UTC)
@@ -155,10 +155,12 @@ async def _species_labels(owner_engine, app_engine, contents) -> tuple[uuid.UUID
         ).scalar_one()
     by_project = {}
     async with tenant_transaction(app_engine, tenant) as conn:
-        dive = await create_dive(conn, tenant, source_path="d", name="d", dived_at=T0)
+        mission = await create_mission(
+            conn, tenant, source_path="d", name="d", started_at=T0
+        )
         capture = (
             await register_capture(
-                conn, tenant, dive_id=dive, device_id=None,
+                conn, tenant, mission_id=mission, device_id=None,
                 source_path="d/P.ORF", captured_at=T0, checksum=uuid.uuid4().hex,
             )  # fmt: skip
         ).capture_id

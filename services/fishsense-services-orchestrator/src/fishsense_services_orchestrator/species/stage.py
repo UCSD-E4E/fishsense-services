@@ -32,7 +32,7 @@ from fishsense_services_orchestrator.species.workflows import (
     PopulateSpeciesLabelStudioProjectWorkflow,
     PreprocessSpeciesImagesParentWorkflow,
     SyncLabelStudioSpeciesLabelsWorkflow,
-    UpdateDiveImageGroupsWorkflow,
+    UpdateMissionImageGroupsWorkflow,
 )
 from fishsense_services_orchestrator.species_predict.settings import (
     SpeciesPredictionSettings,
@@ -60,15 +60,15 @@ def _activities(deps: Deps):
         prediction_settings=SpeciesPredictionSettings(),
     )
     return [
-        species.select_next_dive_for_species_preprocessing,
+        species.select_next_mission_for_species_preprocessing,
         species.resolve_species_preprocess_inputs,
         species.clear_species_reprocess_flags,
         species.create_species_label_studio_project,
-        species.select_dives_needing_species_population,
+        species.select_missions_needing_species_population,
         species.populate_species_label_studio_project,
         species.species_label_projects,
         species.sync_species_labels,
-        species.update_dive_image_groups,
+        species.update_mission_image_groups,
     ]
 
 
@@ -80,7 +80,7 @@ STAGE = Stage(
         PopulateSpeciesLabelStudioProjectWorkflow,
         PopulateSpeciesLabelStudioProjectParentWorkflow,
         SyncLabelStudioSpeciesLabelsWorkflow,
-        UpdateDiveImageGroupsWorkflow,
+        UpdateMissionImageGroupsWorkflow,
     ],
     build_activities=_activities,
     schedules=[

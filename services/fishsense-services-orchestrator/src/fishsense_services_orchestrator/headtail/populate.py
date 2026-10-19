@@ -77,12 +77,12 @@ class HeadtailLabelCatalog(Protocol):
 
     async def member_tenants(self) -> list[uuid.UUID]: ...
 
-    async def dives_needing_headtail_population(
+    async def missions_needing_headtail_population(
         self, tenant_id: uuid.UUID
     ) -> list[HeadtailCandidate]: ...
 
     async def headtail_populate_state(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> PopulateState: ...
 
     async def record_head_tail_task(
@@ -97,7 +97,7 @@ class HeadtailLabelCatalog(Protocol):
     async def supersede_head_tail_labels(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         label_ids: Sequence[uuid.UUID],
     ) -> int: ...
 
@@ -117,18 +117,18 @@ class HeadtailLabelActivities:
         self._label_projects_factory = label_projects_factory
 
     @activity.defn(name="select_dives_needing_headtail_population")
-    async def select_dives_needing_headtail_population(self) -> List[HeadtailTarget]:
+    async def select_missions_needing_headtail_population(self) -> List[HeadtailTarget]:
         """Every dive needing head/tail tasks (re)populated, across tenants,
         oldest first: the parent fans out one populate per dive."""
         found = [
-            (candidate.created_at, str(candidate.dive_id), tenant_id, candidate)
+            (candidate.created_at, str(candidate.mission_id), tenant_id, candidate)
             for tenant_id in await self._catalog.member_tenants()
-            for candidate in await self._catalog.dives_needing_headtail_population(
+            for candidate in await self._catalog.missions_needing_headtail_population(
                 tenant_id
             )
         ]
         targets = [
-            HeadtailTarget(tenant_id, candidate.dive_id)
+            HeadtailTarget(tenant_id, candidate.mission_id)
             for _, _, tenant_id, candidate in sorted(found, key=lambda f: f[:2])
         ]
         activity.logger.info("%d dive(s) need headtail population", len(targets))
@@ -138,15 +138,15 @@ class HeadtailLabelActivities:
     async def create_headtail_label_studio_project(self, target: HeadtailTarget) -> int:
         """The dive's head/tail project, found (the record, then v1's title)
         or created, and recorded."""
-        project_id = await self._label_projects_factory().ensure_dive_project(
+        project_id = await self._label_projects_factory().ensure_mission_project(
             target.tenant_id,
-            target.dive_id,
+            target.mission_id,
             HEAD_TAIL_KIND,
             suffix=HEADTAIL_PROJECT_TITLE_SUFFIX,
             labeling_config_xml=HEADTAIL_LABELING_CONFIG_XML,
         )
         activity.logger.info(
-            "headtail LS project dive=%s project_id=%d", target.dive_id, project_id
+            "headtail LS project dive=%s project_id=%d", target.mission_id, project_id
         )
         return project_id
 
@@ -181,7 +181,7 @@ class HeadtailLabelActivities:
         retire the rows the project no longer owns, and publish when whole.
         Returns the number of rows recorded."""
         state = await self._catalog.headtail_populate_state(
-            target.tenant_id, target.dive_id
+            target.tenant_id, target.mission_id
         )
         predictions = {p.capture_id: p for p in state.predictions}
         predicted = select_predicted_capture_ids(state.predictions)
@@ -220,7 +220,7 @@ class HeadtailLabelActivities:
             activity.logger.info(
                 "dive %s has no predicted, rendered laser-valid images needing "
                 "head/tail labels; skipping task import",
-                target.dive_id,
+                target.mission_id,
             )
 
         # Exempt on CANDIDATES, not on what survived the gates: "not yet" is
@@ -238,7 +238,7 @@ class HeadtailLabelActivities:
         ]
         if stale:
             await self._catalog.supersede_head_tail_labels(
-                target.tenant_id, target.dive_id, stale
+                target.tenant_id, target.mission_id, stale
             )
 
         if result.complete and (
@@ -249,19 +249,19 @@ class HeadtailLabelActivities:
         return result.recorded
 
     @activity.defn(name="backfill_headtail_predictions_for_dive")
-    async def backfill_headtail_predictions_for_dive(
+    async def backfill_headtail_predictions_for_mission(
         self, target: HeadtailTarget
     ) -> int:
         """Attach the dive's placeable predictions to its existing incomplete
         tasks, and make them visible. Idempotent; returns how many attached."""
         state = await self._catalog.headtail_populate_state(
-            target.tenant_id, target.dive_id
+            target.tenant_id, target.mission_id
         )
         targets = select_attach_targets(state.predictions, state.labels)
         if not targets:
             activity.logger.info(
                 "dive %s: no placeable head/tail predictions with attachable tasks",
-                target.dive_id,
+                target.mission_id,
             )
             return 0
 
@@ -287,11 +287,11 @@ class HeadtailLabelActivities:
             attached += 1
 
         await ensure_project_shows_predictions(
-            ls, state.dive_number, tags_by_project, headtail_model_version_tag()
+            ls, state.mission_number, tags_by_project, headtail_model_version_tag()
         )
         activity.logger.info(
             "dive %s: attached %d head/tail prediction(s) to existing tasks",
-            target.dive_id,
+            target.mission_id,
             attached,
         )
         return attached

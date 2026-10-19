@@ -36,7 +36,7 @@ async def lab_tenant_id(conn: AsyncConnection) -> uuid.UUID | None:
     ).scalar_one_or_none()
 
 
-async def research_measurement_count(conn: AsyncConnection, dive_number: int) -> int:
+async def research_measurement_count(conn: AsyncConnection, mission_number: int) -> int:
     """A dive's measured lengths through the `v1` research views (0031), by
     v1's dive id, the way imwut's and cscw's extracts join them. Ask as a
     research login."""
@@ -45,8 +45,8 @@ async def research_measurement_count(conn: AsyncConnection, dive_number: int) ->
             text(
                 "SELECT count(*) FROM v1.measurement m "
                 "JOIN v1.image i ON i.id = m.image_id "
-                "WHERE i.dive_id = :dive AND m.length_m IS NOT NULL"
+                "WHERE i.dive_id = :mission AND m.length_m IS NOT NULL"
             ),
-            {"dive": dive_number},
+            {"mission": mission_number},
         )
     ).scalar_one()

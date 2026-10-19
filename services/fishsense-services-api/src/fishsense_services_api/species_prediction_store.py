@@ -44,7 +44,7 @@ __all__ = [
     "SpeciesPredictionCatalog",
     "SpeciesPredictionRow",
     "SpeciesPredictionState",
-    "next_dive_for_species_prediction",
+    "next_mission_for_species_prediction",
     "persist_species_predictions",
     "species_predict_captures",
     "species_prediction_cohort",
@@ -82,7 +82,7 @@ def _work(version: str, *, never_predicted: bool = False) -> str:
     extra = f"AND NOT {_ANY_PREDICTION}" if never_predicted else ""
     return f"""EXISTS (
         SELECT 1 FROM captures c {_BOXED}
-        WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id AND c.is_canonical
+        WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id AND c.is_canonical
           AND b.mask_bbox IS NOT NULL
           AND NOT {_fresh(version)}
           {extra}
@@ -110,7 +110,7 @@ class ForeignHeadtailPrediction(InvalidSpeciesPredictions):
 
 @dataclass(frozen=True)
 class SpeciesPredictionCandidate:
-    dive_id: uuid.UUID
+    mission_id: uuid.UUID
     created_at: datetime
     #: Some fish has never been classified (not merely a stale row).
     never_predicted: bool
@@ -173,14 +173,14 @@ class SpeciesPredictionState:
     """One snapshot of a dive, as species populate and the backfill read it."""
 
     #: v1's dive id for a migrated dive: what `#{n}` in its titles is.
-    dive_number: int
+    mission_number: int
     #: The current species prediction of each of the dive's captures.
     predictions: list[CurrentSpeciesPrediction]
     #: The dive's live species labels that have a task, every project.
     tasks: list[LiveSpeciesTask]
 
 
-async def next_dive_for_species_prediction(
+async def next_mission_for_species_prediction(
     conn: AsyncConnection, tenant_id: uuid.UUID, *, predictor_version: int
 ) -> SpeciesPredictionCandidate | None:
     """The tenant's next dive for BioCLIP: never-predicted work first, then
@@ -190,7 +190,7 @@ async def next_dive_for_species_prediction(
             text(f"""
                 SELECT d.id, d.created_at,
                        {_work(":version", never_predicted=True)} AS never_predicted
-                FROM dives d
+                FROM missions d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
                   AND {species_prediction_cohort(":version")}
                 ORDER BY never_predicted DESC, d.created_at, d.id
@@ -207,7 +207,7 @@ async def next_dive_for_species_prediction(
 async def species_predict_captures(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     *,
     predictor_version: int,
 ) -> list[SpeciesPredictCapture]:
@@ -219,12 +219,12 @@ async def species_predict_captures(
                    p.id AS headtail_prediction_id, b.mask_bbox,
                    {_ANY_PREDICTION} AS predicted
             FROM captures c {_BOXED}
-            WHERE c.tenant_id = :t AND c.dive_id = :d AND c.is_canonical
+            WHERE c.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
               AND b.mask_bbox IS NOT NULL
               AND NOT {_fresh(":version")}
             ORDER BY c.number
             """),
-        {"t": tenant_id, "d": dive_id, "version": predictor_version},
+        {"t": tenant_id, "d": mission_id, "version": predictor_version},
     )
     return [
         SpeciesPredictCapture(
@@ -242,7 +242,7 @@ async def species_predict_captures(
 async def persist_species_predictions(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     rows: Sequence[SpeciesPredictionRow],
 ) -> int:
     """Append the dive's predictions, abstentions included, all or nothing, in
@@ -262,15 +262,15 @@ async def persist_species_predictions(
             await conn.execute(
                 text("""
                     SELECT id FROM captures
-                    WHERE tenant_id = :t AND dive_id = :d AND id = ANY(:ids)
+                    WHERE tenant_id = :t AND mission_id = :d AND id = ANY(:ids)
                     """),
-                {"t": tenant_id, "d": dive_id, "ids": list(captures)},
+                {"t": tenant_id, "d": mission_id, "ids": list(captures)},
             )
         ).scalars()
     )
     if foreign := captures - owned:
         raise ForeignCapture(
-            f"not captures of dive {dive_id}: {sorted(map(str, foreign))}"
+            f"not captures of dive {mission_id}: {sorted(map(str, foreign))}"
         )
     headtail_capture = {
         row.id: row.capture_id
@@ -307,18 +307,18 @@ async def persist_species_predictions(
 
 
 async def species_prediction_state(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> SpeciesPredictionState:
     """What species populate and the backfill read of the dive, in one
     snapshot."""
-    params = {"t": tenant_id, "d": dive_id}
+    params = {"t": tenant_id, "d": mission_id}
     number = (
         await conn.execute(
-            text("SELECT number FROM dives WHERE tenant_id = :t AND id = :d"), params
+            text("SELECT number FROM missions WHERE tenant_id = :t AND id = :d"), params
         )
     ).scalar_one_or_none()
     if number is None:
-        raise ValueError(f"dive {dive_id} not found")
+        raise ValueError(f"dive {mission_id} not found")
 
     predictions = [
         CurrentSpeciesPrediction(
@@ -329,7 +329,7 @@ async def species_prediction_state(
             text("""
                 SELECT s.* FROM current_species_predictions s
                 JOIN captures c ON c.tenant_id = s.tenant_id AND c.id = s.capture_id
-                WHERE c.tenant_id = :t AND c.dive_id = :d
+                WHERE c.tenant_id = :t AND c.mission_id = :d
                 ORDER BY c.number
                 """),
             params,
@@ -342,7 +342,7 @@ async def species_prediction_state(
                 SELECT l.capture_id, l.ls_project_id, l.ls_task_id, l.completed
                 FROM species_labels l
                 JOIN captures c ON c.tenant_id = l.tenant_id AND c.id = l.capture_id
-                WHERE c.tenant_id = :t AND c.dive_id = :d AND NOT l.superseded
+                WHERE c.tenant_id = :t AND c.mission_id = :d AND NOT l.superseded
                   AND l.ls_task_id IS NOT NULL
                 ORDER BY c.number, l.number
                 """),
@@ -356,33 +356,33 @@ class SpeciesPredictionCatalog(ServicePrincipal):
     """The species prediction stage's database side, as the orchestrator's
     service principal."""
 
-    async def next_dive_for_species_prediction(
+    async def next_mission_for_species_prediction(
         self, tenant_id: uuid.UUID, *, predictor_version: int
     ) -> SpeciesPredictionCandidate | None:
         async with self._tenant(tenant_id) as conn:
-            return await next_dive_for_species_prediction(
+            return await next_mission_for_species_prediction(
                 conn, tenant_id, predictor_version=predictor_version
             )
 
     async def species_predict_captures(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, *, predictor_version: int
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, predictor_version: int
     ) -> list[SpeciesPredictCapture]:
         async with self._tenant(tenant_id) as conn:
             return await species_predict_captures(
-                conn, tenant_id, dive_id, predictor_version=predictor_version
+                conn, tenant_id, mission_id, predictor_version=predictor_version
             )
 
     async def persist_species_predictions(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         rows: Sequence[SpeciesPredictionRow],
     ) -> int:
         async with self._tenant(tenant_id) as conn:
-            return await persist_species_predictions(conn, tenant_id, dive_id, rows)
+            return await persist_species_predictions(conn, tenant_id, mission_id, rows)
 
     async def species_prediction_state(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> SpeciesPredictionState:
         async with self._tenant(tenant_id) as conn:
-            return await species_prediction_state(conn, tenant_id, dive_id)
+            return await species_prediction_state(conn, tenant_id, mission_id)

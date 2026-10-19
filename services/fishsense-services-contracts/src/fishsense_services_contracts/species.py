@@ -22,10 +22,12 @@ Integration adds these to ``MODELS`` and publishes the schema.
 """
 
 from uuid import UUID
+from typing import Annotated
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 from fishsense_services_contracts.object_store import ObjectRef
+from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = ["PreprocessSpeciesImagesInput", "SpeciesClusterMember"]
 
@@ -54,7 +56,8 @@ class SpeciesClusterMember(BaseModel):
 
 
 class PreprocessSpeciesImagesInput(BaseModel):
-    dive_id: UUID
+    model_config = ConfigDict(validate_by_name=True)
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     #: 3x3, from the dive's device's current camera calibration.
     camera_matrix: list[list[float]] = Field(min_length=3, max_length=3)
     distortion_coefficients: list[float]

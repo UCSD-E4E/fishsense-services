@@ -12,7 +12,7 @@ v2 adaptations, none of which changes behaviour:
 * the workspace and the storage come from settings objects passed in, not a
   global `settings.reload()`;
 * the title is built from the dive's `number` and name, which the caller
-  looked up (`label_project_store.dive_for_title`), not fetched here.
+  looked up (`label_project_store.mission_for_title`), not fetched here.
 
 v2 changes are marked where they are pinned. The species labeling-config tests
 in v1's file belong to the species slice, which owns that XML.
@@ -230,13 +230,13 @@ async def test_a_throttled_create_is_retried_not_failed(monkeypatch):
 # -- titles ---------------------------------------------------------------------------
 
 
-def test_same_named_dives_get_distinct_titles():
+def test_same_named_missions_get_distinct_titles():
     # Real prod case: dives 439 and 440 share the (mislabeled) name. The
     # #number tail must keep their LS projects distinct.
-    t439 = pu.build_per_dive_title(
+    t439 = pu.build_per_mission_title(
         439, "101624_AlligatorDeep_FSL02", "Species Labeling"
     )
-    t440 = pu.build_per_dive_title(
+    t440 = pu.build_per_mission_title(
         440, "101624_AlligatorDeep_FSL02", "Species Labeling"
     )
     assert t439 != t440
@@ -245,13 +245,13 @@ def test_same_named_dives_get_distinct_titles():
 
 
 def test_title_truncates_long_name_but_keeps_id():
-    t = pu.build_per_dive_title(393, "x" * 80, "Laser Calibration Labeling")
+    t = pu.build_per_mission_title(393, "x" * 80, "Laser Calibration Labeling")
     assert len(t) <= pu.LS_PROJECT_TITLE_MAX
     assert "#393 - Laser Calibration Labeling" in t
 
 
-def test_title_nameless_dive_is_id_and_suffix():
-    assert pu.build_per_dive_title(7, None, "Species Labeling") == (
+def test_title_nameless_mission_is_id_and_suffix():
+    assert pu.build_per_mission_title(7, None, "Species Labeling") == (
         "#7 - Species Labeling"
     )
 
@@ -260,7 +260,7 @@ def test_title_of_a_long_name_is_v1s_exact_title():
     """v1's worked example, character for character: a migrated project is
     found only if v2 builds exactly the title v1 did."""
     long_name = "2024-08-21 Florida Keys reef survey dive 03 (cohort A)"
-    assert pu.build_per_dive_title(393, long_name, "Laser Calibration Labeling") == (
+    assert pu.build_per_mission_title(393, long_name, "Laser Calibration Labeling") == (
         "2024-08-21 Flori #393 - Laser Calibration Labeling"
     )
 

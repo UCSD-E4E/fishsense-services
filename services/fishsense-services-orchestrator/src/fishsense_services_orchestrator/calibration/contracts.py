@@ -25,9 +25,9 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Annotated
 
-from pydantic import BaseModel, PositiveInt
+from pydantic import BaseModel, PositiveInt, ConfigDict
 
 from fishsense_services_contracts.slate_calibration import (
     CheckerboardLatticeRender,
@@ -37,11 +37,12 @@ from fishsense_services_contracts.slate_calibration import (
     VerifyCheckerboardLatticeInput,
 )
 from fishsense_services_orchestrator.object_store.contracts import StagingTarget
+from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = [
     "CalibrationProvenance",
     "CheckerboardCalibrationPlan",
-    "LatticeDive",
+    "LatticeMission",
     "LatticeImport",
     "LatticePlan",
     "LatticeProject",
@@ -77,8 +78,10 @@ class CheckerboardCalibrationPlan(BaseModel):
 class RecordCalibration(BaseModel):
     """Append one attempt -- accepted or refused -- to a dive's calibrations."""
 
+    model_config = ConfigDict(validate_by_name=True)
+
     tenant_id: uuid.UUID
-    dive_id: uuid.UUID
+    mission_id: Annotated[uuid.UUID, renamed_from("dive_id", "mission_id")]
     result: LaserCalibrationResult
     provenance: CalibrationProvenance
 
@@ -86,20 +89,22 @@ class RecordCalibration(BaseModel):
 class VerifyCheckerboardLatticeParentInput(BaseModel):
     """Which calibrations to study, and how many frames of each (v1's).
 
-    `dives` are the dives whose *own* calibration frames are rendered, by
+    `missions` are the dives whose *own* calibration frames are rendered, by
     number. Include controls: a run holding only the suspect calibrations
     cannot tell "this detector mis-latticed these five" from "it
     mis-lattices everything". Twenty frames per calibration settles a
     systematic fault; None lifts the cap.
     """
 
+    model_config = ConfigDict(validate_by_name=True)
+
     tenant: str
-    dives: list[int]
+    missions: Annotated[list[int], renamed_from("dives", "missions")]
     sample_limit: PositiveInt | None = 20
 
 
 @dataclass(frozen=True)
-class LatticeDive:
+class LatticeMission:
     tenant_id: uuid.UUID
     number: int
     sample_limit: int | None = 20

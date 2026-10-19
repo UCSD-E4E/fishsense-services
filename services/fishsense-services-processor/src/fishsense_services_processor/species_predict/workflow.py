@@ -36,7 +36,7 @@ class PredictSpeciesImagesWorkflow:
     ) -> List[SpeciesPredictionResult]:
         workflow.logger.info(
             "predicting species dive_id=%s images=%d candidates=%d",
-            payload.dive_id,
+            payload.mission_id,
             len(payload.images),
             len(payload.candidates),
         )

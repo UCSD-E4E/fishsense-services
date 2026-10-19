@@ -4,7 +4,7 @@ Ported from fishsense-lite@77e8f8e5 services/fishsense-data-processing-workflow-
 
 The detector's whole job is to produce the `(body_points, image_points)` that
 `calibration_geometry.plane_from_correspondences` turns into a plane — the
-same pair a `DiveSlate`'s template points and hand-clicked corners produce
+same pair a `MissionSlate`'s template points and hand-clicked corners produce
 today. Everything downstream is already shared and already tested.
 
 What is pinned here is the part that can go wrong *silently*, because

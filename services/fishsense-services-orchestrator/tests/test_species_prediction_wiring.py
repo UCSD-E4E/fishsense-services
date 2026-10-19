@@ -16,7 +16,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 
 from fishsense_services_api.species_prediction_store import (
@@ -51,7 +51,7 @@ from fishsense_services_processor.species_predict.workflow import (
 from fishsense_services_processor.worker import build_worker as build_processor
 
 TENANT = uuid.uuid4()
-DIVE = uuid.uuid4()
+MISSION = uuid.uuid4()
 T0 = datetime(2026, 9, 1, tzinfo=UTC)
 LAYOUT = ObjectLayout(
     ObjectStoreConnection(
@@ -80,10 +80,14 @@ class _Catalog:
     async def member_tenants(self):
         return [TENANT]
 
-    async def next_dive_for_species_prediction(self, tenant_id, *, predictor_version):
-        return SpeciesPredictionCandidate(DIVE, T0, never_predicted=True)
+    async def next_mission_for_species_prediction(
+        self, tenant_id, *, predictor_version
+    ):
+        return SpeciesPredictionCandidate(MISSION, T0, never_predicted=True)
 
-    async def species_predict_captures(self, tenant_id, dive_id, *, predictor_version):
+    async def species_predict_captures(
+        self, tenant_id, mission_id, *, predictor_version
+    ):
         return [
             SpeciesPredictCapture(
                 capture_id=self.capture, checksum="a" * 32, from_v1=False,
@@ -92,11 +96,11 @@ class _Catalog:
             )
         ]  # fmt: skip
 
-    async def persist_species_predictions(self, tenant_id, dive_id, rows):
+    async def persist_species_predictions(self, tenant_id, mission_id, rows):
         self.persisted.extend(rows)
         return len(rows)
 
-    async def species_prediction_state(self, tenant_id, dive_id):
+    async def species_prediction_state(self, tenant_id, mission_id):
         return SpeciesPredictionState(42, [], [])
 
 
@@ -158,7 +162,7 @@ async def test_prediction_runs_across_the_orchestrator_and_the_processor():
     )
 
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with (
             build_worker(
@@ -188,7 +192,7 @@ async def test_prediction_runs_across_the_orchestrator_and_the_processor():
                 task_queue="wiring",
             )
 
-    assert target == SpeciesPredictTarget(TENANT, DIVE)
+    assert target == SpeciesPredictTarget(TENANT, MISSION)
     assert store.read == [
         LAYOUT.processed_jpeg(TENANT, "preprocess_headtail_jpeg", "a" * 32)
     ], "the head/tail stage's JPEG"

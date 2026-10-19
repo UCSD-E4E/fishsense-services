@@ -80,7 +80,7 @@ from fishsense_services_orchestrator.labels.sync import (
 from fishsense_services_orchestrator.species.contracts import (
     ClearReprocessFlagsInput,
     SpeciesTarget,
-    UpdateDiveImageGroupsResult,
+    UpdateMissionImageGroupsResult,
 )
 from fishsense_services_orchestrator.species.grouping import (
     regroup_by_species_labels,
@@ -133,22 +133,22 @@ class SpeciesCatalog(Protocol):
 
     async def member_tenants(self) -> list[uuid.UUID]: ...
 
-    async def next_dive_for_species_preprocessing(
+    async def next_mission_for_species_preprocessing(
         self, tenant_id: uuid.UUID
     ) -> SpeciesCandidate | None: ...
 
-    async def dives_needing_species_population(
+    async def missions_needing_species_population(
         self, tenant_id: uuid.UUID
     ) -> list[SpeciesCandidate]: ...
 
     async def species_preprocess_facts(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> SpeciesPreprocessFacts | None: ...
 
     async def set_species_needs_reprocess(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         value: bool,
         *,
         only_incomplete: bool = True,
@@ -156,7 +156,7 @@ class SpeciesCatalog(Protocol):
     ) -> int: ...
 
     async def species_population_facts(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> SpeciesPopulationFacts: ...
 
     async def record_species_label(
@@ -174,11 +174,11 @@ class SpeciesCatalog(Protocol):
     ) -> int: ...
 
     async def species_grouping_facts(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> SpeciesGroupingFacts: ...
 
     async def persist_label_studio_clusters(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, groups: list[list[uuid.UUID]]
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, groups: list[list[uuid.UUID]]
     ) -> int | None: ...
 
     async def slate_templates_by_name(
@@ -189,19 +189,19 @@ class SpeciesCatalog(Protocol):
         self, tenant_id: uuid.UUID
     ) -> dict[str, uuid.UUID]: ...
 
-    async def set_dive_slate_template(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, slate_template_id: uuid.UUID
+    async def set_mission_slate_template(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, slate_template_id: uuid.UUID
     ) -> bool: ...
 
-    async def set_dive_calibration_target(
+    async def set_mission_calibration_target(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         calibration_target_id: uuid.UUID,
     ) -> bool: ...
 
     async def note_unidentified_slate(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, note: str
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, note: str
     ) -> bool: ...
 
 
@@ -258,21 +258,21 @@ class SpeciesActivities:
     # -- stage 2 -------------------------------------------------------------------
 
     @activity.defn(name="select_next_dive_for_species_preprocessing")
-    async def select_next_dive_for_species_preprocessing(
+    async def select_next_mission_for_species_preprocessing(
         self,
     ) -> Optional[SpeciesTarget]:
         """The oldest dive in the stage-2 cohort, across tenants."""
         best: SpeciesTarget | None = None
         best_key = None
         for tenant_id in await self._catalog.member_tenants():
-            candidate = await self._catalog.next_dive_for_species_preprocessing(
+            candidate = await self._catalog.next_mission_for_species_preprocessing(
                 tenant_id
             )
             if candidate is None:
                 continue
-            key = (candidate.created_at, str(candidate.dive_id))
+            key = (candidate.created_at, str(candidate.mission_id))
             if best_key is None or key < best_key:
-                best, best_key = SpeciesTarget(tenant_id, candidate.dive_id), key
+                best, best_key = SpeciesTarget(tenant_id, candidate.mission_id), key
         if best is None:
             activity.logger.info("no high-priority dives needing species preprocessing")
         else:
@@ -280,7 +280,7 @@ class SpeciesActivities:
                 "next high-priority dive needing species preprocessing: "
                 "tenant=%s dive=%s",
                 best.tenant_id,
-                best.dive_id,
+                best.mission_id,
             )
         return best
 
@@ -290,13 +290,13 @@ class SpeciesActivities:
     ) -> PreprocessSpeciesImagesInput:
         """What the processor draws: each eligible frame, its i/N, its refs."""
         facts = await self._catalog.species_preprocess_facts(
-            target.tenant_id, target.dive_id
+            target.tenant_id, target.mission_id
         )
         if facts is None:
-            raise ValueError(f"dive_id={target.dive_id} not found")
+            raise ValueError(f"dive_id={target.mission_id} not found")
         if facts.device_id is None:
             # v1: "has no camera_id" -- the camera is v2's device.
-            raise ValueError(f"dive_id={target.dive_id} has no device")
+            raise ValueError(f"dive_id={target.mission_id} has no device")
         if facts.intrinsics is None:
             raise ValueError(f"device_id={facts.device_id} has no intrinsics")
 
@@ -324,13 +324,13 @@ class SpeciesActivities:
         activity.logger.info(
             "resolved species preprocess inputs dive=%s prediction_clusters=%d "
             "groups=%d total_captures=%d",
-            target.dive_id,
+            target.mission_id,
             len(facts.prediction_clusters),
             len(members),
             sum(len(group) for group in members),
         )
         return PreprocessSpeciesImagesInput(
-            dive_id=target.dive_id,
+            mission_id=target.mission_id,
             camera_matrix=facts.intrinsics.camera_matrix,
             distortion_coefficients=facts.intrinsics.distortion_coefficients,
             cluster_members=members,
@@ -344,13 +344,13 @@ class SpeciesActivities:
         named frames, or the whole dive. Idempotent: 0 when none were up."""
         cleared = await self._catalog.set_species_needs_reprocess(
             payload.tenant_id,
-            payload.dive_id,
+            payload.mission_id,
             False,
             capture_ids=payload.capture_ids,
         )
         activity.logger.info(
             "cleared species reprocess flags dive=%s rows=%d scope=%s",
-            payload.dive_id,
+            payload.mission_id,
             cleared,
             "whole dive" if payload.capture_ids is None else len(payload.capture_ids),
         )
@@ -362,30 +362,30 @@ class SpeciesActivities:
     async def create_species_label_studio_project(self, target: SpeciesTarget) -> int:
         """The dive's species project, found or created (as a draft) and healed
         onto the current labeling config; its Label Studio id."""
-        activity.logger.info("create species LS project dive=%s", target.dive_id)
-        project_id = await self._label_projects.ensure_dive_project(
+        activity.logger.info("create species LS project dive=%s", target.mission_id)
+        project_id = await self._label_projects.ensure_mission_project(
             target.tenant_id,
-            target.dive_id,
+            target.mission_id,
             KIND,
             suffix=SPECIES_PROJECT_TITLE_SUFFIX,
             labeling_config_xml=SPECIES_LABELING_CONFIG_XML,
         )
         activity.logger.info(
-            "species LS project dive=%s project_id=%d", target.dive_id, project_id
+            "species LS project dive=%s project_id=%d", target.mission_id, project_id
         )
         return project_id
 
     @activity.defn(name="select_dives_needing_species_population")
-    async def select_dives_needing_species_population(self) -> List[SpeciesTarget]:
+    async def select_missions_needing_species_population(self) -> List[SpeciesTarget]:
         """Every dive needing species tasks (re)populated, oldest first, across
         tenants."""
         candidates = []
         for tenant_id in await self._catalog.member_tenants():
-            for candidate in await self._catalog.dives_needing_species_population(
+            for candidate in await self._catalog.missions_needing_species_population(
                 tenant_id
             ):
-                candidates.append((candidate.created_at, str(candidate.dive_id),
-                                   SpeciesTarget(tenant_id, candidate.dive_id)))  # fmt: skip
+                candidates.append((candidate.created_at, str(candidate.mission_id),
+                                   SpeciesTarget(tenant_id, candidate.mission_id)))  # fmt: skip
         targets = [target for *_, target in sorted(candidates)]
         activity.logger.info("%d dive(s) need species population", len(targets))
         return targets
@@ -398,7 +398,7 @@ class SpeciesActivities:
         of label rows written."""
         ls = self._label_studio_factory()
         facts = await self._catalog.species_population_facts(
-            target.tenant_id, target.dive_id
+            target.tenant_id, target.mission_id
         )
         selected = select_target_captures(
             facts.candidates, facts.species_labels, ls_project_id
@@ -473,7 +473,7 @@ class SpeciesActivities:
             activity.logger.info(
                 "dive %s has no laser-valid frames needing species labels; "
                 "skipping task import",
-                target.dive_id,
+                target.mission_id,
             )
 
         # Supersede pass: retire open rows of *other* projects, never this
@@ -513,7 +513,7 @@ class SpeciesActivities:
         if not self._prediction_settings.enabled:
             return {}
         state = await self._predictions.species_prediction_state(
-            target.tenant_id, target.dive_id
+            target.tenant_id, target.mission_id
         )
         threshold = self._prediction_settings.other_threshold
         return {
@@ -532,12 +532,12 @@ class SpeciesActivities:
         if not self._prediction_settings.enabled:
             return
         state = await self._predictions.species_prediction_state(
-            target.tenant_id, target.dive_id
+            target.tenant_id, target.mission_id
         )
         threshold = self._prediction_settings.other_threshold
         await ensure_project_shows_predictions(
             ls,
-            state.dive_number,
+            state.mission_number,
             project_tags(state, judged, threshold),
             species_model_version_tag(SPECIES_PREDICTOR_VERSION, threshold),
         )
@@ -575,7 +575,7 @@ class SpeciesActivities:
                 return
             if task.is_labeled and task.annotations:
                 results = task.annotations[0].get("result") or []
-                completed.append((applied.dive_id, task.updated_at, results))
+                completed.append((applied.mission_id, task.updated_at, results))
 
         await sync_label_studio_project(
             project,
@@ -590,9 +590,9 @@ class SpeciesActivities:
                 project.ls_project_id,
                 skipped,
             )
-        await self._resolve_dive_links(project.tenant_id, completed)
+        await self._resolve_mission_links(project.tenant_id, completed)
 
-    async def _resolve_dive_links(
+    async def _resolve_mission_links(
         self,
         tenant_id: uuid.UUID,
         completed: list[tuple[uuid.UUID | None, datetime | None, list[dict]]],
@@ -606,56 +606,58 @@ class SpeciesActivities:
         targets = await self._catalog.calibration_targets_by_name(tenant_id)
 
         slate_votes, target_votes, unidentified = [], [], set()
-        for dive_id, ts, results in completed:
-            if dive_id is None:
+        for mission_id, ts, results in completed:
+            if mission_id is None:
                 continue
             slate = slate_type_choice(results, set(slates))
             if slate is not None:
-                slate_votes.append((dive_id, ts, slates[slate]))
+                slate_votes.append((mission_id, ts, slates[slate]))
             elif slate_not_in_list(results):
-                unidentified.add(dive_id)
+                unidentified.add(mission_id)
             board = calibration_target_choice(results, set(targets))
             if board is not None:
-                target_votes.append((dive_id, ts, targets[board]))
+                target_votes.append((mission_id, ts, targets[board]))
 
         slate_winners = reduce_winners(slate_votes)
-        for dive_id, slate_id in slate_winners.items():
-            await self._catalog.set_dive_slate_template(tenant_id, dive_id, slate_id)
-            activity.logger.info(
-                "species sync set slate template dive=%s slate=%s", dive_id, slate_id
+        for mission_id, slate_id in slate_winners.items():
+            await self._catalog.set_mission_slate_template(
+                tenant_id, mission_id, slate_id
             )
-        for dive_id, target_id in reduce_winners(target_votes).items():
-            await self._catalog.set_dive_calibration_target(
-                tenant_id, dive_id, target_id
+            activity.logger.info(
+                "species sync set slate template dive=%s slate=%s", mission_id, slate_id
+            )
+        for mission_id, target_id in reduce_winners(target_votes).items():
+            await self._catalog.set_mission_calibration_target(
+                tenant_id, mission_id, target_id
             )
             activity.logger.info(
                 "species sync set calibration target dive=%s target=%s",
-                dive_id,
+                mission_id,
                 target_id,
             )
         # A dive that got a real slate on some *other* frame is identified;
         # only the ones left with no answer at all are noted.
-        for dive_id in sorted(unidentified - set(slate_winners), key=str):
+        for mission_id in sorted(unidentified - set(slate_winners), key=str):
             if await self._catalog.note_unidentified_slate(
-                tenant_id, dive_id, unidentified_slate_note()
+                tenant_id, mission_id, unidentified_slate_note()
             ):
                 activity.logger.warning(
                     "species sync: dive=%s has an unidentifiable slate; noted",
-                    dive_id,
+                    mission_id,
                 )
 
     # -- stage 6.1 ----------------------------------------------------------------------
 
     @activity.defn(name="update_dive_image_groups")
-    async def update_dive_image_groups(
+    async def update_mission_image_groups(
         self, target: SpeciesTarget
-    ) -> UpdateDiveImageGroupsResult:
+    ) -> UpdateMissionImageGroupsResult:
         """Materialise the dive's label-studio clusters from its species
         labels, all or nothing; refuse if it already has some."""
         facts = await self._catalog.species_grouping_facts(
-            target.tenant_id, target.dive_id
+            target.tenant_id, target.mission_id
         )
-        skipped = UpdateDiveImageGroupsResult(
+        skipped = UpdateMissionImageGroupsResult(
             skipped_already_grouped=True,
             new_clusters_created=0,
             species_labels_seen=0,
@@ -664,7 +666,7 @@ class SpeciesActivities:
             activity.logger.info(
                 "dive=%s already has label-studio clusters; skipping "
                 "(delete them first to re-group)",
-                target.dive_id,
+                target.mission_id,
             )
             return skipped
 
@@ -677,21 +679,21 @@ class SpeciesActivities:
             activity.logger.info(
                 "dive=%s: no label-studio groups to create "
                 "(prediction_clusters=%d, species_labels=%d)",
-                target.dive_id,
+                target.mission_id,
                 len(facts.prediction_clusters),
                 seen,
             )
-            return UpdateDiveImageGroupsResult(False, 0, seen)
+            return UpdateMissionImageGroupsResult(False, 0, seen)
 
         try:
             created = await self._catalog.persist_label_studio_clusters(
-                target.tenant_id, target.dive_id, groups
+                target.tenant_id, target.mission_id, groups
             )
         except InvalidClusters as exc:
             # Final (ForeignCapture included): a retry re-reads the same labels
             # and regroups them into the same refused set.
             raise ApplicationError(
-                f"refusing the label-studio groups for dive {target.dive_id}: {exc}",
+                f"refusing the label-studio groups for dive {target.mission_id}: {exc}",
                 type="InvalidClusters",
                 non_retryable=True,
             ) from exc
@@ -699,8 +701,8 @@ class SpeciesActivities:
             return skipped
         activity.logger.info(
             "dive=%s: created %d label-studio clusters from %d species labels",
-            target.dive_id,
+            target.mission_id,
             created,
             seen,
         )
-        return UpdateDiveImageGroupsResult(False, created, seen)
+        return UpdateMissionImageGroupsResult(False, created, seen)

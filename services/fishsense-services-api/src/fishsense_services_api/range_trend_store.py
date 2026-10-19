@@ -1,7 +1,7 @@
 """What the range-trend audit reads for one dive, tenant-scoped. Read-only.
 
 Ported from fishsense-lite@77e8f8e5 services/fishsense-data-processing-
-workflow-worker/scripts/audit_length_range_trend.py (`audit_dive`), which read
+workflow-worker/scripts/audit_length_range_trend.py (`audit_mission`), which read
 through the SDK: the dive's resolved laser extrinsics, its measurements, its
 laser depths with `depth_m > 0`, and its completed, non-superseded species
 labels parsed with `parse_model_name`. v2 reads each from its home:
@@ -61,25 +61,25 @@ class RangeTrendInputs:
 
 
 async def range_trend_inputs(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_number: int
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_number: int
 ) -> RangeTrendInputs | None:
-    """The audit's inputs for the tenant's dive `dive_number`, or None when
+    """The audit's inputs for the tenant's dive `mission_number`, or None when
     the tenant has no such dive."""
-    dive = (
+    mission = (
         await conn.execute(
             text("""
                 SELECT d.id, lc.laser_position
-                FROM dives d
+                FROM missions d
                 LEFT JOIN effective_laser_calibrations e
-                    ON e.tenant_id = d.tenant_id AND e.dive_id = d.id
+                    ON e.tenant_id = d.tenant_id AND e.mission_id = d.id
                 LEFT JOIN laser_calibrations lc
                     ON lc.tenant_id = e.tenant_id AND lc.id = e.laser_calibration_id
                 WHERE d.tenant_id = :tenant AND d.number = :number
                 """),
-            {"tenant": tenant_id, "number": dive_number},
+            {"tenant": tenant_id, "number": mission_number},
         )
     ).one_or_none()
-    if dive is None:
+    if mission is None:
         return None
 
     rows = await conn.execute(
@@ -100,11 +100,11 @@ async def range_trend_inputs(
                 ORDER BY s.number DESC
                 LIMIT 1
             ) sl ON true
-            WHERE m.tenant_id = :tenant AND c.dive_id = :dive
+            WHERE m.tenant_id = :tenant AND c.mission_id = :mission
               AND c.is_canonical AND m.source = 'server'
             ORDER BY m.number
             """),
-        {"tenant": tenant_id, "dive": dive.id},
+        {"tenant": tenant_id, "mission": mission.id},
     )
     measurements, depths, names = [], {}, {}
     for r in rows:
@@ -117,7 +117,7 @@ async def range_trend_inputs(
             names[r.capture_id] = r.name
     return RangeTrendInputs(
         laser_position=(
-            None if dive.laser_position is None else list(dive.laser_position)
+            None if mission.laser_position is None else list(mission.laser_position)
         ),
         measurements=measurements,
         depth_by_capture=depths,

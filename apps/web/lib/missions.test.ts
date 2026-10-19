@@ -2,14 +2,14 @@
 //
 // v2 changes: tenant-scoped routes through the generated client; the
 // signed-in user's own bearer token (the API checks their admin role itself)
-// instead of a shared Basic-auth account; dives are addressed by `number`; and
+// instead of a shared Basic-auth account; missions are addressed by `number`; and
 // the API's reason for a refusal reaches the page.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearCalibrationSource,
-  getDives,
+  getMissions,
   setCalibrationSource,
-} from "./dives";
+} from "./missions";
 
 beforeEach(() => {
   vi.stubEnv("FISHSENSE_API_URL", "http://api.test");
@@ -34,31 +34,31 @@ function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
 type NextFetchInit = RequestInit & { next?: { revalidate?: number } };
 type FetchSig = (input: Request, init?: NextFetchInit) => Promise<Response>;
 
-const DIVE = {
+const MISSION = {
   number: 2,
-  name: "fish dive",
-  dived_at: "2025-01-01T00:00:00Z",
+  name: "fish mission",
+  started_at: "2025-01-01T00:00:00Z",
   priority: "low",
   slate_template_number: null,
   calibration_target_number: null,
   calibration_source_number: 1,
 };
 
-describe("getDives", () => {
-  it("GETs the tenant's dives with the user's bearer and returns the parsed body", async () => {
-    const dives = [
-      { ...DIVE, number: 1, name: "slate dive", slate_template_number: 5,
+describe("getMissions", () => {
+  it("GETs the tenant's missions with the user's bearer and returns the parsed body", async () => {
+    const missions = [
+      { ...MISSION, number: 1, name: "slate mission", slate_template_number: 5,
         calibration_source_number: null },
-      DIVE,
+      MISSION,
     ]; // prettier-ignore
-    const fetchMock = vi.fn<FetchSig>(async () => jsonResponse(dives));
+    const fetchMock = vi.fn<FetchSig>(async () => jsonResponse(missions));
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await getDives(TOKEN, 30);
+    const result = await getMissions(TOKEN, 30);
 
-    expect(result).toEqual(dives);
+    expect(result).toEqual(missions);
     const [request, init] = fetchMock.mock.calls[0];
-    expect(request.url).toBe("http://api.test/tenants/lab/dives");
+    expect(request.url).toBe("http://api.test/tenants/lab/missions");
     expect(request.headers.get("Authorization")).toBe(`Bearer ${TOKEN}`);
     expect(init?.next?.revalidate).toBe(30);
   });
@@ -69,19 +69,19 @@ describe("getDives", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(getDives(TOKEN)).rejects.toThrow(/dives list failed: 500/);
+    await expect(getMissions(TOKEN)).rejects.toThrow(/missions list failed: 500/);
   });
 });
 
 describe("setCalibrationSource", () => {
-  it("PUTs to the path-param endpoint by dive number, as the user", async () => {
-    const fetchMock = vi.fn<FetchSig>(async () => jsonResponse(DIVE));
+  it("PUTs to the path-param endpoint by mission number, as the user", async () => {
+    const fetchMock = vi.fn<FetchSig>(async () => jsonResponse(MISSION));
     vi.stubGlobal("fetch", fetchMock);
 
     await setCalibrationSource(TOKEN, 2, 1);
 
     const [request] = fetchMock.mock.calls[0];
-    expect(request.url).toBe("http://api.test/tenants/lab/dives/2/calibration-source/1");
+    expect(request.url).toBe("http://api.test/tenants/lab/missions/2/calibration-source/1");
     expect(request.method).toBe("PUT");
     expect(request.headers.get("Authorization")).toBe(`Bearer ${TOKEN}`);
   });
@@ -114,17 +114,17 @@ describe("setCalibrationSource", () => {
   });
 
   it("rejects non-integer ids before making a request (SSRF guard)", async () => {
-    const fetchMock = vi.fn<FetchSig>(async () => jsonResponse(DIVE));
+    const fetchMock = vi.fn<FetchSig>(async () => jsonResponse(MISSION));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(setCalibrationSource(TOKEN, 1.5, 2)).rejects.toThrow(/Invalid diveNumber/);
+    await expect(setCalibrationSource(TOKEN, 1.5, 2)).rejects.toThrow(/Invalid missionNumber/);
     await expect(setCalibrationSource(TOKEN, 1, -3)).rejects.toThrow(/Invalid sourceNumber/);
     await expect(setCalibrationSource(TOKEN, Number.NaN, 2)).rejects.toThrow(
-      /Invalid diveNumber/,
+      /Invalid missionNumber/,
     );
     await expect(
       setCalibrationSource(TOKEN, "1/../../x" as unknown as number, 2),
-    ).rejects.toThrow(/Invalid diveNumber/);
+    ).rejects.toThrow(/Invalid missionNumber/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -137,7 +137,7 @@ describe("clearCalibrationSource", () => {
     await clearCalibrationSource(TOKEN, 2);
 
     const [request] = fetchMock.mock.calls[0];
-    expect(request.url).toBe("http://api.test/tenants/lab/dives/2/calibration-source");
+    expect(request.url).toBe("http://api.test/tenants/lab/missions/2/calibration-source");
     expect(request.method).toBe("DELETE");
     expect(request.headers.get("Authorization")).toBe(`Bearer ${TOKEN}`);
   });
@@ -157,7 +157,7 @@ describe("clearCalibrationSource", () => {
     const fetchMock = vi.fn<FetchSig>(async () => new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(clearCalibrationSource(TOKEN, -1)).rejects.toThrow(/Invalid diveNumber/);
+    await expect(clearCalibrationSource(TOKEN, -1)).rejects.toThrow(/Invalid missionNumber/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

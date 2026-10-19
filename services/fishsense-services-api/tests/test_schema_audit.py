@@ -81,33 +81,33 @@ async def test_a_tenant_table_without_a_tenant_policy_is_flagged(scratch):
 async def test_an_extra_permissive_policy_on_a_tenant_table_is_flagged(scratch):
     """Permissive policies are OR-ed: one ``USING (true)`` opens every tenant."""
     await scratch.execute(
-        text("CREATE POLICY read_all ON dives FOR SELECT USING (true)")
+        text("CREATE POLICY read_all ON missions FOR SELECT USING (true)")
     )
 
-    assert any("dives" in v and "read_all" in v for v in await _audit(scratch))
+    assert any("missions" in v and "read_all" in v for v in await _audit(scratch))
 
 
 async def test_a_loosened_tenant_policy_is_flagged(scratch):
     """Mentioning app.tenant_id isn't enough; the expression must be exact."""
-    await scratch.execute(text("DROP POLICY tenant_isolation ON dives"))
+    await scratch.execute(text("DROP POLICY tenant_isolation ON missions"))
     await scratch.execute(text(f"""
-            CREATE POLICY tenant_isolation ON dives
+            CREATE POLICY tenant_isolation ON missions
                 USING (tenant_id = {ACTIVE_TENANT} OR true)
                 WITH CHECK (tenant_id = {ACTIVE_TENANT})
             """))
 
-    assert any("dives" in v for v in await _audit(scratch))
+    assert any("missions" in v for v in await _audit(scratch))
 
 
 async def test_a_tenant_policy_that_skips_some_roles_is_flagged(scratch):
-    await scratch.execute(text("DROP POLICY tenant_isolation ON dives"))
+    await scratch.execute(text("DROP POLICY tenant_isolation ON missions"))
     await scratch.execute(text(f"""
-            CREATE POLICY tenant_isolation ON dives TO {APP_ROLE}
+            CREATE POLICY tenant_isolation ON missions TO {APP_ROLE}
                 USING (tenant_id = {ACTIVE_TENANT})
                 WITH CHECK (tenant_id = {ACTIVE_TENANT})
             """))
 
-    assert any("dives" in v for v in await _audit(scratch))
+    assert any("missions" in v for v in await _audit(scratch))
 
 
 async def test_an_extra_permissive_policy_on_a_caller_table_is_flagged(scratch):
@@ -121,7 +121,7 @@ async def test_an_extra_permissive_policy_on_a_caller_table_is_flagged(scratch):
 async def test_a_restrictive_policy_can_only_narrow_so_it_is_fine(scratch):
     await scratch.execute(
         text(
-            "CREATE POLICY no_parked ON dives AS RESTRICTIVE FOR SELECT "
+            "CREATE POLICY no_parked ON missions AS RESTRICTIVE FOR SELECT "
             "USING (priority <> 'none')"
         )
     )
@@ -149,18 +149,20 @@ async def _well_scoped_table(scratch, name: str, extra_columns: str) -> None:
 
 async def test_a_tenant_reference_without_tenant_id_is_flagged(scratch):
     """``dive_id REFERENCES dives (id)`` can point into another tenant."""
-    await _well_scoped_table(scratch, "leaky", "dive_id uuid REFERENCES dives (id)")
+    await _well_scoped_table(
+        scratch, "leaky", "mission_id uuid REFERENCES missions (id)"
+    )
 
     violations = await _audit(scratch)
 
-    assert any("leaky" in v and "dives" in v for v in violations)
+    assert any("leaky" in v and "missions" in v for v in violations)
 
 
 async def test_a_composite_tenant_reference_is_fine(scratch):
     await _well_scoped_table(
         scratch,
         "tidy",
-        "dive_id uuid, FOREIGN KEY (tenant_id, dive_id) REFERENCES dives (tenant_id, id)",
+        "mission_id uuid, FOREIGN KEY (tenant_id, mission_id) REFERENCES missions (tenant_id, id)",
     )
 
     assert await _audit(scratch) == []
@@ -176,18 +178,18 @@ async def test_a_reference_to_global_data_needs_no_tenant_id(scratch):
 
 async def test_a_view_that_runs_as_its_owner_is_flagged(scratch):
     """A view runs with its *owner's* rights by default, bypassing RLS."""
-    await scratch.execute(text("CREATE VIEW all_dives AS SELECT * FROM dives"))
+    await scratch.execute(text("CREATE VIEW all_missions AS SELECT * FROM missions"))
 
     assert any(
-        "all_dives" in v and "security_invoker" in v for v in await _audit(scratch)
+        "all_missions" in v and "security_invoker" in v for v in await _audit(scratch)
     )
 
 
 async def test_a_view_that_runs_as_its_caller_is_fine(scratch):
     await scratch.execute(
         text(
-            "CREATE VIEW my_dives WITH (security_invoker = true) "
-            "AS SELECT * FROM dives"
+            "CREATE VIEW my_missions WITH (security_invoker = true) "
+            "AS SELECT * FROM missions"
         )
     )
 
@@ -237,7 +239,7 @@ RESEARCH = "fishsense_research"
 async def test_a_view_outside_public_that_runs_as_its_owner_is_flagged(scratch):
     """The v1-shaped research views live in schema `v1`: the rule is the same
     there, or one view would show every tenant's rows to research."""
-    await scratch.execute(text("CREATE VIEW v1.all_dives AS SELECT * FROM dives"))
+    await scratch.execute(text("CREATE VIEW v1.all_dives AS SELECT * FROM missions"))
 
     assert any(
         "v1.all_dives" in v and "security_invoker" in v for v in await _audit(scratch)
@@ -256,29 +258,29 @@ async def test_a_table_the_research_role_reads_without_the_lab_binding_is_flagge
 
 
 async def test_a_loosened_research_policy_is_flagged(scratch):
-    await scratch.execute(text("DROP POLICY research_reads_lab ON dives"))
+    await scratch.execute(text("DROP POLICY research_reads_lab ON missions"))
     await scratch.execute(
         text(
-            f"CREATE POLICY research_reads_lab ON dives FOR SELECT TO {RESEARCH} "
+            f"CREATE POLICY research_reads_lab ON missions FOR SELECT TO {RESEARCH} "
             "USING (true)"
         )
     )
 
     assert any(
-        "dives" in v and "research_reads_lab" in v for v in await _audit(scratch)
+        "missions" in v and "research_reads_lab" in v for v in await _audit(scratch)
     )
 
 
 async def test_a_loosened_lab_binding_is_flagged(scratch):
-    await scratch.execute(text("DROP POLICY research_only_lab ON dives"))
+    await scratch.execute(text("DROP POLICY research_only_lab ON missions"))
     await scratch.execute(
         text(
-            "CREATE POLICY research_only_lab ON dives AS RESTRICTIVE FOR SELECT "
+            "CREATE POLICY research_only_lab ON missions AS RESTRICTIVE FOR SELECT "
             f"TO {RESEARCH} USING (true)"
         )
     )
 
-    assert any("dives" in v and "lab" in v for v in await _audit(scratch))
+    assert any("missions" in v and "lab" in v for v in await _audit(scratch))
 
 
 async def test_a_table_the_research_role_can_write_is_flagged(scratch):

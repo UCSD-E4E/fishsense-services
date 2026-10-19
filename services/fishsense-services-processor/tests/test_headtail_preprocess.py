@@ -220,7 +220,7 @@ async def test_workflow_processes_one_image_end_to_end(orf_path: Path, monkeypat
 def _payload(checksums):
     return PreprocessHeadtailImagesInput(
         tenant_id=TENANT,
-        dive_id=uuid.uuid4(),
+        mission_id=uuid.uuid4(),
         images=[
             PreprocessHeadtailImage(
                 capture_id=uuid.uuid4(), checksum=c, raw=_raw(c), jpeg=_jpeg(c)
@@ -233,10 +233,10 @@ def _payload(checksums):
 
 
 async def _run_workflow(payload, stub, queue):
-    from temporalio.contrib.pydantic import pydantic_data_converter
+    from fishsense_services_contracts.temporal import DATA_CONVERTER
 
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,

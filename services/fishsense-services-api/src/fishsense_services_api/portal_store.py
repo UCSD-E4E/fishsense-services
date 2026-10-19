@@ -6,9 +6,9 @@ Ported from fishsense-lite@77e8f8e5, services/fishsense-api:
   and `_gate_scan`: which Label Studio projects still hold live labeling work.
   The landing page and triage both ask this ("one definition, two consumers",
   apps/fishsense-lite-web/lib/label-projects.ts);
-* `dive_controller.py` `get_dives`, `set_dive_calibration_source`,
-  `clear_dive_calibration_source`: the calibration-linking page; and
-  `set_dive_calibration_target`, `clear_dive_calibration_target`,
+* `mission_controller.py` `get_missions`, `set_mission_calibration_source`,
+  `clear_mission_calibration_source`: the calibration-linking page; and
+  `set_mission_calibration_target`, `clear_mission_calibration_target`,
   `clear_calibration_refused`: the levers a calibration refusal's remedy
   names.
 
@@ -50,7 +50,7 @@ from fishsense_services_api import (
 __all__ = [
     "CalibrationTargetNotFound",
     "DiveNotFound",
-    "DiveSummary",
+    "MissionSummary",
     "GateNotApplicable",
     "LabelKind",
     "SelfLink",
@@ -58,7 +58,7 @@ __all__ = [
     "clear_calibration_source",
     "clear_calibration_target",
     "label_studio_project_ids",
-    "list_dives",
+    "list_missions",
     "set_calibration_source",
     "set_calibration_target",
     "set_needs_reprocess",
@@ -106,14 +106,14 @@ class DiveNotFound(LookupError):
 
 
 @dataclass(frozen=True)
-class DiveSummary:
+class MissionSummary:
     """What the portal shows of a dive. v1's `id`, `dive_datetime`,
-    `dive_slate_id` and `calibration_dive_id` are `number`, `dived_at`, the
+    `dive_slate_id` and `calibration_dive_id` are `number`, `started_at`, the
     slate template's `number` and the source dive's `number`."""
 
     number: int
     name: str | None
-    dived_at: datetime
+    started_at: datetime
     priority: str
     slate_template_number: int | None
     calibration_target_number: int | None
@@ -189,35 +189,37 @@ async def label_studio_project_ids(
     return list(rows.scalars())
 
 
-_DIVE_SUMMARY = """
-    SELECT d.number, d.name, d.dived_at, d.priority,
+_MISSION_SUMMARY = """
+    SELECT d.number, d.name, d.started_at, d.priority,
            t.number AS slate_template_number,
            g.number AS calibration_target_number,
            s.number AS calibration_source_number
-    FROM dives d
+    FROM missions d
     LEFT JOIN slate_templates t ON t.id = d.slate_template_id
     LEFT JOIN calibration_targets g ON g.id = d.calibration_target_id
-    LEFT JOIN dives s
-      ON s.tenant_id = d.tenant_id AND s.id = d.calibration_source_dive_id
+    LEFT JOIN missions s
+      ON s.tenant_id = d.tenant_id AND s.id = d.calibration_source_mission_id
     WHERE d.tenant_id = :tenant_id
 """
 
 
-async def list_dives(conn: AsyncConnection, tenant_id: uuid.UUID) -> list[DiveSummary]:
+async def list_missions(
+    conn: AsyncConnection, tenant_id: uuid.UUID
+) -> list[MissionSummary]:
     """Every dive in the tenant, by number (v1: every dive, unordered)."""
     rows = await conn.execute(
-        text(_DIVE_SUMMARY + " ORDER BY d.number"), {"tenant_id": tenant_id}
+        text(_MISSION_SUMMARY + " ORDER BY d.number"), {"tenant_id": tenant_id}
     )
-    return [DiveSummary(**row._mapping) for row in rows]
+    return [MissionSummary(**row._mapping) for row in rows]
 
 
-async def _dive_id(
+async def _mission_id(
     conn: AsyncConnection, tenant_id: uuid.UUID, number: int, which: str
 ) -> uuid.UUID:
     found = (
         await conn.execute(
             text(
-                "SELECT id FROM dives WHERE tenant_id = :tenant_id AND number = :n "
+                "SELECT id FROM missions WHERE tenant_id = :tenant_id AND number = :n "
                 "FOR UPDATE"
             ),
             {"tenant_id": tenant_id, "n": number},
@@ -230,19 +232,19 @@ async def _dive_id(
 
 async def _summary(
     conn: AsyncConnection, tenant_id: uuid.UUID, number: int
-) -> DiveSummary:
+) -> MissionSummary:
     row = (
         await conn.execute(
-            text(_DIVE_SUMMARY + " AND d.number = :n"),
+            text(_MISSION_SUMMARY + " AND d.number = :n"),
             {"tenant_id": tenant_id, "n": number},
         )
     ).one()
-    return DiveSummary(**row._mapping)
+    return MissionSummary(**row._mapping)
 
 
 async def set_calibration_source(
     conn: AsyncConnection, tenant_id: uuid.UUID, number: int, source_number: int
-) -> DiveSummary:
+) -> MissionSummary:
     """Link dive `number` to borrow dive `source_number`'s laser calibration.
 
     For a fish-only dive with no slate of its own: point it at a sibling slate
@@ -252,15 +254,17 @@ async def set_calibration_source(
     Like v1, the source need not have a slate; only the portal restricts that.
     """
     if number == source_number:
-        raise SelfLink("A dive cannot be its own calibration source")
-    dive = await _dive_id(conn, tenant_id, number, "dive")
-    source = await _dive_id(conn, tenant_id, source_number, "calibration source dive")
+        raise SelfLink("A mission cannot be its own calibration source")
+    mission = await _mission_id(conn, tenant_id, number, "mission")
+    source = await _mission_id(
+        conn, tenant_id, source_number, "calibration source mission"
+    )
     await conn.execute(
         text(
-            "UPDATE dives SET calibration_source_dive_id = :source "
-            "WHERE tenant_id = :tenant_id AND id = :dive"
+            "UPDATE missions SET calibration_source_mission_id = :source "
+            "WHERE tenant_id = :tenant_id AND id = :mission"
         ),
-        {"tenant_id": tenant_id, "dive": dive, "source": source},
+        {"tenant_id": tenant_id, "mission": mission, "source": source},
     )
     return await _summary(conn, tenant_id, number)
 
@@ -269,19 +273,19 @@ async def clear_calibration_source(
     conn: AsyncConnection, tenant_id: uuid.UUID, number: int
 ) -> None:
     """Unlink dive `number` from any borrowed calibration (idempotent)."""
-    dive = await _dive_id(conn, tenant_id, number, "dive")
+    mission = await _mission_id(conn, tenant_id, number, "mission")
     await conn.execute(
         text(
-            "UPDATE dives SET calibration_source_dive_id = NULL "
-            "WHERE tenant_id = :tenant_id AND id = :dive"
+            "UPDATE missions SET calibration_source_mission_id = NULL "
+            "WHERE tenant_id = :tenant_id AND id = :mission"
         ),
-        {"tenant_id": tenant_id, "dive": dive},
+        {"tenant_id": tenant_id, "mission": mission},
     )
 
 
 async def set_calibration_target(
     conn: AsyncConnection, tenant_id: uuid.UUID, number: int, target_number: int
-) -> DiveSummary:
+) -> MissionSummary:
     """Declare which board dive `number` was shot against: the calibration
     target numbered `target_number` (v1's id for a migrated one).
 
@@ -290,7 +294,7 @@ async def set_calibration_target(
     refusal as v1's `_clear_refusal` did. The board's geometry is read from
     its current version by name, whichever version is named here.
     """
-    dive = await _dive_id(conn, tenant_id, number, "dive")
+    mission = await _mission_id(conn, tenant_id, number, "mission")
     target = (
         await conn.execute(
             text("SELECT id FROM calibration_targets WHERE number = :n"),
@@ -299,7 +303,7 @@ async def set_calibration_target(
     ).scalar_one_or_none()
     if target is None:
         raise CalibrationTargetNotFound(target_number)
-    await species_store.set_dive_calibration_target(conn, tenant_id, dive, target)
+    await species_store.set_mission_calibration_target(conn, tenant_id, mission, target)
     return await _summary(conn, tenant_id, number)
 
 
@@ -308,8 +312,8 @@ async def clear_calibration_target(
 ) -> None:
     """Unlink dive `number` from any board (idempotent): what a refusal's
     remedy asks of a checkerboard dive that needs other frames."""
-    dive = await _dive_id(conn, tenant_id, number, "dive")
-    await species_store.clear_dive_calibration_target(conn, tenant_id, dive)
+    mission = await _mission_id(conn, tenant_id, number, "mission")
+    await species_store.clear_mission_calibration_target(conn, tenant_id, mission)
 
 
 async def clear_calibration_refusal(
@@ -322,9 +326,9 @@ async def clear_calibration_refusal(
     """Clear dive `number`'s standing calibration refusal, so the dive is
     offered again (v1's `DELETE /dives/{id}/calibration-refused/`). An
     appended clear; idempotent, False when nothing stood."""
-    dive = await _dive_id(conn, tenant_id, number, "dive")
+    mission = await _mission_id(conn, tenant_id, number, "mission")
     return await laser_calibration_store.clear_calibration_refusal(
-        conn, tenant_id, dive, reason=reason
+        conn, tenant_id, mission, reason=reason
     )
 
 
@@ -345,10 +349,10 @@ async def set_needs_reprocess(
     dispatches. A withdrawal is the whole dive: an operator has no redraw run
     to scope it to.
     """
-    dive = await _dive_id(conn, tenant_id, number, "dive")
+    mission = await _mission_id(conn, tenant_id, number, "mission")
     if kind == "species":
         return await species_store.set_species_needs_reprocess(
-            conn, tenant_id, dive, raised, only_incomplete=only_incomplete
+            conn, tenant_id, mission, raised, only_incomplete=only_incomplete
         )
     if raised:
         raise_flags = {
@@ -356,15 +360,17 @@ async def set_needs_reprocess(
             "head_tail": headtail_store.set_headtail_needs_reprocess,
             "slate": slate_store.flag_slate_labels_for_reprocess,
         }[kind]
-        return await raise_flags(conn, tenant_id, dive, only_incomplete=only_incomplete)
+        return await raise_flags(
+            conn, tenant_id, mission, only_incomplete=only_incomplete
+        )
     if kind == "laser":
         return await laser_store.clear_laser_reprocess_flags(
-            conn, tenant_id, dive, None
+            conn, tenant_id, mission, None
         )
     if kind == "head_tail":
         return await headtail_store.clear_headtail_needs_reprocess(
-            conn, tenant_id, dive, None
+            conn, tenant_id, mission, None
         )
     return await slate_store.clear_slate_reprocess_flags(
-        conn, tenant_id, dive, checksums=None
+        conn, tenant_id, mission, checksums=None
     )

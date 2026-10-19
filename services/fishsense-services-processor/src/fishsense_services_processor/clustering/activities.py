@@ -42,14 +42,14 @@ from uuid import UUID
 from sklearn.cluster import HDBSCAN
 from temporalio import activity
 
-from fishsense_services_contracts import ClusterDiveFrameImage
+from fishsense_services_contracts import ClusterMissionFrameImage
 
-__all__ = ["cluster_dive_frames"]
+__all__ = ["cluster_mission_frames"]
 
 
-@activity.defn
-async def cluster_dive_frames(
-    images: Iterable[ClusterDiveFrameImage],
+@activity.defn(name="cluster_dive_frames")
+async def cluster_mission_frames(
+    images: Iterable[ClusterMissionFrameImage],
 ) -> List[List[UUID]]:
     """Cluster a dive's captures by their taken_datetime timestamps.
 

@@ -43,11 +43,11 @@ with workflow.unsafe.imports_passed_through():
     from fishsense_services_orchestrator.ingest.activities import (
         INCOMPLETE_INGEST_TYPE,
         BatchResult,
-        DiveFolderListing,
+        MissionFolderListing,
         IngestTotals,
     )
     from fishsense_services_orchestrator.ingest.contracts import (
-        IngestDiveRequest,
+        IngestMissionRequest,
         IngestPreflight,
         IngestProgress,
         IngestReport,
@@ -56,7 +56,7 @@ with workflow.unsafe.imports_passed_through():
         NAS_FILE_NOT_FOUND_TYPE,
     )
 
-__all__ = ["BATCH_SIZE", "IngestDiveWorkflow"]
+__all__ = ["BATCH_SIZE", "IngestMissionWorkflow"]
 
 # Frames per scan activity. Each is a whole-file download (~14.5 MB), so 25 is
 # roughly 360 MB of work -- small enough that a failure is cheap to redo, large
@@ -77,8 +77,8 @@ _NAS_RETRY = RetryPolicy(
 )
 
 
-@workflow.defn
-class IngestDiveWorkflow:
+@workflow.defn(name="IngestDiveWorkflow")
+class IngestMissionWorkflow:
     """List, preflight, create, scan, finalize -- one dive."""
 
     def __init__(self) -> None:
@@ -92,12 +92,12 @@ class IngestDiveWorkflow:
         return self._progress
 
     @workflow.run
-    async def run(self, request: IngestDiveRequest) -> IngestReport:
+    async def run(self, request: IngestMissionRequest) -> IngestReport:
         self._progress.state = "listing"
-        listing: DiveFolderListing = await workflow.execute_activity(
+        listing: MissionFolderListing = await workflow.execute_activity(
             "list_dive_folder",
             args=(request,),
-            result_type=DiveFolderListing,
+            result_type=MissionFolderListing,
             schedule_to_close_timeout=timedelta(minutes=15),
             retry_policy=_NAS_RETRY,
         )
@@ -119,7 +119,7 @@ class IngestDiveWorkflow:
             # written either way, and the report IS the deliverable.
             self._progress.state = "rejected" if preflight.errors else "dry-run"
             return IngestReport(
-                dive_path=request.dive_path,
+                mission_path=request.mission_path,
                 total=len(listing.files),
                 committed=False,
                 preflight=preflight,
@@ -128,14 +128,14 @@ class IngestDiveWorkflow:
         tenant_id = preflight.tenant_id
 
         self._progress.state = "creating"
-        dive_id: uuid.UUID = await workflow.execute_activity(
+        mission_id: uuid.UUID = await workflow.execute_activity(
             "create_dive",
             args=(request, preflight),
             result_type=uuid.UUID,
             schedule_to_close_timeout=timedelta(minutes=5),
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
-        self._progress.dive_id = dive_id
+        self._progress.mission_id = mission_id
 
         self._progress.state = "scanning"
         totals = IngestTotals(total=len(preflight.images))
@@ -146,7 +146,7 @@ class IngestDiveWorkflow:
             self._progress.current_path = batch[0]
             result: BatchResult = await workflow.execute_activity(
                 "scan_and_register",
-                args=(tenant_id, dive_id, batch, preflight.resolved_device_id),
+                args=(tenant_id, mission_id, batch, preflight.resolved_device_id),
                 result_type=BatchResult,
                 schedule_to_close_timeout=_SCAN_TIMEOUT,
                 heartbeat_timeout=timedelta(minutes=15),
@@ -170,7 +170,7 @@ class IngestDiveWorkflow:
         self._progress.current_path = None
         report: IngestReport = await workflow.execute_activity(
             "finalize_dive",
-            args=(tenant_id, dive_id, request, totals),
+            args=(tenant_id, mission_id, request, totals),
             result_type=IngestReport,
             schedule_to_close_timeout=timedelta(minutes=15),
             retry_policy=RetryPolicy(

@@ -64,7 +64,7 @@ def _activities(deps: Deps):
         layout=ObjectLayout(ObjectStoreConnection()),
     )
     return [
-        activities.select_next_dive_for_slate_detection,
+        activities.select_next_mission_for_slate_detection,
         activities.resolve_slate_detection_inputs,
         activities.persist_slate_presence_predictions,
     ]

@@ -69,11 +69,11 @@ RULER_CONTENT = f"{CALIBRATION_TARGETS_BRANCH}, {RULER_NAME}"
 # The E4E-branded printed checkerboard (15 x 11 squares, 14 x 10 interior
 # corners) the 2023 pool-test `LaserCalibration` folders were shot against.
 # It identifies a dive as calibratable from a *plane* rather than from a
-# `DiveSlate` template - the second producer of `LaserExtrinsics`, see
+# `MissionSlate` template - the second producer of `LaserExtrinsics`, see
 # `docs/plans/checkerboard-laser-calibration.md`.
 #
 # The name is the join key: a `CalibrationTarget` row carries this string as
-# its `name`, exactly as `DiveSlate.name` carries the slate-type leaves. So
+# its `name`, exactly as `MissionSlate.name` carries the slate-type leaves. So
 # adding a second board means adding a taxonomy choice AND a row whose name
 # matches it, and nothing else.
 CHECKERBOARD_NAME = "E4E Checkerboard"
@@ -160,7 +160,7 @@ SLATE_CONTENT_MARKER = "Slate, Laser on slate"
 SLATE_NO_LASER_CONTENT = "Slate, Laser not on slate"
 
 # The two CONTENT answers under `Slate`, as opposed to the slate *type*
-# (`H-Slate`, `V-Slate 2`, ...) that species sync maps to `Dive.dive_slate_id`.
+# (`H-Slate`, `V-Slate 2`, ...) that species sync maps to `Mission.dive_slate_id`.
 #
 # **Both live under `Slate` as sibling paths, and a labeler is meant to pick
 # one of each.** Label Studio returns the picked paths in selection order, so
@@ -177,7 +177,7 @@ SLATE_LASER_CONTENT: frozenset[str] = frozenset(
 # templates you are offering me."
 #
 # Not a nicety. The slate-type choices in the species taxonomy are exactly the
-# `DiveSlate` template rows, and a slate can be absent from that table
+# `MissionSlate` template rows, and a slate can be absent from that table
 # permanently -- V-Slate 7 was lost during a dive, so it can never be scanned
 # and can never be added. A labeler facing it previously had two options, both
 # bad: pick a wrong neighbour, or say nothing. The wrong neighbour is the
@@ -185,7 +185,7 @@ SLATE_LASER_CONTENT: frozenset[str] = frozenset(
 # scale error is the one thing reprojection residual cannot see -- it would
 # calibrate cleanly and measure every fish in the dive wrong.
 #
-# It is deliberately NOT a `DiveSlate` row: it must never resolve to a
+# It is deliberately NOT a `MissionSlate` row: it must never resolve to a
 # `dive_slate_id`, which is what keeps such a dive out of stages 9 and 13
 # rather than calibrating it against a slate it isn't.
 SLATE_NOT_IN_LIST_LEAF = "Slate not in list"

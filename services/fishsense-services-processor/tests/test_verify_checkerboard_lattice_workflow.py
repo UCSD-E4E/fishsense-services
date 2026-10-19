@@ -24,7 +24,7 @@ from __future__ import annotations
 import uuid
 
 from temporalio import activity
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -57,7 +57,7 @@ def _capture(n: int) -> uuid.UUID:
 
 def _input(*, images=3, **overrides):
     kwargs = {
-        "dive_id": uuid.UUID(int=522),
+        "mission_id": uuid.UUID(int=522),
         "camera_matrix": CAMERA_MATRIX,
         "distortion_coefficients": [0.0] * 5,
         "target": TARGET,
@@ -104,7 +104,7 @@ async def _run(payload, *, workflow_id, on_render=None):
         return (on_render or _rendered)(inner)
 
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,

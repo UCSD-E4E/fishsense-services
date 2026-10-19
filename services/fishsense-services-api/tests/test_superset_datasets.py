@@ -25,7 +25,7 @@ from depth_measure_seed import (  # noqa: F401  (forget_identities: a fixture)
     forget_identities,
 )
 from fishsense_services_api.db import tenant_transaction
-from test_dive_pipeline_status_view import (
+from test_mission_pipeline_status_view import (
     SLATE_MARKER,
     _capture,
     _dive,
@@ -59,67 +59,69 @@ def test_the_datasets_are_the_ones_superset_imports():
 
 async def _laser_open(owner_engine, tenant, **kwargs):
     """Laser tasks out, not all labeled."""
-    dive = await _dive(owner_engine, tenant, **kwargs)
-    await _laser(owner_engine, tenant, await _capture(owner_engine, tenant, dive))
-    return dive
+    mission = await _dive(owner_engine, tenant, **kwargs)
+    await _laser(owner_engine, tenant, await _capture(owner_engine, tenant, mission))
+    return mission
 
 
 async def _headtail_open(owner_engine, tenant):
     """Lasers done; head/tail tasks out, not all labeled."""
-    dive = await _dive(owner_engine, tenant)
-    capture_id = await _capture(owner_engine, tenant, dive)
+    mission = await _dive(owner_engine, tenant)
+    capture_id = await _capture(owner_engine, tenant, mission)
     await _valid_laser(owner_engine, tenant, capture_id)
     await _head_tail(owner_engine, tenant, capture_id)
-    return dive
+    return mission
 
 
 async def _species_open(owner_engine, tenant):
     """Lasers done, clustered; species tasks out, not all labeled."""
-    dive = await _dive(owner_engine, tenant)
-    capture_id = await _capture(owner_engine, tenant, dive)
+    mission = await _dive(owner_engine, tenant)
+    capture_id = await _capture(owner_engine, tenant, mission)
     await _valid_laser(owner_engine, tenant, capture_id)
-    await cluster(owner_engine, tenant, dive.id, [capture_id], formed_by="prediction")
+    await cluster(
+        owner_engine, tenant, mission.id, [capture_id], formed_by="prediction"
+    )
     await _species(owner_engine, tenant, capture_id)
-    return dive
+    return mission
 
 
 async def _slate_open(owner_engine, tenant):
     """A marked slate frame with its slate task out, not labeled."""
-    dive = await _dive(
+    mission = await _dive(
         owner_engine, tenant, slate_template_id=await _slate_template(owner_engine)
     )
-    capture_id = await _capture(owner_engine, tenant, dive)
+    capture_id = await _capture(owner_engine, tenant, mission)
     await _species(owner_engine, tenant, capture_id, SLATE_MARKER, completed=True)
     await _slate_label(owner_engine, tenant, capture_id)
-    return dive
+    return mission
 
 
 async def _calibrated(owner_engine, tenant, *, lasers_done=False):
     """Calibrated, nothing measured."""
-    dive = await _dive(owner_engine, tenant)
-    await calibrate(owner_engine, tenant, dive.id)
+    mission = await _dive(owner_engine, tenant)
+    await calibrate(owner_engine, tenant, mission.id)
     if lasers_done:
         await _valid_laser(
-            owner_engine, tenant, await _capture(owner_engine, tenant, dive)
+            owner_engine, tenant, await _capture(owner_engine, tenant, mission)
         )
-    return dive
+    return mission
 
 
 async def _labeled(owner_engine, tenant, *, species, headtail, slate=False):
     """Lasers done; species and head/tail labeling done or not."""
     template = await _slate_template(owner_engine) if slate else None
-    dive = await _dive(owner_engine, tenant, slate_template_id=template)
-    capture_id = await _capture(owner_engine, tenant, dive)
+    mission = await _dive(owner_engine, tenant, slate_template_id=template)
+    capture_id = await _capture(owner_engine, tenant, mission)
     await _valid_laser(owner_engine, tenant, capture_id)
     await _species(owner_engine, tenant, capture_id, completed=species)
     await _head_tail(owner_engine, tenant, capture_id, completed=headtail)
-    return dive
+    return mission
 
 
 # --- pipeline_labeling_queue ------------------------------------------------------
 
 
-async def test_labeling_queue_counts_high_priority_dives_per_stage(
+async def test_labeling_queue_counts_high_priority_missions_per_stage(
     owner_engine, app_engine
 ):
     """Distinct counts per stage, so a stage reading another's column shows."""
@@ -157,7 +159,7 @@ async def test_labeling_queue_is_all_zero_for_an_idle_tenant(owner_engine, app_e
 # --- pipeline_partial_dives -------------------------------------------------------
 
 
-async def test_partial_dives_names_each_unfinished_dives_blocker(
+async def test_partial_missions_names_each_unfinished_missions_blocker(
     owner_engine, app_engine
 ):
     tenant = await _tenant(owner_engine)

@@ -67,7 +67,7 @@ with workflow.unsafe.imports_passed_through():
     from fishsense_services_orchestrator.species.contracts import (
         ClearReprocessFlagsInput,
         SpeciesTarget,
-        UpdateDiveImageGroupsResult,
+        UpdateMissionImageGroupsResult,
     )
 
 __all__ = [
@@ -79,7 +79,7 @@ __all__ = [
     "PopulateSpeciesLabelStudioProjectWorkflow",
     "PreprocessSpeciesImagesParentWorkflow",
     "SyncLabelStudioSpeciesLabelsWorkflow",
-    "UpdateDiveImageGroupsWorkflow",
+    "UpdateMissionImageGroupsWorkflow",
     "create_then_populate",
 ]
 
@@ -140,7 +140,7 @@ class PreprocessSpeciesImagesParentWorkflow:
         workflow.logger.info(
             "dispatching species preprocess to the processor dive=%s clusters=%d "
             "images=%d",
-            target.dive_id,
+            target.mission_id,
             len(inputs.cluster_members),
             len(drawn),
         )
@@ -153,21 +153,21 @@ class PreprocessSpeciesImagesParentWorkflow:
             # request is the lesser harm, so it is lowered and logged.
             workflow.logger.warning(
                 "reprocess flag resolved to no work; lowering it dive=%s",
-                target.dive_id,
+                target.mission_id,
             )
             await _clear_flags(
-                ClearReprocessFlagsInput(target.tenant_id, target.dive_id)
+                ClearReprocessFlagsInput(target.tenant_id, target.mission_id)
             )
             return target
 
-        staging = StagingTarget(target.tenant_id, target.dive_id)
+        staging = StagingTarget(target.tenant_id, target.mission_id)
         await wake_per_image_processor()
         await stage_raw(staging)
         try:
             await workflow.execute_child_workflow(
                 "PreprocessSpeciesImagesWorkflow",
                 inputs,
-                id=raw_scratch_reader_id(RAW_READER, target.dive_id),
+                id=raw_scratch_reader_id(RAW_READER, target.mission_id),
                 task_queue=PROCESSOR_TASK_QUEUE,
                 execution_timeout=timedelta(hours=2),
                 id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
@@ -179,7 +179,7 @@ class PreprocessSpeciesImagesParentWorkflow:
             workflow.logger.info(
                 "dive=%s already has a child running; leaving its raw bytes and "
                 "reprocess flags alone",
-                target.dive_id,
+                target.mission_id,
             )
             return target
 
@@ -187,7 +187,7 @@ class PreprocessSpeciesImagesParentWorkflow:
         # Scoped to what this run drew: a flag raised while the child ran
         # stays up for the next firing.
         await _clear_flags(
-            ClearReprocessFlagsInput(target.tenant_id, target.dive_id, drawn)
+            ClearReprocessFlagsInput(target.tenant_id, target.mission_id, drawn)
         )
         return target
 
@@ -267,7 +267,7 @@ class PopulateSpeciesLabelStudioProjectParentWorkflow:
                         # firing; ALLOW_DUPLICATE (not FAILED_ONLY) so a later
                         # firing can populate newly laser-valid frames after
                         # this one closed -- the child is idempotent.
-                        id=f"populate-species-{target.dive_id}",
+                        id=f"populate-species-{target.mission_id}",
                         execution_timeout=timedelta(minutes=30),
                         id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
                     )
@@ -275,7 +275,7 @@ class PopulateSpeciesLabelStudioProjectParentWorkflow:
                     workflow.logger.info(
                         "populate-species-%s already running; skipping duplicate "
                         "dispatch",
-                        target.dive_id,
+                        target.mission_id,
                     )
 
         # One dive's populate failure must not abort the whole fan-out (v1's
@@ -286,7 +286,9 @@ class PopulateSpeciesLabelStudioProjectParentWorkflow:
         for target, outcome in zip(targets, outcomes):
             if isinstance(outcome, BaseException):
                 workflow.logger.error(
-                    "species populate failed for dive=%s: %s", target.dive_id, outcome
+                    "species populate failed for dive=%s: %s",
+                    target.mission_id,
+                    outcome,
                 )
         return targets
 
@@ -332,20 +334,20 @@ class SyncLabelStudioSpeciesLabelsWorkflow:
             )
 
 
-@workflow.defn
-class UpdateDiveImageGroupsWorkflow:
+@workflow.defn(name="UpdateDiveImageGroupsWorkflow")
+class UpdateMissionImageGroupsWorkflow:
     # pylint: disable=too-few-public-methods
     """On demand (stage 6.1), once a dive's species labeling is complete:
     regroup its prediction clusters into the label-studio clusters stage 14
     measures."""
 
     @workflow.run
-    async def run(self, target: SpeciesTarget) -> UpdateDiveImageGroupsResult:
+    async def run(self, target: SpeciesTarget) -> UpdateMissionImageGroupsResult:
         return await workflow.execute_activity(
             "update_dive_image_groups",
             target,
             schedule_to_close_timeout=timedelta(minutes=15),
             heartbeat_timeout=timedelta(minutes=2),
             retry_policy=CREATE_PROJECT_RETRY,
-            result_type=UpdateDiveImageGroupsResult,
+            result_type=UpdateMissionImageGroupsResult,
         )

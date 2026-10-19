@@ -35,7 +35,7 @@ from fishsense_services_orchestrator.slates import populate as sut
 from fishsense_services_orchestrator.slates.contracts import PopulateSlateProject
 
 TENANT = uuid.UUID(int=1)
-DIVE = uuid.UUID(int=42)
+MISSION = uuid.UUID(int=42)
 PROJECT = 66
 T0 = datetime(2026, 9, 1, tzinfo=UTC)
 
@@ -65,11 +65,11 @@ class FakeCatalog:
         self.provenance = {}
         self.superseded_with = None
 
-    async def slate_populate_candidates(self, tenant_id, dive_id):
-        assert (tenant_id, dive_id) == (TENANT, DIVE)
+    async def slate_populate_candidates(self, tenant_id, mission_id):
+        assert (tenant_id, mission_id) == (TENANT, MISSION)
         return self.candidates
 
-    async def dive_has_slate_labels_in_project(self, tenant_id, dive_id, project):
+    async def mission_has_slate_labels_in_project(self, tenant_id, mission_id, project):
         assert project == PROJECT
         return self.had_rows
 
@@ -81,7 +81,7 @@ class FakeCatalog:
         self.provenance[capture_id] = slate_presence_prediction_id
 
     async def supersede_stale_slate_labels(
-        self, tenant_id, dive_id, *, ls_project_id, keep_capture_ids
+        self, tenant_id, mission_id, *, ls_project_id, keep_capture_ids
     ):
         self.superseded_with = (ls_project_id, list(keep_capture_ids))
         return 0
@@ -131,15 +131,15 @@ class FakeProjects:
     def __init__(self):
         self.calls = []
 
-    async def ensure_dive_project(
-        self, tenant_id, dive_id, kind, *, suffix, labeling_config_xml
+    async def ensure_mission_project(
+        self, tenant_id, mission_id, kind, *, suffix, labeling_config_xml
     ):
-        self.calls.append((tenant_id, dive_id, kind, suffix, labeling_config_xml))
+        self.calls.append((tenant_id, mission_id, kind, suffix, labeling_config_xml))
         return PROJECT
 
 
 def _activities(catalog, *, store=None, ls=None, projects=None):
-    return sut.DiveSlateProjectActivities(
+    return sut.MissionSlateProjectActivities(
         catalog=catalog,
         label_projects=projects or FakeProjects(),
         label_studio=ls or FakeLabelStudio(),
@@ -149,8 +149,10 @@ def _activities(catalog, *, store=None, ls=None, projects=None):
 
 async def _populate(activities) -> int:
     return await ActivityEnvironment().run(
-        activities.populate_dive_slate_label_studio_project,
-        PopulateSlateProject(tenant_id=TENANT, dive_id=DIVE, ls_project_id=PROJECT),
+        activities.populate_mission_slate_label_studio_project,
+        PopulateSlateProject(
+            tenant_id=TENANT, mission_id=MISSION, ls_project_id=PROJECT
+        ),
     )
 
 
@@ -239,7 +241,7 @@ async def test_does_not_publish_empty_project():
     assert ls.updates == []
 
 
-async def test_publishes_a_project_that_already_holds_the_dives_rows():
+async def test_publishes_a_project_that_already_holds_the_missions_rows():
     """v1: publish iff the project holds tasks -- this run's, or the rows it
     already had before the import."""
     ls = FakeLabelStudio()
@@ -322,32 +324,32 @@ async def test_a_migrated_frames_task_points_where_v1_wrote_its_jpeg():
 # ---------- create ----------
 
 
-async def test_create_finds_or_makes_the_dives_slate_project():
+async def test_create_finds_or_makes_the_missions_slate_project():
     projects = FakeProjects()
 
     project = await ActivityEnvironment().run(
         _activities(
             FakeCatalog([]), projects=projects
-        ).create_dive_slate_label_studio_project,
-        StagingTarget(tenant_id=TENANT, dive_id=DIVE),
+        ).create_mission_slate_label_studio_project,
+        StagingTarget(tenant_id=TENANT, mission_id=MISSION),
     )
 
     assert project == PROJECT
-    ((tenant, dive, kind, suffix, xml),) = projects.calls
-    assert (tenant, dive, kind, suffix) == (
+    ((tenant, mission, kind, suffix, xml),) = projects.calls
+    assert (tenant, mission, kind, suffix) == (
         TENANT,
-        DIVE,
+        MISSION,
         "slate",
         "Dive Slate Labeling",
     )
-    assert xml == sut.DIVE_SLATE_LABELING_CONFIG_XML
+    assert xml == sut.MISSION_SLATE_LABELING_CONFIG_XML
 
 
 def test_the_labeling_config_carries_the_controls_the_sync_reads():
     """`reference_points` (keypoints), `slate` (rectangle) and
     `skipped_points` (text) map 1:1 onto the slate label's fields; the
     `upside_down` choice was removed on 2026-07-31 and must not come back."""
-    xml = sut.DIVE_SLATE_LABELING_CONFIG_XML
+    xml = sut.MISSION_SLATE_LABELING_CONFIG_XML
 
     for control in (
         '<KeyPointLabels name="reference_points"',

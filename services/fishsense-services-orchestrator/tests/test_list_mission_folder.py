@@ -73,16 +73,16 @@ async def _run(request, client, monkeypatch):
     activities = IngestActivities(
         nas_settings=settings, nas_client_factory=lambda: client
     )
-    return await activities.list_dive_folder(request)
+    return await activities.list_mission_folder(request)
 
 
 def _request(**kwargs):
-    from fishsense_services_orchestrator.ingest.contracts import IngestDiveRequest
+    from fishsense_services_orchestrator.ingest.contracts import IngestMissionRequest
 
     kwargs.setdefault("tenant", "lab")
-    kwargs.setdefault("dive_path", "2024.06.20.REEF/082929_FishModels_FSL07")
+    kwargs.setdefault("mission_path", "2024.06.20.REEF/082929_FishModels_FSL07")
     kwargs.setdefault("self_calibrates", True)
-    return IngestDiveRequest(**kwargs)
+    return IngestMissionRequest(**kwargs)
 
 
 ROOT = "/fishsense_data/REEF/data"
@@ -231,7 +231,7 @@ async def test_does_not_descend_past_the_immediate_children(monkeypatch):
 
 async def test_the_request_path_is_resolved_against_the_nas_raw_root(monkeypatch):
     """`Image.path` is stored share-relative but FileStation needs absolute —
-    the same asymmetry `stage_raw_bytes_for_dive_activity` handles. Getting it
+    the same asymmetry `stage_raw_bytes_for_mission_activity` handles. Getting it
     wrong surfaces as a 502, not a 404."""
     client = _listing_client({FOLDER: []})
 
@@ -244,7 +244,7 @@ async def test_an_absolute_request_path_is_not_double_prefixed(monkeypatch):
     """An operator pasting a full NAS path is the obvious mistake to absorb."""
     client = _listing_client({FOLDER: []})
 
-    await _run(_request(dive_path=FOLDER), client, monkeypatch)
+    await _run(_request(mission_path=FOLDER), client, monkeypatch)
 
     assert client.listed == [FOLDER]
 

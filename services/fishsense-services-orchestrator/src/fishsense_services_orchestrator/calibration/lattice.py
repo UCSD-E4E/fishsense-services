@@ -200,7 +200,7 @@ class LatticeProjectActivities:
             "checkerboard_lattice",
             title=title,
             labeling_config_xml=CHECKERBOARD_LATTICE_LABELING_CONFIG_XML,
-            dive_id=None,
+            mission_id=None,
         )
         activity.logger.info(
             "lattice-verification LS project_id=%d title=%r", project_id, title

@@ -206,7 +206,7 @@ def test_sql_broader_rows_are_not_also_in_the_corpus():
 # --- the "slate not in list" sentinel --------------------------------------
 #
 # Added 2026-08-27. V-Slate 7 was lost during a dive, so it can never be
-# scanned and can never become a `DiveSlate` template row. Before the
+# scanned and can never become a `MissionSlate` template row. Before the
 # sentinel, a labeler looking at it was offered only V-Slate 1..4 and had to
 # either pick a wrong neighbour or say nothing -- and a wrong slate produces a
 # wrong *scale*, which reprojection error is blind to. The sentinel is the
@@ -238,7 +238,7 @@ def test_slate_not_in_list_is_exported():
 # `Calibration Targets` has held `Ruler` and `E4E Checkerboard` since #371,
 # but only as a *label*: nothing read the branch. It is now the hook that
 # tells a dive it was shot against a planar calibration target, the way the
-# slate-type leaf tells it which `DiveSlate` it was shot against.
+# slate-type leaf tells it which `MissionSlate` it was shot against.
 #
 # The two leaves under that branch mean opposite things to the pipeline, which
 # is the whole reason this parser exists rather than a bare `path[0] ==` test.

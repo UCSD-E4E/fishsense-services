@@ -17,7 +17,7 @@ from fishsense_services_orchestrator.registry import Deps, ScheduledWorkflow, St
 def _activities(deps: Deps):
     depths = LaserDepthActivities(catalog=LaserDepthCatalog(deps.engine, sub=deps.sub))
     return [
-        depths.select_next_dive_for_laser_depth,
+        depths.select_next_mission_for_laser_depth,
         depths.resolve_laser_depth_inputs,
         depths.persist_laser_depths,
     ]

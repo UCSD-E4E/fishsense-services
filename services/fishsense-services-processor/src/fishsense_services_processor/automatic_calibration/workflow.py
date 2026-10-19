@@ -31,7 +31,7 @@ class FitAutomaticCalibrationWorkflow:
     ) -> AutomaticCalibrationResult:
         workflow.logger.info(
             "label-free calibration dive_id=%s frames=%d",
-            payload.dive_id,
+            payload.mission_id,
             len(payload.frames),
         )
         return await workflow.execute_activity(

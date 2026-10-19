@@ -33,7 +33,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from depth_measure_seed import exec_
-from test_dive_pipeline_status_view import VIEW, _dive, _tenant
+from test_mission_pipeline_status_view import VIEW, _dive, _tenant
 
 ROLE = "fishsense_analytics"
 _logins = itertools.count(1)
@@ -68,7 +68,7 @@ async def analyst(postgres, owner_engine) -> AsyncIterator[Analyst]:
         await exec_(owner_engine, f"DROP ROLE {name}")
 
 
-async def _dive_ids(engine: AsyncEngine, sql: str = f"SELECT dive_id FROM {VIEW}"):
+async def _mission_ids(engine: AsyncEngine, sql: str = f"SELECT dive_id FROM {VIEW}"):
     async with engine.connect() as conn:
         return set((await conn.execute(text(sql))).scalars())
 
@@ -88,7 +88,7 @@ async def test_the_role_is_a_group_that_cannot_log_in_or_bypass_rls(owner_engine
     assert tuple(role) == (False, False, False, False, False)
 
 
-async def test_a_member_sees_the_lab_tenants_dives_and_not_another_tenants(
+async def test_a_member_sees_the_lab_tenants_missions_and_not_another_tenants(
     owner_engine, analyst
 ):
     lab = await _tenant(owner_engine)
@@ -97,8 +97,8 @@ async def test_a_member_sees_the_lab_tenants_dives_and_not_another_tenants(
     await _dive(owner_engine, partner)
 
     engine = await analyst(lab)
-    assert await _dive_ids(engine) == mine
-    assert await _dive_ids(engine, "SELECT number FROM dives") == mine
+    assert await _mission_ids(engine) == mine
+    assert await _mission_ids(engine, "SELECT number FROM missions") == mine
 
 
 async def test_a_member_cannot_widen_its_tenant_by_setting_it(owner_engine, analyst):
@@ -113,7 +113,7 @@ async def test_a_member_cannot_widen_its_tenant_by_setting_it(owner_engine, anal
     async with engine.connect() as conn:
         await conn.execute(text(f"SET app.tenant_id = '{partner}'"))
         assert list((await conn.execute(text(f"SELECT dive_id FROM {VIEW}")))) == []
-        assert list((await conn.execute(text("SELECT id FROM dives")))) == []
+        assert list((await conn.execute(text("SELECT id FROM missions")))) == []
 
 
 async def test_a_member_bound_to_another_tenant_sees_nothing(owner_engine, analyst):
@@ -123,22 +123,22 @@ async def test_a_member_bound_to_another_tenant_sees_nothing(owner_engine, analy
     partner = await _tenant(owner_engine, "partner")
     await _dive(owner_engine, partner)
 
-    assert await _dive_ids(await analyst(partner)) == set()
+    assert await _mission_ids(await analyst(partner)) == set()
 
 
 async def test_a_member_with_no_tenant_sees_nothing(owner_engine, analyst):
     lab = await _tenant(owner_engine)
     await _dive(owner_engine, lab)
 
-    assert await _dive_ids(await analyst(None)) == set()
+    assert await _mission_ids(await analyst(None)) == set()
 
 
 @pytest.mark.parametrize(
     "statement",
     [
-        "INSERT INTO dives (tenant_id, source_path, dived_at) "
+        "INSERT INTO missions (tenant_id, source_path, started_at) "
         "SELECT id, '/x', now() FROM tenants",
-        "UPDATE dives SET name = 'x'",
+        "UPDATE missions SET name = 'x'",
         "DELETE FROM captures",
         "INSERT INTO species (scientific_name) VALUES ('Sparisoma viride')",
         "TRUNCATE measurements",

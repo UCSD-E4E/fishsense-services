@@ -67,8 +67,8 @@ from fishsense_services_orchestrator.object_store.layout import ObjectLayout
 BUCKET = "fishsense-test"
 ROOT = "/fishsense_data/REEF/data"
 TENANT = uuid.UUID("7b0c7d4e-3f58-4d8e-9a3c-0c5f1f7f2d11")
-DIVE = uuid.UUID("11111111-2222-4333-8444-555555555555")
-TARGET = StagingTarget(tenant_id=TENANT, dive_id=DIVE)
+MISSION = uuid.UUID("11111111-2222-4333-8444-555555555555")
+TARGET = StagingTarget(tenant_id=TENANT, mission_id=MISSION)
 REL = "2024.06.20.REEF/dive_42/IMG.ORF"
 
 
@@ -91,8 +91,8 @@ class _Catalog:
         self._captures = captures
         self.asked = []
 
-    async def captures_to_stage(self, tenant_id, dive_id):
-        self.asked.append((tenant_id, dive_id))
+    async def captures_to_stage(self, tenant_id, mission_id):
+        self.asked.append((tenant_id, mission_id))
         return list(self._captures)
 
 
@@ -170,7 +170,9 @@ def _raw_keys(s3) -> set[str]:
 
 
 async def _stage(activities) -> StageRawBytesResult:
-    return await ActivityEnvironment().run(activities.stage_raw_bytes_for_dive, TARGET)
+    return await ActivityEnvironment().run(
+        activities.stage_raw_bytes_for_mission, TARGET
+    )
 
 
 async def test_skips_already_staged_checksums_no_nas_download(s3):
@@ -202,7 +204,7 @@ async def test_stages_new_checksums_via_nas_download_then_put(s3):
     assert s3.get_object(Bucket=BUCKET, Key=_raw_key(_md5(1)))["Body"].read() == (
         b"raw-bytes"
     )
-    assert activities._catalog.asked == [(TENANT, DIVE)]
+    assert activities._catalog.asked == [(TENANT, MISSION)]
 
 
 async def test_an_absolute_path_passes_through_to_the_nas(s3):
@@ -256,7 +258,7 @@ async def test_failed_nas_download_does_not_upload_to_object_store(s3):
     ), "staging uploaded to the object store after the NAS download raised"
 
 
-async def test_returns_zeros_when_dive_has_no_images(s3):
+async def test_returns_zeros_when_mission_has_no_images(s3):
     nas = _Nas()
 
     result = await _stage(_activities(s3, [], nas))

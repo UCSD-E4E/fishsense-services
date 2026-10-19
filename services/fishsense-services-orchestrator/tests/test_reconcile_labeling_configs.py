@@ -34,7 +34,7 @@ from unittest.mock import MagicMock
 import pytest
 from label_studio_sdk.core import ApiError
 from temporalio import activity
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -96,7 +96,7 @@ async def _reconcile(ls, *, workspace="", configs=CONFIGS):
 # -- the reconcile (v1's five) ------------------------------------------------------
 
 
-async def test_heals_a_project_whose_dive_left_the_populate_cohort():
+async def test_heals_a_project_whose_mission_left_the_populate_cohort():
     """The 274353 case: fully populated, out of cohort, stale config."""
     stale = _project(
         274353, "082923_FishModels_FSL02 #58 - Species Labeling", OLD_SPECIES_XML
@@ -322,7 +322,7 @@ async def test_the_workflow_runs_the_reconcile_with_v1s_timeouts():
         return ReconcileLabelingConfigsResult(scanned=2, healed=1, unchanged=1)
 
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,
@@ -348,7 +348,7 @@ async def test_the_workflow_runs_the_reconcile_with_v1s_timeouts():
     assert scheduled.heartbeat_timeout.ToTimedelta() == timedelta(minutes=2)
 
 
-def test_every_per_dive_kind_declares_its_labeling_config():
+def test_every_per_mission_kind_declares_its_labeling_config():
     """The integration seam: the reconcile discovers each kind's
     `<package>/labeling_config.py`, and the four populate slices were ported in
     parallel with it, so none declared one -- the reconcile would heal nothing.
@@ -367,7 +367,7 @@ def test_every_per_dive_kind_declares_its_labeling_config():
         LASER_LABELING_CONFIG_XML,
     )
     from fishsense_services_orchestrator.slates.populate import (
-        DIVE_SLATE_LABELING_CONFIG_XML,
+        MISSION_SLATE_LABELING_CONFIG_XML,
     )
     from fishsense_services_orchestrator.species.labeling import (
         SPECIES_LABELING_CONFIG_XML,
@@ -378,6 +378,6 @@ def test_every_per_dive_kind_declares_its_labeling_config():
     assert declared == [
         ("head_tail", "HeadTail Labeling", HEADTAIL_LABELING_CONFIG_XML),
         ("laser", "Laser Calibration Labeling", LASER_LABELING_CONFIG_XML),
-        ("slate", "Dive Slate Labeling", DIVE_SLATE_LABELING_CONFIG_XML),
+        ("slate", "Dive Slate Labeling", MISSION_SLATE_LABELING_CONFIG_XML),
         ("species", "Species Labeling", SPECIES_LABELING_CONFIG_XML),
     ]

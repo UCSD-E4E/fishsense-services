@@ -33,21 +33,21 @@ async def _one(conn, sql: str, **params):
 @dataclass
 class Scene:
     tenant: uuid.UUID
-    dive: uuid.UUID
+    mission: uuid.UUID
     capture: uuid.UUID
     fish: uuid.UUID
     laser_label: uuid.UUID
     calibration: uuid.UUID
 
 
-async def _calibrate(conn, tenant, dive) -> uuid.UUID:
+async def _calibrate(conn, tenant, mission) -> uuid.UUID:
     return await _one(
         conn,
-        "INSERT INTO laser_calibrations (tenant_id, dive_id, producer, outcome, "
+        "INSERT INTO laser_calibrations (tenant_id, mission_id, producer, outcome, "
         "laser_position, laser_axis) VALUES (:t, :d, 'slate', 'accepted', "
         ":p, :a) RETURNING id",
         t=tenant,
-        d=dive,
+        d=mission,
         p=json.dumps([0.1, 0, 0]),
         a=json.dumps([0, 0, 1]),
     )
@@ -57,19 +57,19 @@ async def _scene(conn, slug: str = "lab") -> Scene:
     tenant = await _one(
         conn, "INSERT INTO tenants (slug, name) VALUES (:s, :s) RETURNING id", s=slug
     )
-    dive = await _one(
+    mission = await _one(
         conn,
-        "INSERT INTO dives (tenant_id, source_path, dived_at) "
+        "INSERT INTO missions (tenant_id, source_path, started_at) "
         "VALUES (:t, '/a', now()) RETURNING id",
         t=tenant,
     )
     capture = await _one(
         conn,
-        "INSERT INTO captures (tenant_id, dive_id, source_path, captured_at, checksum) "
+        "INSERT INTO captures (tenant_id, mission_id, source_path, captured_at, checksum) "
         "VALUES (:t, :d, '/a/1.ORF', now(), '0123456789abcdef0123456789abcdef') "
         "RETURNING id",
         t=tenant,
-        d=dive,
+        d=mission,
     )
     fish = await _one(
         conn, "INSERT INTO fish (tenant_id) VALUES (:t) RETURNING id", t=tenant
@@ -82,8 +82,8 @@ async def _scene(conn, slug: str = "lab") -> Scene:
         t=tenant,
         c=capture,
     )
-    calibration = await _calibrate(conn, tenant, dive)
-    return Scene(tenant, dive, capture, fish, laser_label, calibration)
+    calibration = await _calibrate(conn, tenant, mission)
+    return Scene(tenant, mission, capture, fish, laser_label, calibration)
 
 
 async def _measure(conn, scene: Scene, **columns) -> uuid.UUID:
@@ -201,7 +201,7 @@ async def test_a_recalibration_makes_old_results_stale_until_remeasured(owner):
     scene = await _scene(owner)
     await _measure(owner, scene)
 
-    recalibrated = await _calibrate(owner, scene.tenant, scene.dive)
+    recalibrated = await _calibrate(owner, scene.tenant, scene.mission)
     assert await _current(owner, scene) == []
 
     remeasured = await _measure(owner, scene, laser_calibration_id=recalibrated)

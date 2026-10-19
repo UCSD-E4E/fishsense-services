@@ -32,13 +32,13 @@ async def _two_tenants(owner_engine):
     seeded = {}
     for slug in ("lab", "partner"):
         tenant_id = await tenant(owner_engine, slug)
-        dive_id, _ = await calibrated_dive(owner_engine, tenant_id)
-        capture_id = await capture(owner_engine, tenant_id, dive_id)
+        mission_id, _ = await calibrated_dive(owner_engine, tenant_id)
+        capture_id = await capture(owner_engine, tenant_id, mission_id)
         numbers = await rows(
             owner_engine,
-            "SELECT (SELECT number FROM dives WHERE id = :d) AS dive, "
+            "SELECT (SELECT number FROM missions WHERE id = :d) AS mission, "
             "(SELECT number FROM captures WHERE id = :c) AS image",
-            d=dive_id,
+            d=mission_id,
             c=capture_id,
         )
         seeded[slug] = (tenant_id, numbers[0])
@@ -71,7 +71,7 @@ async def test_a_research_login_sees_the_labs_rows_without_a_tenant_setting(
 
     got = await rows(research_engine, "SELECT id FROM dive ORDER BY id")
 
-    assert got == [{"id": seeded["lab"][1]["dive"]}]
+    assert got == [{"id": seeded["lab"][1]["mission"]}]
 
 
 async def test_a_research_login_cannot_see_another_tenant_by_naming_it(
@@ -87,12 +87,12 @@ async def test_a_research_login_cannot_see_another_tenant_by_naming_it(
             text("SELECT set_config('app.tenant_id', :t, false)"),
             {"t": str(partner)},
         )
-        dives = (await conn.execute(text("SELECT id FROM dive"))).scalars().all()
+        missions = (await conn.execute(text("SELECT id FROM dive"))).scalars().all()
         images = (await conn.execute(text("SELECT id FROM image"))).scalars().all()
-        raw = (await conn.execute(text("SELECT id FROM public.dives"))).all()
+        raw = (await conn.execute(text("SELECT id FROM public.missions"))).all()
 
     lab = seeded["lab"][1]
-    assert dives == [lab["dive"]]
+    assert missions == [lab["mission"]]
     assert images == [lab["image"]]
     assert len(raw) == 1, "the base table, read directly, is bound the same way"
 
@@ -115,7 +115,7 @@ async def test_without_a_lab_tenant_a_research_login_sees_nothing(
         "DELETE FROM v1.measurement",
         "INSERT INTO public.devices (tenant_id, kind, serial) "
         "VALUES (public.research_tenant_id(), 'lite', 'X')",
-        "UPDATE public.dives SET name = 'renamed'",
+        "UPDATE public.missions SET name = 'renamed'",
         "DELETE FROM public.species",
         "TRUNCATE public.measurements",
     ],

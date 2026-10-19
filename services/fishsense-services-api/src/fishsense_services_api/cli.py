@@ -33,8 +33,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from fishsense_services_api import dev_seed
 from fishsense_services_api.automatic_validation import (
     PAPER_CALIBRATION_SESSIONS,
-    PAPER_POOL_DIVES,
-    PAPER_REEF_DIVES,
+    PAPER_POOL_MISSIONS,
+    PAPER_REEF_MISSIONS,
     PAPER_REEF_FRAMES,
     format_report,
     pool_ladder,
@@ -100,7 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
         "trend (read-only)",
     )
     audit.add_argument("--tenant", required=True, help="the tenant's slug, or its id")
-    audit.add_argument("dive_numbers", type=int, nargs="+", metavar="dive_number")
+    audit.add_argument("mission_numbers", type=int, nargs="+", metavar="mission_number")
     audit.add_argument("--min-frames", type=int, default=DEFAULT_MIN_FRAMES)
     audit.add_argument("--min-range-ratio", type=float, default=DEFAULT_MIN_RANGE_RATIO)
     validate = commands.add_parser(
@@ -112,10 +112,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--tenant", required=True, help="the tenant's slug, or its id"
     )
     validate.add_argument(
-        "--pool-dives", type=int, nargs="*", default=list(PAPER_POOL_DIVES)
+        "--pool-missions",
+        "--pool-dives",
+        type=int,
+        nargs="*",
+        default=list(PAPER_POOL_MISSIONS),
     )
     validate.add_argument(
-        "--reef-dives", type=int, nargs="*", default=list(PAPER_REEF_DIVES)
+        "--reef-missions",
+        "--reef-dives",
+        type=int,
+        nargs="*",
+        default=list(PAPER_REEF_MISSIONS),
     )
     validate.add_argument(
         "--any-reef-frames",
@@ -395,7 +403,7 @@ async def _audit_range_trend(args: argparse.Namespace) -> int:
             )
             return 1
         missing = False
-        for number in args.dive_numbers:
+        for number in args.mission_numbers:
             async with tenant_transaction(engine, tenant_id) as conn:
                 inputs = await range_trend_inputs(conn, tenant_id, number)
             if inputs is None:
@@ -446,8 +454,8 @@ async def _validate_automatic(args: argparse.Namespace) -> int:
             frames = await validation_frames(
                 conn,
                 tenant_id,
-                pool_dives=args.pool_dives,
-                reef_dives=args.reef_dives,
+                pool_missions=args.pool_missions,
+                reef_missions=args.reef_missions,
                 outputs=outputs,
                 label_free=label_free,
                 reef_frames=None if args.any_reef_frames else PAPER_REEF_FRAMES,
@@ -521,14 +529,14 @@ def _range_trends(
 
 
 def format_range_trend_report(
-    dive_number: int,
+    mission_number: int,
     trends: Mapping[str, RangeTrend | None],
     *,
     min_frames: int,
     min_range_ratio: float,
 ) -> str:
     """v1's report: one line per object; the note carries the interpretation."""
-    lines = ["", f"=== dive {dive_number} ==="]
+    lines = ["", f"=== dive {mission_number} ==="]
     if not trends:
         lines.append("  no measured rigid objects")
         return "\n".join(lines)

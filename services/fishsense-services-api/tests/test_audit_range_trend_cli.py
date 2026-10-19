@@ -70,7 +70,7 @@ def test_an_unflagged_object_carries_no_flag():
     assert line.endswith("+0.030d       ")
 
 
-def test_a_dive_with_nothing_measured_says_so():
+def test_a_mission_with_nothing_measured_says_so():
     assert format_range_trend_report(
         7, {}, min_frames=8, min_range_ratio=2.0
     ).splitlines() == ["", "=== dive 7 ===", "  no measured rigid objects"]
@@ -92,7 +92,7 @@ def test_the_subcommand_parses_v1s_arguments():
     )
     assert args.command == "audit-range-trend"
     assert args.tenant == "lab"
-    assert args.dive_numbers == [490, 491, 492]
+    assert args.mission_numbers == [490, 491, 492]
     assert (args.min_frames, args.min_range_ratio) == (8, 2.0)
 
     args = build_parser().parse_args(
@@ -115,7 +115,7 @@ def test_the_subcommand_parses_v1s_arguments():
     [
         ["audit-range-trend", "490"],  # no tenant
         ["audit-range-trend", "--tenant", "lab"],  # no dive
-        ["audit-range-trend", "--tenant", "lab", "dive490"],
+        ["audit-range-trend", "--tenant", "lab", "mission490"],
     ],
 )
 def test_the_subcommand_refuses_incomplete_arguments(argv):
@@ -134,23 +134,23 @@ async def test_without_a_database_url_it_fails_naming_it(monkeypatch, capsys):
 # -- end to end, on Postgres -------------------------------------------------------
 
 
-async def _dive_number(owner_engine, dive_id):
+async def _mission_number(owner_engine, mission_id):
     async with owner_engine.connect() as conn:
         return (
             await conn.execute(
-                text("SELECT number FROM dives WHERE id = :d"), {"d": dive_id}
+                text("SELECT number FROM missions WHERE id = :d"), {"d": mission_id}
             )
         ).scalar_one()
 
 
-async def _rotated_dive(owner_engine, lab):
+async def _rotated_mission(owner_engine, lab):
     """A 10 cm baseline and a Weasly Fish read at 20 ranges under a -0.25 deg
     in-plane error: length (1 + eps z / b), v1's model."""
-    dive_id, calibration = await calibrated_dive(owner_engine, lab)
+    mission_id, calibration = await calibrated_dive(owner_engine, lab)
     weasly = await fish(owner_engine, lab, model="Weasly Fish")
     eps = np.radians(-0.25)
     for z in np.linspace(0.9, 3.0, 20):
-        capture_id = await capture(owner_engine, lab, dive_id)
+        capture_id = await capture(owner_engine, lab, mission_id)
         laser = await laser_label(owner_engine, lab, capture_id)
         await species_label(owner_engine, lab, capture_id, "Fish Model, Weasly Fish")
         await depth(owner_engine, lab, capture_id, laser, calibration, depth_m=z)
@@ -163,14 +163,14 @@ async def _rotated_dive(owner_engine, lab):
             length_m=float(0.31 * (1 + eps * z / 0.1)),
             laser_label_id=laser,
         )
-    return await _dive_number(owner_engine, dive_id)
+    return await _mission_number(owner_engine, mission_id)
 
 
-async def test_audits_a_dive_as_the_app_role_by_tenant_id(
+async def test_audits_a_mission_as_the_app_role_by_tenant_id(
     owner_engine, app_url, monkeypatch, capsys
 ):
     lab = await tenant(owner_engine)
-    number = await _rotated_dive(owner_engine, lab)
+    number = await _rotated_mission(owner_engine, lab)
     monkeypatch.setenv("FISHSENSE_DATABASE_URL", app_url)
 
     code = await main(["audit-range-trend", "--tenant", str(lab), str(number)])
@@ -187,14 +187,14 @@ async def test_a_slug_resolves_for_a_role_that_can_read_tenants(
     owner_engine, owner_url, monkeypatch, capsys
 ):
     lab = await tenant(owner_engine)
-    number = await _rotated_dive(owner_engine, lab)
+    number = await _rotated_mission(owner_engine, lab)
     monkeypatch.setenv("FISHSENSE_DATABASE_URL", owner_url)
 
     assert await main(["audit-range-trend", "--tenant", "lab", str(number)]) == 0
     assert "-0.250d" in capsys.readouterr().out
 
 
-async def test_an_unresolvable_tenant_or_dive_is_named(
+async def test_an_unresolvable_tenant_or_mission_is_named(
     owner_engine, app_url, monkeypatch, capsys
 ):
     lab = await tenant(owner_engine)

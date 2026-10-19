@@ -25,7 +25,7 @@ from __future__ import annotations
 import dataclasses
 import uuid
 from dataclasses import dataclass
-from typing import Any, List, Optional, Protocol
+from typing import Any, List, Optional, Protocol, Annotated
 
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
@@ -69,6 +69,7 @@ from fishsense_services_contracts.species_prediction import (
 from fishsense_services_orchestrator.species_predict.candidates import (
     species_candidates,
 )
+from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = [
     "AutomaticCalibrationPlan",
@@ -93,7 +94,7 @@ class AutomaticTarget:
     """A dive of a tenant."""
 
     tenant_id: uuid.UUID
-    dive_id: uuid.UUID
+    mission_id: Annotated[uuid.UUID, renamed_from("dive_id", "mission_id")]
 
 
 @dataclass(frozen=True)
@@ -120,40 +121,44 @@ class AutomaticResultsCatalog(Protocol):
 
     async def member_tenants(self) -> list[uuid.UUID]: ...
 
-    async def next_dive_for_automatic_results(
+    async def next_mission_for_automatic_results(
         self, tenant_id: uuid.UUID, **versions
     ) -> AutomaticCandidate | None: ...
 
     async def automatic_frames_inputs(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, *, headtail_version: int
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, headtail_version: int
     ) -> AutomaticFramesInputs: ...
 
-    async def persist_automatic_head_tails(self, tenant_id, dive_id, rows) -> int: ...
+    async def persist_automatic_head_tails(
+        self, tenant_id, mission_id, rows
+    ) -> int: ...
 
     async def automatic_species_captures(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, *, species_version: int
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, species_version: int
     ) -> list[AutomaticSpeciesCapture]: ...
 
-    async def persist_automatic_species(self, tenant_id, dive_id, rows) -> int: ...
+    async def persist_automatic_species(self, tenant_id, mission_id, rows) -> int: ...
 
     async def automatic_calibration_inputs(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> AutomaticCalibrationInputs: ...
 
     async def persist_automatic_calibration(
-        self, tenant_id, dive_id, row: AutomaticCalibrationRow
+        self, tenant_id, mission_id, row: AutomaticCalibrationRow
     ) -> uuid.UUID: ...
 
     async def automatic_measure_inputs(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, *, algorithm_version: str
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, algorithm_version: str
     ) -> AutomaticMeasureInputs: ...
 
-    async def persist_automatic_measurements(self, tenant_id, dive_id, rows) -> int: ...
+    async def persist_automatic_measurements(
+        self, tenant_id, mission_id, rows
+    ) -> int: ...
 
 
 def _refuse(target: AutomaticTarget, why: str) -> ApplicationError:
     return ApplicationError(
-        f"refusing the processor's automatic results for dive {target.dive_id}: {why}",
+        f"refusing the processor's automatic results for dive {target.mission_id}: {why}",
         type="InvalidPredictions",
         non_retryable=True,
     )
@@ -180,21 +185,21 @@ class AutomaticResultsActivities:
 
     async def _write(self, target: AutomaticTarget, fn, *args, **kwargs):
         try:
-            return await fn(target.tenant_id, target.dive_id, *args, **kwargs)
+            return await fn(target.tenant_id, target.mission_id, *args, **kwargs)
         except InvalidAutomaticResults as exc:
             raise _refuse(target, str(exc)) from exc
 
     # -- select ---------------------------------------------------------------
 
     @activity.defn(name="select_next_dive_for_automatic_results")
-    async def select_next_dive_for_automatic_results(
+    async def select_next_mission_for_automatic_results(
         self, exclude: Optional[List[uuid.UUID]] = None
     ) -> Optional[AutomaticTarget]:
         """The oldest backlog dive across tenants, other than those the run
         already took."""
         best, best_key = None, None
         for tenant_id in await self._catalog.member_tenants():
-            candidate = await self._catalog.next_dive_for_automatic_results(
+            candidate = await self._catalog.next_mission_for_automatic_results(
                 tenant_id,
                 species=self._species_enabled,
                 exclude=exclude or [],
@@ -202,9 +207,9 @@ class AutomaticResultsActivities:
             )
             if candidate is None:
                 continue
-            key = (candidate.created_at, str(candidate.dive_id))
+            key = (candidate.created_at, str(candidate.mission_id))
             if best_key is None or key < best_key:
-                best, best_key = AutomaticTarget(tenant_id, candidate.dive_id), key
+                best, best_key = AutomaticTarget(tenant_id, candidate.mission_id), key
         activity.logger.info("next dive for automatic results: %s", best)
         return best
 
@@ -215,12 +220,12 @@ class AutomaticResultsActivities:
         """A dive's failed step; at three failures the cohort leaves the dive
         for an operator (0040)."""
         await self._catalog.record_automatic_results_failure(
-            target.tenant_id, target.dive_id, step=step, error=error
+            target.tenant_id, target.mission_id, step=step, error=error
         )
 
     @activity.defn(name="plan_automatic_run")
     async def plan_automatic_run(self, tenant: str, numbers: List[int]) -> dict:
-        """A by-hand run's plan (`run_dives`): the named dives, sessions
+        """A by-hand run's plan (`run_missions`): the named dives, sessions
         first, as JSON for the operator's reviewed report."""
         tenant_id = await self._catalog.tenant_by_slug(tenant)
         if tenant_id is None:
@@ -234,10 +239,20 @@ class AutomaticResultsActivities:
             list(numbers),
             headtail_version=AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
         )
+        # On the wire under the names a running or rolled-back workflow reads
+        # (Phase 2a); the workflow reads either (`run_missions.with_current_names`).
         return {
             "tenant_id": str(tenant_id),
             "dives": [
-                {**dataclasses.asdict(d), "dive_id": str(d.dive_id)} for d in plan.dives
+                {
+                    **{
+                        k: v
+                        for k, v in dataclasses.asdict(d).items()
+                        if k != "mission_id"
+                    },
+                    "dive_id": str(d.mission_id),
+                }
+                for d in plan.missions
             ],
             "missing": list(plan.missing),
         }
@@ -264,7 +279,7 @@ class AutomaticResultsActivities:
     ) -> PredictAutomaticFramesInput:
         inputs = await self._catalog.automatic_frames_inputs(
             target.tenant_id,
-            target.dive_id,
+            target.mission_id,
             headtail_version=AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
         )
         frames = []
@@ -286,11 +301,11 @@ class AutomaticResultsActivities:
             activity.heartbeat()
         activity.logger.info(
             "automatic frames dive=%s frames=%d slate=%d",
-            target.dive_id, len(frames), sum(f.is_slate for f in frames),
+            target.mission_id, len(frames), sum(f.is_slate for f in frames),
         )  # fmt: skip
         return PredictAutomaticFramesInput(
             tenant_id=target.tenant_id,
-            dive_id=target.dive_id,
+            mission_id=target.mission_id,
             camera_matrix=inputs.camera_matrix,
             distortion_coefficients=inputs.distortion_coefficients,
             laser_region=[list(v) for v in LASER_REGION_POLYGON],
@@ -314,7 +329,7 @@ class AutomaticResultsActivities:
             target, self._catalog.persist_automatic_head_tails, rows
         )
         activity.logger.info(
-            "dive=%s automatic frames written=%d", target.dive_id, written
+            "dive=%s automatic frames written=%d", target.mission_id, written
         )
         return written
 
@@ -327,12 +342,14 @@ class AutomaticResultsActivities:
         if not self._species_enabled:
             return PredictSpeciesImagesInput(
                 tenant_id=target.tenant_id,
-                dive_id=target.dive_id,
+                mission_id=target.mission_id,
                 candidates=species_candidates(),
                 images=[],
             )
         captures = await self._catalog.automatic_species_captures(
-            target.tenant_id, target.dive_id, species_version=SPECIES_PREDICTOR_VERSION
+            target.tenant_id,
+            target.mission_id,
+            species_version=SPECIES_PREDICTOR_VERSION,
         )
         images = []
         for c in captures:
@@ -353,7 +370,7 @@ class AutomaticResultsActivities:
             )
         return PredictSpeciesImagesInput(
             tenant_id=target.tenant_id,
-            dive_id=target.dive_id,
+            mission_id=target.mission_id,
             candidates=species_candidates(),
             images=images,
         )
@@ -395,7 +412,7 @@ class AutomaticResultsActivities:
         self, target: AutomaticTarget
     ) -> AutomaticCalibrationPlan:
         inputs = await self._catalog.automatic_calibration_inputs(
-            target.tenant_id, target.dive_id
+            target.tenant_id, target.mission_id
         )
         frames = []
         for c in inputs.candidates:
@@ -408,7 +425,7 @@ class AutomaticResultsActivities:
         return AutomaticCalibrationPlan(
             payload=FitAutomaticCalibrationInput(
                 tenant_id=target.tenant_id,
-                dive_id=target.dive_id,
+                mission_id=target.mission_id,
                 camera_matrix=inputs.camera_matrix,
                 frames=frames,
                 line_dots=inputs.line_dots,
@@ -423,9 +440,9 @@ class AutomaticResultsActivities:
         plan: AutomaticCalibrationPlan,
         result: AutomaticCalibrationResult,
     ) -> uuid.UUID:
-        if result.dive_id != target.dive_id:
-            raise _refuse(target, f"a calibration for dive {result.dive_id}")
-        fields = result.model_dump(exclude={"dive_id"})
+        if result.mission_id != target.mission_id:
+            raise _refuse(target, f"a calibration for dive {result.mission_id}")
+        fields = result.model_dump(exclude={"mission_id"})
         row = AutomaticCalibrationRow(
             camera_calibration_id=plan.camera_calibration_id, **fields
         )
@@ -441,7 +458,7 @@ class AutomaticResultsActivities:
     ) -> Optional[AutomaticMeasurePlan]:
         inputs = await self._catalog.automatic_measure_inputs(
             target.tenant_id,
-            target.dive_id,
+            target.mission_id,
             algorithm_version=AUTOMATIC_MEASUREMENT_VERSION,
         )
         if inputs.calibration is None:
@@ -450,7 +467,7 @@ class AutomaticResultsActivities:
         return AutomaticMeasurePlan(
             payload=MeasureAutomaticInput(
                 tenant_id=target.tenant_id,
-                dive_id=target.dive_id,
+                mission_id=target.mission_id,
                 camera_matrix=inputs.camera_matrix,
                 laser_position=cal.laser_position,
                 laser_axis=cal.laser_axis,
@@ -469,8 +486,8 @@ class AutomaticResultsActivities:
         plan: AutomaticMeasurePlan,
         result: MeasureAutomaticResult,
     ) -> int:
-        if result.dive_id != target.dive_id:
-            raise _refuse(target, f"lengths for dive {result.dive_id}")
+        if result.mission_id != target.mission_id:
+            raise _refuse(target, f"lengths for dive {result.mission_id}")
         rows = [
             AutomaticMeasurementRow(
                 capture_id=x.capture_id,

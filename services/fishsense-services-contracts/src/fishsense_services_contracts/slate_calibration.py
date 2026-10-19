@@ -37,7 +37,7 @@ Integration adds `SLATE_CALIBRATION_MODELS` to the published schema.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Annotated
 from uuid import UUID
 
 from pydantic import (
@@ -50,6 +50,7 @@ from pydantic import (
 )
 
 from fishsense_services_contracts.object_store import ObjectRef
+from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = [
     "SLATE_CALIBRATION_MODELS",
@@ -88,7 +89,9 @@ class PreprocessSlateImage(BaseModel):
 class PreprocessSlateImagesInput(BaseModel):
     """v1's `PreprocessSlateImagesInput`, with refs for its checksums."""
 
-    dive_id: UUID
+    model_config = ConfigDict(validate_by_name=True)
+
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     slate_template_id: UUID
     #: The template PDF, staged to scratch from the NAS.
     slate_pdf: ObjectRef
@@ -119,7 +122,9 @@ class SlateObservation(BaseModel):
 class SlateCalibrationInput(BaseModel):
     """Everything stage 13's fit reads, resolved by the orchestrator."""
 
-    dive_id: UUID
+    model_config = ConfigDict(validate_by_name=True)
+
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     camera_matrix: list[list[float]]
     #: The slate template's points, in PDF pixels at `dpi`.
     template_points: list[Point]
@@ -128,7 +133,7 @@ class SlateCalibrationInput(BaseModel):
     #: Every live laser dot in the dive (non-superseded, x/y set; incomplete
     #: and non-canonical included, as v1's `get_laser_labels`), for the gate
     #: that asks whether the fit describes the dive it will measure.
-    dive_dots: list[Point]
+    mission_dots: Annotated[list[Point], renamed_from("dive_dots", "mission_dots")]
 
 
 class LaserCalibrationResult(BaseModel):
@@ -192,7 +197,8 @@ class CheckerboardCalibrationImage(BaseModel):
 
 
 class PerformCheckerboardCalibrationInput(BaseModel):
-    dive_id: UUID
+    model_config = ConfigDict(validate_by_name=True)
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     camera_matrix: list[list[float]]
     distortion_coefficients: list[float]
     target: CheckerboardTarget
@@ -200,7 +206,7 @@ class PerformCheckerboardCalibrationInput(BaseModel):
     #: As in `SlateCalibrationInput`. v1's fit read them in the activity,
     #: before its try, so a transport error stayed retryable; v2 resolves them
     #: with the rest, so the processor has nothing to fetch at all.
-    dive_dots: list[Point]
+    mission_dots: Annotated[list[Point], renamed_from("dive_dots", "mission_dots")]
 
 
 class CheckerboardObservation(BaseModel):
@@ -231,7 +237,8 @@ class LatticeImage(BaseModel):
 
 
 class VerifyCheckerboardLatticeInput(BaseModel):
-    dive_id: UUID
+    model_config = ConfigDict(validate_by_name=True)
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     camera_matrix: list[list[float]]
     distortion_coefficients: list[float]
     target: CheckerboardTarget

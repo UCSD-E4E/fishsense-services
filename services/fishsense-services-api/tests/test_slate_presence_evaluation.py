@@ -29,7 +29,7 @@ from sqlalchemy.exc import DBAPIError
 from _slate_calibration_seed import (
     capture,
     device_with_camera,
-    dive,
+    mission,
     run,
     slate_label,
     slate_presence,
@@ -45,7 +45,7 @@ FISH = "Fish, Hogfish (Lachnolaimus maximus)"
 
 async def _dive(owner_engine, lab, **kwargs):
     device, _ = await device_with_camera(owner_engine, lab)
-    return await dive(owner_engine, lab, device=device, **kwargs)
+    return await mission(owner_engine, lab, device=device, **kwargs)
 
 
 async def _evaluation(engine, **where):
@@ -137,11 +137,13 @@ async def test_every_prediction_row_with_the_latest_marked(owner_engine):
     ]  # fmt: skip
 
 
-async def test_it_carries_dive_image_camera_and_provenance(owner_engine):
+async def test_it_carries_mission_image_camera_and_provenance(owner_engine):
     lab = await tenant(owner_engine)
     device, _ = await device_with_camera(owner_engine, lab)
     template = await slate_template(owner_engine)
-    only = await dive(owner_engine, lab, device=device, slate=template, priority="low")
+    only = await mission(
+        owner_engine, lab, device=device, slate=template, priority="low"
+    )
     frame = await capture(owner_engine, lab, only)
     await slate_presence(owner_engine, lab, frame, probability=None)
 
@@ -149,24 +151,24 @@ async def test_it_carries_dive_image_camera_and_provenance(owner_engine):
     numbers = (
         await rows(
             owner_engine,
-            "SELECT d.number AS dive, c.number AS image, dev.number AS camera "
-            "FROM captures c JOIN dives d ON d.id = c.dive_id "
+            "SELECT d.number AS mission, c.number AS image, dev.number AS camera "
+            "FROM captures c JOIN missions d ON d.id = c.mission_id "
             "JOIN devices dev ON dev.id = d.device_id WHERE c.id = :c",
             c=frame,
         )
     )[0]
 
-    assert (row["dive_id"], row["image_id"], row["camera_id"]) == (
-        numbers["dive"],
+    assert (row["mission_id"], row["image_id"], row["camera_id"]) == (
+        numbers["mission"],
         numbers["image"],
         numbers["camera"],
     )
-    assert (row["dive_uuid"], row["device_id"], row["is_canonical"]) == (
+    assert (row["mission_uuid"], row["device_id"], row["is_canonical"]) == (
         only,
         device,
         True,
     )
-    assert (row["dive_priority"], row["dive_has_slate_template"]) == ("low", True)
+    assert (row["mission_priority"], row["mission_has_slate_template"]) == ("low", True)
     assert (row["status"], row["probability"], row["predicted_slate"]) == (
         "decode_failed",
         None,

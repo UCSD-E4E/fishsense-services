@@ -30,13 +30,14 @@ stale and re-predicted once the primary can run.
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Optional, Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, ConfigDict
 
 from fishsense_services_contracts._boxes import check_box
 from fishsense_services_contracts.object_store import ObjectRef
+from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = [
     "SPECIES_CROP_MIN_SIZE",
@@ -153,8 +154,10 @@ class PredictSpeciesImagesInput(BaseModel):
     candidates come from the species labeling config, which the orchestrator
     owns; the processor never reads it."""
 
+    model_config = ConfigDict(validate_by_name=True)
+
     tenant_id: UUID
-    dive_id: UUID
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     candidates: List[SpeciesCandidate]
     images: List[PredictSpeciesImage]
 

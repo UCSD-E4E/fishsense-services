@@ -74,16 +74,16 @@ def _activities(deps: Deps):
         label_studio_factory=_label_studio,
     )
     return [
-        headtail.select_next_dive_for_headtail_preprocessing,
+        headtail.select_next_mission_for_headtail_preprocessing,
         headtail.resolve_headtail_preprocess_inputs,
         headtail.clear_headtail_reprocess_flags,
-        headtail.select_next_dive_for_headtail_prediction,
+        headtail.select_next_mission_for_headtail_prediction,
         headtail.resolve_headtail_predict_inputs,
         headtail.persist_headtail_predictions,
-        labels.select_dives_needing_headtail_population,
+        labels.select_missions_needing_headtail_population,
         labels.create_headtail_label_studio_project,
         labels.populate_headtail_label_studio_project,
-        labels.backfill_headtail_predictions_for_dive,
+        labels.backfill_headtail_predictions_for_mission,
         sync.head_tail_label_projects,
         sync.sync_head_tail_labels,
     ]

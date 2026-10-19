@@ -170,7 +170,7 @@ def test_slate_type_choice_empty_results():
     assert sut.slate_type_choice([], {"H-Slate"}) is None
 
 
-def test_reduce_winners_most_recent_per_dive():
+def test_reduce_winners_most_recent_per_mission():
     votes = [
         (7, datetime(2026, 5, 1, tzinfo=timezone.utc), 9),
         (7, datetime(2026, 5, 3, tzinfo=timezone.utc), 1),  # newer -> wins for dive 7

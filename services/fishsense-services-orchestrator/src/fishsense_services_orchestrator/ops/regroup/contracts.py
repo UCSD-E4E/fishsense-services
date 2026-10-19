@@ -6,9 +6,10 @@ so a report reads against the research extracts.
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Annotated
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = ["RegroupMove", "RegroupReport"]
 
@@ -25,7 +26,8 @@ class RegroupMove(BaseModel):
 
 
 class RegroupReport(BaseModel):
-    dive_number: int
+    model_config = ConfigDict(validate_by_name=True)
+    mission_number: Annotated[int, renamed_from("dive_number", "mission_number")]
     #: False: a dry run, which writes nothing.
     applied: bool
     #: The dive is already grouped this way; an apply writes nothing.

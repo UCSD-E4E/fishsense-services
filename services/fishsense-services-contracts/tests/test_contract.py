@@ -20,8 +20,8 @@ from fishsense_services_contracts import (
     PROCESSOR_GPU_TASK_QUEUE,
     PROCESSOR_LIGHT_TASK_QUEUE,
     PROCESSOR_TASK_QUEUE,
-    ClusterDiveFrameImage,
-    ClusterDiveFramesInput,
+    ClusterMissionFrameImage,
+    ClusterMissionFramesInput,
     json_schema,
 )
 
@@ -67,16 +67,16 @@ def test_v2_queues_never_collide_with_v1s():
 
 def test_clustering_input_carries_capture_ids_and_timestamps():
     capture = uuid4()
-    payload = ClusterDiveFramesInput(
-        dive_id=uuid4(),
+    payload = ClusterMissionFramesInput(
+        mission_id=uuid4(),
         images=[
-            ClusterDiveFrameImage(
+            ClusterMissionFrameImage(
                 capture_id=capture, taken_datetime=datetime(2024, 8, 21, tzinfo=UTC)
             )
         ],
     )
 
-    round_tripped = ClusterDiveFramesInput.model_validate_json(
+    round_tripped = ClusterMissionFramesInput.model_validate_json(
         payload.model_dump_json()
     )
 
@@ -88,7 +88,9 @@ def test_a_naive_timestamp_is_refused():
     """Clustering is timestamp arithmetic; a naive value is ambiguous by
     exactly the camera's UTC offset. Every stored capture time is aware."""
     with pytest.raises(ValidationError):
-        ClusterDiveFrameImage(capture_id=uuid4(), taken_datetime=datetime(2024, 8, 21))
+        ClusterMissionFrameImage(
+            capture_id=uuid4(), taken_datetime=datetime(2024, 8, 21)
+        )
 
 
 def test_every_payload_model_in_the_package_is_in_the_contract():

@@ -10,7 +10,7 @@ What an operator depends on, kept:
   `--input <dive>` alone means "check every frame";
 * the sweep visits every canonical dive the selector returns, **one at a
   time** (the verification shares one NAS with the pipeline's staging), and
-  forwards `limit_per_dive` -- the knob between a ~20 GB sample and a ~930 GB
+  forwards `limit_per_mission` -- the knob between a ~20 GB sample and a ~930 GB
   full sweep;
 * **one dive's failure does not abandon the sweep**, and a dive that could not
   be verified carries an `error`, so it never reads as clean;
@@ -25,24 +25,24 @@ from __future__ import annotations
 import uuid
 
 from temporalio import activity
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
 from fishsense_services_orchestrator.ops.checksums.contracts import (
     ChecksumMismatch,
-    VerifyAllDivesProgress,
+    VerifyAllMissionsProgress,
     VerifyChecksumsReport,
 )
 from fishsense_services_orchestrator.ops.checksums.workflows import (
-    VerifyAllDivesChecksumsWorkflow,
-    VerifyDiveChecksumsWorkflow,
+    VerifyAllMissionsChecksumsWorkflow,
+    VerifyMissionChecksumsWorkflow,
 )
 
 QUEUE = "test-verify-checksums"
 
 
-def _activities(dive_numbers=(), *, per_dive=None, fail_on=()):
+def _activities(mission_numbers=(), *, per_mission=None, fail_on=()):
     """Stub the selector and the per-dive verifier. `fail_on` names dives whose
     verification raises, standing in for a dive whose NAS reads exhausted
     their retries."""
@@ -50,18 +50,18 @@ def _activities(dive_numbers=(), *, per_dive=None, fail_on=()):
 
     @activity.defn(name="select_canonical_dive_numbers")
     async def select() -> list[int]:
-        return list(dive_numbers)
+        return list(mission_numbers)
 
     @activity.defn(name="verify_dive_checksums")
-    async def verify(dive_number: int, limit: int | None) -> VerifyChecksumsReport:
-        calls.append((dive_number, limit))
-        if dive_number in fail_on:
-            raise RuntimeError(f"NAS unreachable for dive {dive_number}")
-        if per_dive and dive_number in per_dive:
-            return per_dive[dive_number]
+    async def verify(mission_number: int, limit: int | None) -> VerifyChecksumsReport:
+        calls.append((mission_number, limit))
+        if mission_number in fail_on:
+            raise RuntimeError(f"NAS unreachable for dive {mission_number}")
+        if per_mission and mission_number in per_mission:
+            return per_mission[mission_number]
         return VerifyChecksumsReport(
-            dive_number=dive_number,
-            total_in_dive=55,
+            mission_number=mission_number,
+            total_in_mission=55,
             checked=limit or 55,
             checksum_matched=limit or 55,
         )
@@ -71,7 +71,7 @@ def _activities(dive_numbers=(), *, per_dive=None, fail_on=()):
 
 async def _execute(workflow, args, activities):
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client, task_queue=QUEUE, workflows=[workflow], activities=activities
@@ -87,21 +87,21 @@ async def _execute(workflow, args, activities):
 # -- one dive ---------------------------------------------------------------------
 
 
-async def test_forwards_the_dive_and_limit_and_returns_the_report():
+async def test_forwards_the_mission_and_limit_and_returns_the_report():
     acts, calls = _activities()
-    report = await _execute(VerifyDiveChecksumsWorkflow, (412, 25), acts)
+    report = await _execute(VerifyMissionChecksumsWorkflow, (412, 25), acts)
 
     assert calls == [(412, 25)]
-    assert report.dive_number == 412
+    assert report.mission_number == 412
     assert report.checked == 25
-    assert report.total_in_dive == 55
+    assert report.total_in_mission == 55
 
 
-async def test_the_limit_is_optional_and_defaults_to_the_whole_dive():
+async def test_the_limit_is_optional_and_defaults_to_the_whole_mission():
     """`temporal workflow start --input 412` is the obvious way to run this,
     and it must mean "check every frame"."""
     acts, calls = _activities()
-    report = await _execute(VerifyDiveChecksumsWorkflow, (412,), acts)
+    report = await _execute(VerifyMissionChecksumsWorkflow, (412,), acts)
 
     assert calls == [(412, None)]
     assert report.checked == 55
@@ -110,46 +110,46 @@ async def test_the_limit_is_optional_and_defaults_to_the_whole_dive():
 # -- the sweep --------------------------------------------------------------------
 
 
-async def test_the_sweep_visits_every_canonical_dive_the_selector_returns():
+async def test_the_sweep_visits_every_canonical_mission_the_selector_returns():
     acts, calls = _activities([11, 22, 33])
-    report = await _execute(VerifyAllDivesChecksumsWorkflow, (5,), acts)
+    report = await _execute(VerifyAllMissionsChecksumsWorkflow, (5,), acts)
 
     assert [c[0] for c in calls] == [11, 22, 33]
-    assert report.dives_requested == 3
-    assert report.dives_verified == 3
+    assert report.missions_requested == 3
+    assert report.missions_verified == 3
     assert report.images_checked == 15
 
 
-async def test_the_per_dive_limit_is_forwarded_to_each_dive():
+async def test_the_per_mission_limit_is_forwarded_to_each_mission():
     acts, calls = _activities([11, 22])
-    await _execute(VerifyAllDivesChecksumsWorkflow, (5,), acts)
+    await _execute(VerifyAllMissionsChecksumsWorkflow, (5,), acts)
 
     assert calls == [(11, 5), (22, 5)]
 
 
-async def test_no_limit_means_every_frame_of_every_dive():
+async def test_no_limit_means_every_frame_of_every_mission():
     acts, calls = _activities([11])
-    await _execute(VerifyAllDivesChecksumsWorkflow, (None,), acts)
+    await _execute(VerifyAllMissionsChecksumsWorkflow, (None,), acts)
 
     assert calls == [(11, None)]
 
 
-async def test_dives_are_verified_one_at_a_time():
+async def test_missions_are_verified_one_at_a_time():
     """Serial by design: a parallel sweep would starve the pipeline's staging
     of NAS bandwidth for days. Strict input order proves it."""
     acts, calls = _activities([11, 22, 33, 44])
-    report = await _execute(VerifyAllDivesChecksumsWorkflow, (5,), acts)
+    report = await _execute(VerifyAllMissionsChecksumsWorkflow, (5,), acts)
 
     assert [c[0] for c in calls] == [11, 22, 33, 44]
-    assert report.dives_verified == 4
+    assert report.missions_verified == 4
 
 
-async def test_findings_are_carried_per_dive_and_clean_dives_are_kept():
+async def test_findings_are_carried_per_mission_and_clean_missions_are_kept():
     """Clean rows are the result too: dropping them would make "verified,
     fine" indistinguishable from "never reached"."""
     dirty = VerifyChecksumsReport(
-        dive_number=22,
-        total_in_dive=55,
+        mission_number=22,
+        total_in_mission=55,
         checked=5,
         checksum_matched=4,
         mismatches=[
@@ -158,33 +158,33 @@ async def test_findings_are_carried_per_dive_and_clean_dives_are_kept():
             )
         ],
     )
-    acts, _ = _activities([11, 22], per_dive={22: dirty})
-    report = await _execute(VerifyAllDivesChecksumsWorkflow, (5,), acts)
+    acts, _ = _activities([11, 22], per_mission={22: dirty})
+    report = await _execute(VerifyAllMissionsChecksumsWorkflow, (5,), acts)
 
-    assert len(report.dives) == 2
-    assert [d.dive_number for d in report.dives_with_findings] == [22]
-    assert report.dives_with_findings[0].mismatches[0].stored == "0" * 32
+    assert len(report.missions) == 2
+    assert [d.mission_number for d in report.missions_with_findings] == [22]
+    assert report.missions_with_findings[0].mismatches[0].stored == "0" * 32
     assert report.checksum_matched == 9
 
 
-async def test_a_dive_that_cannot_be_verified_is_recorded_and_the_sweep_goes_on():
+async def test_a_mission_that_cannot_be_verified_is_recorded_and_the_sweep_goes_on():
     """A full sweep is days of transfer; abandoning it for one unreachable
     dive would be its own outage. And the dive must not read as clean."""
     acts, calls = _activities([11, 22, 33], fail_on=(22,))
-    report = await _execute(VerifyAllDivesChecksumsWorkflow, (5,), acts)
+    report = await _execute(VerifyAllMissionsChecksumsWorkflow, (5,), acts)
 
     # Dive 22 is retried by the policy; what matters is that 33 was reached.
     assert list(dict.fromkeys(c[0] for c in calls)) == [11, 22, 33]
-    assert report.dives_verified == 2
-    errored = [d for d in report.dives if d.error]
-    assert [d.dive_number for d in errored] == [22]
+    assert report.missions_verified == 2
+    errored = [d for d in report.missions if d.error]
+    assert [d.mission_number for d in errored] == [22]
     assert errored[0].is_clean is False
 
 
-async def test_an_explicit_dive_list_overrides_the_selector():
+async def test_an_explicit_mission_list_overrides_the_selector():
     """For re-running just the dives a sample flagged."""
     acts, calls = _activities([11, 22, 33])
-    await _execute(VerifyAllDivesChecksumsWorkflow, (5, [33]), acts)
+    await _execute(VerifyAllMissionsChecksumsWorkflow, (5, [33]), acts)
 
     assert [c[0] for c in calls] == [33]
 
@@ -194,27 +194,27 @@ async def test_progress_is_queryable_while_the_sweep_runs():
     be answerable without waiting for the return value."""
     acts, _ = _activities([11, 22])
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,
             task_queue=QUEUE,
-            workflows=[VerifyAllDivesChecksumsWorkflow],
+            workflows=[VerifyAllMissionsChecksumsWorkflow],
             activities=acts,
         ):
             handle = await env.client.start_workflow(
-                VerifyAllDivesChecksumsWorkflow.run,
+                VerifyAllMissionsChecksumsWorkflow.run,
                 args=(5,),
                 id=f"{QUEUE}-{uuid.uuid4()}",
                 task_queue=QUEUE,
             )
             await handle.result()
             # By method reference, so the payload decodes to the model.
-            progress = await handle.query(VerifyAllDivesChecksumsWorkflow.progress)
+            progress = await handle.query(VerifyAllMissionsChecksumsWorkflow.progress)
 
-    assert isinstance(progress, VerifyAllDivesProgress)
+    assert isinstance(progress, VerifyAllMissionsProgress)
     assert progress.state == "done"
-    assert progress.total_dives == 2
-    assert progress.dives_done == 2
+    assert progress.total_missions == 2
+    assert progress.missions_done == 2
     assert progress.images_checked == 10
-    assert progress.current_dive_number is None
+    assert progress.current_mission_number is None

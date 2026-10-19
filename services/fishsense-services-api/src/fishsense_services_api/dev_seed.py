@@ -92,8 +92,8 @@ DECOY_LABEL = f"Fish Model, {DECOY_MODEL}"
 #: How many of the frames are labelled as the decoy (the rest, a species).
 DECOY_FRAMES = 3
 #: Every seeded dive's path starts here, which is how a rerun finds the seed.
-DIVE_PREFIX = "dev-seed/"
-DIVE_PATH = DIVE_PREFIX + "2025.01.17.FishSense.San Diego/ED-00/FSL-10D/Ginny"
+MISSION_PREFIX = "dev-seed/"
+MISSION_PATH = MISSION_PREFIX + "2025.01.17.FishSense.San Diego/ED-00/FSL-10D/Ginny"
 T0 = datetime(2025, 1, 18, 1, 0, tzinfo=UTC)
 #: A pinhole camera for a 1600x1200 frame (the TG-6's ~2970 px focal length
 #: at 4000 px wide, scaled).
@@ -147,7 +147,7 @@ async def assert_dev_database(conn: AsyncConnection) -> None:
         )
     if await _scalar(
         conn,
-        "SELECT (SELECT count(*) FROM dives WHERE v1_id IS NOT NULL)"
+        "SELECT (SELECT count(*) FROM missions WHERE v1_id IS NOT NULL)"
         " + (SELECT count(*) FROM captures WHERE v1_id IS NOT NULL)",
     ):
         raise NotDevDatabase("refusing to seed: the database holds migrated v1 data")
@@ -333,9 +333,9 @@ async def _lite(
     """The decoy dive, measured. Returns the captures created (0: seeded)."""
     if await _scalar(
         conn,
-        "SELECT count(*) FROM dives WHERE tenant_id = :t AND source_path LIKE :p",
+        "SELECT count(*) FROM missions WHERE tenant_id = :t AND source_path LIKE :p",
         t=tenant_id,
-        p=DIVE_PREFIX + "%",
+        p=MISSION_PREFIX + "%",
     ):
         return 0
 
@@ -353,18 +353,18 @@ async def _lite(
         d=device,
         k=json.dumps(CAMERA_MATRIX),
     )
-    dive = await one(
-        "INSERT INTO dives (tenant_id, source_path, name, dived_at, priority, device_id) "
+    mission = await one(
+        "INSERT INTO missions (tenant_id, source_path, name, started_at, priority, device_id) "
         "VALUES (:t, :p, 'FSL-10D Ginny (dev seed)', :at, 'high', :d) RETURNING id",
-        p=DIVE_PATH,
+        p=MISSION_PATH,
         at=T0,
         d=device,
     )
     calibration = await one(
-        "INSERT INTO laser_calibrations (tenant_id, dive_id, producer, outcome, "
+        "INSERT INTO laser_calibrations (tenant_id, mission_id, producer, outcome, "
         "laser_position, laser_axis) VALUES (:t, :d, 'slate', 'accepted', "
         "'[0.1, 0.0, 0.0]', '[0.0, 0.0, 1.0]') RETURNING id",
-        d=dive,
+        d=mission,
     )
     species = await _scalar(
         conn, "SELECT ensure_species(:s, :c)", s=LITE_SPECIES[0], c=LITE_SPECIES[1]
@@ -394,12 +394,12 @@ async def _lite(
     for i, frame in enumerate(frames):
         project = 900_000 + i
         capture = await one(
-            "INSERT INTO captures (tenant_id, dive_id, device_id, source_path, "
+            "INSERT INTO captures (tenant_id, mission_id, device_id, source_path, "
             "captured_at, checksum, is_canonical) VALUES (:t, :d, :dev, :p, :at, :sum, "
             "true) RETURNING id",
-            d=dive,
+            d=mission,
             dev=device,
-            p=f"{DIVE_PATH}/{frame.name}.ORF",
+            p=f"{MISSION_PATH}/{frame.name}.ORF",
             at=T0 + timedelta(seconds=20 * i),
             sum=hashlib.md5(frame.jpeg).hexdigest(),
         )

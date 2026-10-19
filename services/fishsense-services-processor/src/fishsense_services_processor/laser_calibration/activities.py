@@ -163,7 +163,7 @@ async def perform_laser_calibration(
         laser_points,
         laser_dots,
         payload.camera_matrix,
-        payload.dive_dots,
+        payload.mission_dots,
         too_few_type="InsufficientLaserPoints",
         too_few_reason=lambda count, minimum: (
             f"insufficient laser points ({count} < {minimum})"
@@ -172,13 +172,13 @@ async def perform_laser_calibration(
     if result.observations_trimmed:
         activity.logger.info(
             "dive_id=%s: trimmed %d of %d laser observations as outliers",
-            payload.dive_id,
+            payload.mission_id,
             result.observations_trimmed,
             result.observation_count,
         )
     activity.logger.info(
         "stage 13 dive_id=%s outcome=%s observations=%d verdicts=%s",
-        payload.dive_id,
+        payload.mission_id,
         result.outcome,
         result.observation_count,
         result.gate_verdicts,

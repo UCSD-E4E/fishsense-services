@@ -701,115 +701,6 @@
         "title": "DeviceView",
         "type": "object"
       },
-      "Dive": {
-        "properties": {
-          "calibration_source_number": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Calibration Source Number"
-          },
-          "calibration_target_number": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Calibration Target Number"
-          },
-          "dived_at": {
-            "format": "date-time",
-            "title": "Dived At",
-            "type": "string"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          },
-          "number": {
-            "title": "Number",
-            "type": "integer"
-          },
-          "priority": {
-            "enum": [
-              "low",
-              "high",
-              "none"
-            ],
-            "title": "Priority",
-            "type": "string"
-          },
-          "slate_template_number": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Slate Template Number"
-          }
-        },
-        "required": [
-          "number",
-          "name",
-          "dived_at",
-          "priority",
-          "slate_template_number",
-          "calibration_target_number",
-          "calibration_source_number"
-        ],
-        "title": "Dive",
-        "type": "object"
-      },
-      "DiveView": {
-        "properties": {
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          },
-          "number": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Number"
-          }
-        },
-        "required": [
-          "number",
-          "name"
-        ],
-        "title": "DiveView",
-        "type": "object"
-      },
       "FileView": {
         "properties": {
           "content_type": {
@@ -1217,6 +1108,115 @@
         "title": "MeasurementView",
         "type": "object"
       },
+      "Mission": {
+        "properties": {
+          "calibration_source_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calibration Source Number"
+          },
+          "calibration_target_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calibration Target Number"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "priority": {
+            "enum": [
+              "low",
+              "high",
+              "none"
+            ],
+            "title": "Priority",
+            "type": "string"
+          },
+          "slate_template_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slate Template Number"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "name",
+          "started_at",
+          "priority",
+          "slate_template_number",
+          "calibration_target_number",
+          "calibration_source_number"
+        ],
+        "title": "Mission",
+        "type": "object"
+      },
+      "MissionView": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number"
+          }
+        },
+        "required": [
+          "number",
+          "name"
+        ],
+        "title": "MissionView",
+        "type": "object"
+      },
       "MyMembership": {
         "properties": {
           "is_admin": {
@@ -1406,16 +1406,6 @@
           "device": {
             "$ref": "#/components/schemas/DeviceView"
           },
-          "dive": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/DiveView"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "fish_id": {
             "format": "uuid",
             "title": "Fish Id",
@@ -1455,6 +1445,16 @@
           "method": {
             "title": "Method",
             "type": "string"
+          },
+          "mission": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MissionView"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "photo_url": {
             "anyOf": [
@@ -1496,7 +1496,7 @@
           "length_m",
           "captured_at",
           "device",
-          "dive",
+          "mission",
           "species",
           "fish_model",
           "location",
@@ -1816,9 +1816,10 @@
         "summary": "Create Device"
       }
     },
-    "/tenants/{slug}/dives": {
+    "/tenants/{slug}/label-studio-projects": {
       "get": {
-        "operationId": "list_dives",
+        "description": "Label Studio project ids with live labels of ``kind``.",
+        "operationId": "list_label_studio_project_ids",
         "parameters": [
           {
             "in": "path",
@@ -1828,6 +1829,49 @@
               "title": "Slug",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "laser",
+                "head_tail",
+                "species",
+                "slate"
+              ],
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "incomplete",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Incomplete",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "laser only: the auto-accept gate is done here",
+            "in": "query",
+            "name": "gated",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "laser only: the auto-accept gate is done here",
+              "title": "Gated"
+            }
           }
         ],
         "responses": {
@@ -1836,9 +1880,9 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/Dive"
+                    "type": "integer"
                   },
-                  "title": "Response List Dives",
+                  "title": "Response List Label Studio Project Ids",
                   "type": "array"
                 }
               }
@@ -1861,13 +1905,105 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Get Dives"
+        "summary": "List Label Studio Project Ids"
       }
     },
-    "/tenants/{slug}/dives/{number}/calibration-refusal": {
+    "/tenants/{slug}/membership": {
+      "get": {
+        "operationId": "get_my_membership",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyMembership"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get My Membership"
+      }
+    },
+    "/tenants/{slug}/missions": {
+      "get": {
+        "operationId": "list_missions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Mission"
+                  },
+                  "title": "Response List Missions",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Missions"
+      }
+    },
+    "/tenants/{slug}/missions/{number}/calibration-refusal": {
       "delete": {
         "description": "Clear dive ``number``'s standing calibration refusal, so it is\nfitted again (idempotent): for a change its labels don't show.",
-        "operationId": "clear_dive_calibration_refusal",
+        "operationId": "clear_mission_calibration_refusal",
         "parameters": [
           {
             "in": "path",
@@ -1927,13 +2063,13 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Clear Dive Calibration Refusal"
+        "summary": "Clear Mission Calibration Refusal"
       }
     },
-    "/tenants/{slug}/dives/{number}/calibration-source": {
+    "/tenants/{slug}/missions/{number}/calibration-source": {
       "delete": {
         "description": "Unlink dive ``number`` from any borrowed calibration (idempotent).",
-        "operationId": "clear_dive_calibration_source",
+        "operationId": "clear_mission_calibration_source",
         "parameters": [
           {
             "in": "path",
@@ -1975,13 +2111,13 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Clear Dive Calibration Source"
+        "summary": "Clear Mission Calibration Source"
       }
     },
-    "/tenants/{slug}/dives/{number}/calibration-source/{source_number}": {
+    "/tenants/{slug}/missions/{number}/calibration-source/{source_number}": {
       "put": {
         "description": "Dive ``number`` borrows dive ``source_number``'s laser calibration.\n\n400 on a self-link; 404 if either dive is missing from the tenant.",
-        "operationId": "set_dive_calibration_source",
+        "operationId": "set_mission_calibration_source",
         "parameters": [
           {
             "in": "path",
@@ -2018,7 +2154,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Dive"
+                  "$ref": "#/components/schemas/Mission"
                 }
               }
             },
@@ -2040,13 +2176,13 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Set Dive Calibration Source"
+        "summary": "Set Mission Calibration Source"
       }
     },
-    "/tenants/{slug}/dives/{number}/calibration-target": {
+    "/tenants/{slug}/missions/{number}/calibration-target": {
       "delete": {
         "description": "Unlink dive ``number`` from any calibration target (idempotent): it\nleaves the checkerboard cohort. A standing refusal is left as it is.",
-        "operationId": "clear_dive_calibration_target",
+        "operationId": "clear_mission_calibration_target",
         "parameters": [
           {
             "in": "path",
@@ -2088,13 +2224,13 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Clear Dive Calibration Target"
+        "summary": "Clear Mission Calibration Target"
       }
     },
-    "/tenants/{slug}/dives/{number}/calibration-target/{target_number}": {
+    "/tenants/{slug}/missions/{number}/calibration-target/{target_number}": {
       "put": {
         "description": "Dive ``number`` was shot against calibration target\n``target_number``: it enters the checkerboard cohort, and a standing\ncalibration refusal expires.\n\n404 if the dive is missing from the tenant or no target has that\nnumber.",
-        "operationId": "set_dive_calibration_target",
+        "operationId": "set_mission_calibration_target",
         "parameters": [
           {
             "in": "path",
@@ -2131,7 +2267,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Dive"
+                  "$ref": "#/components/schemas/Mission"
                 }
               }
             },
@@ -2153,10 +2289,10 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Set Dive Calibration Target"
+        "summary": "Set Mission Calibration Target"
       }
     },
-    "/tenants/{slug}/dives/{number}/labels/{kind}/needs-reprocess": {
+    "/tenants/{slug}/missions/{number}/labels/{kind}/needs-reprocess": {
       "delete": {
         "description": "Withdraw a redraw of dive ``number``'s ``kind`` frames (idempotent:\n0 when none was asked for).",
         "operationId": "clear_needs_reprocess",
@@ -2302,142 +2438,6 @@
           }
         ],
         "summary": "Raise Needs Reprocess"
-      }
-    },
-    "/tenants/{slug}/label-studio-projects": {
-      "get": {
-        "description": "Label Studio project ids with live labels of ``kind``.",
-        "operationId": "list_label_studio_project_ids",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "kind",
-            "required": true,
-            "schema": {
-              "enum": [
-                "laser",
-                "head_tail",
-                "species",
-                "slate"
-              ],
-              "title": "Kind",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "incomplete",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Incomplete",
-              "type": "boolean"
-            }
-          },
-          {
-            "description": "laser only: the auto-accept gate is done here",
-            "in": "query",
-            "name": "gated",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "laser only: the auto-accept gate is done here",
-              "title": "Gated"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "type": "integer"
-                  },
-                  "title": "Response List Label Studio Project Ids",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "List Label Studio Project Ids"
-      }
-    },
-    "/tenants/{slug}/membership": {
-      "get": {
-        "operationId": "get_my_membership",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MyMembership"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get My Membership"
       }
     },
     "/tenants/{slug}/mobile/captures": {

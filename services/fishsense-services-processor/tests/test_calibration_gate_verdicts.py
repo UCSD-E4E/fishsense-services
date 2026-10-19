@@ -17,7 +17,7 @@ from fishsense_services_processor.calibration.consistency import (
     ABSTAINED,
     PASSED,
     check_baseline_plausible,
-    check_calibration_describes_dive,
+    check_calibration_describes_mission,
     check_fit_self_consistency,
     check_observation_geometry,
 )
@@ -44,7 +44,7 @@ def test_a_judged_fit_is_reported_as_passed():
     assert check_observation_geometry(_points(depths)) == PASSED
     assert check_fit_self_consistency(ORIGIN, AXIS, K, _dots(depths)) == PASSED
     assert check_baseline_plausible([0.0624, 0.0832, 0.0]) == PASSED
-    assert check_calibration_describes_dive(ORIGIN, AXIS, K, _dots(depths)) == PASSED
+    assert check_calibration_describes_mission(ORIGIN, AXIS, K, _dots(depths)) == PASSED
 
 
 def test_an_abstention_is_reported_as_abstained_not_passed():
@@ -52,7 +52,7 @@ def test_an_abstention_is_reported_as_abstained_not_passed():
     projection gates say nothing -- and the row should say they said nothing."""
     one = _dots([1.2])
     assert check_fit_self_consistency(ORIGIN, AXIS, K, one) == ABSTAINED
-    assert check_calibration_describes_dive(ORIGIN, AXIS, K, one) == ABSTAINED
+    assert check_calibration_describes_mission(ORIGIN, AXIS, K, one) == ABSTAINED
 
 
 def test_the_verdicts_are_distinct_strings():

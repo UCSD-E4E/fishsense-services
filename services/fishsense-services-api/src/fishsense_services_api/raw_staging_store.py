@@ -66,22 +66,22 @@ class CaptureChecksum:
 
 
 async def captures_to_stage(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> list[StagingCapture]:
     """The dive's canonical captures, with their NAS paths and checksums."""
     rows = await conn.execute(
         text("""
             SELECT id, source_path, checksum FROM captures
-            WHERE tenant_id = :tenant AND dive_id = :dive AND is_canonical
+            WHERE tenant_id = :tenant AND mission_id = :mission AND is_canonical
             ORDER BY source_path NULLS LAST, id
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     return [StagingCapture(r.id, r.source_path, r.checksum) for r in rows]
 
 
 async def checksums_to_clean(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> list[str]:
     """The checksums whose scratch this dive may delete: every one of its
     captures', canonical or not, except where the canonical copy is another
@@ -89,18 +89,18 @@ async def checksums_to_clean(
     rows = await conn.execute(
         text("""
             SELECT DISTINCT c.checksum FROM captures c
-            WHERE c.tenant_id = :tenant AND c.dive_id = :dive
+            WHERE c.tenant_id = :tenant AND c.mission_id = :mission
               AND NOT EXISTS (
                   SELECT 1 FROM captures o
                   WHERE o.tenant_id = c.tenant_id
                     AND o.checksum_algorithm = c.checksum_algorithm
                     AND o.checksum = c.checksum
                     AND o.is_canonical
-                    AND o.dive_id IS DISTINCT FROM c.dive_id
+                    AND o.mission_id IS DISTINCT FROM c.mission_id
               )
             ORDER BY c.checksum
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     return list(rows.scalars())
 
@@ -126,16 +126,16 @@ class RawStagingCatalog(ServicePrincipal):
     """Raw staging's database side, as the orchestrator's service principal."""
 
     async def captures_to_stage(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> list[StagingCapture]:
         async with self._tenant(tenant_id) as conn:
-            return await captures_to_stage(conn, tenant_id, dive_id)
+            return await captures_to_stage(conn, tenant_id, mission_id)
 
     async def checksums_to_clean(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> list[str]:
         async with self._tenant(tenant_id) as conn:
-            return await checksums_to_clean(conn, tenant_id, dive_id)
+            return await checksums_to_clean(conn, tenant_id, mission_id)
 
     async def capture_checksum(
         self, tenant_id: uuid.UUID, capture_id: uuid.UUID

@@ -71,7 +71,7 @@ class PerformCheckerboardCalibrationWorkflow:
         workflow.logger.info(
             "checkerboard calibration dive_id=%s frames=%d board=%dx%d "
             "pitch=%.5f/%.5fm",
-            payload.dive_id,
+            payload.mission_id,
             len(payload.images),
             payload.target.rows,
             payload.target.cols,
@@ -102,10 +102,10 @@ class PerformCheckerboardCalibrationWorkflow:
         return await workflow.execute_activity(
             "fit_checkerboard_laser_extrinsics",
             FitCheckerboardExtrinsicsInput(
-                dive_id=payload.dive_id,
+                mission_id=payload.mission_id,
                 camera_matrix=payload.camera_matrix,
                 observations=list(observations),
-                dive_dots=payload.dive_dots,
+                mission_dots=payload.mission_dots,
             ),
             start_to_close_timeout=timedelta(minutes=10),
             result_type=LaserCalibrationResult,
@@ -127,7 +127,7 @@ class VerifyCheckerboardLatticeWorkflow:
 
         workflow.logger.info(
             "lattice verification dive_id=%s frames=%d of %d board=%dx%d",
-            payload.dive_id,
+            payload.mission_id,
             len(images),
             len(payload.images),
             payload.target.rows,

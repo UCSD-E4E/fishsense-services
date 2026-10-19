@@ -106,9 +106,9 @@ export function methodLabel(method: string): string {
   }
 }
 
-/** Where the fish was: its dive (Lite), else its place (Mobile). */
+/** Where the fish was: its mission (Lite), else its place (Mobile). */
 export function where(o: Observation): string | null {
-  return o.dive?.name ?? o.place_name ?? null;
+  return o.mission?.name ?? o.place_name ?? null;
 }
 
 /** A fish's page: a mobile fish's is its capture's, a Lite fish's its own. */

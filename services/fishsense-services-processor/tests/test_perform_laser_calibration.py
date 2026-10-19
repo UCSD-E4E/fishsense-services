@@ -49,7 +49,7 @@ CAMERA_MATRIX = np.array(
         [0.0, 0.0, 1.0],
     ]
 )
-DIVE = UUID(int=42)
+MISSION = UUID(int=42)
 DPI = 300
 TEMPLATE = [
     (0.0, 0.0),
@@ -66,18 +66,18 @@ def _project(point_camera: np.ndarray) -> tuple[float, float]:
     return float(p[0] / p[2]), float(p[1] / p[2])
 
 
-def _payload(observations, dive_dots=None) -> SlateCalibrationInput:
+def _payload(observations, mission_dots=None) -> SlateCalibrationInput:
     """The dive's own dots default to the calibration frames' dots, the
     honest stand-in for "the whole dive agrees" (v1's fixture did the same)."""
-    if dive_dots is None:
-        dive_dots = [(o.laser_x, o.laser_y) for o in observations]
+    if mission_dots is None:
+        mission_dots = [(o.laser_x, o.laser_y) for o in observations]
     return SlateCalibrationInput(
-        dive_id=DIVE,
+        mission_id=MISSION,
         camera_matrix=CAMERA_MATRIX.tolist(),
         template_points=TEMPLATE,
         dpi=DPI,
         observations=observations,
-        dive_dots=dive_dots,
+        mission_dots=mission_dots,
     )
 
 
@@ -318,7 +318,7 @@ async def test_mismatched_labels_are_skipped_not_fatal():
     assert float(np.linalg.norm(fitted_pos[:2] - laser_origin[:2])) < 0.001
 
 
-async def test_mismatched_labels_that_starve_the_dive_record_a_refusal():
+async def test_mismatched_labels_that_starve_the_mission_record_a_refusal():
     """Skipping must not silently wedge the cohort either.
 
     When the surviving observations fall below `MIN_LASER_POINTS`, the existing

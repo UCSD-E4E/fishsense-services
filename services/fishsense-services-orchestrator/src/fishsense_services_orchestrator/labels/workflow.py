@@ -96,17 +96,17 @@ class SyncLabelStudioLaserLabelsWorkflow:
                 f"the other {len(projects) - len(failed)} synced"
             )
 
-        await _validate_complete_dives()
+        await _validate_complete_missions()
 
 
-async def _validate_complete_dives() -> None:
+async def _validate_complete_missions() -> None:
     """The post-sync validation pass (see the module docstring)."""
-    dives: List[LaserTarget] = await workflow.execute_activity(
+    missions: List[LaserTarget] = await workflow.execute_activity(
         "laser_dives_with_complete_labeling",
         schedule_to_close_timeout=timedelta(minutes=10),
         result_type=List[LaserTarget],
     )
-    if not dives:
+    if not missions:
         return
     # The children judge on the light queue, which nothing polls until the
     # processor is stood up; v1's children once sat unpolled for 20 minutes.
@@ -119,7 +119,7 @@ async def _validate_complete_dives() -> None:
                 await workflow.execute_child_workflow(
                     "ValidateDiveLaserLabelsWorkflow",
                     target,
-                    id=f"validate-laser-labels-{target.dive_id}",
+                    id=f"validate-laser-labels-{target.mission_id}",
                     # The read, the processor's 20 minutes, and the write.
                     execution_timeout=timedelta(minutes=30),
                     id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
@@ -127,16 +127,16 @@ async def _validate_complete_dives() -> None:
             except WorkflowAlreadyStartedError:
                 workflow.logger.info(
                     "validate-laser-labels-%s already running; skipping",
-                    target.dive_id,
+                    target.mission_id,
                 )
 
     outcomes = await asyncio.gather(
-        *(_validate(t) for t in dives), return_exceptions=True
+        *(_validate(t) for t in missions), return_exceptions=True
     )
-    for target, outcome in zip(dives, outcomes):
+    for target, outcome in zip(missions, outcomes):
         if isinstance(outcome, BaseException):
             workflow.logger.error(
                 "laser label validation failed for dive=%s: %s",
-                target.dive_id,
+                target.mission_id,
                 outcome,
             )

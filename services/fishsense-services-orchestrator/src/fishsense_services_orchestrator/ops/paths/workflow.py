@@ -35,7 +35,7 @@ with workflow.unsafe.imports_passed_through():
 __all__ = ["RepairMovedCapturePathsWorkflow"]
 
 # A dive is a few hundred listings and NAS-side hashes, driven serially.
-_PER_DIVE_TIMEOUT = timedelta(hours=6)
+_PER_MISSION_TIMEOUT = timedelta(hours=6)
 # One frame at a time, so a gap this long means a hash is wedged.
 _HEARTBEAT_TIMEOUT = timedelta(minutes=20)
 _REPAIR_RETRY = RetryPolicy(
@@ -53,12 +53,12 @@ class RepairMovedCapturePathsWorkflow:
     """Report (and, with ``apply``, repair) one dive's moved captures."""
 
     @workflow.run
-    async def run(self, dive_number: int, apply: bool = False) -> PathRepairReport:
+    async def run(self, mission_number: int, apply: bool = False) -> PathRepairReport:
         return await workflow.execute_activity(
             "repair_moved_capture_paths",
-            args=(dive_number, apply),
+            args=(mission_number, apply),
             result_type=PathRepairReport,
-            schedule_to_close_timeout=_PER_DIVE_TIMEOUT,
+            schedule_to_close_timeout=_PER_MISSION_TIMEOUT,
             heartbeat_timeout=_HEARTBEAT_TIMEOUT,
             retry_policy=_REPAIR_RETRY,
         )

@@ -29,4 +29,4 @@ def test_the_spec_is_built_without_a_database_or_an_identity_provider():
     document = spec()
 
     assert document["info"]["title"] == "FishSense Services API"
-    assert "/tenants/{slug}/dives" in document["paths"]
+    assert "/tenants/{slug}/missions" in document["paths"]

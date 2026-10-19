@@ -43,7 +43,7 @@ def _geometry(**overrides) -> LaserCalibrationGeometry:
 
 def test_the_input_round_trips():
     payload = ComputeLaserDepthsInput(
-        dive_id=uuid4(),
+        mission_id=uuid4(),
         camera_matrix=K,
         calibration=_geometry(),
         captures=[
@@ -91,7 +91,7 @@ def test_a_non_finite_coordinate_is_refused(bad):
 def test_the_camera_matrix_is_three_by_three():
     with pytest.raises(ValidationError):
         ComputeLaserDepthsInput(
-            dive_id=uuid4(),
+            mission_id=uuid4(),
             camera_matrix=((1.0, 0.0), (0.0, 1.0)),
             calibration=_geometry(),
             captures=[],
@@ -174,10 +174,10 @@ def test_a_non_finite_depth_travels_as_unknown():
 def test_the_result_names_the_core_that_made_it():
     """laser_depths requires core_version on every row it did not migrate."""
     with pytest.raises(ValidationError):
-        ComputeLaserDepthsResult(dive_id=uuid4(), core_version="", captures=[])
+        ComputeLaserDepthsResult(mission_id=uuid4(), core_version="", captures=[])
 
     result = ComputeLaserDepthsResult(
-        dive_id=uuid4(),
+        mission_id=uuid4(),
         core_version="4.1.0",
         captures=[
             LaserDepthOutcome(

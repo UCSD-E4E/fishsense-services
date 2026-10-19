@@ -60,7 +60,7 @@ class PredictAutomaticFramesWorkflow:
     ) -> List[AutomaticFrameResult]:
         workflow.logger.info(
             "automatic frames dive_id=%s frames=%d",
-            payload.dive_id,
+            payload.mission_id,
             len(payload.frames),
         )
         outcomes = await asyncio.gather(

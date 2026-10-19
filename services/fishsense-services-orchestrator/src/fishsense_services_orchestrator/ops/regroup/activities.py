@@ -34,7 +34,7 @@ from fishsense_services_api.regroup_store import (
     RegroupFacts,
 )
 from fishsense_services_orchestrator.ops.checksums.activities import (
-    DIVE_NOT_FOUND_TYPE,
+    MISSION_NOT_FOUND_TYPE,
 )
 from fishsense_services_orchestrator.ops.regroup.contracts import (
     RegroupMove,
@@ -61,18 +61,18 @@ class RegroupCatalogLike(Protocol):
 
     async def member_tenants(self) -> list[uuid.UUID]: ...
 
-    async def dive_by_number(
+    async def mission_by_number(
         self, tenant_id: uuid.UUID, number: int
     ) -> uuid.UUID | None: ...
 
     async def regroup_facts(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> RegroupFacts: ...
 
     async def replace_label_studio_clusters(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         clusters: Sequence[NewCluster],
         *,
         expected_fingerprint: str,
@@ -83,31 +83,33 @@ class RegroupActivities:
     def __init__(self, *, catalog: RegroupCatalogLike) -> None:
         self._catalog = catalog
 
-    async def _find_dive(self, dive_number: int) -> tuple[uuid.UUID, uuid.UUID]:
+    async def _find_mission(self, mission_number: int) -> tuple[uuid.UUID, uuid.UUID]:
         for tenant_id in await self._catalog.member_tenants():
-            dive_id = await self._catalog.dive_by_number(tenant_id, dive_number)
-            if dive_id is not None:
-                return tenant_id, dive_id
+            mission_id = await self._catalog.mission_by_number(
+                tenant_id, mission_number
+            )
+            if mission_id is not None:
+                return tenant_id, mission_id
         raise ApplicationError(
-            f"no dive numbered {dive_number} in any tenant the orchestrator serves",
-            type=DIVE_NOT_FOUND_TYPE,
+            f"no dive numbered {mission_number} in any tenant the orchestrator serves",
+            type=MISSION_NOT_FOUND_TYPE,
             non_retryable=True,
         )
 
     @activity.defn(name="regroup_dive")
-    async def regroup_dive(
+    async def regroup_mission(
         self,
-        dive_number: int,
+        mission_number: int,
         apply: bool = False,
         expected_plan_sha256: str | None = None,
     ) -> RegroupReport:
         """Plan the dive's label-studio clusters afresh and (with ``apply``
         and the plan's digest) write them."""
-        tenant_id, dive_id = await self._find_dive(dive_number)
-        facts = await self._catalog.regroup_facts(tenant_id, dive_id)
+        tenant_id, mission_id = await self._find_mission(mission_number)
+        facts = await self._catalog.regroup_facts(tenant_id, mission_id)
         plan = plan_regroup(facts)
         report = RegroupReport(
-            dive_number=dive_number,
+            mission_number=mission_number,
             applied=False,
             noop=plan.noop,
             plan_sha256=plan.sha256,
@@ -121,7 +123,7 @@ class RegroupActivities:
         if apply:
             if expected_plan_sha256 != plan.sha256:
                 raise ApplicationError(
-                    f"dive {dive_number} now plans to {plan.sha256}, not the "
+                    f"dive {mission_number} now plans to {plan.sha256}, not the "
                     f"reviewed {expected_plan_sha256}: dry-run it again",
                     type=PLAN_MISMATCH_TYPE,
                     non_retryable=True,
@@ -130,7 +132,7 @@ class RegroupActivities:
                 try:
                     await self._catalog.replace_label_studio_clusters(
                         tenant_id,
-                        dive_id,
+                        mission_id,
                         plan.clusters,
                         expected_fingerprint=facts.fingerprint,
                     )
@@ -145,7 +147,7 @@ class RegroupActivities:
             report.applied = True
         activity.logger.info(
             "regroup dive=%d applied=%s noop=%s clusters %d->%d moves=%d plan=%s",
-            dive_number,
+            mission_number,
             report.applied,
             plan.noop,
             report.clusters_before,

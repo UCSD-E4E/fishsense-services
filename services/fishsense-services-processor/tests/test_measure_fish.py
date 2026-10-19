@@ -94,7 +94,7 @@ def _capture(laser_pix, head_pix, tail_pix) -> MeasureFishCapture:
 
 def _input(calibration, captures) -> MeasureFishInput:
     return MeasureFishInput(
-        dive_id=uuid4(),
+        mission_id=uuid4(),
         camera_matrix=tuple(tuple(row) for row in CAMERA_MATRIX),
         calibration=calibration,
         captures=captures,

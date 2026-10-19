@@ -3,7 +3,7 @@
 Ported from fishsense-lite@77e8f8e5: the cohort is the API's
 `select-next/laser-depth` endpoint (dive_cohort_controller.py
 `_laser_depth_cohort_query`); the inputs are what
-`compute_laser_depths_activity` read through `load_dive_calibration_context`
+`compute_laser_depths_activity` read through `load_mission_calibration_context`
 (dive -> camera intrinsics -> resolved extrinsics) and the dive's laser labels
 and depths; the write is its `put_laser_depth`. v1's rules, kept:
 
@@ -15,7 +15,7 @@ and depths; the write is its `put_laser_depth`. v1's rules, kept:
 * a capture's labels are tried in ascending order (v1's id; v2's number,
   which is v1's id for a migrated label), the first that triangulates wins.
 
-The rules live in migration 0026's views (`dive_laser_geometry`,
+The rules live in migration 0026's views (`mission_laser_geometry`,
 `laser_depth_work`); the cohort, the resolver and the persist check all read
 them, so they cannot disagree.
 
@@ -53,16 +53,16 @@ __all__ = [
     "CaptureDots",
     "DepthRecord",
     "DepthRefusal",
-    "DiveGeometry",
+    "MissionGeometry",
     "Dot",
     "LaserDepthCandidate",
     "LaserDepthCatalog",
     "LaserDepthWork",
     "PersistedDepths",
-    "dive_geometry",
+    "mission_geometry",
     "laser_depth_work",
-    "lock_dive",
-    "next_dive_for_laser_depth",
+    "lock_mission",
+    "next_mission_for_laser_depth",
     "persist_laser_depths",
 ]
 
@@ -72,7 +72,7 @@ __all__ = [
 #: 0029).
 LASER_DEPTH_COHORT = """EXISTS (
     SELECT 1 FROM laser_depth_work w
-    WHERE w.tenant_id = d.tenant_id AND w.dive_id = d.id
+    WHERE w.tenant_id = d.tenant_id AND w.mission_id = d.id
 )"""
 
 Vector3 = tuple[float, float, float]
@@ -80,7 +80,7 @@ Vector3 = tuple[float, float, float]
 
 @dataclass(frozen=True)
 class LaserDepthCandidate:
-    dive_id: uuid.UUID
+    mission_id: uuid.UUID
     created_at: datetime
     #: The tiebreak: v1's id for a migrated dive, and every migrated dive
     #: shares one created_at (v1 recorded none), so the UUID would drain
@@ -89,7 +89,7 @@ class LaserDepthCandidate:
 
 
 @dataclass(frozen=True)
-class DiveGeometry:
+class MissionGeometry:
     """What a dive is measured with: its effective laser calibration and the
     current camera calibration of its device."""
 
@@ -118,7 +118,7 @@ class CaptureDots:
 class LaserDepthWork:
     """A dive's laser-depth work, and what it skipped (v1's counters)."""
 
-    geometry: DiveGeometry | None
+    geometry: MissionGeometry | None
     captures: list[CaptureDots]
     #: Canonical captures with a valid label whose depth is current.
     skipped_current: int
@@ -165,14 +165,14 @@ def _vector(value) -> Vector3:
     return tuple(float(v) for v in value)
 
 
-async def next_dive_for_laser_depth(
+async def next_mission_for_laser_depth(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> LaserDepthCandidate | None:
     """The tenant's oldest high-priority dive with laser-depth work."""
     row = (
         await conn.execute(
             text(f"""
-                SELECT d.id, d.created_at, d.number FROM dives d
+                SELECT d.id, d.created_at, d.number FROM missions d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
                   AND {LASER_DEPTH_COHORT}
                 ORDER BY d.created_at, d.number
@@ -186,9 +186,9 @@ async def next_dive_for_laser_depth(
     )
 
 
-async def dive_geometry(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
-) -> DiveGeometry | None:
+async def mission_geometry(
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
+) -> MissionGeometry | None:
     """The dive's effective calibration and camera matrix, if it can be
     projected at all."""
     row = (
@@ -196,15 +196,15 @@ async def dive_geometry(
             text("""
                 SELECT laser_calibration_id, laser_position, laser_axis,
                        camera_calibration_id, camera_matrix
-                FROM dive_laser_geometry
-                WHERE tenant_id = :tenant AND dive_id = :dive
+                FROM mission_laser_geometry
+                WHERE tenant_id = :tenant AND mission_id = :mission
                 """),
-            {"tenant": tenant_id, "dive": dive_id},
+            {"tenant": tenant_id, "mission": mission_id},
         )
     ).one_or_none()
     if row is None:
         return None
-    return DiveGeometry(
+    return MissionGeometry(
         laser_calibration_id=row.laser_calibration_id,
         laser_position=_vector(row.laser_position),
         laser_axis=_vector(row.laser_axis),
@@ -214,18 +214,18 @@ async def dive_geometry(
 
 
 async def laser_depth_work(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> LaserDepthWork:
     """What the processor is given for the dive: per capture needing a depth,
     its valid unrefused labels in label order."""
-    geometry = await dive_geometry(conn, tenant_id, dive_id)
+    geometry = await mission_geometry(conn, tenant_id, mission_id)
     rows = await conn.execute(
         text("""
             SELECT capture_id, laser_label_id, x, y FROM laser_depth_work
-            WHERE tenant_id = :tenant AND dive_id = :dive
+            WHERE tenant_id = :tenant AND mission_id = :mission
             ORDER BY capture_number, laser_label_number
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     captures: dict[uuid.UUID, list[Dot]] = {}
     for r in rows:
@@ -263,7 +263,7 @@ async def laser_depth_work(
                     FROM captures c
                     JOIN laser_labels l
                       ON l.tenant_id = c.tenant_id AND l.capture_id = c.id
-                    WHERE c.tenant_id = :tenant AND c.dive_id = :dive
+                    WHERE c.tenant_id = :tenant AND c.mission_id = :mission
                       AND c.is_canonical AND NOT l.superseded
                     GROUP BY c.id, c.tenant_id
                 )
@@ -276,7 +276,7 @@ async def laser_depth_work(
                 """),
             {
                 "tenant": tenant_id,
-                "dive": dive_id,
+                "mission": mission_id,
                 "calibration": (
                     None if geometry is None else geometry.laser_calibration_id
                 ),
@@ -295,19 +295,21 @@ async def laser_depth_work(
     )
 
 
-async def lock_dive(conn: AsyncConnection, stage: str, dive_id: uuid.UUID) -> None:
+async def lock_mission(
+    conn: AsyncConnection, stage: str, mission_id: uuid.UUID
+) -> None:
     """Serialise one stage's persists of one dive, so two can't both find the
     same work still open."""
     await conn.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-        {"key": f"{stage}:{dive_id}"},
+        {"key": f"{stage}:{mission_id}"},
     )
 
 
 async def _is_work(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     laser_calibration_id: uuid.UUID,
     capture_id: uuid.UUID,
     laser_label_id: uuid.UUID,
@@ -320,7 +322,7 @@ async def _is_work(
             text("""
                 SELECT EXISTS (
                     SELECT 1 FROM laser_depth_work
-                    WHERE tenant_id = :tenant AND dive_id = :dive
+                    WHERE tenant_id = :tenant AND mission_id = :mission
                       AND capture_id = :capture AND laser_label_id = :label
                       AND laser_calibration_id = :calibration
                       AND (NOT CAST(:check_dot AS boolean)
@@ -330,7 +332,7 @@ async def _is_work(
                 """),
             {
                 "tenant": tenant_id,
-                "dive": dive_id,
+                "mission": mission_id,
                 "capture": capture_id,
                 "label": laser_label_id,
                 "calibration": laser_calibration_id,
@@ -345,7 +347,7 @@ async def _is_work(
 async def persist_laser_depths(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     *,
     laser_calibration_id: uuid.UUID,
     core_version: str,
@@ -356,13 +358,13 @@ async def persist_laser_depths(
     """Append the processor's depths and refusals for the dive, in the
     caller's transaction. Each is written only if it still answers open
     work: refusals first, since a capture's depth closes its work."""
-    await lock_dive(conn, "laser-depth", dive_id)
+    await lock_mission(conn, "laser-depth", mission_id)
     written = refused = stale = 0
     for refusal in refusals:
         if not await _is_work(
             conn,
             tenant_id,
-            dive_id,
+            mission_id,
             laser_calibration_id,
             refusal.capture_id,
             refusal.laser_label_id,
@@ -396,7 +398,7 @@ async def persist_laser_depths(
         if not await _is_work(
             conn,
             tenant_id,
-            dive_id,
+            mission_id,
             laser_calibration_id,
             record.capture_id,
             record.laser_label_id,
@@ -431,20 +433,20 @@ class LaserDepthCatalog(ServicePrincipal):
     """The laser-depth stage's database side, as the orchestrator's service
     principal."""
 
-    async def next_dive_for_laser_depth(
+    async def next_mission_for_laser_depth(
         self, tenant_id: uuid.UUID
     ) -> LaserDepthCandidate | None:
         async with self._tenant(tenant_id) as conn:
-            return await next_dive_for_laser_depth(conn, tenant_id)
+            return await next_mission_for_laser_depth(conn, tenant_id)
 
     async def laser_depth_work(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> LaserDepthWork:
         async with self._tenant(tenant_id) as conn:
-            return await laser_depth_work(conn, tenant_id, dive_id)
+            return await laser_depth_work(conn, tenant_id, mission_id)
 
     async def persist_laser_depths(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, **result
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, **result
     ) -> PersistedDepths:
         async with self._tenant(tenant_id) as conn:
-            return await persist_laser_depths(conn, tenant_id, dive_id, **result)
+            return await persist_laser_depths(conn, tenant_id, mission_id, **result)

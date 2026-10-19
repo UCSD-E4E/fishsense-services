@@ -3,7 +3,7 @@
 Ported from the shape of fishsense-lite@77e8f8e5
 services/fishsense-data-processing-workflow-worker/src/
 fishsense_data_processing_workflow_worker/activities/
-compute_laser_depths_activity.py, which took a bare `dive_id` and did its own
+compute_laser_depths_activity.py, which took a bare `mission_id` and did its own
 SDK reads (the dive's camera intrinsics, its resolved extrinsics, its laser
 labels) and writes. v2's processor never touches the database, so the
 orchestrator resolves those inputs and persists the result:
@@ -29,7 +29,8 @@ same inputs there.
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
+from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = [
     "CameraMatrix",
@@ -79,7 +80,8 @@ class LaserDepthCapture(BaseModel):
 
 
 class ComputeLaserDepthsInput(BaseModel):
-    dive_id: UUID
+    model_config = ConfigDict(validate_by_name=True)
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     camera_matrix: CameraMatrix
     calibration: LaserCalibrationGeometry
     captures: list[LaserDepthCapture]
@@ -123,7 +125,8 @@ class LaserDepthOutcome(BaseModel):
 
 
 class ComputeLaserDepthsResult(BaseModel):
-    dive_id: UUID
+    model_config = ConfigDict(validate_by_name=True)
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     #: The fishsense-core wheel that computed it; laser_depths requires it.
     core_version: str = Field(min_length=1)
     captures: list[LaserDepthOutcome]

@@ -1,4 +1,4 @@
-"""`judge_dive` is the one definition of what the laser validator decides.
+"""`judge_mission` is the one definition of what the laser validator decides.
 
 Ported from fishsense-lite@77e8f8e5 services/fishsense-data-processing-
 workflow-worker/tests/test_laser_dive_judgement.py. Names, bodies and reasons
@@ -17,23 +17,23 @@ from __future__ import annotations
 
 import numpy as np
 
-from fishsense_services_processor.laser_validation.judgement import judge_dive
+from fishsense_services_processor.laser_validation.judgement import judge_mission
 
-from ._laser import label, prod_like_dive, reflection_dive
+from ._laser import label, prod_like_mission, reflection_mission
 
 
-def test_a_clean_confident_dive_is_judged_and_flags_its_outliers():
-    labels = prod_like_dive(offsets={5: 60.0, 40: -45.0})
+def test_a_clean_confident_mission_is_judged_and_flags_its_outliers():
+    labels = prod_like_mission(offsets={5: 60.0, 40: -45.0})
 
-    judgement = judge_dive(labels, calibration_image_ids=set())
+    judgement = judge_mission(labels, calibration_image_ids=set())
 
     assert judgement.judged
     assert judgement.status == "flagged"
     assert judgement.flagged_ids == {labels[5].number, labels[40].number}
 
 
-def test_a_clean_dive_with_nothing_to_flag_is_still_judged():
-    judgement = judge_dive(prod_like_dive(), calibration_image_ids=set())
+def test_a_clean_mission_with_nothing_to_flag_is_still_judged():
+    judgement = judge_mission(prod_like_mission(), calibration_image_ids=set())
 
     assert judgement.judged
     assert judgement.status == "no_outliers"
@@ -41,7 +41,7 @@ def test_a_clean_dive_with_nothing_to_flag_is_still_judged():
 
 
 def test_too_few_positives_is_not_a_judgement():
-    judgement = judge_dive(prod_like_dive(n=4), calibration_image_ids=set())
+    judgement = judge_mission(prod_like_mission(n=4), calibration_image_ids=set())
 
     assert not judgement.judged
     assert judgement.status == "too_few"
@@ -53,7 +53,7 @@ def test_a_line_that_is_not_confident_is_not_a_judgement():
     dots = [(100.0, 100.0)] * 6 + [(200.0, 140.0)] * 6
     labels = [label(i + 1, 1000 + i, p) for i, p in enumerate(dots)]
 
-    judgement = judge_dive(labels, calibration_image_ids=set())
+    judgement = judge_mission(labels, calibration_image_ids=set())
 
     assert not judgement.judged
     assert judgement.status == "not_confident"
@@ -61,7 +61,7 @@ def test_a_line_that_is_not_confident_is_not_a_judgement():
 
 
 def test_a_reflection_split_is_not_a_judgement():
-    judgement = judge_dive(reflection_dive(), calibration_image_ids=set())
+    judgement = judge_mission(reflection_mission(), calibration_image_ids=set())
 
     assert not judgement.judged
     assert judgement.status == "reflection"
@@ -78,7 +78,7 @@ def test_the_fraction_gate_is_not_a_judgement(monkeypatch):
 
     monkeypatch.setattr(sut, "flag_outliers", flags_sixty_percent)
 
-    judgement = judge_dive(prod_like_dive(), calibration_image_ids=set())
+    judgement = judge_mission(prod_like_mission(), calibration_image_ids=set())
 
     assert not judgement.judged
     assert judgement.status == "gate"
@@ -87,9 +87,9 @@ def test_the_fraction_gate_is_not_a_judgement(monkeypatch):
 
 def test_superseded_labels_are_judged_too():
     """The whole population, every run."""
-    labels = prod_like_dive(offsets={5: 60.0}, superseded={5, 9})
+    labels = prod_like_mission(offsets={5: 60.0}, superseded={5, 9})
 
-    judgement = judge_dive(labels, calibration_image_ids=set())
+    judgement = judge_mission(labels, calibration_image_ids=set())
 
     assert labels[5].number in judgement.flagged_ids
     assert labels[9].number not in judgement.flagged_ids
@@ -97,12 +97,12 @@ def test_superseded_labels_are_judged_too():
 
 
 def test_the_verdict_does_not_depend_on_input_order():
-    labels = prod_like_dive(offsets={5: 60.0, 40: -45.0})
+    labels = prod_like_mission(offsets={5: 60.0, 40: -45.0})
     shuffled = list(reversed(labels))
 
     assert (
-        judge_dive(shuffled, calibration_image_ids=set()).flagged_ids
-        == judge_dive(labels, calibration_image_ids=set()).flagged_ids
+        judge_mission(shuffled, calibration_image_ids=set()).flagged_ids
+        == judge_mission(labels, calibration_image_ids=set()).flagged_ids
     )
 
 
@@ -122,11 +122,11 @@ def test_the_order_is_capture_number_then_label_number():
 
 
 def test_calibration_frames_get_the_coarse_rule_and_are_marked():
-    labels = prod_like_dive()
+    labels = prod_like_mission()
     on_slate = labels[30]
     on_slate.y += 8.0  # a genuine slate dot a few px off the fish line
 
-    judgement = judge_dive(labels, calibration_image_ids={on_slate.capture_number})
+    judgement = judge_mission(labels, calibration_image_ids={on_slate.capture_number})
 
     assert on_slate.number not in judgement.flagged_ids
     assert judgement.is_calibration(on_slate.number)
@@ -134,8 +134,8 @@ def test_calibration_frames_get_the_coarse_rule_and_are_marked():
 
 
 def test_labels_without_a_dot_are_not_part_of_the_population():
-    labels = prod_like_dive() + [label(900, 9000, None)]
+    labels = prod_like_mission() + [label(900, 9000, None)]
 
-    judgement = judge_dive(labels, calibration_image_ids=set())
+    judgement = judge_mission(labels, calibration_image_ids=set())
 
     assert 900 not in judgement.kept_ids | judgement.flagged_ids

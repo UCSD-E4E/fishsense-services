@@ -37,13 +37,14 @@ Not in ``MODELS``: integration publishes schemas once for every slice.
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Optional, Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, ConfigDict
 
 from fishsense_services_contracts._boxes import check_box
 from fishsense_services_contracts.object_store import ObjectRef
+from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = [
     "AUTOMATIC_CALIBRATION_VERSION",
@@ -115,8 +116,10 @@ class AutomaticFrame(BaseModel):
 class PredictAutomaticFramesInput(BaseModel):
     """The GPU workflow's input (orchestrator -> processor)."""
 
+    model_config = ConfigDict(validate_by_name=True)
+
     tenant_id: UUID
-    dive_id: UUID
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     camera_matrix: List[List[float]]
     distortion_coefficients: List[float]
     #: The expected-laser region (`laser_region.LASER_REGION_POLYGON`).
@@ -177,8 +180,9 @@ class AutomaticCalibrationFrame(BaseModel):
 
 
 class FitAutomaticCalibrationInput(BaseModel):
+    model_config = ConfigDict(validate_by_name=True)
     tenant_id: UUID
-    dive_id: UUID
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     camera_matrix: List[List[float]]
     frames: List[AutomaticCalibrationFrame]
     #: Every automatic dot of the dive, for the dive line.
@@ -188,7 +192,9 @@ class FitAutomaticCalibrationInput(BaseModel):
 class AutomaticCalibrationResult(BaseModel):
     """The dive's label-free fit, or why not, with what it saw."""
 
-    dive_id: UUID
+    model_config = ConfigDict(validate_by_name=True)
+
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     outcome: str
     refusal_reason: Optional[str] = None
     algorithm_version: str
@@ -221,8 +227,9 @@ class AutomaticMeasureCapture(BaseModel):
 
 
 class MeasureAutomaticInput(BaseModel):
+    model_config = ConfigDict(validate_by_name=True)
     tenant_id: UUID
-    dive_id: UUID
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     camera_matrix: List[List[float]]
     laser_position: List[float]
     laser_axis: List[float]
@@ -239,7 +246,8 @@ class AutomaticLength(BaseModel):
 
 
 class MeasureAutomaticResult(BaseModel):
-    dive_id: UUID
+    model_config = ConfigDict(validate_by_name=True)
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     algorithm: str
     algorithm_version: str
     core_version: str

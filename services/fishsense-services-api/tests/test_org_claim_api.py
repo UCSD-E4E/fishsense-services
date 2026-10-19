@@ -89,7 +89,7 @@ async def test_without_the_org_claim_there_is_no_way_in(tenants, client):
 
 async def test_a_partner_is_not_an_admin_of_their_tenant(tenants, client):
     response = await client.put(
-        f"/tenants/{ORG}/dives/1/calibration-source/2", headers=_bearer(PARTNER, ORG)
+        f"/tenants/{ORG}/missions/1/calibration-source/2", headers=_bearer(PARTNER, ORG)
     )
 
     assert response.status_code == 403

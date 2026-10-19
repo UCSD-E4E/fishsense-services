@@ -22,13 +22,14 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import List, Literal
+from typing import List, Literal, Annotated
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = [
     "DuplicateOverlap",
-    "IngestDiveRequest",
+    "IngestMissionRequest",
     "IngestPreflight",
     "IngestProgress",
     "IngestReport",
@@ -38,16 +39,20 @@ __all__ = [
 ]
 
 
-class IngestDiveRequest(BaseModel):
+class IngestMissionRequest(BaseModel):
     """What an operator submits. One request, one dive."""
+
+    model_config = ConfigDict(validate_by_name=True)
 
     #: v2: the tenant the dive belongs to, by slug.
     tenant: str
     #: NAS path relative to the NAS raw root.
-    dive_path: str
+    mission_path: Annotated[str, renamed_from("dive_path", "mission_path")]
     #: Defaults to the leaf directory name. The dive name feeds Label Studio
     #: project titles, so it is worth getting right at ingest.
-    dive_name: str | None = None
+    mission_name: Annotated[str | None, renamed_from("dive_name", "mission_name")] = (
+        None
+    )
 
     #: Override device resolution, by serial. When unset the device is resolved
     #: from each frame's Olympus MakerNote serial; there is deliberately no
@@ -69,7 +74,9 @@ class IngestDiveRequest(BaseModel):
     calibration_source_path: str | None = None
     self_calibrates: bool = False
 
-    flip_dive_slate: bool = False
+    flip_mission_slate: Annotated[
+        bool, renamed_from("flip_dive_slate", "flip_mission_slate")
+    ] = False
 
     #: Preflight only: list, read EXIF headers, validate, write nothing.
     dry_run: bool = False
@@ -112,8 +119,10 @@ class DuplicateOverlap(BaseModel):
     was consulted on a corpus that is ~50% duplicates.
     """
 
-    dive_id: uuid.UUID
-    dive_path: str
+    model_config = ConfigDict(validate_by_name=True)
+
+    mission_id: Annotated[uuid.UUID, renamed_from("dive_id", "mission_id")]
+    mission_path: Annotated[str, renamed_from("dive_path", "mission_path")]
     shared_images: int
     containment: float
 
@@ -121,10 +130,18 @@ class DuplicateOverlap(BaseModel):
 class IngestPreflight(BaseModel):
     """Everything preflight found. Non-empty `errors` means nothing is written."""
 
-    dive_path: str
+    model_config = ConfigDict(validate_by_name=True)
+
+    mission_path: Annotated[str, renamed_from("dive_path", "mission_path")]
     #: v2: resolved here, once, and handed to the later steps as ids.
     tenant_id: uuid.UUID | None = None
-    resolved_calibration_source_dive_id: uuid.UUID | None = None
+    resolved_calibration_source_mission_id: Annotated[
+        uuid.UUID | None,
+        renamed_from(
+            "resolved_calibration_source_dive_id",
+            "resolved_calibration_source_mission_id",
+        ),
+    ] = None
     resolved_slate_template_id: uuid.UUID | None = None
     images: List[PreflightImage] = []
     subfolders: List[SubfolderReport] = []
@@ -148,8 +165,12 @@ class RejectedImage(BaseModel):
 class IngestProgress(BaseModel):
     """Shape of the workflow's `progress` query."""
 
+    model_config = ConfigDict(validate_by_name=True)
+
     state: str = "starting"
-    dive_id: uuid.UUID | None = None
+    mission_id: Annotated[uuid.UUID | None, renamed_from("dive_id", "mission_id")] = (
+        None
+    )
     total: int = 0
     scanned: int = 0
     registered: int = 0
@@ -161,8 +182,12 @@ class IngestProgress(BaseModel):
 class IngestReport(BaseModel):
     """The workflow's return value."""
 
-    dive_path: str
-    dive_id: uuid.UUID | None = None
+    model_config = ConfigDict(validate_by_name=True)
+
+    mission_path: Annotated[str, renamed_from("dive_path", "mission_path")]
+    mission_id: Annotated[uuid.UUID | None, renamed_from("dive_id", "mission_id")] = (
+        None
+    )
     total: int = 0
     registered: int = 0
     skipped_existing: int = 0

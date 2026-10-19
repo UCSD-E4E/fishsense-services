@@ -24,7 +24,7 @@ from typing import List
 import pytest
 from temporalio import activity
 from temporalio.client import WorkflowFailureError
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
@@ -33,11 +33,11 @@ from fishsense_services_orchestrator.labels.sync import LabelProject
 from fishsense_services_orchestrator.species import workflows as sut
 from fishsense_services_orchestrator.species.contracts import (
     SpeciesTarget,
-    UpdateDiveImageGroupsResult,
+    UpdateMissionImageGroupsResult,
 )
 from fishsense_services_orchestrator.species.workflows import (
     SyncLabelStudioSpeciesLabelsWorkflow,
-    UpdateDiveImageGroupsWorkflow,
+    UpdateMissionImageGroupsWorkflow,
 )
 
 TENANT = uuid.uuid4()
@@ -63,7 +63,7 @@ def _stubs(projects, calls: List, *, fail=(), gate=None):
 
 async def _run(workflow_cls, activities, *args, max_concurrent_activities=None):
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,
@@ -146,20 +146,20 @@ async def test_one_projects_failure_does_not_cancel_the_others():
     assert "57" in str(failure.value.cause)
 
 
-async def test_update_groups_forwards_the_dive_to_the_activity_and_returns_its_result():
+async def test_update_groups_forwards_the_mission_to_the_activity_and_returns_its_result():
     seen: List[SpeciesTarget] = []
     target = SpeciesTarget(TENANT, uuid.uuid4())
 
     @activity.defn(name="update_dive_image_groups")
-    async def stub(t: SpeciesTarget) -> UpdateDiveImageGroupsResult:
+    async def stub(t: SpeciesTarget) -> UpdateMissionImageGroupsResult:
         seen.append(t)
-        return UpdateDiveImageGroupsResult(
+        return UpdateMissionImageGroupsResult(
             skipped_already_grouped=False,
             new_clusters_created=3,
             species_labels_seen=12,
         )
 
-    result = await _run(UpdateDiveImageGroupsWorkflow, [stub], target)
+    result = await _run(UpdateMissionImageGroupsWorkflow, [stub], target)
 
     assert seen == [target]
     assert result.new_clusters_created == 3

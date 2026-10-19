@@ -37,10 +37,12 @@ class Catalog(Protocol):
     ) -> ResolvedDevice | None:
         """The tenant's device with this serial."""
 
-    async def dive_by_path(self, tenant_id: uuid.UUID, path: str) -> uuid.UUID | None:
+    async def mission_by_path(
+        self, tenant_id: uuid.UUID, path: str
+    ) -> uuid.UUID | None:
         """The tenant's dive at this NAS path."""
 
-    async def dives_with_leaf(
+    async def missions_with_leaf(
         self, tenant_id: uuid.UUID, leaf: str
     ) -> list[tuple[uuid.UUID, str]]:
         """The tenant's dives whose folder name is ``leaf``: (id, path)."""
@@ -50,7 +52,7 @@ class Catalog(Protocol):
 
     # -- writes: the store's functions, keyword arguments passed through ------
 
-    async def create_dive(self, tenant_id: uuid.UUID, **dive: Any) -> uuid.UUID:
+    async def create_mission(self, tenant_id: uuid.UUID, **mission: Any) -> uuid.UUID:
         """Create or re-open the dive at its path, always at low."""
 
     async def register_capture(
@@ -59,21 +61,21 @@ class Catalog(Protocol):
         """Upsert one frame on its path."""
 
     async def registered_captures(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> dict[str, datetime]:
         """Path -> captured_at for frames already registered to the dive."""
 
-    async def finalize_dive(
+    async def finalize_mission(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         *,
         priority: str,
-        dived_at: datetime,
+        started_at: datetime,
     ) -> None:
         """Open the commit flag."""
 
     async def content_overlap(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> list[ContentOverlap]:
         """How much of the dive already exists under other dives."""

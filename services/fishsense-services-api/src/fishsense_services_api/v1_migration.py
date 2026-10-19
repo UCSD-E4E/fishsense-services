@@ -84,17 +84,17 @@ NUMBERED_TABLES = {
     "species": "species",
     "diveslate": "slate_templates",
     "camera": "devices",
-    "dive": "dives",
+    "dive": "missions",
     "image": "captures",
     "cameraintrinsics": "camera_calibrations",
     "laserextrinsics": "laser_calibrations",
-    "divelaserline": "dive_laser_lines",
+    "divelaserline": "mission_laser_lines",
     "labelstudiosynccursor": "label_studio_sync_cursors",
     "laserprediction": "laser_predictions",
     "slateprediction": "slate_predictions",
     "headtailprediction": "head_tail_predictions",
     "fish": "fish",
-    "diveframecluster": "dive_frame_clusters",
+    "diveframecluster": "mission_frame_clusters",
     "laserdepth": "laser_depths",
     "measurement": "measurements",
 }
@@ -252,8 +252,8 @@ def _dives(v1, v2, tenant, report) -> None:
 
     _insert(
         v2,
-        "INSERT INTO dives (tenant_id, v1_id, name, source_path, dived_at, priority, "
-        "notes, flip_dive_slate, device_id, slate_template_id, calibration_target_id) "
+        "INSERT INTO missions (tenant_id, v1_id, name, source_path, started_at, priority, "
+        "notes, flip_mission_slate, device_id, slate_template_id, calibration_target_id) "
         "VALUES (:tenant, :id, :name, :path, :dived_at, :priority, :notes, :flip, "
         ":device, :slate, :target) ON CONFLICT DO NOTHING",
         rows(),
@@ -261,8 +261,8 @@ def _dives(v1, v2, tenant, report) -> None:
     # Borrowing links need every dive first.
     v2.execute(
         text(
-            "UPDATE dives d SET calibration_source_dive_id = src.id "
-            "FROM dives src "
+            "UPDATE missions d SET calibration_source_mission_id = src.id "
+            "FROM missions src "
             "WHERE src.tenant_id = d.tenant_id AND src.v1_id = :source_v1 "
             "AND d.v1_id = :dive_v1"
         ),
@@ -276,14 +276,14 @@ def _dives(v1, v2, tenant, report) -> None:
         ]
         or [{"dive_v1": None, "source_v1": None}],
     )
-    _account(v1, v2, report, "dive", "dives")
+    _account(v1, v2, report, "dive", "missions")
 
 
 def _captures(v1, v2, tenant, report) -> None:
-    dives, devices = _ids(v2, "dives"), _ids(v2, "devices")
+    dives, devices = _ids(v2, "missions"), _ids(v2, "devices")
     _insert(
         v2,
-        "INSERT INTO captures (tenant_id, v1_id, dive_id, device_id, source_path, "
+        "INSERT INTO captures (tenant_id, v1_id, mission_id, device_id, source_path, "
         "captured_at, checksum, checksum_algorithm, is_canonical) "
         "VALUES (:tenant, :id, :dive, :device, :path, :taken_datetime, :checksum, "
         "'md5', :is_canonical) ON CONFLICT DO NOTHING",
@@ -329,7 +329,7 @@ def _laser_calibrations(v1, v2, tenant, report) -> None:
     ``seq``) matches v1's state. A producer is named only when certain: a dive
     with no calibration target can only have been calibrated from its slate.
     """
-    dives = _ids(v2, "dives")
+    dives = _ids(v2, "missions")
     camera_calibrations = {
         camera_id: v2_id
         for camera_id, v2_id in v2.execute(
@@ -359,7 +359,7 @@ def _laser_calibrations(v1, v2, tenant, report) -> None:
     _insert(
         v2,
         "INSERT INTO laser_calibrations (tenant_id, v1_id, v1_refusal_dive_id, "
-        "dive_id, camera_calibration_id, producer, outcome, laser_position, "
+        "mission_id, camera_calibration_id, producer, outcome, laser_position, "
         "laser_axis, refusal_reason, inputs_as_of, created_at) VALUES (:tenant, "
         ":v1_id, :refusal_dive, :dive, :camera_calibration, :producer, :outcome, "
         "CAST(:position AS jsonb), CAST(:axis AS jsonb), :reason, :inputs_as_of, "
@@ -415,10 +415,10 @@ def _has_column(v1, table: str, column: str) -> bool:
 
 
 def _dive_laser_lines(v1, v2, tenant, report) -> None:
-    dives = _ids(v2, "dives")
+    dives = _ids(v2, "missions")
     _insert(
         v2,
-        "INSERT INTO dive_laser_lines (tenant_id, v1_id, dive_id, a, b, c, n_points, "
+        "INSERT INTO mission_laser_lines (tenant_id, v1_id, mission_id, a, b, c, n_points, "
         "inlier_count, inlier_fraction, residual_std, label_noise_mad, "
         "noise_estimator, line_confidence, fitted_at) VALUES (:tenant, :id, "
         ":dive, :a, :b, :c, :n_points, :inlier_count, :inlier_fraction, "
@@ -430,7 +430,7 @@ def _dive_laser_lines(v1, v2, tenant, report) -> None:
             for r in _rows(v1, "SELECT * FROM divelaserline ORDER BY fitted_at, id")
         ),
     )  # fmt: skip
-    _account(v1, v2, report, "divelaserline", "dive_laser_lines")
+    _account(v1, v2, report, "divelaserline", "mission_laser_lines")
 
 
 #: v2 label table -> its label_studio_projects kind.
@@ -449,14 +449,14 @@ def _label_studio_projects(v1, v2, tenant, report) -> None:
     for table, kind in PROJECT_KINDS.items():
         v2.execute(
             text(f"""
-                INSERT INTO label_studio_projects (tenant_id, dive_id, kind,
+                INSERT INTO label_studio_projects (tenant_id, mission_id, kind,
                                                    ls_project_id)
                 SELECT DISTINCT ON (l.ls_project_id)
-                       :tenant, c.dive_id, :kind, l.ls_project_id
+                       :tenant, c.mission_id, :kind, l.ls_project_id
                 FROM {table} l JOIN captures c ON c.id = l.capture_id
-                JOIN dives d ON d.id = c.dive_id
+                JOIN missions d ON d.id = c.mission_id
                 WHERE l.tenant_id = :tenant AND l.ls_project_id IS NOT NULL
-                GROUP BY l.ls_project_id, c.dive_id, d.number
+                GROUP BY l.ls_project_id, c.mission_id, d.number
                 ORDER BY l.ls_project_id, count(*) DESC, d.number
                 ON CONFLICT (tenant_id, kind, ls_project_id) DO NOTHING
                 """),
@@ -671,10 +671,10 @@ def _fish_and_clusters(v1, v2, tenant, report) -> None:
     )
     _account(v1, v2, report, "fish", "fish")
 
-    dives, fish = _ids(v2, "dives"), _ids(v2, "fish")
+    dives, fish = _ids(v2, "missions"), _ids(v2, "fish")
     _insert(
         v2,
-        "INSERT INTO dive_frame_clusters (tenant_id, v1_id, dive_id, formed_by, "
+        "INSERT INTO mission_frame_clusters (tenant_id, v1_id, mission_id, formed_by, "
         "fish_id, updated_at) VALUES (:tenant, :id, :dive, :formed_by, :fish, "
         ":updated_at) ON CONFLICT DO NOTHING",
         (
@@ -692,12 +692,12 @@ def _fish_and_clusters(v1, v2, tenant, report) -> None:
             )
         ),
     )
-    _account(v1, v2, report, "diveframecluster", "dive_frame_clusters")
+    _account(v1, v2, report, "diveframecluster", "mission_frame_clusters")
 
-    clusters, captures = _ids(v2, "dive_frame_clusters"), _ids(v2, "captures")
+    clusters, captures = _ids(v2, "mission_frame_clusters"), _ids(v2, "captures")
     _insert(
         v2,
-        "INSERT INTO dive_frame_cluster_captures (tenant_id, cluster_id, "
+        "INSERT INTO mission_frame_cluster_captures (tenant_id, cluster_id, "
         "capture_id) VALUES (:tenant, :cluster, :capture) ON CONFLICT DO NOTHING",
         (
             {
@@ -714,8 +714,8 @@ def _fish_and_clusters(v1, v2, tenant, report) -> None:
         ).scalar_one(),
         v2.execute(
             text(
-                "SELECT count(*) FROM dive_frame_cluster_captures m "
-                "JOIN dive_frame_clusters k ON k.id = m.cluster_id "
+                "SELECT count(*) FROM mission_frame_cluster_captures m "
+                "JOIN mission_frame_clusters k ON k.id = m.cluster_id "
                 "WHERE k.v1_id IS NOT NULL"
             )
         ).scalar_one(),

@@ -59,7 +59,7 @@ class InvalidLabelingConfig(ValueError):
 @dataclass(frozen=True)
 class LabelingConfig:
     """What a per-dive project of ``kind`` should be configured with. Its
-    title ends ``" - {title_suffix}"`` (`labels.populate.build_per_dive_title`),
+    title ends ``" - {title_suffix}"`` (`labels.populate.build_per_mission_title`),
     which is how the reconcile tells a kind's projects apart."""
 
     kind: str

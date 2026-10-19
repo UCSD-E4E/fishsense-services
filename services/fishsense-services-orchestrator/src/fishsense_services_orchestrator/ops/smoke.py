@@ -129,7 +129,7 @@ class SmokeOptions:
     api_url: str
     web_url: str
     label_studio_workspace: str
-    dive_number: int
+    mission_number: int
     min_measurements: int = 1
 
 
@@ -151,7 +151,7 @@ class Probes(Protocol):
 
     async def lab_tenant_id(self) -> uuid.UUID | None: ...
 
-    async def research_measurement_count(self, dive_number: int) -> int: ...
+    async def research_measurement_count(self, mission_number: int) -> int: ...
 
     async def temporal_schedule_ids(self) -> set[str]: ...
 
@@ -219,13 +219,13 @@ async def _lab_tenant(p: Probes, _o: SmokeOptions) -> str:
 
 
 async def _research_measurements(p: Probes, o: SmokeOptions) -> str:
-    count = await p.research_measurement_count(o.dive_number)
+    count = await p.research_measurement_count(o.mission_number)
     if count < o.min_measurements:
         raise SmokeFailure(
-            f"dive {o.dive_number}: {count} measurements through v1.measurement, "
+            f"dive {o.mission_number}: {count} measurements through v1.measurement, "
             f"expected at least {o.min_measurements}"
         )
-    return f"dive {o.dive_number}: {count} measurements"
+    return f"dive {o.mission_number}: {count} measurements"
 
 
 async def _temporal_schedules(p: Probes, _o: SmokeOptions) -> str:
@@ -380,7 +380,7 @@ class LiveProbes:  # pylint: disable=too-many-instance-attributes
 
         return await self._ask(self._migration.migration_database_url, lab_tenant_id)
 
-    async def research_measurement_count(self, dive_number: int) -> int:
+    async def research_measurement_count(self, mission_number: int) -> int:
         # pylint: disable=import-outside-toplevel
         from fishsense_services_api.deployment_checks import (
             research_measurement_count,
@@ -391,7 +391,7 @@ class LiveProbes:  # pylint: disable=too-many-instance-attributes
         return await self._ask(
             self._smoke.research_database_url,
             research_measurement_count,
-            dive_number,
+            mission_number,
         )
 
     async def temporal_schedule_ids(self) -> set[str]:
@@ -446,6 +446,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         description="Post-converge smoke test: exit 0 is GO, 1 is NO-GO.",
     )
     parser.add_argument(
+        "--mission",
         "--dive",
         type=int,
         required=True,
@@ -475,7 +476,7 @@ def _options(args: argparse.Namespace) -> SmokeOptions:
         api_url=settings.api_url.rstrip("/"),
         web_url=settings.web_url.rstrip("/"),
         label_studio_workspace=LabelStudioSettings().workspace,
-        dive_number=args.dive,
+        mission_number=args.mission,
         min_measurements=args.min_measurements,
     )
 

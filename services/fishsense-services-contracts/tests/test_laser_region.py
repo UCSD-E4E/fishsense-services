@@ -14,7 +14,7 @@ sufficient alone:
 
 * `PROD_CALIBRATIONS` is the geometry: each fitted laser ray projected across
   the working depth range. Exact, but a sample of 13.
-* `PROD_DIVE_LASER_LOCI` is the observation, and it is what caught the bug: the
+* `PROD_MISSION_LASER_LOCI` is the observation, and it is what caught the bug: the
   uncalibrated rigs sit measurably further right than the calibrated 13.
 
 Corpus measured 2026-08-27 against prod: 13 `LaserExtrinsics` rows and the
@@ -52,7 +52,7 @@ PROD_CALIBRATIONS = [
 ]  # fmt: skip
 
 # (dive_id, x_p5, y_p5, x_p95, y_p95) over that dive's completed labels.
-PROD_DIVE_LASER_LOCI = [
+PROD_MISSION_LASER_LOCI = [
     (424, 1792, 1216, 1945, 1380),  # leftmost observed rig
     (262, 1795, 1064, 1872, 1308),
     (253, 2202, 1397, 2328, 1570),  # rightmost -- an uncalibrated rig
@@ -63,7 +63,12 @@ PROD_DIVE_LASER_LOCI = [
 ]
 
 # Widest per-dive median over all 262 dives -- a median cannot be a mislabel.
-PROD_DIVE_MEDIAN_EXTREMES = {"x_min": 1768, "x_max": 2367, "y_min": 1069, "y_max": 1616}
+PROD_MISSION_MEDIAN_EXTREMES = {
+    "x_min": 1768,
+    "x_max": 2367,
+    "y_min": 1069,
+    "y_max": 1616,
+}
 
 _FRAME_W, _FRAME_H = 4014, 3016
 
@@ -101,19 +106,19 @@ def test_region_contains_every_calibrated_laser_ray(calibration):
     assert not outside, f"laser ray leaves the region at {outside[:3]}"
 
 
-@pytest.mark.parametrize("locus", PROD_DIVE_LASER_LOCI)
-def test_region_contains_every_observed_dive_locus(locus):
+@pytest.mark.parametrize("locus", PROD_MISSION_LASER_LOCI)
+def test_region_contains_every_observed_mission_locus(locus):
     """All four corners, not just the diagonal: the region is not axis-aligned."""
-    dive_id, x1, y1, x2, y2 = locus
+    mission_id, x1, y1, x2, y2 = locus
     corners = [(x1, y1), (x1, y2), (x2, y1), (x2, y2)]
     assert all(
         point_in_laser_region(x, y) for x, y in corners
-    ), f"dive {dive_id} lasers span x {x1}..{x2} y {y1}..{y2}, outside the region"
+    ), f"dive {mission_id} lasers span x {x1}..{x2} y {y1}..{y2}, outside the region"
 
 
-def test_region_clears_every_per_dive_median_with_margin():
+def test_region_clears_every_per_mission_median_with_margin():
     x1, y1, x2, y2 = DEFAULT_LASER_BBOX
-    e = PROD_DIVE_MEDIAN_EXTREMES
+    e = PROD_MISSION_MEDIAN_EXTREMES
     margins = {
         "left": e["x_min"] - x1,
         "right": x2 - e["x_max"],

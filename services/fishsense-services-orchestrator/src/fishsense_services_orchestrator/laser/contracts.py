@@ -11,16 +11,17 @@ what the operator's report names it by.
 from __future__ import annotations
 
 import uuid
-from typing import List, Optional
+from typing import List, Optional, Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
-from fishsense_services_contracts.laser import DivePlan, PlanLaserRemediationInput
+from fishsense_services_contracts.laser import MissionPlan, PlanLaserRemediationInput
+from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = [
     "ClearReprocessFlags",
-    "DiveRemediation",
-    "DiveRemediationRequest",
+    "MissionRemediation",
+    "MissionRemediationRequest",
     "LaserTarget",
     "RemediationInputs",
     "RemediationTarget",
@@ -32,8 +33,10 @@ class LaserTarget(BaseModel):
     """A dive of a tenant. Serialises like `object_store.StagingTarget`, so it
     is what the staging and cleanup steps take too."""
 
+    model_config = ConfigDict(validate_by_name=True)
+
     tenant_id: uuid.UUID
-    dive_id: uuid.UUID
+    mission_id: Annotated[uuid.UUID, renamed_from("dive_id", "mission_id")]
 
 
 class ClearReprocessFlags(BaseModel):
@@ -46,18 +49,23 @@ class ClearReprocessFlags(BaseModel):
 
 
 class RemediationTarget(BaseModel):
+    model_config = ConfigDict(validate_by_name=True)
     tenant_id: uuid.UUID
-    dive_id: uuid.UUID
+    mission_id: Annotated[uuid.UUID, renamed_from("dive_id", "mission_id")]
     #: v1's dive id for a migrated dive: the report's name for it.
     number: int
 
 
-class DiveRemediationRequest(BaseModel):
+class MissionRemediationRequest(BaseModel):
     """Plan one dive -- and, with `revive_ids`, apply a reviewed plan to it."""
+
+    model_config = ConfigDict(validate_by_name=True)
 
     target: RemediationTarget
     excluded_label_ids: List[int] = Field(default_factory=list)
-    dive_excluded: bool = False
+    mission_excluded: Annotated[
+        bool, renamed_from("dive_excluded", "mission_excluded")
+    ] = False
     revive_ids: List[int] = Field(default_factory=list)
 
 
@@ -78,6 +86,6 @@ class ReviveLabels(BaseModel):
     fingerprint: str
 
 
-class DiveRemediation(BaseModel):
-    plan: DivePlan
+class MissionRemediation(BaseModel):
+    plan: MissionPlan
     written: Optional[int] = None

@@ -27,7 +27,7 @@ with workflow.unsafe.imports_passed_through():
 
     from fishsense_services_orchestrator.ops.regroup.contracts import RegroupReport
 
-__all__ = ["RegroupDiveWorkflow"]
+__all__ = ["RegroupMissionWorkflow"]
 
 _REGROUP_RETRY = RetryPolicy(
     initial_interval=timedelta(seconds=10),
@@ -44,8 +44,8 @@ _REGROUP_RETRY = RetryPolicy(
 )
 
 
-@workflow.defn
-class RegroupDiveWorkflow:
+@workflow.defn(name="RegroupDiveWorkflow")
+class RegroupMissionWorkflow:
     # pylint: disable=too-few-public-methods
     """Report (and, with ``apply`` and the reviewed digest, write) one dive's
     label-studio clusters, regrouped in capture order."""
@@ -53,13 +53,13 @@ class RegroupDiveWorkflow:
     @workflow.run
     async def run(
         self,
-        dive_number: int,
+        mission_number: int,
         apply: bool = False,
         expected_plan_sha256: str | None = None,
     ) -> RegroupReport:
         return await workflow.execute_activity(
             "regroup_dive",
-            args=(dive_number, apply, expected_plan_sha256),
+            args=(mission_number, apply, expected_plan_sha256),
             result_type=RegroupReport,
             schedule_to_close_timeout=timedelta(minutes=10),
             retry_policy=_REGROUP_RETRY,

@@ -3,7 +3,7 @@ pre-annotation, or -- for a frame the gate cleared -- a finished annotation.
 
 Ported from fishsense-lite@77e8f8e5 services/fishsense-api-workflow-worker/
 src/fishsense_api_workflow_worker/activities/
-populate_laser_label_studio_project_activity.py (`dive_laser_label`,
+populate_laser_label_studio_project_activity.py (`mission_laser_label`,
 `_keypoint_result`, `_prediction_annotations`, `_auto_accepted_annotations`,
 `_build_task`) and create_laser_label_studio_project_activity.py (the title
 suffix and the labeling config). The single definition of dot, colour and
@@ -31,7 +31,7 @@ __all__ = [
     "Dot",
     "auto_accepted_annotations",
     "build_laser_task",
-    "dive_laser_label",
+    "mission_laser_label",
     "prediction_annotations",
 ]
 
@@ -70,7 +70,7 @@ class Dot:
     height: int | None
 
 
-def dive_laser_label(colors: Iterable[str | None]) -> str:
+def mission_laser_label(colors: Iterable[str | None]) -> str:
     """The keypoint label for every task of the dive: the majority of the
     per-frame colours, computed over all the dive's predictions so a top-up
     run agrees with the first."""

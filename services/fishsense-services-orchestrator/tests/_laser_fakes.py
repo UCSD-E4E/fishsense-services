@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from fishsense_services_api.laser_store import (
-    DiveCamera,
+    MissionCamera,
     ForeignRows,
     GateInputs,
     LabelPopulation,
@@ -41,8 +41,8 @@ def capture(number, *, checksum=None, from_v1=False):
     )
 
 
-def candidate(dive_id, *, age_days=0, number=1):
-    return LaserCandidate(dive_id, T0 - timedelta(days=age_days), number)
+def candidate(mission_id, *, age_days=0, number=1):
+    return LaserCandidate(mission_id, T0 - timedelta(days=age_days), number)
 
 
 @dataclass
@@ -50,10 +50,10 @@ class FakeCatalog:
     """Answers what a test sets; records what the activities write."""
 
     tenants: list = field(default_factory=list)
-    next_dive: dict = field(default_factory=dict)  # (selector, tenant) -> candidate
-    dive_lists: dict = field(default_factory=dict)  # (selector, tenant) -> [cand]
+    next_mission: dict = field(default_factory=dict)  # (selector, tenant) -> candidate
+    mission_lists: dict = field(default_factory=dict)  # (selector, tenant) -> [cand]
     captures: list = field(default_factory=list)
-    camera: DiveCamera | None = None
+    camera: MissionCamera | None = None
     gate: GateInputs | None = None
     population: LaserPopulation | None = None
     targets: dict = field(default_factory=dict)  # auto_accepted_only -> targets
@@ -68,34 +68,34 @@ class FakeCatalog:
         return list(self.tenants)
 
     def _next(self, selector, tenant):
-        return self.next_dive.get((selector, tenant))
+        return self.next_mission.get((selector, tenant))
 
-    async def next_dive_for_laser_preprocessing(self, tenant):
+    async def next_mission_for_laser_preprocessing(self, tenant):
         return self._next("preprocess", tenant)
 
-    async def next_dive_for_laser_prediction(self, tenant):
+    async def next_mission_for_laser_prediction(self, tenant):
         return self._next("predict", tenant)
 
-    async def next_dive_for_laser_auto_accept(self, tenant):
+    async def next_mission_for_laser_auto_accept(self, tenant):
         return self._next("gate", tenant)
 
-    async def dives_needing_laser_population(self, tenant):
-        return self.dive_lists.get(("populate", tenant), [])
+    async def missions_needing_laser_population(self, tenant):
+        return self.mission_lists.get(("populate", tenant), [])
 
-    async def dives_with_complete_laser_labeling(self, tenant):
-        return self.dive_lists.get(("complete", tenant), [])
+    async def missions_with_complete_laser_labeling(self, tenant):
+        return self.mission_lists.get(("complete", tenant), [])
 
-    async def laser_preprocess_captures(self, tenant, dive):
+    async def laser_preprocess_captures(self, tenant, mission):
         return list(self.captures)
 
-    async def laser_predict_captures(self, tenant, dive):
+    async def laser_predict_captures(self, tenant, mission):
         return list(self.captures)
 
-    async def dive_camera(self, tenant, dive):
+    async def mission_camera(self, tenant, mission):
         return self.camera
 
-    async def clear_laser_reprocess_flags(self, tenant, dive, capture_ids):
-        self.calls.append(("clear", tenant, dive, capture_ids))
+    async def clear_laser_reprocess_flags(self, tenant, mission, capture_ids):
+        self.calls.append(("clear", tenant, mission, capture_ids))
         return 0 if capture_ids == [] else 3
 
     def _write(self, *call):
@@ -103,53 +103,53 @@ class FakeCatalog:
             raise self.raise_on_write
         self.calls.append(call)
 
-    async def persist_laser_predictions(self, tenant, dive, predictions):
-        self._write("persist", tenant, dive, list(predictions))
+    async def persist_laser_predictions(self, tenant, mission, predictions):
+        self._write("persist", tenant, mission, list(predictions))
         return len(predictions)
 
-    async def laser_gate_inputs(self, tenant, dive):
+    async def laser_gate_inputs(self, tenant, mission):
         return self.gate
 
-    async def record_laser_gate_verdicts(self, tenant, dive, verdicts):
-        self._write("verdicts", tenant, dive, list(verdicts))
+    async def record_laser_gate_verdicts(self, tenant, mission, verdicts):
+        self._write("verdicts", tenant, mission, list(verdicts))
         return len(verdicts)
 
-    async def laser_populate_items(self, tenant, dive):
+    async def laser_populate_items(self, tenant, mission):
         return self.population
 
-    async def dive_has_laser_labels_in_project(self, tenant, dive, project):
+    async def mission_has_laser_labels_in_project(self, tenant, mission, project):
         return self.has_labels_in_project
 
     async def record_populated_laser_labels(self, tenant, labels):
         self.calls.append(("record", tenant, list(labels)))
         return len(labels)
 
-    async def laser_task_targets(self, tenant, dive, *, auto_accepted_only=False):
+    async def laser_task_targets(self, tenant, mission, *, auto_accepted_only=False):
         return self.targets.get(auto_accepted_only, TaskTargets(1, [], []))
 
     async def mark_laser_labels_auto_accepted(self, tenant, tasks):
         self.calls.append(("mark", tenant, list(tasks)))
         return len(tasks)
 
-    async def laser_label_population(self, tenant, dive):
+    async def laser_label_population(self, tenant, mission):
         return self.labels
 
-    async def apply_laser_validation(self, tenant, dive, supersedes, line):
-        self._write("validation", tenant, dive, list(supersedes), line)
+    async def apply_laser_validation(self, tenant, mission, supersedes, line):
+        self._write("validation", tenant, mission, list(supersedes), line)
         return ValidationWrite(
             superseded=len(supersedes), line_appended=line is not None
         )
 
-    async def revive_laser_labels(self, tenant, dive, numbers, fingerprint):
+    async def revive_laser_labels(self, tenant, mission, numbers, fingerprint):
         if self.revive_raises is not None:
             raise self.revive_raises
-        self.calls.append(("revive", tenant, dive, list(numbers), fingerprint))
+        self.calls.append(("revive", tenant, mission, list(numbers), fingerprint))
         return len(numbers)
 
-    async def dive_by_number(self, tenant, number):
+    async def mission_by_number(self, tenant, number):
         return self.numbers.get((tenant, number))
 
-    async def dive_numbers(self, tenant):
+    async def mission_numbers(self, tenant):
         return sorted(n for t, n in self.numbers if t == tenant)
 
 
@@ -233,10 +233,10 @@ class FakeLabelProjects:
         self.project_id = project_id
         self.calls: list = []
 
-    async def ensure_dive_project(
-        self, tenant, dive, kind, *, suffix, labeling_config_xml
+    async def ensure_mission_project(
+        self, tenant, mission, kind, *, suffix, labeling_config_xml
     ):
-        self.calls.append((tenant, dive, kind, suffix, labeling_config_xml))
+        self.calls.append((tenant, mission, kind, suffix, labeling_config_xml))
         return self.project_id
 
 

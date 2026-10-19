@@ -27,7 +27,7 @@ v2 changes, each pinned here:
   cluster at a time, so a failure left a partial set that blocked every re-run),
   leaving out the dive's duplicate frames and refusing another dive's;
 * **a refusal expires by comparison, not by clearing**: the sync stamps
-  `dives.calibration_links_changed_at` when it writes a link, and a refused
+  `missions.calibration_links_changed_at` when it writes a link, and a refused
   calibration row older than that stamp no longer stands (migration
   0022). v1 nulled three refusal columns on `dive`.
 """
@@ -41,21 +41,21 @@ from sqlalchemy import text
 from fishsense_services_api.clustering_store import ForeignCapture, InvalidClusters
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.ingest_store import (
-    create_dive,
-    finalize_dive,
+    create_mission,
+    finalize_mission,
     register_capture,
 )
 from fishsense_services_api.species_store import (
     SpeciesCatalog,
     calibration_targets_by_name,
-    dives_needing_species_population,
-    next_dive_for_species_preprocessing,
+    missions_needing_species_population,
+    next_mission_for_species_preprocessing,
     note_unidentified_slate,
     persist_label_studio_clusters,
     record_species_label,
     refusal_outlived_by_link_change,
-    set_dive_calibration_target,
-    set_dive_slate_template,
+    set_mission_calibration_target,
+    set_mission_slate_template,
     set_species_needs_reprocess,
     slate_templates_by_name,
     species_grouping_facts,
@@ -122,18 +122,18 @@ async def _dive(app_engine, tenant, path, *, priority="high", device=_PINHOLE):
             _PINHOLE_DEVICES[tenant] = await _pinhole_device(tenant)
         device = _PINHOLE_DEVICES[tenant]
     async with tenant_transaction(app_engine, tenant) as conn:
-        dive = await create_dive(
-            conn, tenant, source_path=path, name=path, dived_at=T0, device_id=device
+        mission = await create_mission(
+            conn, tenant, source_path=path, name=path, started_at=T0, device_id=device
         )
-        await finalize_dive(conn, tenant, dive, priority=priority, dived_at=T0)
-    return dive
+        await finalize_mission(conn, tenant, mission, priority=priority, started_at=T0)
+    return mission
 
 
-async def _capture(app_engine, tenant, dive, name, *, checksum=None, at=T0):
+async def _capture(app_engine, tenant, mission, name, *, checksum=None, at=T0):
     async with tenant_transaction(app_engine, tenant) as conn:
         registered = await register_capture(
-            conn, tenant, dive_id=dive, device_id=None,
-            source_path=f"{dive}/{name}", captured_at=at,
+            conn, tenant, mission_id=mission, device_id=None,
+            source_path=f"{mission}/{name}", captured_at=at,
             checksum=checksum or uuid.uuid4().hex,
         )  # fmt: skip
     return registered.capture_id
@@ -175,23 +175,23 @@ async def _species(owner_engine, tenant, capture, *, project=70, task=None,
         ).scalar_one()
 
 
-async def _cluster(owner_engine, tenant, dive, formed_by, captures=(), *, id=None):
+async def _cluster(owner_engine, tenant, mission, formed_by, captures=(), *, id=None):
     # pylint: disable=redefined-builtin
     async with owner_engine.begin() as conn:
         cluster = (
             await conn.execute(
                 text(
-                    "INSERT INTO dive_frame_clusters (id, tenant_id, dive_id, "
+                    "INSERT INTO mission_frame_clusters (id, tenant_id, mission_id, "
                     "formed_by) VALUES (coalesce(:i, gen_random_uuid()), :t, :d, :f) "
                     "RETURNING id"
                 ),
-                {"i": id, "t": tenant, "d": dive, "f": formed_by},
+                {"i": id, "t": tenant, "d": mission, "f": formed_by},
             )
         ).scalar_one()
         for capture in captures:
             await conn.execute(
                 text(
-                    "INSERT INTO dive_frame_cluster_captures "
+                    "INSERT INTO mission_frame_cluster_captures "
                     "(tenant_id, cluster_id, capture_id) VALUES (:t, :k, :c)"
                 ),
                 {"t": tenant, "k": cluster, "c": capture},
@@ -210,13 +210,16 @@ async def _row(owner_engine, table, row_id):
 
 async def _next(app_engine, tenant):
     async with tenant_transaction(app_engine, tenant) as conn:
-        candidate = await next_dive_for_species_preprocessing(conn, tenant)
-    return None if candidate is None else candidate.dive_id
+        candidate = await next_mission_for_species_preprocessing(conn, tenant)
+    return None if candidate is None else candidate.mission_id
 
 
 async def _population(app_engine, tenant):
     async with tenant_transaction(app_engine, tenant) as conn:
-        return [c.dive_id for c in await dives_needing_species_population(conn, tenant)]
+        return [
+            c.mission_id
+            for c in await missions_needing_species_population(conn, tenant)
+        ]
 
 
 # -- stage 2: species-preprocessing (v1's tests) ----------------------------------
@@ -241,15 +244,15 @@ async def test_species_preprocessing_requires_prediction_cluster_and_valid_laser
     assert await _next(app_engine, lab) == d3
 
 
-async def test_species_preprocessing_excludes_dive_with_only_incomplete_species_labels(
+async def test_species_preprocessing_excludes_mission_with_only_incomplete_species_labels(
     owner_engine, app_engine
 ):
     """Once populate seeds an incomplete species label (with a real project)
     for every laser-valid image, the dive drops out of the cohort."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    captures = [await _capture(app_engine, lab, dive, n) for n in ("a", "b")]
-    await _cluster(owner_engine, lab, dive, "prediction", captures)
+    mission = await _dive(app_engine, lab, "d1")
+    captures = [await _capture(app_engine, lab, mission, n) for n in ("a", "b")]
+    await _cluster(owner_engine, lab, mission, "prediction", captures)
     for capture in captures:
         await _laser(owner_engine, lab, capture)
         await _species(owner_engine, lab, capture, project=70)
@@ -257,13 +260,13 @@ async def test_species_preprocessing_excludes_dive_with_only_incomplete_species_
     assert await _next(app_engine, lab) is None
 
 
-async def test_species_preprocessing_excludes_dive_when_sentinel_coexists_with_real_label(
+async def test_species_preprocessing_excludes_mission_when_sentinel_coexists_with_real_label(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    capture = await _capture(app_engine, lab, dive, "a")
-    await _cluster(owner_engine, lab, dive, "prediction", [capture])
+    mission = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, mission, "a")
+    await _cluster(owner_engine, lab, mission, "prediction", [capture])
     await _laser(owner_engine, lab, capture)
     await _species(owner_engine, lab, capture, project=None)
     await _species(owner_engine, lab, capture, project=70)
@@ -276,13 +279,13 @@ async def test_species_preprocessing_ignores_null_project_species_sentinels(
 ):
     """Sentinel rows (no project) must NOT drop a dive from the cohort."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    capture = await _capture(app_engine, lab, dive, "a")
-    await _cluster(owner_engine, lab, dive, "prediction", [capture])
+    mission = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, mission, "a")
+    await _cluster(owner_engine, lab, mission, "prediction", [capture])
     await _laser(owner_engine, lab, capture)
     await _species(owner_engine, lab, capture, project=None)
 
-    assert await _next(app_engine, lab) == dive
+    assert await _next(app_engine, lab) == mission
 
 
 async def test_a_completed_sentinel_takes_its_frame_out_of_both_cohorts(
@@ -293,9 +296,9 @@ async def test_a_completed_sentinel_takes_its_frame_out_of_both_cohorts(
     counted that frame as work re-staged its dive every hour, forever, ahead
     of every younger dive. A completed sentinel is done work."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    capture = await _capture(app_engine, lab, dive, "a")
-    await _cluster(owner_engine, lab, dive, "prediction", [capture])
+    mission = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, mission, "a")
+    await _cluster(owner_engine, lab, mission, "prediction", [capture])
     await _laser(owner_engine, lab, capture)
     await _species(owner_engine, lab, capture, project=None, completed=True)
 
@@ -309,15 +312,15 @@ async def test_a_superseded_completed_sentinel_is_not_done_work(
     """Populate reads live rows only, so a superseded one -- completed or
     not -- leaves its frame in both cohorts."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    capture = await _capture(app_engine, lab, dive, "a")
-    await _cluster(owner_engine, lab, dive, "prediction", [capture])
+    mission = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, mission, "a")
+    await _cluster(owner_engine, lab, mission, "prediction", [capture])
     await _laser(owner_engine, lab, capture)
     await _species(owner_engine, lab, capture, project=None, completed=True,
                    superseded=True)  # fmt: skip
 
-    assert await _next(app_engine, lab) == dive
-    assert await _population(app_engine, lab) == [dive]
+    assert await _next(app_engine, lab) == mission
+    assert await _population(app_engine, lab) == [mission]
 
 
 async def test_species_preprocessing_excludes_incomplete_or_superseded_or_null_xy_lasers(
@@ -331,9 +334,9 @@ async def test_species_preprocessing_excludes_incomplete_or_superseded_or_null_x
         {"y": None},
     ]
     for i, shape in enumerate(shapes):
-        dive = await _dive(app_engine, lab, f"d{i}")
-        capture = await _capture(app_engine, lab, dive, "a")
-        await _cluster(owner_engine, lab, dive, "prediction", [capture])
+        mission = await _dive(app_engine, lab, f"d{i}")
+        capture = await _capture(app_engine, lab, mission, "a")
+        await _cluster(owner_engine, lab, mission, "prediction", [capture])
         await _laser(owner_engine, lab, capture, **shape)
 
     assert await _next(app_engine, lab) is None
@@ -343,35 +346,35 @@ async def test_species_preprocessing_returns_none_when_only_label_studio_cluster
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    capture = await _capture(app_engine, lab, dive, "a")
-    await _cluster(owner_engine, lab, dive, "label_studio", [capture])
+    mission = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, mission, "a")
+    await _cluster(owner_engine, lab, mission, "label_studio", [capture])
     await _laser(owner_engine, lab, capture)
 
     assert await _next(app_engine, lab) is None
 
 
-async def test_species_preprocessing_reenters_dive_with_only_superseded_species(
+async def test_species_preprocessing_reenters_mission_with_only_superseded_species(
     owner_engine, app_engine
 ):
     """A superseded real-project species row must NOT gate the image out."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    capture = await _capture(app_engine, lab, dive, "a")
-    await _cluster(owner_engine, lab, dive, "prediction", [capture])
+    mission = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, mission, "a")
+    await _cluster(owner_engine, lab, mission, "prediction", [capture])
     await _laser(owner_engine, lab, capture)
     await _species(owner_engine, lab, capture, project=117, superseded=True)
 
-    assert await _next(app_engine, lab) == dive
+    assert await _next(app_engine, lab) == mission
 
 
 async def test_species_preprocessing_still_excludes_live_real_species_row(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    capture = await _capture(app_engine, lab, dive, "a")
-    await _cluster(owner_engine, lab, dive, "prediction", [capture])
+    mission = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, mission, "a")
+    await _cluster(owner_engine, lab, mission, "prediction", [capture])
     await _laser(owner_engine, lab, capture)
     await _species(owner_engine, lab, capture, project=70)
 
@@ -384,10 +387,10 @@ async def test_species_preprocessing_skips_qualifying_image_not_in_a_cluster(
     """The 2026-07-22 poison pill: a qualifying image that is NOT clustered
     must not select the dive (the resolver needs its cluster for i of N)."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    clustered = await _capture(app_engine, lab, dive, "a")
-    loose = await _capture(app_engine, lab, dive, "b")
-    await _cluster(owner_engine, lab, dive, "prediction", [clustered])
+    mission = await _dive(app_engine, lab, "d1")
+    clustered = await _capture(app_engine, lab, mission, "a")
+    loose = await _capture(app_engine, lab, mission, "b")
+    await _cluster(owner_engine, lab, mission, "prediction", [clustered])
     await _laser(owner_engine, lab, clustered)
     await _laser(owner_engine, lab, loose)
     await _species(owner_engine, lab, clustered, project=70)
@@ -395,23 +398,23 @@ async def test_species_preprocessing_skips_qualifying_image_not_in_a_cluster(
     assert await _next(app_engine, lab) is None
 
 
-async def test_species_preprocessing_picks_dive_with_a_clustered_qualifying_image(
+async def test_species_preprocessing_picks_mission_with_a_clustered_qualifying_image(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    capture = await _capture(app_engine, lab, dive, "a")
-    await _cluster(owner_engine, lab, dive, "prediction", [capture])
+    mission = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, mission, "a")
+    await _cluster(owner_engine, lab, mission, "prediction", [capture])
     await _laser(owner_engine, lab, capture)
 
-    assert await _next(app_engine, lab) == dive
+    assert await _next(app_engine, lab) == mission
 
 
 async def test_species_preprocessing_needs_high_priority(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1", priority="low")
-    capture = await _capture(app_engine, lab, dive, "a")
-    await _cluster(owner_engine, lab, dive, "prediction", [capture])
+    mission = await _dive(app_engine, lab, "d1", priority="low")
+    capture = await _capture(app_engine, lab, mission, "a")
+    await _cluster(owner_engine, lab, mission, "prediction", [capture])
     await _laser(owner_engine, lab, capture)
 
     assert await _next(app_engine, lab) is None
@@ -434,23 +437,23 @@ async def test_species_preprocessing_is_canonical_only(owner_engine, app_engine)
 # the reprocess flag: the cohort's second way in (test_cohort_needs_reprocess_all_kinds)
 
 
-async def test_a_flagged_species_label_selects_its_dive(owner_engine, app_engine):
+async def test_a_flagged_species_label_selects_its_mission(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    capture = await _capture(app_engine, lab, dive, "a")
+    mission = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, mission, "a")
     await _laser(owner_engine, lab, capture)
     await _species(owner_engine, lab, capture, project=70, completed=True,
                    needs_reprocess=True)  # fmt: skip
 
-    assert await _next(app_engine, lab) == dive
+    assert await _next(app_engine, lab) == mission
 
 
 async def test_a_flag_on_a_superseded_row_does_not_select(owner_engine, app_engine):
     """The resolver never sees a superseded row, so selecting on one picks a
     dive it finds no work for, every hour, forever."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    capture = await _capture(app_engine, lab, dive, "a")
+    mission = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, mission, "a")
     await _species(owner_engine, lab, capture, project=70, superseded=True,
                    needs_reprocess=True)  # fmt: skip
 
@@ -471,15 +474,15 @@ async def test_a_flag_on_a_duplicate_frame_does_not_select(owner_engine, app_eng
 async def test_the_oldest_candidate_is_first(owner_engine, app_engine):
     """v2: first in, first out by `created_at` (v1: lowest id)."""
     lab = await _tenant(owner_engine)
-    dives = []
+    missions = []
     for name in ("first", "second"):
-        dive = await _dive(app_engine, lab, name)
-        capture = await _capture(app_engine, lab, dive, "a")
-        await _cluster(owner_engine, lab, dive, "prediction", [capture])
+        mission = await _dive(app_engine, lab, name)
+        capture = await _capture(app_engine, lab, mission, "a")
+        await _cluster(owner_engine, lab, mission, "prediction", [capture])
         await _laser(owner_engine, lab, capture)
-        dives.append(dive)
+        missions.append(mission)
 
-    assert await _next(app_engine, lab) == dives[0]
+    assert await _next(app_engine, lab) == missions[0]
 
 
 # -- species population (v1's tests) ------------------------------------------------
@@ -498,28 +501,28 @@ async def test_needing_species_population_picks_laser_valid_without_live_species
     assert await _population(app_engine, lab) == [high]
 
 
-async def test_needing_species_population_reincludes_superseded_only_dive(
+async def test_needing_species_population_reincludes_superseded_only_mission(
     owner_engine, app_engine
 ):
     """The migration case: both cohorts must re-include a dive whose only
     species rows are superseded, or they deadlock."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    capture = await _capture(app_engine, lab, dive, "a")
-    await _cluster(owner_engine, lab, dive, "prediction", [capture])
+    mission = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, mission, "a")
+    await _cluster(owner_engine, lab, mission, "prediction", [capture])
     await _laser(owner_engine, lab, capture)
     await _species(owner_engine, lab, capture, project=117, superseded=True)
 
-    assert await _population(app_engine, lab) == [dive]
-    assert await _next(app_engine, lab) == dive
+    assert await _population(app_engine, lab) == [mission]
+    assert await _next(app_engine, lab) == mission
 
 
-async def test_needing_species_population_excludes_dive_with_live_species(
+async def test_needing_species_population_excludes_mission_with_live_species(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    capture = await _capture(app_engine, lab, dive, "a")
+    mission = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, mission, "a")
     await _laser(owner_engine, lab, capture)
     await _species(owner_engine, lab, capture, project=226)
 
@@ -530,25 +533,25 @@ async def test_needing_species_population_excludes_invalid_laser(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
+    mission = await _dive(app_engine, lab, "d1")
     for name, shape in (("a", {"completed": False}), ("b", {"superseded": True}),
                         ("c", {"x": None})):  # fmt: skip
         await _laser(
-            owner_engine, lab, await _capture(app_engine, lab, dive, name), **shape
+            owner_engine, lab, await _capture(app_engine, lab, mission, name), **shape
         )
 
     assert await _population(app_engine, lab) == []
 
 
-async def test_needing_species_population_lists_every_dive_oldest_first(
+async def test_needing_species_population_lists_every_mission_oldest_first(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dives = [await _dive(app_engine, lab, f"d{i}") for i in range(3)]
-    for dive in dives:
-        await _laser(owner_engine, lab, await _capture(app_engine, lab, dive, "a"))
+    missions = [await _dive(app_engine, lab, f"d{i}") for i in range(3)]
+    for mission in missions:
+        await _laser(owner_engine, lab, await _capture(app_engine, lab, mission, "a"))
 
-    assert await _population(app_engine, lab) == dives
+    assert await _population(app_engine, lab) == missions
 
 
 # -- what the resolver reads -----------------------------------------------------------
@@ -588,10 +591,10 @@ async def test_preprocess_facts_carry_the_devices_current_intrinsics(
     append-only, so the current (latest) calibration is the one."""
     lab = await _tenant(owner_engine)
     device = await _device_with_intrinsics(owner_engine, lab, K1, K2)
-    dive = await _dive(app_engine, lab, "d1", device=device)
+    mission = await _dive(app_engine, lab, "d1", device=device)
 
     async with tenant_transaction(app_engine, lab) as conn:
-        facts = await species_preprocess_facts(conn, lab, dive)
+        facts = await species_preprocess_facts(conn, lab, mission)
 
     assert facts.device_id == device
     assert facts.intrinsics.camera_matrix[0][0] == 2000
@@ -618,16 +621,16 @@ async def test_an_axial_camera_gives_no_intrinsics(owner_engine, app_engine):
     port) calibration is not intrinsics it may use (`camera_sql`)."""
     lab = await _tenant(owner_engine)
     device = await _pinhole_device(lab, model="axial_refractive")
-    dive = await _dive(app_engine, lab, "d1", device=device)
+    mission = await _dive(app_engine, lab, "d1", device=device)
 
     async with tenant_transaction(app_engine, lab) as conn:
-        facts = await species_preprocess_facts(conn, lab, dive)
+        facts = await species_preprocess_facts(conn, lab, mission)
 
     assert facts.device_id == device and facts.intrinsics is None
 
 
 @pytest.mark.parametrize("setup", ["no-device", "no-calibration", "axial"])
-async def test_a_dive_stage_2_cannot_rectify_is_not_a_candidate(
+async def test_a_mission_stage_2_cannot_rectify_is_not_a_candidate(
     owner_engine, app_engine, setup
 ):
     """v2: the resolver fails a dive without pinhole intrinsics, and the
@@ -639,10 +642,10 @@ async def test_a_dive_stage_2_cannot_rectify_is_not_a_candidate(
         "no-calibration": await _device_with_intrinsics(owner_engine, lab),
         "axial": await _pinhole_device(lab, model="axial_refractive"),
     }[setup]
-    dive = await _dive(app_engine, lab, "d1", device=device)
-    capture = await _capture(app_engine, lab, dive, "a.ORF")
+    mission = await _dive(app_engine, lab, "d1", device=device)
+    capture = await _capture(app_engine, lab, mission, "a.ORF")
     await _laser(owner_engine, lab, capture)
-    await _cluster(owner_engine, lab, dive, "prediction", [capture])
+    await _cluster(owner_engine, lab, mission, "prediction", [capture])
 
     assert await _next(app_engine, lab) is None
 
@@ -654,20 +657,22 @@ async def test_preprocess_facts_order_clusters_and_members_by_capture_time(
     read the order, so v2 states it: clusters by their earliest member,
     members by `captured_at` then `number`."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
+    mission = await _dive(app_engine, lab, "d1")
     at = [T0 + timedelta(seconds=s) for s in range(6)]
-    c = [await _capture(app_engine, lab, dive, f"{i}", at=at[i]) for i in range(6)]
+    c = [await _capture(app_engine, lab, mission, f"{i}", at=at[i]) for i in range(6)]
     # Inserted late-first, members scrambled, and cluster ids neither in nor
     # against time order, so no incidental order can pass for the stated one.
-    await _cluster(owner_engine, lab, dive, "prediction", [c[5]], id=uuid.UUID(int=1))
-    await _cluster(owner_engine, lab, dive, "prediction", [c[4], c[3]],
+    await _cluster(
+        owner_engine, lab, mission, "prediction", [c[5]], id=uuid.UUID(int=1)
+    )
+    await _cluster(owner_engine, lab, mission, "prediction", [c[4], c[3]],
                    id=uuid.UUID(int=0))  # fmt: skip
-    await _cluster(owner_engine, lab, dive, "prediction", [c[2], c[0], c[1]],
+    await _cluster(owner_engine, lab, mission, "prediction", [c[2], c[0], c[1]],
                    id=uuid.UUID(int=2))  # fmt: skip
-    await _cluster(owner_engine, lab, dive, "label_studio", [c[0]])
+    await _cluster(owner_engine, lab, mission, "label_studio", [c[0]])
 
     async with tenant_transaction(app_engine, lab) as conn:
-        facts = await species_preprocess_facts(conn, lab, dive)
+        facts = await species_preprocess_facts(conn, lab, mission)
 
     assert facts.prediction_clusters == [[c[0], c[1], c[2]], [c[3], c[4]], [c[5]]]
     assert [x.capture_id for x in facts.captures] == c
@@ -679,17 +684,17 @@ async def test_preprocess_facts_read_canonical_captures_lasers_and_live_species(
     lab = await _tenant(owner_engine)
     other = await _dive(app_engine, lab, "other", priority="low")
     await _capture(app_engine, lab, other, "dup", checksum="c" * 32)
-    dive = await _dive(app_engine, lab, "d1")
-    valid = await _capture(app_engine, lab, dive, "a", checksum="a" * 32)
-    invalid = await _capture(app_engine, lab, dive, "b")
-    duplicate = await _capture(app_engine, lab, dive, "dup", checksum="c" * 32)
+    mission = await _dive(app_engine, lab, "d1")
+    valid = await _capture(app_engine, lab, mission, "a", checksum="a" * 32)
+    invalid = await _capture(app_engine, lab, mission, "b")
+    duplicate = await _capture(app_engine, lab, mission, "dup", checksum="c" * 32)
     await _laser(owner_engine, lab, valid)
     await _laser(owner_engine, lab, invalid, completed=False)
     live = await _species(owner_engine, lab, valid, project=70, needs_reprocess=True)
     await _species(owner_engine, lab, invalid, project=71, superseded=True)
 
     async with tenant_transaction(app_engine, lab) as conn:
-        facts = await species_preprocess_facts(conn, lab, dive)
+        facts = await species_preprocess_facts(conn, lab, mission)
 
     assert {x.capture_id for x in facts.captures} == {valid, invalid}
     assert duplicate not in {x.capture_id for x in facts.captures}
@@ -710,14 +715,14 @@ async def test_raising_flags_only_incomplete_live_canonical_labels(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    a, b, c = [await _capture(app_engine, lab, dive, n) for n in "abc"]
+    mission = await _dive(app_engine, lab, "d1")
+    a, b, c = [await _capture(app_engine, lab, mission, n) for n in "abc"]
     open_ = await _species(owner_engine, lab, a, project=70)
     done = await _species(owner_engine, lab, b, project=70, completed=True)
     gone = await _species(owner_engine, lab, c, project=70, superseded=True)
 
     async with tenant_transaction(app_engine, lab) as conn:
-        raised = await set_species_needs_reprocess(conn, lab, dive, True)
+        raised = await set_species_needs_reprocess(conn, lab, mission, True)
 
     assert raised == 1
     assert await _flagged(owner_engine, open_)
@@ -727,7 +732,7 @@ async def test_raising_flags_only_incomplete_live_canonical_labels(
     async with tenant_transaction(app_engine, lab) as conn:
         assert (
             await set_species_needs_reprocess(
-                conn, lab, dive, True, only_incomplete=False
+                conn, lab, mission, True, only_incomplete=False
             )
             == 2
         )
@@ -740,13 +745,13 @@ async def test_clearing_lowers_every_canonical_flag_regardless_of_state(
     """Clearing is wider on purpose: a row completed or superseded after
     being flagged must still come down, or it holds its dive forever."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    a, b = [await _capture(app_engine, lab, dive, n) for n in "ab"]
+    mission = await _dive(app_engine, lab, "d1")
+    a, b = [await _capture(app_engine, lab, mission, n) for n in "ab"]
     done = await _species(owner_engine, lab, a, completed=True, needs_reprocess=True)
     gone = await _species(owner_engine, lab, b, superseded=True, needs_reprocess=True)
 
     async with tenant_transaction(app_engine, lab) as conn:
-        assert await set_species_needs_reprocess(conn, lab, dive, False) == 2
+        assert await set_species_needs_reprocess(conn, lab, mission, False) == 2
 
     assert not await _flagged(owner_engine, done)
     assert not await _flagged(owner_engine, gone)
@@ -756,14 +761,16 @@ async def test_scoped_clear_leaves_a_flag_raised_during_the_run(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    redrawn, raised_mid_run = [await _capture(app_engine, lab, dive, n) for n in "ab"]
+    mission = await _dive(app_engine, lab, "d1")
+    redrawn, raised_mid_run = [
+        await _capture(app_engine, lab, mission, n) for n in "ab"
+    ]
     first = await _species(owner_engine, lab, redrawn, needs_reprocess=True)
     second = await _species(owner_engine, lab, raised_mid_run, needs_reprocess=True)
 
     async with tenant_transaction(app_engine, lab) as conn:
         cleared = await set_species_needs_reprocess(
-            conn, lab, dive, False, capture_ids=[redrawn]
+            conn, lab, mission, False, capture_ids=[redrawn]
         )
 
     assert cleared == 1
@@ -773,15 +780,15 @@ async def test_scoped_clear_leaves_a_flag_raised_during_the_run(
 
 async def test_an_empty_scope_is_not_read_as_no_scope(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
+    mission = await _dive(app_engine, lab, "d1")
     label = await _species(
-        owner_engine, lab, await _capture(app_engine, lab, dive, "a"),
+        owner_engine, lab, await _capture(app_engine, lab, mission, "a"),
         needs_reprocess=True,
     )  # fmt: skip
 
     async with tenant_transaction(app_engine, lab) as conn:
         assert await set_species_needs_reprocess(
-            conn, lab, dive, False, capture_ids=[]
+            conn, lab, mission, False, capture_ids=[]
         ) == 0  # fmt: skip
 
     assert await _flagged(owner_engine, label)
@@ -791,12 +798,12 @@ async def test_the_flag_never_touches_a_duplicate_frame(owner_engine, app_engine
     lab = await _tenant(owner_engine)
     other = await _dive(app_engine, lab, "other", priority="low")
     await _capture(app_engine, lab, other, "a", checksum="d" * 32)
-    dive = await _dive(app_engine, lab, "d1")
-    copy = await _capture(app_engine, lab, dive, "a", checksum="d" * 32)
+    mission = await _dive(app_engine, lab, "d1")
+    copy = await _capture(app_engine, lab, mission, "a", checksum="d" * 32)
     label = await _species(owner_engine, lab, copy)
 
     async with tenant_transaction(app_engine, lab) as conn:
-        assert await set_species_needs_reprocess(conn, lab, dive, True) == 0
+        assert await set_species_needs_reprocess(conn, lab, mission, True) == 0
 
     assert not await _flagged(owner_engine, label)
 
@@ -810,11 +817,13 @@ async def test_population_facts_are_canonical_valid_laser_captures_in_capture_or
     lab = await _tenant(owner_engine)
     other = await _dive(app_engine, lab, "other", priority="low")
     await _capture(app_engine, lab, other, "dup", checksum="e" * 32)
-    dive = await _dive(app_engine, lab, "d1")
-    late = await _capture(app_engine, lab, dive, "late", at=T0 + timedelta(seconds=9))
-    early = await _capture(app_engine, lab, dive, "early", at=T0)
-    duplicate = await _capture(app_engine, lab, dive, "dup", checksum="e" * 32)
-    invalid = await _capture(app_engine, lab, dive, "invalid")
+    mission = await _dive(app_engine, lab, "d1")
+    late = await _capture(
+        app_engine, lab, mission, "late", at=T0 + timedelta(seconds=9)
+    )
+    early = await _capture(app_engine, lab, mission, "early", at=T0)
+    duplicate = await _capture(app_engine, lab, mission, "dup", checksum="e" * 32)
+    invalid = await _capture(app_engine, lab, mission, "invalid")
     for capture in (late, early, duplicate):
         await _laser(owner_engine, lab, capture)
     # A second valid label must not list the capture twice.
@@ -825,7 +834,7 @@ async def test_population_facts_are_canonical_valid_laser_captures_in_capture_or
     await _species(owner_engine, lab, late, project=99, superseded=True)
 
     async with tenant_transaction(app_engine, lab) as conn:
-        facts = await species_population_facts(conn, lab, dive)
+        facts = await species_population_facts(conn, lab, mission)
 
     assert [c.capture_id for c in facts.candidates] == [early, late]
     assert [(r.id, r.ls_project_id) for r in facts.species_labels] == [(sentinel, None)]
@@ -836,8 +845,8 @@ async def test_recording_a_label_seeds_a_human_row_for_the_task(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    capture = await _capture(app_engine, lab, dive, "a")
+    mission = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, mission, "a")
 
     async with tenant_transaction(app_engine, lab) as conn:
         await record_species_label(
@@ -865,8 +874,8 @@ async def test_recording_revives_the_projects_superseded_row_and_keeps_its_flag(
     names are written, so `needs_reprocess` survives (v1 lost 259 flags in an
     hour to a writer that wrote every column)."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    capture = await _capture(app_engine, lab, dive, "a")
+    mission = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, mission, "a")
     old = await _species(owner_engine, lab, capture, project=70, task=11,
                          superseded=True, needs_reprocess=True, grouping="x")  # fmt: skip
 
@@ -892,9 +901,9 @@ async def test_a_task_held_by_a_migrated_duplicate_is_skipped_not_raised(
     every hour. The duplicate's row is left as it is (it may carry a
     labeler's answer) and nothing is written for the twin."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    twin = await _capture(app_engine, lab, dive, "a", checksum="7" * 32)
-    duplicate = await _capture(app_engine, lab, dive, "a2", checksum="7" * 32)
+    mission = await _dive(app_engine, lab, "d1")
+    twin = await _capture(app_engine, lab, mission, "a", checksum="7" * 32)
+    duplicate = await _capture(app_engine, lab, mission, "a2", checksum="7" * 32)
     held = await _species(owner_engine, lab, duplicate, project=70, task=5001,
                           completed=True, grouping="x")  # fmt: skip
 
@@ -919,8 +928,8 @@ async def test_a_task_held_by_a_migrated_duplicate_is_skipped_not_raised(
 
 async def test_recording_says_it_recorded(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    capture = await _capture(app_engine, lab, dive, "a")
+    mission = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, mission, "a")
     await _species(owner_engine, lab, capture, project=70, task=11, superseded=True)
 
     async with tenant_transaction(app_engine, lab) as conn:
@@ -938,8 +947,8 @@ async def test_recording_says_it_recorded(owner_engine, app_engine):
 
 async def test_superseding_retires_only_the_named_open_rows(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    a, b = [await _capture(app_engine, lab, dive, n) for n in "ab"]
+    mission = await _dive(app_engine, lab, "d1")
+    a, b = [await _capture(app_engine, lab, mission, n) for n in "ab"]
     stale = await _species(owner_engine, lab, a, project=99)
     finished = await _species(owner_engine, lab, b, project=99, completed=True)
 
@@ -955,19 +964,19 @@ async def test_superseding_retires_only_the_named_open_rows(owner_engine, app_en
 
 async def test_grouping_facts(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
+    mission = await _dive(app_engine, lab, "d1")
     a, b = [
-        await _capture(app_engine, lab, dive, n, at=T0 + timedelta(seconds=i))
+        await _capture(app_engine, lab, mission, n, at=T0 + timedelta(seconds=i))
         for i, n in enumerate("ab")
     ]
-    await _cluster(owner_engine, lab, dive, "prediction", [b, a])
+    await _cluster(owner_engine, lab, mission, "prediction", [b, a])
     live = await _species(
         owner_engine, lab, a, project=70, grouping="Part of previous group"
     )
     await _species(owner_engine, lab, b, project=70, superseded=True)
 
     async with tenant_transaction(app_engine, lab) as conn:
-        facts = await species_grouping_facts(conn, lab, dive)
+        facts = await species_grouping_facts(conn, lab, mission)
 
     assert facts.already_grouped is False
     assert facts.prediction_clusters == [[a, b]]
@@ -980,21 +989,23 @@ async def test_label_studio_clusters_are_written_all_or_nothing(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    a, b, c = [await _capture(app_engine, lab, dive, n) for n in "abc"]
+    mission = await _dive(app_engine, lab, "d1")
+    a, b, c = [await _capture(app_engine, lab, mission, n) for n in "abc"]
 
     async with tenant_transaction(app_engine, lab) as conn:
-        assert await persist_label_studio_clusters(conn, lab, dive, [[a, b], [c]]) == 2
+        assert (
+            await persist_label_studio_clusters(conn, lab, mission, [[a, b], [c]]) == 2
+        )
 
     async with owner_engine.connect() as conn:
         rows = (
             await conn.execute(
                 text(
                     "SELECT k.formed_by, k.updated_at, array_agg(m.capture_id) AS m "
-                    "FROM dive_frame_clusters k JOIN dive_frame_cluster_captures m "
-                    "ON m.cluster_id = k.id WHERE k.dive_id = :d GROUP BY k.id"
+                    "FROM mission_frame_clusters k JOIN mission_frame_cluster_captures m "
+                    "ON m.cluster_id = k.id WHERE k.mission_id = :d GROUP BY k.id"
                 ),
-                {"d": dive},
+                {"d": mission},
             )
         ).all()
     assert sorted(len(r.m) for r in rows) == [1, 2]
@@ -1002,8 +1013,8 @@ async def test_label_studio_clusters_are_written_all_or_nothing(
     assert all(r.updated_at is not None for r in rows)
 
     async with tenant_transaction(app_engine, lab) as conn:
-        assert await persist_label_studio_clusters(conn, lab, dive, [[a]]) is None
-        facts = await species_grouping_facts(conn, lab, dive)
+        assert await persist_label_studio_clusters(conn, lab, mission, [[a]]) is None
+        facts = await species_grouping_facts(conn, lab, mission)
     assert facts.already_grouped is True
 
 
@@ -1011,34 +1022,36 @@ async def test_a_foreign_capture_writes_nothing(owner_engine, app_engine):
     """v1 posted cluster by cluster, so a bad one left the ones before it --
     and v1 refuses to re-run while any exist. Nothing is written here."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
+    mission = await _dive(app_engine, lab, "d1")
     other = await _dive(app_engine, lab, "d2")
-    mine = await _capture(app_engine, lab, dive, "a")
+    mine = await _capture(app_engine, lab, mission, "a")
     theirs = await _capture(app_engine, lab, other, "a")
 
     with pytest.raises(InvalidClusters):
         async with tenant_transaction(app_engine, lab) as conn:
-            await persist_label_studio_clusters(conn, lab, dive, [[mine], [theirs]])
+            await persist_label_studio_clusters(conn, lab, mission, [[mine], [theirs]])
 
     async with tenant_transaction(app_engine, lab) as conn:
-        assert (await species_grouping_facts(conn, lab, dive)).already_grouped is False
+        assert (
+            await species_grouping_facts(conn, lab, mission)
+        ).already_grouped is False
 
 
-async def _label_studio_members(owner_engine, dive) -> list[set[uuid.UUID]]:
+async def _label_studio_members(owner_engine, mission) -> list[set[uuid.UUID]]:
     async with owner_engine.connect() as conn:
         rows = await conn.execute(
             text(
-                "SELECT array_agg(m.capture_id) AS m FROM dive_frame_clusters k "
-                "JOIN dive_frame_cluster_captures m ON m.cluster_id = k.id "
-                "WHERE k.dive_id = :d AND k.formed_by = 'label_studio' "
+                "SELECT array_agg(m.capture_id) AS m FROM mission_frame_clusters k "
+                "JOIN mission_frame_cluster_captures m ON m.cluster_id = k.id "
+                "WHERE k.mission_id = :d AND k.formed_by = 'label_studio' "
                 "GROUP BY k.id"
             ),
-            {"d": dive},
+            {"d": mission},
         )
         return sorted((set(r.m) for r in rows), key=len)
 
 
-async def test_a_migrated_duplicate_in_the_dive_is_dropped_not_refused(
+async def test_a_migrated_duplicate_in_the_mission_is_dropped_not_refused(
     owner_engine, app_engine
 ):
     """A migrated dive's prediction clusters can hold a duplicate frame (its
@@ -1050,21 +1063,21 @@ async def test_a_migrated_duplicate_in_the_dive_is_dropped_not_refused(
     original = await _dive(app_engine, lab, "orig", priority="low")
     await _capture(app_engine, lab, original, "a", checksum="f" * 32)
     await _capture(app_engine, lab, original, "b", checksum="9" * 32)
-    dive = await _dive(app_engine, lab, "d1")
-    mine = await _capture(app_engine, lab, dive, "m")
-    duplicate = await _capture(app_engine, lab, dive, "a", checksum="f" * 32)
-    lonely = await _capture(app_engine, lab, dive, "b", checksum="9" * 32)
+    mission = await _dive(app_engine, lab, "d1")
+    mine = await _capture(app_engine, lab, mission, "m")
+    duplicate = await _capture(app_engine, lab, mission, "a", checksum="f" * 32)
+    lonely = await _capture(app_engine, lab, mission, "b", checksum="9" * 32)
 
     async with tenant_transaction(app_engine, lab) as conn:
         written = await persist_label_studio_clusters(
-            conn, lab, dive, [[mine, duplicate], [lonely]]
+            conn, lab, mission, [[mine, duplicate], [lonely]]
         )
 
     assert written == 1
-    assert await _label_studio_members(owner_engine, dive) == [{mine}]
+    assert await _label_studio_members(owner_engine, mission) == [{mine}]
 
 
-async def test_a_duplicate_under_another_dive_is_still_foreign(
+async def test_a_duplicate_under_another_mission_is_still_foreign(
     owner_engine, app_engine
 ):
     """Only the dive's own duplicates are dropped: a capture of another dive,
@@ -1074,14 +1087,14 @@ async def test_a_duplicate_under_another_dive_is_still_foreign(
     await _capture(app_engine, lab, original, "a", checksum="8" * 32)
     other = await _dive(app_engine, lab, "d2")
     theirs = await _capture(app_engine, lab, other, "a", checksum="8" * 32)
-    dive = await _dive(app_engine, lab, "d1")
-    mine = await _capture(app_engine, lab, dive, "m")
+    mission = await _dive(app_engine, lab, "d1")
+    mine = await _capture(app_engine, lab, mission, "m")
 
     with pytest.raises(ForeignCapture):
         async with tenant_transaction(app_engine, lab) as conn:
-            await persist_label_studio_clusters(conn, lab, dive, [[mine], [theirs]])
+            await persist_label_studio_clusters(conn, lab, mission, [[mine], [theirs]])
 
-    assert await _label_studio_members(owner_engine, dive) == []
+    assert await _label_studio_members(owner_engine, mission) == []
 
 
 # -- the dive links the species sync writes -------------------------------------------
@@ -1133,20 +1146,20 @@ async def test_reference_names_resolve_through_current_rows(owner_engine, app_en
     assert targets[f"Board {suffix}"] == current
 
 
-async def _refuse(owner_engine, tenant, dive):
+async def _refuse(owner_engine, tenant, mission):
     async with owner_engine.begin() as conn:
         await conn.execute(
             text(
-                "INSERT INTO laser_calibrations (tenant_id, dive_id, producer, "
+                "INSERT INTO laser_calibrations (tenant_id, mission_id, producer, "
                 "outcome, refusal_reason) VALUES (:t, :d, 'slate', 'refused', 'x')"
             ),
-            {"t": tenant, "d": dive},
+            {"t": tenant, "d": mission},
         )
 
 
-async def _outlived(app_engine, tenant, dive):
+async def _outlived(app_engine, tenant, mission):
     async with tenant_transaction(app_engine, tenant) as conn:
-        return await refusal_outlived_by_link_change(conn, tenant, dive)
+        return await refusal_outlived_by_link_change(conn, tenant, mission)
 
 
 async def test_writing_a_link_sets_it_and_expires_a_standing_refusal(
@@ -1157,35 +1170,39 @@ async def test_writing_a_link_sets_it_and_expires_a_standing_refusal(
     and a refusal older than the stamp has expired."""
     lab = await _tenant(owner_engine)
     _, slate, _, target = await _reference(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    await _refuse(owner_engine, lab, dive)
-    assert await _outlived(app_engine, lab, dive) is False
+    mission = await _dive(app_engine, lab, "d1")
+    await _refuse(owner_engine, lab, mission)
+    assert await _outlived(app_engine, lab, mission) is False
 
     async with tenant_transaction(app_engine, lab) as conn:
-        assert await set_dive_slate_template(conn, lab, dive, slate)
-    row = await _row(owner_engine, "dives", dive)
+        assert await set_mission_slate_template(conn, lab, mission, slate)
+    row = await _row(owner_engine, "missions", mission)
     assert row.slate_template_id == slate
     assert row.calibration_links_changed_at is not None
-    assert await _outlived(app_engine, lab, dive) is True
+    assert await _outlived(app_engine, lab, mission) is True
 
     # A refusal after the link change stands again...
-    await _refuse(owner_engine, lab, dive)
-    assert await _outlived(app_engine, lab, dive) is False
+    await _refuse(owner_engine, lab, mission)
+    assert await _outlived(app_engine, lab, mission) is False
     # ...until the next link write, the calibration target's included.
     async with tenant_transaction(app_engine, lab) as conn:
-        assert await set_dive_calibration_target(conn, lab, dive, target)
-    assert (await _row(owner_engine, "dives", dive)).calibration_target_id == target
-    assert await _outlived(app_engine, lab, dive) is True
+        assert await set_mission_calibration_target(conn, lab, mission, target)
+    assert (
+        await _row(owner_engine, "missions", mission)
+    ).calibration_target_id == target
+    assert await _outlived(app_engine, lab, mission) is True
 
 
-async def test_a_dive_with_no_refusal_has_nothing_to_outlive(owner_engine, app_engine):
+async def test_a_mission_with_no_refusal_has_nothing_to_outlive(
+    owner_engine, app_engine
+):
     lab = await _tenant(owner_engine)
     _, slate, _, _ = await _reference(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
+    mission = await _dive(app_engine, lab, "d1")
     async with tenant_transaction(app_engine, lab) as conn:
-        await set_dive_slate_template(conn, lab, dive, slate)
+        await set_mission_slate_template(conn, lab, mission, slate)
 
-    assert await _outlived(app_engine, lab, dive) is False
+    assert await _outlived(app_engine, lab, mission) is False
 
 
 async def test_the_unidentified_slate_note_never_clobbers_an_operators(
@@ -1196,7 +1213,7 @@ async def test_the_unidentified_slate_note_never_clobbers_an_operators(
     noted = await _dive(app_engine, lab, "d2")
     async with owner_engine.begin() as conn:
         await conn.execute(
-            text("UPDATE dives SET notes = 'operator: re-shoot' WHERE id = :d"),
+            text("UPDATE missions SET notes = 'operator: re-shoot' WHERE id = :d"),
             {"d": noted},
         )
 
@@ -1204,10 +1221,10 @@ async def test_the_unidentified_slate_note_never_clobbers_an_operators(
         assert await note_unidentified_slate(conn, lab, empty, "not in list")
         assert not await note_unidentified_slate(conn, lab, noted, "not in list")
 
-    assert (await _row(owner_engine, "dives", empty)).notes == "not in list"
-    assert (await _row(owner_engine, "dives", noted)).notes == "operator: re-shoot"
+    assert (await _row(owner_engine, "missions", empty)).notes == "not in list"
+    assert (await _row(owner_engine, "missions", noted)).notes == "operator: re-shoot"
     # Only notes: never priority (v1's rule -- parking stays a human decision).
-    assert (await _row(owner_engine, "dives", empty)).priority == "high"
+    assert (await _row(owner_engine, "missions", empty)).priority == "high"
 
 
 # -- as the orchestrator's service principal ------------------------------------------
@@ -1219,16 +1236,18 @@ async def test_the_catalog_acts_only_in_tenants_it_serves(
     tenants = await seed_memberships({ORCHESTRATOR: {"lab": "member"}})
     lab = tenants["lab"]
     reef = await _tenant(owner_engine, "reef")
-    dive = await _dive(app_engine, lab, "d1")
-    capture = await _capture(app_engine, lab, dive, "a")
-    await _cluster(owner_engine, lab, dive, "prediction", [capture])
+    mission = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, mission, "a")
+    await _cluster(owner_engine, lab, mission, "prediction", [capture])
     await _laser(owner_engine, lab, capture)
     catalog = SpeciesCatalog(app_engine, sub=ORCHESTRATOR)
 
     assert await catalog.member_tenants() == [lab]
-    assert (await catalog.next_dive_for_species_preprocessing(lab)).dive_id == dive
-    assert [c.dive_id for c in await catalog.dives_needing_species_population(lab)] == [
-        dive
-    ]
+    assert (
+        await catalog.next_mission_for_species_preprocessing(lab)
+    ).mission_id == mission
+    assert [
+        c.mission_id for c in await catalog.missions_needing_species_population(lab)
+    ] == [mission]
     with pytest.raises(PermissionError):
-        await catalog.next_dive_for_species_preprocessing(reef)
+        await catalog.next_mission_for_species_preprocessing(reef)

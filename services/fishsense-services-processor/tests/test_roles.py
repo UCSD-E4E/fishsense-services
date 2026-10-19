@@ -39,9 +39,9 @@ from fishsense_services_contracts import (
     PROCESSOR_TASK_QUEUE,
 )
 from fishsense_services_processor import registry
-from fishsense_services_processor.clustering.activities import cluster_dive_frames
+from fishsense_services_processor.clustering.activities import cluster_mission_frames
 from fishsense_services_processor.clustering.workflow import (
-    DiveFrameClusteringWorkflow,
+    MissionFrameClusteringWorkflow,
 )
 from fishsense_services_processor.registry import Stage, registration_for_role
 from fishsense_services_processor.worker import (
@@ -57,8 +57,8 @@ def _stage(role: str) -> Stage:
     return Stage(
         name=f"fake-{role}",
         role=role,
-        workflows=[DiveFrameClusteringWorkflow],
-        activities=[cluster_dive_frames],
+        workflows=[MissionFrameClusteringWorkflow],
+        activities=[cluster_mission_frames],
     )
 
 
@@ -124,8 +124,8 @@ def test_clustering_is_a_light_stage():
     not wait behind the per-image role's memory cap (v1 moved it to the light
     queue on 2026-09-04, after sub-second work expired on ScheduleToStart)."""
     registration = registration_for_role(registry.ROLE_LIGHT)
-    assert DiveFrameClusteringWorkflow in registration.workflows
-    assert cluster_dive_frames in registration.activities
+    assert MissionFrameClusteringWorkflow in registration.workflows
+    assert cluster_mission_frames in registration.activities
 
 
 def test_the_per_image_role_is_capped_at_two_concurrent_activities():
@@ -217,7 +217,7 @@ async def test_a_stage_serves_only_its_own_role():
             role=registry.ROLE_GPU,
             stages=[_stage(registry.ROLE_GPU), _stage(registry.ROLE_LIGHT)],
         )
-        assert worker.config()["workflows"] == [DiveFrameClusteringWorkflow]
+        assert worker.config()["workflows"] == [MissionFrameClusteringWorkflow]
 
 
 async def test_a_pod_may_lower_its_cap():

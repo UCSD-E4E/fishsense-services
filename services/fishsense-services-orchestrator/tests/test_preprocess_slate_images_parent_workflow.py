@@ -22,7 +22,7 @@ from typing import List
 
 import pytest
 from temporalio import activity, workflow
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -50,9 +50,9 @@ from fishsense_services_orchestrator.slates.workflows import (
 _K = [[1000.0, 0.0, 960.0], [0.0, 1000.0, 540.0], [0.0, 0.0, 1.0]]
 _D = [-0.1, 0.05, 0.0, 0.0, 0.0]
 TENANT = uuid.UUID(int=1)
-DIVE = uuid.UUID(int=440)
+MISSION = uuid.UUID(int=440)
 SLATE = uuid.UUID(int=7)
-TARGET = StagingTarget(tenant_id=TENANT, dive_id=DIVE)
+TARGET = StagingTarget(tenant_id=TENANT, mission_id=MISSION)
 QUEUE = "test-stage9-parent"
 
 #: What ran, in order; the clear calls' scopes. Module level: the workflow
@@ -72,7 +72,7 @@ def _plan(checksums: list[str]) -> SlatePreprocessPlan:
     ref = lambda key: ObjectRef(bucket="b", key=f"tenants/{TENANT}/{key}")  # noqa: E731
     return SlatePreprocessPlan(
         payload=PreprocessSlateImagesInput(
-            dive_id=DIVE,
+            mission_id=MISSION,
             slate_template_id=SLATE,
             slate_pdf=ref(f"slate_pdf/{SLATE}.pdf"),
             slate_dpi=300,
@@ -160,7 +160,7 @@ def _stubs(selector_result, plan):
     async def clear(payload: ClearSlateFlagsInput) -> int:
         """The parent lowers the redraw flag after its child completes;
         without it the dive stays in the cohort forever."""
-        assert (payload.tenant_id, payload.dive_id) == (TENANT, DIVE)
+        assert (payload.tenant_id, payload.mission_id) == (TENANT, MISSION)
         _EVENTS.append("clear")
         _CLEAR_SCOPES.append(payload.checksums)
         return 0
@@ -170,7 +170,7 @@ def _stubs(selector_result, plan):
 
 async def _run(selector_result, plan, *, firings=1, before=None):
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with (
             Worker(
@@ -203,11 +203,11 @@ async def test_dispatches_child_with_deterministic_id():
     result = await _run(TARGET, _plan(["a"]))
 
     assert result == TARGET
-    assert f"child:preprocess-slate-{DIVE}" in _EVENTS
-    assert _POPULATES == [f"populate-dive-slate-{DIVE}"]
+    assert f"child:preprocess-slate-{MISSION}" in _EVENTS
+    assert _POPULATES == [f"populate-dive-slate-{MISSION}"]
 
 
-async def test_returns_none_when_no_dive():
+async def test_returns_none_when_no_mission():
     result = await _run(None, None)
 
     assert result is None
@@ -223,14 +223,14 @@ async def test_skips_child_when_no_image_checksums():
     assert not _POPULATES
 
 
-async def test_populate_redispatches_on_a_later_firing_for_the_same_dive():
+async def test_populate_redispatches_on_a_later_firing_for_the_same_mission():
     """Same stall regression as the headtail parent (prod dive 60,
     2026-08-04): a *completed* populate must not burn the child id, or a dive
     that later gains an eligible image never gets a task and never drains."""
     await _run(TARGET, _plan(["a"]), firings=2)
 
     assert (
-        _POPULATES == [f"populate-dive-slate-{DIVE}"] * 2
+        _POPULATES == [f"populate-dive-slate-{MISSION}"] * 2
     ), "the second firing must re-dispatch populate, or the dive can never drain"
 
 
@@ -287,7 +287,7 @@ async def test_a_running_child_keeps_its_scratch_and_its_flags():
         await client.start_workflow(
             "PreprocessSlateImagesWorkflow",
             _plan(["a"]).payload,
-            id=f"preprocess-slate-{DIVE}",
+            id=f"preprocess-slate-{MISSION}",
             task_queue="no-worker-serves-this-queue",
         )
 
@@ -306,4 +306,7 @@ def test_the_child_is_a_registered_raw_reader():
         raw_scratch_reader_id,
     )
 
-    assert raw_scratch_reader_id("preprocess-slate", DIVE) == f"preprocess-slate-{DIVE}"
+    assert (
+        raw_scratch_reader_id("preprocess-slate", MISSION)
+        == f"preprocess-slate-{MISSION}"
+    )

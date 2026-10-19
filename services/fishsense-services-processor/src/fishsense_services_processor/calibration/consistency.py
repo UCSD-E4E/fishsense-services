@@ -46,15 +46,15 @@ __all__ = [
     "DEFAULT_MIN_BASELINE_M",
     "CalibrationDoesNotDescribeDiveError",
     "CalibrationUnderdeterminedError",
-    "DEFAULT_MAX_DIVE_MEDIAN_OFFSET_PX",
-    "DEFAULT_MAX_DIVE_P90_OFFSET_PX",
-    "MIN_DISAGREEING_DIVE_DOTS",
-    "MIN_DIVE_DOTS",
+    "DEFAULT_MAX_MISSION_MEDIAN_OFFSET_PX",
+    "DEFAULT_MAX_MISSION_P90_OFFSET_PX",
+    "MIN_DISAGREEING_MISSION_DOTS",
+    "MIN_MISSION_DOTS",
     "MIN_OBSERVATION_LEVER_M",
     "MIN_DOT_SPAN_PX",
     "REFUSAL_REMEDIES",
     "check_baseline_plausible",
-    "check_calibration_describes_dive",
+    "check_calibration_describes_mission",
     "check_observation_geometry",
     "check_fit_self_consistency",
 ]
@@ -315,15 +315,15 @@ def check_fit_self_consistency(
 # family of rays sharing an image line leaves the projection identical, so five
 # of the six known-bad baselines sit at 0.43-1.35 px here and pass. That is
 # what `check_baseline_plausible` is for. Neither gate subsumes the other.
-DEFAULT_MAX_DIVE_MEDIAN_OFFSET_PX = 6.0
-DEFAULT_MAX_DIVE_P90_OFFSET_PX = 12.0
+DEFAULT_MAX_MISSION_MEDIAN_OFFSET_PX = 6.0
+DEFAULT_MAX_MISSION_P90_OFFSET_PX = 12.0
 #: Below this many usable dots the dive cannot define a line, so the gate
 #: abstains rather than refusing. A degenerate *fit* is not this gate's
 #: abstention: it is caught by `check_observation_geometry`, which bounds the
 #: lever arm of the observations rather than counting them -- the count is the
 #: quantity that failed on dive 347, where `MIN_LASER_POINTS = 2` was
 #: satisfied by a duplicate label at the identical pixel.
-MIN_DIVE_DOTS = 6
+MIN_MISSION_DOTS = 6
 #: The p90 branch needs a disagreeing SUBSET, not one or two stray labels, so
 #: it also requires this many dots beyond the bound.
 #:
@@ -340,29 +340,29 @@ MIN_DIVE_DOTS = 6
 #: live dots: **every one of the 30 sound calibrations has zero dots beyond
 #: the p90 bound**, against 13 of 40 (dive 498) and 139 of 321 (dive 347). So
 #: the floor has only to clear a handful of strays and stay below 13.
-MIN_DISAGREEING_DIVE_DOTS = 5
+MIN_DISAGREEING_MISSION_DOTS = 5
 
 
 class CalibrationDoesNotDescribeDiveError(ValueError):
     """The fitted ray disagrees with the dive's own laser dots."""
 
 
-def check_calibration_describes_dive(
+def check_calibration_describes_mission(
     laser_position: np.ndarray,
     laser_axis: np.ndarray,
     camera_matrix: np.ndarray,
-    dive_dots_xy: np.ndarray,
+    mission_dots_xy: np.ndarray,
     *,
-    max_median_offset_px: float = DEFAULT_MAX_DIVE_MEDIAN_OFFSET_PX,
-    max_p90_offset_px: float = DEFAULT_MAX_DIVE_P90_OFFSET_PX,
-    min_disagreeing_dots: int = MIN_DISAGREEING_DIVE_DOTS,
+    max_median_offset_px: float = DEFAULT_MAX_MISSION_MEDIAN_OFFSET_PX,
+    max_p90_offset_px: float = DEFAULT_MAX_MISSION_P90_OFFSET_PX,
+    min_disagreeing_dots: int = MIN_DISAGREEING_MISSION_DOTS,
 ) -> str:
     """Raise `CalibrationDoesNotDescribeDiveError` when the fitted ray's
     projection disagrees with the laser dots of the dive it will measure.
 
-    `dive_dots_xy` is an (N, 2) array of every live laser pixel in the dive,
+    `mission_dots_xy` is an (N, 2) array of every live laser pixel in the dive,
     not just the observations that fed the fit. Non-finite rows are dropped.
-    Abstains below `MIN_DIVE_DOTS` usable dots or `MIN_DOT_SPAN_PX` of spread:
+    Abstains below `MIN_MISSION_DOTS` usable dots or `MIN_DOT_SPAN_PX` of spread:
     a dive that cannot define a line cannot answer this. Those two are read
     from the module rather than taken as parameters — they say when the
     question is unanswerable, which is not a per-caller policy, and the three
@@ -373,11 +373,11 @@ def check_calibration_describes_dive(
     which can also be a handful of bad labels the fit never saw, so it fires
     only when at least `min_disagreeing_dots` sit beyond the bound.
     """
-    dots = np.asarray(dive_dots_xy, dtype=float)
+    dots = np.asarray(mission_dots_xy, dtype=float)
     if dots.ndim != 2 or dots.shape[1] != 2:
         return ABSTAINED
     dots = dots[np.isfinite(dots).all(axis=1)]
-    if dots.shape[0] < MIN_DIVE_DOTS:
+    if dots.shape[0] < MIN_MISSION_DOTS:
         return ABSTAINED
     span = float(np.linalg.norm(dots.max(axis=0) - dots.min(axis=0)))
     if span < MIN_DOT_SPAN_PX:

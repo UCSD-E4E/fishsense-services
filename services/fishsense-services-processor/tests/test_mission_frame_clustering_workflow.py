@@ -1,4 +1,4 @@
-"""`DiveFrameClusteringWorkflow` -- the processor's stage-1 workflow.
+"""`MissionFrameClusteringWorkflow` -- the processor's stage-1 workflow.
 
 Ported from fishsense-lite@a8b2c3bc services/fishsense-data-processing-workflow-
 worker/tests/test_dive_frame_clustering_workflow.py (the contract test, with a
@@ -15,14 +15,17 @@ from typing import Iterable, List
 from uuid import UUID
 
 from temporalio import activity
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from fishsense_services_contracts import ClusterDiveFrameImage, ClusterDiveFramesInput
-from fishsense_services_processor.clustering.activities import cluster_dive_frames
+from fishsense_services_contracts import (
+    ClusterMissionFrameImage,
+    ClusterMissionFramesInput,
+)
+from fishsense_services_processor.clustering.activities import cluster_mission_frames
 from fishsense_services_processor.clustering.workflow import (
-    DiveFrameClusteringWorkflow,
+    MissionFrameClusteringWorkflow,
 )
 
 QUEUE = "test-stage1-clustering"
@@ -31,16 +34,16 @@ BASE = datetime(2026, 5, 5, 10, 0, 0, tzinfo=timezone.utc)
 
 async def _run(payload, activities):
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,
             task_queue=QUEUE,
-            workflows=[DiveFrameClusteringWorkflow],
+            workflows=[MissionFrameClusteringWorkflow],
             activities=activities,
         ):
             return await env.client.execute_workflow(
-                DiveFrameClusteringWorkflow.run,
+                MissionFrameClusteringWorkflow.run,
                 payload,
                 id=f"{QUEUE}-{uuid.uuid4()}",
                 task_queue=QUEUE,
@@ -48,19 +51,21 @@ async def _run(payload, activities):
 
 
 async def test_workflow_passes_images_to_activity_and_returns_result():
-    captured: List[List[ClusterDiveFrameImage]] = []
+    captured: List[List[ClusterMissionFrameImage]] = []
 
     @activity.defn(name="cluster_dive_frames")
-    async def stub_cluster(images: Iterable[ClusterDiveFrameImage]) -> List[List[UUID]]:
+    async def stub_cluster(
+        images: Iterable[ClusterMissionFrameImage],
+    ) -> List[List[UUID]]:
         materialized = list(images)
         captured.append(materialized)
         return [[img.capture_id for img in materialized]]
 
-    payload = ClusterDiveFramesInput(
-        dive_id=uuid.uuid4(),
+    payload = ClusterMissionFramesInput(
+        mission_id=uuid.uuid4(),
         images=[
-            ClusterDiveFrameImage(capture_id=UUID(int=1), taken_datetime=BASE),
-            ClusterDiveFrameImage(
+            ClusterMissionFrameImage(capture_id=UUID(int=1), taken_datetime=BASE),
+            ClusterMissionFrameImage(
                 capture_id=UUID(int=2), taken_datetime=BASE + timedelta(seconds=1)
             ),
         ],
@@ -73,13 +78,13 @@ async def test_workflow_passes_images_to_activity_and_returns_result():
     assert [img.capture_id for img in captured[0]] == [UUID(int=1), UUID(int=2)]
 
 
-async def test_workflow_clusters_a_dive_end_to_end():
+async def test_workflow_clusters_a_mission_end_to_end():
     """Two well-separated cohorts (5 images each, 10 minutes apart) reliably
     resolve into two HDBSCAN clusters with default parameters. Returned shape is
     `list[list[UUID]]` of capture ids -- what the orchestrator's persist
     activity turns into prediction clusters."""
     images = [
-        ClusterDiveFrameImage(
+        ClusterMissionFrameImage(
             capture_id=UUID(int=10 * cohort + i),
             taken_datetime=BASE + timedelta(minutes=10 * cohort, seconds=i),
         )
@@ -88,8 +93,8 @@ async def test_workflow_clusters_a_dive_end_to_end():
     ]
 
     result = await _run(
-        ClusterDiveFramesInput(dive_id=uuid.uuid4(), images=images),
-        [cluster_dive_frames],
+        ClusterMissionFramesInput(mission_id=uuid.uuid4(), images=images),
+        [cluster_mission_frames],
     )
 
     assert sorted(sorted(c.int for c in cluster) for cluster in result) == [

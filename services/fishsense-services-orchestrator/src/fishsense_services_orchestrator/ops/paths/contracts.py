@@ -7,9 +7,10 @@ run, would be), or one of the reasons it was left alone.
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Annotated
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = ["MovedFrame", "PathFinding", "PathRepairReport"]
 
@@ -36,7 +37,8 @@ class PathFinding(BaseModel):
 
 
 class PathRepairReport(BaseModel):
-    dive_number: int
+    model_config = ConfigDict(validate_by_name=True)
+    mission_number: Annotated[int, renamed_from("dive_number", "mission_number")]
     #: False: a dry run, which changes nothing and fills `would_repair`.
     applied: bool
     #: Captures of the dive with a NAS path.

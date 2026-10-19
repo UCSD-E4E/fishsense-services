@@ -115,7 +115,7 @@ async def calibration_target(
     )
 
 
-async def dive(
+async def mission(
     engine,
     tenant_id,
     *,
@@ -130,9 +130,9 @@ async def dive(
 ) -> uuid.UUID:
     return await _one(
         engine,
-        "INSERT INTO dives (tenant_id, source_path, name, dived_at, priority, "
+        "INSERT INTO missions (tenant_id, source_path, name, started_at, priority, "
         "slate_template_id, calibration_target_id, device_id, "
-        "calibration_source_dive_id, created_at, v1_id) VALUES (:t, :p, :n, :at, "
+        "calibration_source_mission_id, created_at, v1_id) VALUES (:t, :p, :n, :at, "
         ":pr, :s, :g, :dev, :src, coalesce(:c, now()), :v1) RETURNING id",
         t=tenant_id,
         p=f"/dives/{uuid.uuid4()}",
@@ -151,7 +151,7 @@ async def dive(
 async def capture(
     engine,
     tenant_id,
-    dive_id,
+    mission_id,
     *,
     canonical: bool = True,
     checksum: str | None = None,
@@ -160,11 +160,11 @@ async def capture(
 ) -> uuid.UUID:
     return await _one(
         engine,
-        "INSERT INTO captures (tenant_id, dive_id, source_path, captured_at, "
+        "INSERT INTO captures (tenant_id, mission_id, source_path, captured_at, "
         "checksum, is_canonical, v1_id) VALUES (:t, :d, :p, :at, :k, :c, :v1) "
         "RETURNING id",
         t=tenant_id,
-        d=dive_id,
+        d=mission_id,
         p=f"/frames/{uuid.uuid4()}.ORF",
         at=captured_at,
         k=checksum or uuid.uuid4().hex,
@@ -269,7 +269,7 @@ async def laser_label(
 async def laser_calibration(
     engine,
     tenant_id,
-    dive_id,
+    mission_id,
     *,
     outcome: str = "accepted",
     position=GOOD_POSITION,
@@ -283,12 +283,12 @@ async def laser_calibration(
     accepted = outcome == "accepted"
     return await _one(
         engine,
-        "INSERT INTO laser_calibrations (tenant_id, dive_id, producer, outcome, "
+        "INSERT INTO laser_calibrations (tenant_id, mission_id, producer, outcome, "
         "laser_position, laser_axis, refusal_reason, inputs_as_of, "
         "slate_template_id, calibration_target_id, v1_refusal_dive_id) VALUES "
         "(:t, :d, :p, :o, :pos, :axis, :r, :at, :s, :g, :v1) RETURNING id",
         t=tenant_id,
-        d=dive_id,
+        d=mission_id,
         p=producer,
         o=outcome,
         pos=json.dumps(position) if accepted else None,

@@ -38,7 +38,7 @@ class DetectSlatePresenceWorkflow:
     async def run(self, payload: DetectSlateImagesInput) -> List[SlatePresenceResult]:
         workflow.logger.info(
             "detecting slates dive_id=%s images=%d",
-            payload.dive_id,
+            payload.mission_id,
             len(payload.images),
         )
         results = await asyncio.gather(

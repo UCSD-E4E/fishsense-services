@@ -45,11 +45,11 @@ import numpy as np
 import pytest
 
 from fishsense_services_processor.calibration.consistency import (
-    DEFAULT_MAX_DIVE_MEDIAN_OFFSET_PX,
-    DEFAULT_MAX_DIVE_P90_OFFSET_PX,
-    MIN_DISAGREEING_DIVE_DOTS,
+    DEFAULT_MAX_MISSION_MEDIAN_OFFSET_PX,
+    DEFAULT_MAX_MISSION_P90_OFFSET_PX,
+    MIN_DISAGREEING_MISSION_DOTS,
     CalibrationDoesNotDescribeDiveError,
-    check_calibration_describes_dive,
+    check_calibration_describes_mission,
 )
 
 # A realistic Olympus rig: the intrinsics and laser geometry of prod dive 347's
@@ -88,14 +88,14 @@ def _perpendicular(dots: np.ndarray, px: float) -> np.ndarray:
 
 
 def test_dots_on_the_projected_ray_pass():
-    check_calibration_describes_dive(ORIGIN, AXIS, K, _dots_on_ray())
+    check_calibration_describes_mission(ORIGIN, AXIS, K, _dots_on_ray())
 
 
 def test_realistic_label_noise_passes():
     """A sound dive sits at 0.4-2.3 px; a couple of px of label noise is normal."""
     rng = np.random.default_rng(0)
     dots = _perpendicular(_dots_on_ray(), 0.0) + rng.normal(0, 1.5, (40, 2))
-    check_calibration_describes_dive(ORIGIN, AXIS, K, dots)
+    check_calibration_describes_mission(ORIGIN, AXIS, K, dots)
 
 
 def test_the_gate_is_blind_to_the_baseline_by_construction():
@@ -103,7 +103,7 @@ def test_the_gate_is_blind_to_the_baseline_by_construction():
     gate cannot see a wrong baseline. Pinned so nobody expects it to."""
     dots = _dots_on_ray()
     for scale in (0.5, 2.0, 4.0):
-        check_calibration_describes_dive(ORIGIN * scale, AXIS, K, dots)
+        check_calibration_describes_mission(ORIGIN * scale, AXIS, K, dots)
 
 
 # --- and refuses what it should ---------------------------------------------
@@ -114,7 +114,7 @@ def test_a_uniformly_offset_dot_population_is_refused():
     dive, because it was fitted from one frame that happened to lie elsewhere."""
     dots = _perpendicular(_dots_on_ray(), 9.4)
     with pytest.raises(CalibrationDoesNotDescribeDiveError, match="median"):
-        check_calibration_describes_dive(ORIGIN, AXIS, K, dots)
+        check_calibration_describes_mission(ORIGIN, AXIS, K, dots)
 
 
 def test_a_rotated_ray_is_refused():
@@ -123,7 +123,7 @@ def test_a_rotated_ray_is_refused():
     rotated = AXIS + np.array([0.004, -0.004, 0.0])
     dots = _dots_on_ray()
     with pytest.raises(CalibrationDoesNotDescribeDiveError):
-        check_calibration_describes_dive(ORIGIN, rotated, K, dots)
+        check_calibration_describes_mission(ORIGIN, rotated, K, dots)
 
 
 def test_a_wild_minority_is_caught_by_the_p90_even_when_the_median_is_fine():
@@ -132,7 +132,7 @@ def test_a_wild_minority_is_caught_by_the_p90_even_when_the_median_is_fine():
     dots = _dots_on_ray()
     dots[-8:] = _perpendicular(dots, 40.0)[-8:]
     with pytest.raises(CalibrationDoesNotDescribeDiveError, match="p90"):
-        check_calibration_describes_dive(ORIGIN, AXIS, K, dots)
+        check_calibration_describes_mission(ORIGIN, AXIS, K, dots)
 
 
 def test_a_disagreeing_subset_is_refused_once_it_is_a_real_population():
@@ -141,7 +141,7 @@ def test_a_disagreeing_subset_is_refused_once_it_is_a_real_population():
     dots = _dots_on_ray(depths=np.linspace(0.6, 3.5, 40))
     dots[-13:] = _perpendicular(dots, 40.0)[-13:]
     with pytest.raises(CalibrationDoesNotDescribeDiveError, match="p90"):
-        check_calibration_describes_dive(ORIGIN, AXIS, K, dots)
+        check_calibration_describes_mission(ORIGIN, AXIS, K, dots)
 
 
 # --- the p90 branch needs a real subset, not one or two labels --------------
@@ -160,7 +160,7 @@ def test_a_pair_of_mislabels_does_not_refuse_a_fit_they_never_fed():
     worst values and lands at ~18 px with the fit itself exact."""
     dots = _dots_on_ray(depths=np.linspace(0.6, 3.5, 18))
     dots[-2:] = _perpendicular(dots, 60.0)[-2:]
-    check_calibration_describes_dive(ORIGIN, AXIS, K, dots)
+    check_calibration_describes_mission(ORIGIN, AXIS, K, dots)
 
 
 def test_one_wild_label_does_not_refuse_at_the_minimum_dot_count():
@@ -168,7 +168,7 @@ def test_one_wild_label_does_not_refuse_at_the_minimum_dot_count():
     were measured on populations of 13 to 321 dots."""
     dots = _dots_on_ray(depths=np.linspace(0.6, 3.5, 6))
     dots[-1] = _perpendicular(dots, 60.0)[-1]
-    check_calibration_describes_dive(ORIGIN, AXIS, K, dots)
+    check_calibration_describes_mission(ORIGIN, AXIS, K, dots)
 
 
 def test_the_median_branch_still_fires_below_the_disagreeing_dot_floor():
@@ -177,7 +177,7 @@ def test_the_median_branch_still_fires_below_the_disagreeing_dot_floor():
     point of the gate."""
     dots = _perpendicular(_dots_on_ray(depths=np.linspace(0.6, 3.5, 6)), 9.4)
     with pytest.raises(CalibrationDoesNotDescribeDiveError, match="median"):
-        check_calibration_describes_dive(ORIGIN, AXIS, K, dots)
+        check_calibration_describes_mission(ORIGIN, AXIS, K, dots)
 
 
 # --- abstention, so the gate never fires on data that cannot answer ---------
@@ -191,21 +191,21 @@ def test_abstains_on_too_few_dots(n):
     `check_observation_geometry`, on the lever arm of the observations — not
     a count, which is the quantity dive 347 satisfied with a duplicate."""
     dots = _perpendicular(_dots_on_ray(depths=np.linspace(0.6, 3.5, max(n, 1))), 60.0)
-    check_calibration_describes_dive(ORIGIN, AXIS, K, dots[:n])
+    check_calibration_describes_mission(ORIGIN, AXIS, K, dots[:n])
 
 
 def test_abstains_when_the_dots_do_not_span_enough_pixels():
     """All the dots at one range define no direction, so a perpendicular offset
     is not measurable against them."""
     dots = _perpendicular(_dots_on_ray(depths=np.full(30, 1.2)), 60.0)
-    check_calibration_describes_dive(ORIGIN, AXIS, K, dots)
+    check_calibration_describes_mission(ORIGIN, AXIS, K, dots)
 
 
 def test_nan_and_infinite_dots_are_ignored_rather_than_poisoning_the_statistic():
     dots = _dots_on_ray()
     dots[3] = [np.nan, np.nan]
     dots[7] = [np.inf, 0.0]
-    check_calibration_describes_dive(ORIGIN, AXIS, K, dots)
+    check_calibration_describes_mission(ORIGIN, AXIS, K, dots)
 
 
 # --- the bounds themselves --------------------------------------------------
@@ -217,8 +217,8 @@ def test_bounds_sit_between_the_measured_populations():
     347). Healthy p90 reaches 6.07 (341) against 18.44 and 29.69 for the bad.
     Widening past these re-admits a known-bad fit; tightening refuses dives
     whose calibrations are merely imperfect."""
-    assert 3.92 < DEFAULT_MAX_DIVE_MEDIAN_OFFSET_PX < 9.42
-    assert 6.07 < DEFAULT_MAX_DIVE_P90_OFFSET_PX < 18.44
+    assert 3.92 < DEFAULT_MAX_MISSION_MEDIAN_OFFSET_PX < 9.42
+    assert 6.07 < DEFAULT_MAX_MISSION_P90_OFFSET_PX < 18.44
 
 
 def test_the_disagreeing_dot_floor_sits_between_the_measured_populations():
@@ -227,14 +227,14 @@ def test_the_disagreeing_dot_floor_sits_between_the_measured_populations():
     beyond the p90 bound.** The two refused have 13 (dive 498, of 40) and 139
     (dive 347, of 321). So the floor has only to clear the handful of stray
     labels a dive accumulates mid-labelling and stay below 13."""
-    assert 2 < MIN_DISAGREEING_DIVE_DOTS < 13
+    assert 2 < MIN_DISAGREEING_MISSION_DOTS < 13
 
 
-def test_error_names_the_dive_statistic_so_a_refusal_is_actionable():
+def test_error_names_the_mission_statistic_so_a_refusal_is_actionable():
     dots = _perpendicular(_dots_on_ray(), 9.4)
     with pytest.raises(CalibrationDoesNotDescribeDiveError) as exc:
-        check_calibration_describes_dive(ORIGIN, AXIS, K, dots)
+        check_calibration_describes_mission(ORIGIN, AXIS, K, dots)
     message = str(exc.value)
     assert "9.4" in message or "9.3" in message
     assert "px" in message
-    assert str(int(DEFAULT_MAX_DIVE_MEDIAN_OFFSET_PX)) in message
+    assert str(int(DEFAULT_MAX_MISSION_MEDIAN_OFFSET_PX)) in message

@@ -148,16 +148,16 @@ class RawStagingActivities:
         )
 
     @activity.defn(name="stage_raw_bytes_for_dive")
-    async def stage_raw_bytes_for_dive(
+    async def stage_raw_bytes_for_mission(
         self, target: StagingTarget
     ) -> StageRawBytesResult:
         captures = await self._catalog.captures_to_stage(
-            target.tenant_id, target.dive_id
+            target.tenant_id, target.mission_id
         )
         activity.logger.info(
             "staging raw bytes tenant=%s dive=%s images=%d concurrency=%d",
             target.tenant_id,
-            target.dive_id,
+            target.mission_id,
             len(captures),
             self._concurrency,
         )
@@ -209,7 +209,7 @@ class RawStagingActivities:
         activity.logger.info(
             "staged tenant=%s dive=%s staged=%d skipped=%d no_path=%d",
             target.tenant_id,
-            target.dive_id,
+            target.mission_id,
             staged,
             skipped,
             no_path,

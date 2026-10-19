@@ -73,7 +73,7 @@ def test_a_long_burst_over_a_wide_range_is_accepted():
     check_observation_geometry(_observations(np.linspace(1.19, 2.74, 30)))
 
 
-def test_the_tightest_healthy_dive_is_accepted():
+def test_the_tightest_healthy_mission_is_accepted():
     """Dive 62: 1.02 m of lever over 20 observations — the closest sound
     calibration to the bound, so this pins that the bound does not refuse it.
     Dive 383's 1.09 m is the next tightest and is covered by the same margin."""

@@ -61,8 +61,8 @@ from fishsense_services_orchestrator.object_store.store import OrchestratorObjec
 
 T0 = datetime(2026, 9, 1, tzinfo=UTC)
 LAB, REEF = uuid.uuid4(), uuid.uuid4()
-DIVE = uuid.uuid4()
-TARGET = HeadtailTarget(LAB, DIVE)
+MISSION = uuid.uuid4()
+TARGET = HeadtailTarget(LAB, MISSION)
 PROJECT = 71
 LAYOUT = ObjectLayout(
     ObjectStoreConnection(
@@ -130,21 +130,21 @@ class FakeCatalog:
     async def member_tenants(self):
         return [LAB, REEF]
 
-    async def dives_needing_headtail_population(self, tenant_id):
+    async def missions_needing_headtail_population(self, tenant_id):
         return {
-            LAB: [HeadtailCandidate(DIVE, T0 + timedelta(hours=1))],
+            LAB: [HeadtailCandidate(MISSION, T0 + timedelta(hours=1))],
             REEF: [HeadtailCandidate(_cid(9), T0)],
         }[tenant_id]
 
-    async def headtail_populate_state(self, tenant_id, dive_id):
-        assert (tenant_id, dive_id) == (LAB, DIVE)
+    async def headtail_populate_state(self, tenant_id, mission_id):
+        assert (tenant_id, mission_id) == (LAB, MISSION)
         return self.state
 
     async def record_head_tail_task(self, tenant_id, capture_id, *, ls_project_id,
                                     ls_task_id):  # fmt: skip
         self.recorded.append((capture_id, ls_project_id, ls_task_id))
 
-    async def supersede_head_tail_labels(self, tenant_id, dive_id, label_ids):
+    async def supersede_head_tail_labels(self, tenant_id, mission_id, label_ids):
         self.superseded.extend(label_ids)
         return len(label_ids)
 
@@ -223,9 +223,9 @@ class FakeLabelProjects:
     def __init__(self):
         self.calls = []
 
-    async def ensure_dive_project(self, tenant_id, dive_id, kind, *, suffix,
+    async def ensure_mission_project(self, tenant_id, mission_id, kind, *, suffix,
                                   labeling_config_xml):  # fmt: skip
-        self.calls.append((tenant_id, dive_id, kind, suffix, labeling_config_xml))
+        self.calls.append((tenant_id, mission_id, kind, suffix, labeling_config_xml))
         return PROJECT
 
 
@@ -479,7 +479,7 @@ async def test_a_predicted_image_is_imported_with_its_keypoints():
 # -- create ------------------------------------------------------------------------------
 
 
-async def test_create_ensures_the_dives_head_tail_project():
+async def test_create_ensures_the_missions_head_tail_project():
     """v1's title `{name} #{dive} - HeadTail Labeling` and config; v2 records
     the project and looks there first (`LabelProjects`)."""
     projects = FakeLabelProjects()
@@ -491,7 +491,7 @@ async def test_create_ensures_the_dives_head_tail_project():
 
     assert project_id == PROJECT
     assert projects.calls == [
-        (LAB, DIVE, "head_tail", HEADTAIL_PROJECT_TITLE_SUFFIX,
+        (LAB, MISSION, "head_tail", HEADTAIL_PROJECT_TITLE_SUFFIX,
          HEADTAIL_LABELING_CONFIG_XML)
     ]  # fmt: skip
 
@@ -499,14 +499,14 @@ async def test_create_ensures_the_dives_head_tail_project():
 # -- the populate cohort -------------------------------------------------------------------
 
 
-async def test_every_dive_needing_population_is_listed_oldest_first_across_tenants():
+async def test_every_mission_needing_population_is_listed_oldest_first_across_tenants():
     activities = _activities(FakeCatalog(), FakeLabelStudioSdk())
 
     targets = await ActivityEnvironment().run(
-        activities.select_dives_needing_headtail_population
+        activities.select_missions_needing_headtail_population
     )
 
-    assert targets == [HeadtailTarget(REEF, _cid(9)), HeadtailTarget(LAB, DIVE)]
+    assert targets == [HeadtailTarget(REEF, _cid(9)), HeadtailTarget(LAB, MISSION)]
 
 
 # -- the backfill ----------------------------------------------------------------------------
@@ -520,7 +520,7 @@ def _project(title, model_version=None):
 
 async def _backfill(catalog, sdk):
     return await ActivityEnvironment().run(
-        _activities(catalog, sdk).backfill_headtail_predictions_for_dive, TARGET
+        _activities(catalog, sdk).backfill_headtail_predictions_for_mission, TARGET
     )
 
 

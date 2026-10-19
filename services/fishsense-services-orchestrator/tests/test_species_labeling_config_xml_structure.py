@@ -9,11 +9,11 @@ The XML is just a string in
 so a typo (renamed control, dropped Choice value, malformed tag) won't
 trip any other test — but it CAN silently break downstream:
 
-  * Stage 9 selects `dive_slate_label` cohort on
+  * Stage 9 selects `mission_slate_label` cohort on
     `SpeciesLabel.content_of_image == 'Slate, Laser on slate'`. If the
     species taxonomy loses the `Slate / Laser on slate` leaf, stage 9
     quietly returns no dives forever.
-  * Stage 6.1 (`update_dive_image_groups_activity`) walks
+  * Stage 6.1 (`update_mission_image_groups_activity`) walks
     `SpeciesLabel.grouping`. A renamed `name="grouping"` Choices
     block stops grouping populating new clusters.
   * The sync activity's `_first_choice(results, "exclude")` /
@@ -144,7 +144,7 @@ def test_no_slate_upside_down_choice(root):
 def test_slate_branch_offers_the_not_in_list_sentinel(root):
     """A labeler must be able to say "that slate isn't on your list".
 
-    The slate-type leaves are exactly the `DiveSlate` template rows, and a
+    The slate-type leaves are exactly the `MissionSlate` template rows, and a
     slate can be missing from that table permanently — V-Slate 7 was lost
     during a dive, so it can never be scanned and never added. Without this
     leaf the only options are a wrong neighbour or silence, and the wrong

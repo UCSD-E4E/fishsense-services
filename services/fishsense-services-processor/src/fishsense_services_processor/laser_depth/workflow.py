@@ -34,7 +34,7 @@ class ComputeLaserDepthsWorkflow:
     async def run(self, payload: ComputeLaserDepthsInput) -> ComputeLaserDepthsResult:
         workflow.logger.info(
             "laser depths dive_id=%s captures=%d",
-            payload.dive_id,
+            payload.mission_id,
             len(payload.captures),
         )
         return await workflow.execute_activity(

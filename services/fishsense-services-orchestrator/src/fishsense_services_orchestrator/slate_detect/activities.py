@@ -56,7 +56,7 @@ class SlatePresenceCatalog(Protocol):
 
     async def member_tenants(self) -> list[uuid.UUID]: ...
 
-    async def next_dive_for_slate_detection(
+    async def next_mission_for_slate_detection(
         self,
         tenant_id: uuid.UUID,
         *,
@@ -65,13 +65,13 @@ class SlatePresenceCatalog(Protocol):
     ) -> SlateDetectionCandidate | None: ...
 
     async def slate_detection_inputs(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, *, model_version: int
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, model_version: int
     ) -> SlateDetectionInputs: ...
 
     async def persist_slate_presence(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         rows: Sequence[SlatePresenceRow],
     ) -> int: ...
 
@@ -82,21 +82,21 @@ class SlateDetectionActivities:
         self._layout = layout
 
     @activity.defn(name="select_next_dive_for_slate_detection")
-    async def select_next_dive_for_slate_detection(
+    async def select_next_mission_for_slate_detection(
         self, exclude: Optional[List[uuid.UUID]] = None
     ) -> Optional[StagingTarget]:
         """The oldest dive across tenants with a canonical frame the current
         model has not predicted, other than those the run already took."""
         best, best_key = None, None
         for tenant_id in await self._catalog.member_tenants():
-            candidate = await self._catalog.next_dive_for_slate_detection(
+            candidate = await self._catalog.next_mission_for_slate_detection(
                 tenant_id, model_version=SLATE_DETECTOR_VERSION, exclude=exclude or []
             )
             if candidate is None:
                 continue
-            key = (candidate.created_at, str(candidate.dive_id))
+            key = (candidate.created_at, str(candidate.mission_id))
             if best_key is None or key < best_key:
-                best, best_key = StagingTarget(tenant_id, candidate.dive_id), key
+                best, best_key = StagingTarget(tenant_id, candidate.mission_id), key
         activity.logger.info("next dive for slate detection: %s", best)
         return best
 
@@ -109,23 +109,23 @@ class SlateDetectionActivities:
         try:
             inputs = await self._catalog.slate_detection_inputs(
                 target.tenant_id,
-                target.dive_id,
+                target.mission_id,
                 model_version=SLATE_DETECTOR_VERSION,
             )
         except SlateDetectionUnavailable as exc:
             raise ApplicationError(
-                f"cannot resolve slate detection for dive {target.dive_id}: {exc}",
+                f"cannot resolve slate detection for dive {target.mission_id}: {exc}",
                 type="SlateDetectionUnavailable",
                 non_retryable=True,
             ) from exc
         activity.logger.info(
             "resolved slate detection inputs dive=%s images=%d",
-            target.dive_id,
+            target.mission_id,
             len(inputs.captures),
         )
         return DetectSlateImagesInput(
             tenant_id=target.tenant_id,
-            dive_id=target.dive_id,
+            mission_id=target.mission_id,
             camera_matrix=inputs.camera_matrix,
             distortion_coefficients=inputs.distortion_coefficients,
             images=[
@@ -163,19 +163,19 @@ class SlateDetectionActivities:
             return 0
         try:
             written = await self._catalog.persist_slate_presence(
-                target.tenant_id, target.dive_id, rows
+                target.tenant_id, target.mission_id, rows
             )
         except InvalidSlatePresence as exc:
             raise ApplicationError(
                 f"refusing the processor's slate predictions for dive "
-                f"{target.dive_id}: {exc}",
+                f"{target.mission_id}: {exc}",
                 type="InvalidPredictions",
                 non_retryable=True,
             ) from exc
         activity.logger.info(
             "persisted %d slate presence predictions dive=%s slate=%d",
             written,
-            target.dive_id,
+            target.mission_id,
             sum(
                 1
                 for r in results

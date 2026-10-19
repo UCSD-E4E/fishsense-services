@@ -44,7 +44,10 @@ from typing import Any, Sequence
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from fishsense_services_api.camera_sql import RECTIFIABLE_CAMERA_MODEL, RECTIFIABLE_DIVE
+from fishsense_services_api.camera_sql import (
+    RECTIFIABLE_CAMERA_MODEL,
+    RECTIFIABLE_MISSION,
+)
 from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
@@ -60,7 +63,7 @@ __all__ = [
     "SlatePresenceRow",
     "current_presence_is",
     "detector_slate_frame",
-    "next_dive_for_slate_detection",
+    "next_mission_for_slate_detection",
     "persist_slate_presence",
     "slate_detection_cohort",
     "slate_detection_inputs",
@@ -114,9 +117,9 @@ def slate_detection_cohort(version: str) -> str:
     """The slate-detection cohort over dive `d`, but for the tenant term the
     selector adds (there is no priority term); `version` is SQL for the
     model's current version (a bind parameter, or a literal in a view)."""
-    return f"""{RECTIFIABLE_DIVE} AND EXISTS (
+    return f"""{RECTIFIABLE_MISSION} AND EXISTS (
         SELECT 1 FROM captures c
-        WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id AND c.is_canonical
+        WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id AND c.is_canonical
           AND NOT {_fresh(version)}
     )"""
 
@@ -136,7 +139,7 @@ class ForeignCapture(InvalidSlatePresence):
 
 @dataclass(frozen=True)
 class SlateDetectionCandidate:
-    dive_id: uuid.UUID
+    mission_id: uuid.UUID
     created_at: datetime
 
 
@@ -149,7 +152,7 @@ class SlateDetectionCapture:
 
 @dataclass(frozen=True)
 class SlateDetectionInputs:
-    dive_id: uuid.UUID
+    mission_id: uuid.UUID
     camera_matrix: list[list[float]]
     distortion_coefficients: list[float]
     captures: list[SlateDetectionCapture]
@@ -187,7 +190,7 @@ class CurrentSlatePresence:
     created_at: datetime
 
 
-async def next_dive_for_slate_detection(
+async def next_mission_for_slate_detection(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
     *,
@@ -201,7 +204,7 @@ async def next_dive_for_slate_detection(
     row = (
         await conn.execute(
             text(f"""
-                SELECT d.id, d.created_at FROM dives d
+                SELECT d.id, d.created_at FROM missions d
                 WHERE d.tenant_id = :tenant
                   AND {slate_detection_cohort(":version")}
                   AND NOT d.id = ANY(CAST(:exclude AS uuid[]))
@@ -217,7 +220,7 @@ async def next_dive_for_slate_detection(
 async def slate_detection_inputs(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     *,
     model_version: int,
 ) -> SlateDetectionInputs:
@@ -228,29 +231,29 @@ async def slate_detection_inputs(
         await conn.execute(
             text("""
                 SELECT cc.camera_matrix, cc.distortion_coefficients
-                FROM dives d
+                FROM missions d
                 JOIN current_camera_calibrations cc
                   ON cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
                 WHERE d.tenant_id = :t AND d.id = :d AND cc.camera_model = :model
                 """),
-            {"t": tenant_id, "d": dive_id, "model": RECTIFIABLE_CAMERA_MODEL},
+            {"t": tenant_id, "d": mission_id, "model": RECTIFIABLE_CAMERA_MODEL},
         )
     ).one_or_none()
     if camera is None:
         raise SlateDetectionUnavailable(
-            f"dive_id={dive_id} has no pinhole camera calibration for its device"
+            f"dive_id={mission_id} has no pinhole camera calibration for its device"
         )
     rows = await conn.execute(
         text(f"""
             SELECT c.id, c.checksum FROM captures c
-            WHERE c.tenant_id = :t AND c.dive_id = :d AND c.is_canonical
+            WHERE c.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
               AND NOT {_fresh(":version")}
             ORDER BY c.number
             """),
-        {"t": tenant_id, "d": dive_id, "version": model_version},
+        {"t": tenant_id, "d": mission_id, "version": model_version},
     )
     return SlateDetectionInputs(
-        dive_id=dive_id,
+        mission_id=mission_id,
         camera_matrix=camera.camera_matrix,
         distortion_coefficients=list(camera.distortion_coefficients),
         captures=[SlateDetectionCapture(r.id, r.checksum) for r in rows],
@@ -260,7 +263,7 @@ async def slate_detection_inputs(
 async def persist_slate_presence(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     rows: Sequence[SlatePresenceRow],
 ) -> int:
     """Append the dive's predictions, abstentions included, all or nothing, in
@@ -278,15 +281,15 @@ async def persist_slate_presence(
             await conn.execute(
                 text("""
                     SELECT id FROM captures
-                    WHERE tenant_id = :t AND dive_id = :d AND id = ANY(:ids)
+                    WHERE tenant_id = :t AND mission_id = :d AND id = ANY(:ids)
                     """),
-                {"t": tenant_id, "d": dive_id, "ids": list(captures)},
+                {"t": tenant_id, "d": mission_id, "ids": list(captures)},
             )
         ).scalars()
     )
     if foreign := captures - owned:
         raise ForeignCapture(
-            f"not captures of dive {dive_id}: {sorted(map(str, foreign))}"
+            f"not captures of dive {mission_id}: {sorted(map(str, foreign))}"
         )
     for r in rows:
         render = r.render
@@ -317,7 +320,7 @@ async def persist_slate_presence(
 
 
 async def slate_presence(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> list[CurrentSlatePresence]:
     """The current prediction of each of the dive's canonical captures that
     has one, in capture order."""
@@ -327,10 +330,10 @@ async def slate_presence(
                    p.weights_sha256, p.created_at
             FROM current_slate_presence p
             JOIN captures c ON c.tenant_id = p.tenant_id AND c.id = p.capture_id
-            WHERE c.tenant_id = :t AND c.dive_id = :d AND c.is_canonical
+            WHERE c.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
             ORDER BY c.number
             """),
-        {"t": tenant_id, "d": dive_id},
+        {"t": tenant_id, "d": mission_id},
     )
     return [
         CurrentSlatePresence(
@@ -344,7 +347,7 @@ async def slate_presence(
 async def slate_frames(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     *,
     threshold: float = SLATE_PRESENCE_THRESHOLD,
 ) -> list[tuple[uuid.UUID, float]]:
@@ -357,11 +360,11 @@ async def slate_frames(
             SELECT p.capture_id, p.probability
             FROM current_slate_presence p
             JOIN captures c ON c.tenant_id = p.tenant_id AND c.id = p.capture_id
-            WHERE c.tenant_id = :t AND c.dive_id = :d AND c.is_canonical
+            WHERE c.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
               AND p.probability >= :threshold
             ORDER BY c.number
             """),
-        {"t": tenant_id, "d": dive_id, "threshold": threshold},
+        {"t": tenant_id, "d": mission_id, "threshold": threshold},
     )
     return [(r.capture_id, r.probability) for r in rows]
 
@@ -370,7 +373,7 @@ class SlatePresenceCatalog(ServicePrincipal):
     """The slate detector's database side, as the orchestrator's service
     principal (and the automatic chain's)."""
 
-    async def next_dive_for_slate_detection(
+    async def next_mission_for_slate_detection(
         self,
         tenant_id: uuid.UUID,
         *,
@@ -378,39 +381,39 @@ class SlatePresenceCatalog(ServicePrincipal):
         exclude: Sequence[uuid.UUID] = (),
     ) -> SlateDetectionCandidate | None:
         async with self._tenant(tenant_id) as conn:
-            return await next_dive_for_slate_detection(
+            return await next_mission_for_slate_detection(
                 conn, tenant_id, model_version=model_version, exclude=exclude
             )
 
     async def slate_detection_inputs(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, *, model_version: int
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, model_version: int
     ) -> SlateDetectionInputs:
         async with self._tenant(tenant_id) as conn:
             return await slate_detection_inputs(
-                conn, tenant_id, dive_id, model_version=model_version
+                conn, tenant_id, mission_id, model_version=model_version
             )
 
     async def persist_slate_presence(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         rows: Sequence[SlatePresenceRow],
     ) -> int:
         async with self._tenant(tenant_id) as conn:
-            return await persist_slate_presence(conn, tenant_id, dive_id, rows)
+            return await persist_slate_presence(conn, tenant_id, mission_id, rows)
 
     async def slate_presence(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> list[CurrentSlatePresence]:
         async with self._tenant(tenant_id) as conn:
-            return await slate_presence(conn, tenant_id, dive_id)
+            return await slate_presence(conn, tenant_id, mission_id)
 
     async def slate_frames(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         *,
         threshold: float = SLATE_PRESENCE_THRESHOLD,
     ) -> list[tuple[uuid.UUID, float]]:
         async with self._tenant(tenant_id) as conn:
-            return await slate_frames(conn, tenant_id, dive_id, threshold=threshold)
+            return await slate_frames(conn, tenant_id, mission_id, threshold=threshold)

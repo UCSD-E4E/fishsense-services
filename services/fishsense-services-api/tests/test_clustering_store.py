@@ -33,13 +33,13 @@ from fishsense_services_api.clustering_store import (
     ForeignCapture,
     InvalidClusters,
     canonical_capture_times,
-    next_dive_for_clustering,
+    next_mission_for_clustering,
     persist_prediction_clusters,
 )
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.ingest_store import (
-    create_dive,
-    finalize_dive,
+    create_mission,
+    finalize_mission,
     register_capture,
 )
 
@@ -59,16 +59,18 @@ async def _tenant(owner_engine, slug="lab") -> uuid.UUID:
 
 async def _dive(app_engine, tenant, path, *, priority="high") -> uuid.UUID:
     async with tenant_transaction(app_engine, tenant) as conn:
-        dive = await create_dive(conn, tenant, source_path=path, name=path, dived_at=T0)
-        await finalize_dive(conn, tenant, dive, priority=priority, dived_at=T0)
-    return dive
+        mission = await create_mission(
+            conn, tenant, source_path=path, name=path, started_at=T0
+        )
+        await finalize_mission(conn, tenant, mission, priority=priority, started_at=T0)
+    return mission
 
 
-async def _capture(app_engine, tenant, dive, name, *, checksum=None, at=T0):
+async def _capture(app_engine, tenant, mission, name, *, checksum=None, at=T0):
     async with tenant_transaction(app_engine, tenant) as conn:
         registered = await register_capture(
-            conn, tenant, dive_id=dive, device_id=None,
-            source_path=f"{dive}/{name}", captured_at=at,
+            conn, tenant, mission_id=mission, device_id=None,
+            source_path=f"{mission}/{name}", captured_at=at,
             checksum=checksum or uuid.uuid4().hex,
         )  # fmt: skip
     return registered.capture_id
@@ -88,21 +90,21 @@ async def _laser(owner_engine, tenant, capture, *, completed=True,
         )  # fmt: skip
 
 
-async def _cluster(owner_engine, tenant, dive, formed_by, captures=()):
+async def _cluster(owner_engine, tenant, mission, formed_by, captures=()):
     async with owner_engine.begin() as conn:
         cluster = (
             await conn.execute(
                 text(
-                    "INSERT INTO dive_frame_clusters (tenant_id, dive_id, formed_by) "
+                    "INSERT INTO mission_frame_clusters (tenant_id, mission_id, formed_by) "
                     "VALUES (:t, :d, :f) RETURNING id"
                 ),
-                {"t": tenant, "d": dive, "f": formed_by},
+                {"t": tenant, "d": mission, "f": formed_by},
             )
         ).scalar_one()
         for capture in captures:
             await conn.execute(
                 text(
-                    "INSERT INTO dive_frame_cluster_captures "
+                    "INSERT INTO mission_frame_cluster_captures "
                     "(tenant_id, cluster_id, capture_id) VALUES (:t, :k, :c)"
                 ),
                 {"t": tenant, "k": cluster, "c": capture},
@@ -111,20 +113,20 @@ async def _cluster(owner_engine, tenant, dive, formed_by, captures=()):
 
 async def _next(app_engine, tenant):
     async with tenant_transaction(app_engine, tenant) as conn:
-        candidate = await next_dive_for_clustering(conn, tenant)
-    return None if candidate is None else candidate.dive_id
+        candidate = await next_mission_for_clustering(conn, tenant)
+    return None if candidate is None else candidate.mission_id
 
 
-async def _clusters(owner_engine, dive) -> list[set[uuid.UUID]]:
+async def _clusters(owner_engine, mission) -> list[set[uuid.UUID]]:
     async with owner_engine.connect() as conn:
         rows = await conn.execute(
             text(
                 "SELECT k.id, array_agg(m.capture_id) AS captures "
-                "FROM dive_frame_clusters k JOIN dive_frame_cluster_captures m "
-                "ON m.cluster_id = k.id WHERE k.dive_id = :d "
+                "FROM mission_frame_clusters k JOIN mission_frame_cluster_captures m "
+                "ON m.cluster_id = k.id WHERE k.mission_id = :d "
                 "AND k.formed_by = 'prediction' GROUP BY k.id"
             ),
-            {"d": dive},
+            {"d": mission},
         )
         return [set(r.captures) for r in rows]
 
@@ -140,26 +142,26 @@ async def test_clustering_requires_valid_laser_and_no_prediction_cluster(
     # dive 2: valid laser + no clusters -> picked.
     # dive 3: no valid laser -> excluded.
     d1, d2, d3 = [await _dive(app_engine, lab, f"d{i}") for i in (1, 2, 3)]
-    for dive, completed in ((d1, True), (d2, True), (d3, False)):
-        capture = await _capture(app_engine, lab, dive, "P1.ORF")
+    for mission, completed in ((d1, True), (d2, True), (d3, False)):
+        capture = await _capture(app_engine, lab, mission, "P1.ORF")
         await _laser(owner_engine, lab, capture, completed=completed)
     await _cluster(owner_engine, lab, d1, "prediction")
 
     assert await _next(app_engine, lab) == d2
 
 
-async def test_clustering_excludes_dive_with_only_label_studio_cluster(
+async def test_clustering_excludes_mission_with_only_label_studio_cluster(
     owner_engine, app_engine
 ):
     """LABEL_STUDIO clusters come from stage 6.1 (label-time grouping)
     and don't count as PREDICTION clusters from stage 1. A dive whose
     only clusters are LABEL_STUDIO must still be picked for stage 1."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    await _laser(owner_engine, lab, await _capture(app_engine, lab, dive, "P1.ORF"))
-    await _cluster(owner_engine, lab, dive, "label_studio")
+    mission = await _dive(app_engine, lab, "d1")
+    await _laser(owner_engine, lab, await _capture(app_engine, lab, mission, "P1.ORF"))
+    await _cluster(owner_engine, lab, mission, "label_studio")
 
-    assert await _next(app_engine, lab) == dive
+    assert await _next(app_engine, lab) == mission
 
 
 @pytest.mark.parametrize(
@@ -180,8 +182,8 @@ async def test_clustering_excludes_incomplete_or_superseded_or_null_xy_lasers(
     'valid laser', because that's what calibration and the validator
     treat as usable."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    capture = await _capture(app_engine, lab, dive, "P1.ORF")
+    mission = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, mission, "P1.ORF")
     await _laser(owner_engine, lab, capture, **laser)
 
     assert await _next(app_engine, lab) is None
@@ -189,8 +191,8 @@ async def test_clustering_excludes_incomplete_or_superseded_or_null_xy_lasers(
 
 async def test_clustering_returns_none_with_no_high_priority(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1", priority="low")
-    await _laser(owner_engine, lab, await _capture(app_engine, lab, dive, "P1.ORF"))
+    mission = await _dive(app_engine, lab, "d1", priority="low")
+    await _laser(owner_engine, lab, await _capture(app_engine, lab, mission, "P1.ORF"))
 
     assert await _next(app_engine, lab) is None
 
@@ -217,11 +219,11 @@ async def test_clustering_gate_is_any_prediction_cluster(owner_engine, app_engin
     impossible: persist is all-or-nothing (see below), so the only way to
     have one prediction cluster is to have them all."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    captures = [await _capture(app_engine, lab, dive, f"P{i}.ORF") for i in range(3)]
+    mission = await _dive(app_engine, lab, "d1")
+    captures = [await _capture(app_engine, lab, mission, f"P{i}.ORF") for i in range(3)]
     for capture in captures:
         await _laser(owner_engine, lab, capture)
-    await _cluster(owner_engine, lab, dive, "prediction", captures[:1])
+    await _cluster(owner_engine, lab, mission, "prediction", captures[:1])
 
     assert await _next(app_engine, lab) is None
 
@@ -232,17 +234,19 @@ async def test_the_oldest_candidate_comes_first(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
     first = await _dive(app_engine, lab, "first")
     second = await _dive(app_engine, lab, "second")
-    for dive in (second, first):
-        await _laser(owner_engine, lab, await _capture(app_engine, lab, dive, "P.ORF"))
+    for mission in (second, first):
+        await _laser(
+            owner_engine, lab, await _capture(app_engine, lab, mission, "P.ORF")
+        )
 
     async with tenant_transaction(app_engine, lab) as conn:
-        candidate = await next_dive_for_clustering(conn, lab)
+        candidate = await next_mission_for_clustering(conn, lab)
 
-    assert candidate.dive_id == first
+    assert candidate.mission_id == first
     assert candidate.created_at is not None
 
 
-async def test_another_tenants_dive_is_never_a_candidate(owner_engine, app_engine):
+async def test_another_tenants_mission_is_never_a_candidate(owner_engine, app_engine):
     lab, partner = await _tenant(owner_engine), await _tenant(owner_engine, "partner")
     theirs = await _dive(app_engine, partner, "d1")
     await _laser(
@@ -255,7 +259,7 @@ async def test_another_tenants_dive_is_never_a_candidate(owner_engine, app_engin
 # -- the inputs (v1's resolver) --------------------------------------------------
 
 
-async def test_the_inputs_are_the_dives_canonical_captures_and_their_times(
+async def test_the_inputs_are_the_missions_canonical_captures_and_their_times(
     owner_engine, app_engine
 ):
     """Canonical frames only: the same physical frames live under several dives,
@@ -265,13 +269,15 @@ async def test_the_inputs_are_the_dives_canonical_captures_and_their_times(
     lab = await _tenant(owner_engine)
     elsewhere = await _dive(app_engine, lab, "elsewhere", priority="low")
     await _capture(app_engine, lab, elsewhere, "X.ORF", checksum="d" * 32)
-    dive = await _dive(app_engine, lab, "d1")
-    late = await _capture(app_engine, lab, dive, "B.ORF", at=T0 + timedelta(seconds=9))
-    early = await _capture(app_engine, lab, dive, "A.ORF", at=T0)
-    await _capture(app_engine, lab, dive, "X.ORF", checksum="d" * 32)  # a copy
+    mission = await _dive(app_engine, lab, "d1")
+    late = await _capture(
+        app_engine, lab, mission, "B.ORF", at=T0 + timedelta(seconds=9)
+    )
+    early = await _capture(app_engine, lab, mission, "A.ORF", at=T0)
+    await _capture(app_engine, lab, mission, "X.ORF", checksum="d" * 32)  # a copy
 
     async with tenant_transaction(app_engine, lab) as conn:
-        inputs = await canonical_capture_times(conn, lab, dive)
+        inputs = await canonical_capture_times(conn, lab, mission)
 
     assert inputs == [(early, T0), (late, T0 + timedelta(seconds=9))]
 
@@ -281,17 +287,19 @@ async def test_the_inputs_are_the_dives_canonical_captures_and_their_times(
 
 async def test_persists_one_prediction_cluster_per_group(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    a, b, c = [await _capture(app_engine, lab, dive, f"{n}.ORF") for n in "ABC"]
+    mission = await _dive(app_engine, lab, "d1")
+    a, b, c = [await _capture(app_engine, lab, mission, f"{n}.ORF") for n in "ABC"]
 
     async with tenant_transaction(app_engine, lab) as conn:
-        written = await persist_prediction_clusters(conn, lab, dive, [[a, b], [c], []])
+        written = await persist_prediction_clusters(
+            conn, lab, mission, [[a, b], [c], []]
+        )
 
     assert written == 2  # v1 skipped empty groups too
-    assert sorted(await _clusters(owner_engine, dive), key=len) == [{c}, {a, b}]
+    assert sorted(await _clusters(owner_engine, mission), key=len) == [{c}, {a, b}]
 
 
-async def test_a_capture_outside_the_dive_is_refused_and_nothing_is_written(
+async def test_a_capture_outside_the_mission_is_refused_and_nothing_is_written(
     owner_engine, app_engine
 ):
     """The processor runs on infrastructure we don't own (PLAN.md §9.11). A
@@ -299,17 +307,19 @@ async def test_a_capture_outside_the_dive_is_refused_and_nothing_is_written(
     a duplicate copy, or made up -- is refused, and because persist is one
     transaction, the groups before it are not written either."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
+    mission = await _dive(app_engine, lab, "d1")
     other = await _dive(app_engine, lab, "d2")
-    mine = await _capture(app_engine, lab, dive, "A.ORF")
+    mine = await _capture(app_engine, lab, mission, "A.ORF")
     theirs = await _capture(app_engine, lab, other, "B.ORF")
 
     for foreign in (theirs, uuid.uuid4()):
         with pytest.raises(ForeignCapture):
             async with tenant_transaction(app_engine, lab) as conn:
-                await persist_prediction_clusters(conn, lab, dive, [[mine], [foreign]])
+                await persist_prediction_clusters(
+                    conn, lab, mission, [[mine], [foreign]]
+                )
 
-    assert await _clusters(owner_engine, dive) == []
+    assert await _clusters(owner_engine, mission) == []
 
 
 async def test_persisting_again_writes_nothing(owner_engine, app_engine):
@@ -317,15 +327,15 @@ async def test_persisting_again_writes_nothing(owner_engine, app_engine):
     the clusters. Clustering is one-shot per dive (the cohort gate), so a dive
     that already has prediction clusters is left as it is."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    a = await _capture(app_engine, lab, dive, "A.ORF")
+    mission = await _dive(app_engine, lab, "d1")
+    a = await _capture(app_engine, lab, mission, "A.ORF")
 
     for _ in range(2):
         async with tenant_transaction(app_engine, lab) as conn:
-            written = await persist_prediction_clusters(conn, lab, dive, [[a]])
+            written = await persist_prediction_clusters(conn, lab, mission, [[a]])
 
     assert written == 0
-    assert await _clusters(owner_engine, dive) == [{a}]
+    assert await _clusters(owner_engine, mission) == [{a}]
 
 
 # -- the catalog, as the orchestrator's principal --------------------------------
@@ -347,30 +357,30 @@ async def test_the_catalog_runs_stage_1_within_a_tenant(
     owner_engine, app_engine, seed_memberships
 ):
     lab = (await seed_memberships({ORCHESTRATOR: {"lab": "member"}}))["lab"]
-    dive = await _dive(app_engine, lab, "d1")
-    capture = await _capture(app_engine, lab, dive, "A.ORF")
+    mission = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, mission, "A.ORF")
     await _laser(owner_engine, lab, capture)
     catalog = ClusteringCatalog(app_engine, sub=ORCHESTRATOR)
 
-    candidate = await catalog.next_dive_for_clustering(lab)
-    inputs = await catalog.canonical_capture_times(lab, dive)
-    written = await catalog.persist_prediction_clusters(lab, dive, [[capture]])
+    candidate = await catalog.next_mission_for_clustering(lab)
+    inputs = await catalog.canonical_capture_times(lab, mission)
+    written = await catalog.persist_prediction_clusters(lab, mission, [[capture]])
 
-    assert candidate.dive_id == dive
+    assert candidate.mission_id == mission
     assert inputs == [(capture, T0)]
     assert written == 1
-    assert await catalog.next_dive_for_clustering(lab) is None
+    assert await catalog.next_mission_for_clustering(lab) is None
 
 
 async def test_a_capture_in_two_clusters_is_refused(owner_engine, app_engine):
     """The kernel partitions the frames; output that doesn't is not the
     kernel's, and is refused rather than double-counted in stage 2."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(app_engine, lab, "d1")
-    a, b = [await _capture(app_engine, lab, dive, f"{n}.ORF") for n in "AB"]
+    mission = await _dive(app_engine, lab, "d1")
+    a, b = [await _capture(app_engine, lab, mission, f"{n}.ORF") for n in "AB"]
 
     with pytest.raises(InvalidClusters):
         async with tenant_transaction(app_engine, lab) as conn:
-            await persist_prediction_clusters(conn, lab, dive, [[a, b], [b]])
+            await persist_prediction_clusters(conn, lab, mission, [[a, b], [b]])
 
-    assert await _clusters(owner_engine, dive) == []
+    assert await _clusters(owner_engine, mission) == []

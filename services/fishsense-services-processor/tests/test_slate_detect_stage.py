@@ -46,7 +46,7 @@ from moto import mock_aws
 from PIL import Image
 from pydantic import ValidationError
 from temporalio import activity
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
 from temporalio.worker import Worker
@@ -466,18 +466,18 @@ async def _detect(payload: DetectSlateImageInput) -> SlatePresenceResult:
     )
 
 
-async def test_the_workflow_scores_every_frame_with_the_dives_intrinsics():
+async def test_the_workflow_scores_every_frame_with_the_missions_intrinsics():
     SEEN.clear()
     images = [DetectSlateImage(capture_id=uuid.uuid4(), raw=RAW) for _ in range(3)]
     payload = DetectSlateImagesInput(
         tenant_id=uuid.uuid4(),
-        dive_id=uuid.uuid4(),
+        mission_id=uuid.uuid4(),
         camera_matrix=K,
         distortion_coefficients=D,
         images=images,
     )
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,

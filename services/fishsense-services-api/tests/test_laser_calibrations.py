@@ -33,51 +33,56 @@ async def _tenant(conn, slug: str) -> uuid.UUID:
 async def _dive(conn, tenant, path: str, source=None) -> uuid.UUID:
     return await _one(
         conn,
-        "INSERT INTO dives (tenant_id, source_path, dived_at, "
-        "calibration_source_dive_id) VALUES (:t, :p, now(), :src) RETURNING id",
+        "INSERT INTO missions (tenant_id, source_path, started_at, "
+        "calibration_source_mission_id) VALUES (:t, :p, now(), :src) RETURNING id",
         t=tenant,
         p=path,
         src=source,
     )
 
 
-async def _accepted(conn, tenant, dive, **columns) -> uuid.UUID:
+async def _accepted(conn, tenant, mission, **columns) -> uuid.UUID:
     columns = {
         "laser_position": json.dumps(POSITION),
         "laser_axis": json.dumps(AXIS),
         **columns,
     }
     return await _calibration(
-        conn, tenant, dive, outcome="accepted", producer="slate", **columns
+        conn, tenant, mission, outcome="accepted", producer="slate", **columns
     )
 
 
-async def _refused(conn, tenant, dive, reason="baseline implausible") -> uuid.UUID:
+async def _refused(conn, tenant, mission, reason="baseline implausible") -> uuid.UUID:
     return await _calibration(
-        conn, tenant, dive, outcome="refused", producer="slate", refusal_reason=reason
+        conn,
+        tenant,
+        mission,
+        outcome="refused",
+        producer="slate",
+        refusal_reason=reason,
     )
 
 
-async def _calibration(conn, tenant, dive, **columns) -> uuid.UUID:
-    names = ", ".join(["tenant_id", "dive_id", *columns])
-    params = ", ".join([":tenant_id", ":dive_id", *(f":{c}" for c in columns)])
+async def _calibration(conn, tenant, mission, **columns) -> uuid.UUID:
+    names = ", ".join(["tenant_id", "mission_id", *columns])
+    params = ", ".join([":tenant_id", ":mission_id", *(f":{c}" for c in columns)])
     return await _one(
         conn,
         f"INSERT INTO laser_calibrations ({names}) VALUES ({params}) RETURNING id",
         tenant_id=tenant,
-        dive_id=dive,
+        mission_id=mission,
         **columns,
     )
 
 
-async def _effective(conn, dive) -> uuid.UUID | None:
+async def _effective(conn, mission) -> uuid.UUID | None:
     return (
         await conn.execute(
             text(
                 "SELECT laser_calibration_id FROM effective_laser_calibrations "
-                "WHERE dive_id = :d"
+                "WHERE mission_id = :d"
             ),
-            {"d": dive},
+            {"d": mission},
         )
     ).scalar_one_or_none()
 
@@ -96,10 +101,10 @@ async def test_the_app_role_appends_but_never_rewrites_a_calibration(
 ):
     async with owner_engine.begin() as conn:
         lab = await _tenant(conn, "lab")
-        dive = await _dive(conn, lab, "/a")
+        mission = await _dive(conn, lab, "/a")
 
     async with tenant_transaction(app_engine, lab) as conn:
-        await _accepted(conn, lab, dive)
+        await _accepted(conn, lab, mission)
 
     for statement in (
         "UPDATE laser_calibrations SET outcome = 'refused'",
@@ -112,56 +117,58 @@ async def test_the_app_role_appends_but_never_rewrites_a_calibration(
 
 async def test_an_accepted_calibration_carries_its_laser_geometry(owner):
     lab = await _tenant(owner, "lab")
-    dive = await _dive(owner, lab, "/a")
+    mission = await _dive(owner, lab, "/a")
 
     with pytest.raises(IntegrityError, match="check"):
         async with owner.begin_nested():
-            await _calibration(owner, lab, dive, outcome="accepted", producer="slate")
+            await _calibration(
+                owner, lab, mission, outcome="accepted", producer="slate"
+            )
 
 
 async def test_a_refusal_carries_its_reason(owner):
     lab = await _tenant(owner, "lab")
-    dive = await _dive(owner, lab, "/a")
+    mission = await _dive(owner, lab, "/a")
 
     with pytest.raises(IntegrityError, match="check"):
         async with owner.begin_nested():
-            await _calibration(owner, lab, dive, outcome="refused", producer="slate")
+            await _calibration(owner, lab, mission, outcome="refused", producer="slate")
 
 
 async def test_only_a_migrated_row_may_have_an_unknown_producer(owner):
     lab = await _tenant(owner, "lab")
-    dive = await _dive(owner, lab, "/a")
+    mission = await _dive(owner, lab, "/a")
     geometry = {
         "outcome": "accepted",
         "laser_position": json.dumps(POSITION),
         "laser_axis": json.dumps(AXIS),
     }
 
-    await _calibration(owner, lab, dive, v1_id=42, **geometry)
+    await _calibration(owner, lab, mission, v1_id=42, **geometry)
     with pytest.raises(IntegrityError, match="check"):
         async with owner.begin_nested():
-            await _calibration(owner, lab, dive, **geometry)
+            await _calibration(owner, lab, mission, **geometry)
 
 
 # --- current and effective --------------------------------------------------------
 
 
-async def test_a_later_refusal_leaves_the_dive_without_an_effective_calibration(
+async def test_a_later_refusal_leaves_the_mission_without_an_effective_calibration(
     owner,
 ):
     lab = await _tenant(owner, "lab")
-    dive = await _dive(owner, lab, "/a")
-    accepted = await _accepted(owner, lab, dive)
-    assert await _effective(owner, dive) == accepted
+    mission = await _dive(owner, lab, "/a")
+    accepted = await _accepted(owner, lab, mission)
+    assert await _effective(owner, mission) == accepted
 
-    await _refused(owner, lab, dive)
+    await _refused(owner, lab, mission)
 
-    assert await _effective(owner, dive) is None
+    assert await _effective(owner, mission) is None
     assert (
         await _one(
             owner,
-            "SELECT outcome FROM current_laser_calibrations WHERE dive_id = :d",
-            d=dive,
+            "SELECT outcome FROM current_laser_calibrations WHERE mission_id = :d",
+            d=mission,
         )
         == "refused"
     )
@@ -180,48 +187,48 @@ async def test_a_later_refusal_leaves_the_dive_without_an_effective_calibration(
 # refusal is the dive's current calibration, so it has none of its own).
 
 
-async def _effective_row(conn, dive):
+async def _effective_row(conn, mission):
     return (
         await conn.execute(
             text(
-                "SELECT laser_calibration_id, source_dive_id, borrowed "
-                "FROM effective_laser_calibrations WHERE dive_id = :d"
+                "SELECT laser_calibration_id, source_mission_id, borrowed "
+                "FROM effective_laser_calibrations WHERE mission_id = :d"
             ),
-            {"d": dive},
+            {"d": mission},
         )
     ).one_or_none()
 
 
-async def test_a_dives_own_calibration_wins_over_its_link(owner):
+async def test_a_missions_own_calibration_wins_over_its_link(owner):
     """Migration 0008 had this backwards (the link won) while saying it
     followed v1."""
     lab = await _tenant(owner, "lab")
     source = await _dive(owner, lab, "/source")
-    dive = await _dive(owner, lab, "/dive", source=source)
+    mission = await _dive(owner, lab, "/dive", source=source)
     await _accepted(owner, lab, source)
-    own = await _accepted(owner, lab, dive)
+    own = await _accepted(owner, lab, mission)
 
-    assert tuple(await _effective_row(owner, dive)) == (own, dive, False)
+    assert tuple(await _effective_row(owner, mission)) == (own, mission, False)
 
 
-async def test_a_dive_without_its_own_borrows_its_links(owner):
+async def test_a_mission_without_its_own_borrows_its_links(owner):
     lab = await _tenant(owner, "lab")
     source = await _dive(owner, lab, "/source")
-    dive = await _dive(owner, lab, "/dive", source=source)
+    mission = await _dive(owner, lab, "/dive", source=source)
     sources = await _accepted(owner, lab, source)
 
-    assert tuple(await _effective_row(owner, dive)) == (sources, source, True)
+    assert tuple(await _effective_row(owner, mission)) == (sources, source, True)
 
 
 async def test_a_refused_own_calibration_falls_back_to_the_link(owner):
     lab = await _tenant(owner, "lab")
     source = await _dive(owner, lab, "/source")
-    dive = await _dive(owner, lab, "/dive", source=source)
+    mission = await _dive(owner, lab, "/dive", source=source)
     sources = await _accepted(owner, lab, source)
-    await _accepted(owner, lab, dive)
-    await _refused(owner, lab, dive)
+    await _accepted(owner, lab, mission)
+    await _refused(owner, lab, mission)
 
-    assert await _effective(owner, dive) == sources
+    assert await _effective(owner, mission) == sources
 
 
 @pytest.mark.parametrize(
@@ -240,30 +247,30 @@ async def test_an_implausible_baseline_counts_as_no_calibration(
     owner, position, plausible
 ):
     lab = await _tenant(owner, "lab")
-    dive = await _dive(owner, lab, "/dive")
-    fit = await _accepted(owner, lab, dive, laser_position=json.dumps(position))
+    mission = await _dive(owner, lab, "/dive")
+    fit = await _accepted(owner, lab, mission, laser_position=json.dumps(position))
 
-    assert (await _effective(owner, dive) == fit) is plausible
+    assert (await _effective(owner, mission) == fit) is plausible
 
 
 async def test_an_implausible_own_calibration_falls_back_to_the_link(owner):
     lab = await _tenant(owner, "lab")
     source = await _dive(owner, lab, "/source")
-    dive = await _dive(owner, lab, "/dive", source=source)
+    mission = await _dive(owner, lab, "/dive", source=source)
     sources = await _accepted(owner, lab, source)
-    await _accepted(owner, lab, dive, laser_position=json.dumps([0.0235, 0, 0]))
+    await _accepted(owner, lab, mission, laser_position=json.dumps([0.0235, 0, 0]))
 
-    assert await _effective(owner, dive) == sources
+    assert await _effective(owner, mission) == sources
 
 
 async def test_an_implausible_borrowed_calibration_is_no_calibration(owner):
     """Dive 518's case: borrowing a known-wrong fit is the worst case."""
     lab = await _tenant(owner, "lab")
     source = await _dive(owner, lab, "/source")
-    dive = await _dive(owner, lab, "/dive", source=source)
+    mission = await _dive(owner, lab, "/dive", source=source)
     await _accepted(owner, lab, source, laser_position=json.dumps([0.026, 0, 0]))
 
-    assert await _effective(owner, dive) is None
+    assert await _effective(owner, mission) is None
 
 
 async def test_effective_calibrations_are_visible_only_within_the_tenant(

@@ -16,7 +16,7 @@ from fishsense_services_contracts.laser import LaserLabelRow
 
 SLOPE, INTERCEPT = 0.4, 100.0
 NORMAL = np.array([-SLOPE, 1.0]) / np.hypot(SLOPE, 1.0)
-DIVE = uuid.UUID("00000000-0000-0000-0000-00000000d1e0")
+MISSION = uuid.UUID("00000000-0000-0000-0000-00000000d1e0")
 
 
 def label_uuid(number: int) -> uuid.UUID:
@@ -36,7 +36,7 @@ def label(number, capture_number, xy, *, superseded=False, completed=True):
     )
 
 
-def prod_like_dive(n=80, offsets=None, superseded=(), seed=0, sigma=1.85):
+def prod_like_mission(n=80, offsets=None, superseded=(), seed=0, sigma=1.85):
     """v1's `_dive`: n positives on one line with prod-like perpendicular
     noise (~1.85 px), plus per-index offsets along the normal."""
     rng = np.random.default_rng(seed)
@@ -60,7 +60,7 @@ def colinear_labels(n, *, capture_start=1000):
     ]
 
 
-def reflection_dive(*, superseded_secondary=False):
+def reflection_mission(*, superseded_secondary=False):
     """Prod dive 77: a laser line and its specular reflection 45 px away."""
     labels = []
     for i in range(30):

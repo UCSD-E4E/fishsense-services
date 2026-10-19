@@ -82,12 +82,12 @@ with workflow.unsafe.imports_passed_through():
     )
 
 __all__ = [
-    "CreateDiveSlateLabelStudioProjectWorkflow",
+    "CreateMissionSlateLabelStudioProjectWorkflow",
     "POPULATE_RETRY",
     "PROJECT_CONCURRENCY",
-    "PopulateDiveSlateLabelStudioProjectWorkflow",
+    "PopulateMissionSlateLabelStudioProjectWorkflow",
     "PreprocessSlateImagesParentWorkflow",
-    "SyncLabelStudioDiveSlateLabelsWorkflow",
+    "SyncLabelStudioMissionSlateLabelsWorkflow",
 ]
 
 # Selector, resolver and flag writes are database round trips: one retry for a
@@ -107,7 +107,9 @@ async def _clear_flags(target: StagingTarget, checksums) -> int:
     return await workflow.execute_activity(
         "clear_slate_reprocess_flags",
         ClearSlateFlagsInput(
-            tenant_id=target.tenant_id, dive_id=target.dive_id, checksums=checksums
+            tenant_id=target.tenant_id,
+            mission_id=target.mission_id,
+            checksums=checksums,
         ),
         schedule_to_close_timeout=timedelta(minutes=15),
         retry_policy=_DB_FAIL_FAST,
@@ -141,7 +143,7 @@ class PreprocessSlateImagesParentWorkflow:
         )
         workflow.logger.info(
             "dispatching slate preprocess to the processor dive=%s images=%d slate=%s",
-            target.dive_id,
+            target.mission_id,
             len(plan.payload.images),
             plan.payload.slate_template_id,
         )
@@ -152,7 +154,7 @@ class PreprocessSlateImagesParentWorkflow:
             # is the lesser harm, so it is lowered and logged.
             workflow.logger.warning(
                 "reprocess flag resolved to no work; lowering it dive=%s",
-                target.dive_id,
+                target.mission_id,
             )
             await _clear_flags(target, None)
             return target
@@ -175,7 +177,7 @@ class PreprocessSlateImagesParentWorkflow:
             await workflow.execute_child_workflow(
                 "PreprocessSlateImagesWorkflow",
                 plan.payload,
-                id=raw_scratch_reader_id("preprocess-slate", target.dive_id),
+                id=raw_scratch_reader_id("preprocess-slate", target.mission_id),
                 task_queue=PROCESSOR_TASK_QUEUE,
                 execution_timeout=timedelta(hours=1),
                 id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
@@ -187,7 +189,7 @@ class PreprocessSlateImagesParentWorkflow:
             workflow.logger.info(
                 "dive=%s already has a child running; leaving its raw bytes and "
                 "reprocess flags alone",
-                target.dive_id,
+                target.mission_id,
             )
             return target
 
@@ -196,7 +198,7 @@ class PreprocessSlateImagesParentWorkflow:
             await workflow.execute_child_workflow(
                 "PopulateDiveSlateLabelStudioProjectWorkflow",
                 target,
-                id=f"populate-dive-slate-{target.dive_id}",
+                id=f"populate-dive-slate-{target.mission_id}",
                 execution_timeout=timedelta(minutes=30),
                 id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
             )
@@ -204,7 +206,7 @@ class PreprocessSlateImagesParentWorkflow:
             workflow.logger.info(
                 "populate-dive-slate-%s is still running; skipping duplicate "
                 "dispatch",
-                target.dive_id,
+                target.mission_id,
             )
 
         # Scoped to what this run redrew: the child can run for an hour, and
@@ -213,8 +215,8 @@ class PreprocessSlateImagesParentWorkflow:
         return target
 
 
-@workflow.defn
-class CreateDiveSlateLabelStudioProjectWorkflow:
+@workflow.defn(name="CreateDiveSlateLabelStudioProjectWorkflow")
+class CreateMissionSlateLabelStudioProjectWorkflow:
     # pylint: disable=too-few-public-methods
     """Idempotently create a dive's slate-labeling project; returns its id.
     Rarely needed on its own: populate calls the same activity first."""
@@ -230,8 +232,8 @@ class CreateDiveSlateLabelStudioProjectWorkflow:
         )
 
 
-@workflow.defn
-class PopulateDiveSlateLabelStudioProjectWorkflow:
+@workflow.defn(name="PopulateDiveSlateLabelStudioProjectWorkflow")
+class PopulateMissionSlateLabelStudioProjectWorkflow:
     # pylint: disable=too-few-public-methods
     """Create the dive's slate project if need be, then push one task per
     still-unlabeled slate frame. Returns the number of label rows written."""
@@ -249,7 +251,7 @@ class PopulateDiveSlateLabelStudioProjectWorkflow:
             "populate_dive_slate_label_studio_project",
             PopulateSlateProject(
                 tenant_id=target.tenant_id,
-                dive_id=target.dive_id,
+                mission_id=target.mission_id,
                 ls_project_id=project_id,
             ),
             schedule_to_close_timeout=timedelta(minutes=30),
@@ -259,8 +261,8 @@ class PopulateDiveSlateLabelStudioProjectWorkflow:
         )
 
 
-@workflow.defn
-class SyncLabelStudioDiveSlateLabelsWorkflow:
+@workflow.defn(name="SyncLabelStudioDiveSlateLabelsWorkflow")
+class SyncLabelStudioMissionSlateLabelsWorkflow:
     # pylint: disable=too-few-public-methods
     """Sync slate labels in from Label Studio, every project."""
 

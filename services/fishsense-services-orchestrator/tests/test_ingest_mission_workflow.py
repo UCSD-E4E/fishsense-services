@@ -1,4 +1,4 @@
-"""Contract tests for `IngestDiveWorkflow` -- the end-to-end ingest.
+"""Contract tests for `IngestMissionWorkflow` -- the end-to-end ingest.
 
 Ported from fishsense-lite@a8b2c3bc services/fishsense-api-workflow-worker/tests/
 test_ingest_dive_workflow.py. Test names, bodies and reasons are v1's; v2
@@ -19,17 +19,17 @@ import uuid
 from datetime import datetime, timezone
 
 from temporalio import activity
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
 from fishsense_services_orchestrator.ingest.activities import (
     BatchResult,
-    DiveFolderListing,
+    MissionFolderListing,
     IngestTotals,
 )
 from fishsense_services_orchestrator.ingest.contracts import (
-    IngestDiveRequest,
+    IngestMissionRequest,
     IngestPreflight,
     IngestReport,
     PreflightImage,
@@ -37,7 +37,7 @@ from fishsense_services_orchestrator.ingest.contracts import (
 from fishsense_services_orchestrator.ingest.nas import NasEntry
 from fishsense_services_orchestrator.ingest.workflow import (
     BATCH_SIZE,
-    IngestDiveWorkflow,
+    IngestMissionWorkflow,
 )
 
 TASK_QUEUE = "test-ingest"
@@ -45,7 +45,7 @@ FOLDER = "2024.06.20.REEF/082929_FishModels_FSL07"
 T = datetime(2024, 8, 21, 9, 30, 0, tzinfo=timezone.utc)
 TENANT = uuid.uuid4()
 DEVICE = uuid.uuid4()
-DIVE = uuid.uuid4()
+MISSION = uuid.uuid4()
 
 
 def _activities(calls, *, frames=2, errors=(), rejected=()):
@@ -55,10 +55,10 @@ def _activities(calls, *, frames=2, errors=(), rejected=()):
     ]
 
     @activity.defn(name="list_dive_folder")
-    async def _list(request: IngestDiveRequest) -> DiveFolderListing:
+    async def _list(request: IngestMissionRequest) -> MissionFolderListing:
         calls.append("list")
-        return DiveFolderListing(
-            folder_path=f"/root/{request.dive_path}",
+        return MissionFolderListing(
+            folder_path=f"/root/{request.mission_path}",
             files=[
                 NasEntry(path=i.path, name=i.path[-8:], is_dir=False, size=1)
                 for i in images
@@ -67,11 +67,11 @@ def _activities(calls, *, frames=2, errors=(), rejected=()):
 
     @activity.defn(name="preflight")
     async def _preflight(
-        request: IngestDiveRequest, listing: DiveFolderListing
+        request: IngestMissionRequest, listing: MissionFolderListing
     ) -> IngestPreflight:
         calls.append("preflight")
         return IngestPreflight(
-            dive_path=listing.folder_path,
+            mission_path=listing.folder_path,
             tenant_id=TENANT,
             images=images,
             resolved_device_id=DEVICE,
@@ -80,18 +80,18 @@ def _activities(calls, *, frames=2, errors=(), rejected=()):
 
     @activity.defn(name="create_dive")
     async def _create(
-        request: IngestDiveRequest, preflight: IngestPreflight
+        request: IngestMissionRequest, preflight: IngestPreflight
     ) -> uuid.UUID:
         calls.append("create")
-        return DIVE
+        return MISSION
 
     @activity.defn(name="scan_and_register")
     async def _scan(
-        tenant_id: uuid.UUID, dive_id: uuid.UUID, paths: list[str],
+        tenant_id: uuid.UUID, mission_id: uuid.UUID, paths: list[str],
         device_id: uuid.UUID | None,
     ) -> BatchResult:  # fmt: skip
         # v2: the tenant and device preflight resolved are what the scan uses.
-        assert (tenant_id, dive_id, device_id) == (TENANT, DIVE, DEVICE)
+        assert (tenant_id, mission_id, device_id) == (TENANT, MISSION, DEVICE)
         calls.append(f"scan:{len(paths)}")
         return BatchResult(
             registered=len(paths),
@@ -101,14 +101,14 @@ def _activities(calls, *, frames=2, errors=(), rejected=()):
 
     @activity.defn(name="finalize_dive")
     async def _finalize(
-        tenant_id: uuid.UUID, dive_id: uuid.UUID, request: IngestDiveRequest,
+        tenant_id: uuid.UUID, mission_id: uuid.UUID, request: IngestMissionRequest,
         totals: IngestTotals,
     ) -> IngestReport:  # fmt: skip
         assert tenant_id == TENANT
         calls.append("finalize")
         return IngestReport(
-            dive_path=request.dive_path,
-            dive_id=dive_id,
+            mission_path=request.mission_path,
+            mission_id=mission_id,
             total=totals.total,
             registered=totals.registered,
             skipped_existing=totals.skipped_existing,
@@ -122,16 +122,16 @@ def _activities(calls, *, frames=2, errors=(), rejected=()):
 async def _run(request, **kwargs):
     calls: list[str] = []
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,
             task_queue=TASK_QUEUE,
-            workflows=[IngestDiveWorkflow],
+            workflows=[IngestMissionWorkflow],
             activities=_activities(calls, **kwargs),
         ):
             report = await env.client.execute_workflow(
-                IngestDiveWorkflow.run,
+                IngestMissionWorkflow.run,
                 request,
                 id=f"{TASK_QUEUE}-{uuid.uuid4()}",
                 task_queue=TASK_QUEUE,
@@ -141,15 +141,15 @@ async def _run(request, **kwargs):
 
 def _request(**kwargs):
     kwargs.setdefault("tenant", "lab")
-    kwargs.setdefault("dive_path", FOLDER)
+    kwargs.setdefault("mission_path", FOLDER)
     kwargs.setdefault("self_calibrates", True)
-    return IngestDiveRequest(**kwargs)
+    return IngestMissionRequest(**kwargs)
 
 
 # -- the happy path ------------------------------------------------------------
 
 
-async def test_creates_the_dive_before_registering_and_finalizes_after():
+async def test_creates_the_mission_before_registering_and_finalizes_after():
     """The two-phase commit, as an ordering. `create` must precede every scan
     (frames need a dive to belong to) and `finalize` must follow all of them --
     it is the step that opens the commit flag."""
@@ -158,7 +158,7 @@ async def test_creates_the_dive_before_registering_and_finalizes_after():
     assert calls[:3] == ["list", "preflight", "create"]
     assert calls[-1] == "finalize"
     assert report.committed is True
-    assert report.dive_id == DIVE
+    assert report.mission_id == MISSION
 
 
 async def test_frames_are_scanned_in_batches():
@@ -188,7 +188,7 @@ async def test_a_dry_run_writes_nothing_and_returns_the_preflight():
     assert calls == ["list", "preflight"]
     assert report.committed is False
     assert report.preflight is not None
-    assert report.dive_id is None
+    assert report.mission_id is None
 
 
 async def test_a_failed_preflight_writes_nothing():

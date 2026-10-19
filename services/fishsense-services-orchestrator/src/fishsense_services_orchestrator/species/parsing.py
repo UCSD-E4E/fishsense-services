@@ -38,7 +38,7 @@ __all__ = [
 #: The `exclude` control's affirmative choice (the labeling XML's).
 TOP_THREE_CHOICE = "Top 3 photos of group"
 
-Dive = TypeVar("Dive", bound=Hashable)
+Mission = TypeVar("Mission", bound=Hashable)
 Target = TypeVar("Target")
 
 
@@ -201,8 +201,8 @@ def slate_not_in_list(results: list[dict]) -> bool:
 
 
 def reduce_winners(
-    votes: list[tuple[Dive, datetime | None, Target]],
-) -> dict[Dive, Target]:
+    votes: list[tuple[Mission, datetime | None, Target]],
+) -> dict[Mission, Target]:
     """Collapse per-image votes to one winner per dive.
 
     `votes` is `(dive, updated_at, choice)`. Most-recent completed annotation
@@ -210,10 +210,10 @@ def reduce_winners(
     with no timestamp never displaces one that has a timestamp.
     """
     best: dict = {}
-    for dive_id, ts, choice in votes:
-        current = best.get(dive_id)
+    for mission_id, ts, choice in votes:
+        current = best.get(mission_id)
         if current is None or (
             ts is not None and (current[0] is None or ts > current[0])
         ):
-            best[dive_id] = (ts, choice)
-    return {dive_id: choice for dive_id, (_, choice) in best.items()}
+            best[mission_id] = (ts, choice)
+    return {mission_id: choice for mission_id, (_, choice) in best.items()}

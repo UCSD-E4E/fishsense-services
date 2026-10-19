@@ -1,4 +1,4 @@
-"""`verify_dive_checksums` -- does the migrated data mean what we think it means?
+"""`verify_mission_checksums` -- does the migrated data mean what we think it means?
 
 Ported from fishsense-lite@77e8f8e5 services/fishsense-api-workflow-worker/
 tests/test_verify_dive_checksums_activity.py.
@@ -53,10 +53,10 @@ from fishsense_services_orchestrator.ops.checksums.contracts import (
 from ._tiff_builder import build_orf
 
 ROOT = "/fishsense_data/REEF/data"
-DIVE_FOLDER = "2024.06.20.REEF/082929_FishModels_FSL07"
+MISSION_FOLDER = "2024.06.20.REEF/082929_FishModels_FSL07"
 LAB = uuid.UUID("7b0c7d4e-3f58-4d8e-9a3c-0c5f1f7f2d11")
 REEF = uuid.UUID("0d0d0d0d-3f58-4d8e-9a3c-0c5f1f7f2d11")
-DIVE = uuid.UUID("11111111-2222-4333-8444-555555555555")
+MISSION = uuid.UUID("11111111-2222-4333-8444-555555555555")
 TAKEN = datetime(2024, 8, 21, 8, 56, 51, tzinfo=timezone.utc)
 
 
@@ -73,7 +73,7 @@ def _capture(number, name, data, *, checksum=None, taken=None, algorithm="md5"):
         checksum = hashlib.new(algorithm, data).hexdigest()
     return VerifyCapture(
         number=number,
-        source_path=f"{DIVE_FOLDER}/{name}",
+        source_path=f"{MISSION_FOLDER}/{name}",
         checksum=checksum,
         checksum_algorithm=algorithm,
         captured_at=TAKEN if taken is None else taken,
@@ -81,27 +81,27 @@ def _capture(number, name, data, *, checksum=None, taken=None, algorithm="md5"):
 
 
 class FakeCatalog:
-    """The checksum catalog, answered from memory: `dives` maps
+    """The checksum catalog, answered from memory: `missions` maps
     (tenant, number) -> dive id, and every dive holds `captures`."""
 
-    def __init__(self, captures, *, dives=None, tenants=(LAB,)):
+    def __init__(self, captures, *, missions=None, tenants=(LAB,)):
         self.captures = list(captures)
-        self.dives = {(LAB, 412): DIVE} if dives is None else dives
+        self.missions = {(LAB, 412): MISSION} if missions is None else missions
         self.tenants = list(tenants)
         self.asked: list[tuple[uuid.UUID, uuid.UUID]] = []
 
     async def member_tenants(self):
         return self.tenants
 
-    async def dive_by_number(self, tenant_id, number):
-        return self.dives.get((tenant_id, number))
+    async def mission_by_number(self, tenant_id, number):
+        return self.missions.get((tenant_id, number))
 
-    async def captures_to_verify(self, tenant_id, dive_id):
-        self.asked.append((tenant_id, dive_id))
+    async def captures_to_verify(self, tenant_id, mission_id):
+        self.asked.append((tenant_id, mission_id))
         return self.captures
 
-    async def canonical_dive_numbers(self, tenant_id):
-        return sorted(n for (t, n) in self.dives if t == tenant_id)
+    async def canonical_mission_numbers(self, tenant_id):
+        return sorted(n for (t, n) in self.missions if t == tenant_id)
 
 
 class FakeNas:
@@ -140,7 +140,7 @@ async def _run(captures, contents, *, limit=None, env=None, catalog=None, nas=No
     catalog = catalog or FakeCatalog(captures)
     nas = nas or FakeNas(contents)
     return await (env or ActivityEnvironment()).run(
-        _activities(catalog, nas).verify_dive_checksums, 412, limit
+        _activities(catalog, nas).verify_mission_checksums, 412, limit
     )
 
 
@@ -151,7 +151,7 @@ async def test_a_row_whose_stored_checksum_matches_the_file_is_counted_matched()
     data = _orf()
     report = await _run([_capture(1, "PA010001.ORF", data)], {"PA010001.ORF": data})
 
-    assert report.dive_number == 412
+    assert report.mission_number == 412
     assert report.checked == 1
     assert report.checksum_matched == 1
     assert report.mismatches == []
@@ -308,7 +308,7 @@ async def test_a_frame_with_no_nas_path_is_skipped_uncounted():
     held = dataclasses.replace(_capture(1, "X.ORF", data), source_path=None)
     report = await _run([held, _capture(2, "B.ORF", data)], {"B.ORF": data})
 
-    assert report.total_in_dive == 2
+    assert report.total_in_mission == 2
     assert report.checked == 1
 
 
@@ -320,21 +320,21 @@ async def test_the_nas_root_is_prepended_to_a_share_relative_path():
     nas = FakeNas({"P.ORF": data})
     await _run([_capture(1, "P.ORF", data)], {}, nas=nas)
 
-    assert nas.downloaded == [f"{ROOT}/{DIVE_FOLDER}/P.ORF"]
+    assert nas.downloaded == [f"{ROOT}/{MISSION_FOLDER}/P.ORF"]
 
 
-async def test_the_dive_is_found_in_whichever_served_tenant_holds_it():
-    catalog = FakeCatalog([], dives={(REEF, 412): DIVE}, tenants=[LAB, REEF])
+async def test_the_mission_is_found_in_whichever_served_tenant_holds_it():
+    catalog = FakeCatalog([], missions={(REEF, 412): MISSION}, tenants=[LAB, REEF])
     await _run([], {}, catalog=catalog)
 
-    assert catalog.asked == [(REEF, DIVE)]
+    assert catalog.asked == [(REEF, MISSION)]
 
 
-async def test_a_dive_that_does_not_exist_is_a_non_retryable_error():
+async def test_a_mission_that_does_not_exist_is_a_non_retryable_error():
     """v1 returned an empty report for an unknown dive id, so a typo read as a
     clean verification of zero frames."""
     with pytest.raises(ApplicationError) as raised:
-        await _run([], {}, catalog=FakeCatalog([], dives={}))
+        await _run([], {}, catalog=FakeCatalog([], missions={}))
 
     assert raised.value.non_retryable
     assert raised.value.type == "DiveNotFound"
@@ -352,7 +352,7 @@ async def test_a_limit_caps_how_many_frames_are_downloaded():
     report = await _run(captures, {}, limit=3, nas=nas)
 
     assert report.checked == 3
-    assert report.total_in_dive == 10
+    assert report.total_in_mission == 10
     assert len(nas.downloaded) == 3
 
 
@@ -378,8 +378,8 @@ async def test_a_retry_resumes_where_the_last_attempt_heartbeated():
     data = _orf()
     captures = [_capture(i, f"P{i}.ORF", data) for i in range(4)]
     earlier = VerifyChecksumsReport(
-        dive_number=412,
-        total_in_dive=4,
+        mission_number=412,
+        total_in_mission=4,
         checked=2,
         checksum_matched=1,
         mismatches=[{"capture_number": 1, "path": "x", "stored": "0", "computed": "1"}],
@@ -394,8 +394,8 @@ async def test_a_retry_resumes_where_the_last_attempt_heartbeated():
     report = await _run(captures, {}, env=env, nas=nas)
 
     assert nas.downloaded == [
-        f"{ROOT}/{DIVE_FOLDER}/P2.ORF",
-        f"{ROOT}/{DIVE_FOLDER}/P3.ORF",
+        f"{ROOT}/{MISSION_FOLDER}/P2.ORF",
+        f"{ROOT}/{MISSION_FOLDER}/P3.ORF",
     ]
     assert report.checked == 4
     assert report.checksum_matched == 3
@@ -405,14 +405,14 @@ async def test_a_retry_resumes_where_the_last_attempt_heartbeated():
 # -- the sweep's selector (v1's select_canonical_dive_ids_activity) ---------------
 
 
-async def test_the_sweep_takes_every_served_tenants_canonical_dives_in_order():
+async def test_the_sweep_takes_every_served_tenants_canonical_missions_in_order():
     catalog = FakeCatalog(
-        [], dives={(LAB, 66): DIVE, (REEF, 64): DIVE, (LAB, 11): DIVE},
+        [], missions={(LAB, 66): MISSION, (REEF, 64): MISSION, (LAB, 11): MISSION},
         tenants=[LAB, REEF],
     )  # fmt: skip
 
     numbers = await ActivityEnvironment().run(
-        _activities(catalog, FakeNas({})).select_canonical_dive_numbers
+        _activities(catalog, FakeNas({})).select_canonical_mission_numbers
     )
 
     assert numbers == [11, 64, 66]

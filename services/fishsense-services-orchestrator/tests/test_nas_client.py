@@ -11,7 +11,7 @@ JSON-error body after the staging activity's idle session timed out
 `get_file(mode='download')` implementation streamed the JSON-error
 body to disk and returned a tuple instead of raising; the surrounding
 wrapper only caught `FileStationError` exceptions, so the corruption
-slipped through silently. Callers (`stage_raw_bytes_for_dive_activity`)
+slipped through silently. Callers (`stage_raw_bytes_for_mission_activity`)
 read the JSON bytes via `read_bytes()` and uploaded them to the
 file-exchange as `.ORF` content — every subsequent stage-2
 `preprocess_species_image` activity received those JSON bytes, failed
@@ -38,9 +38,9 @@ from synology_filestation import SidNotFound
 def test_external_shape_preserved_for_activity_call_sites(monkeypatch):
     """Contract test for the public method shape of `NasClient`.
 
-    `stage_raw_bytes_for_dive_activity`, `stage_slate_pdf_activity`,
+    `stage_raw_bytes_for_mission_activity`, `stage_slate_pdf_activity`,
     `archive_processed_jpegs_to_nas_activity`, and
-    `cleanup_raw_bytes_for_dive_activity` all call into NasClient
+    `cleanup_raw_bytes_for_mission_activity` all call into NasClient
     using these exact keyword arguments. A future refactor that
     renames a method or drops a kwarg can't be caught at import time
     (call sites use `getattr` via `asyncio.to_thread` partials), so

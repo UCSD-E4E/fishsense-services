@@ -26,16 +26,16 @@ from fishsense_services_orchestrator.slates import workflows as slates
 from fishsense_services_orchestrator.species import workflows as species
 from fishsense_services_orchestrator.species.contracts import SpeciesTarget
 
-TENANT, DIVE = uuid.uuid4(), uuid.uuid4()
+TENANT, MISSION = uuid.uuid4(), uuid.uuid4()
 
 KINDS = {
-    "species": lambda: species.create_then_populate(SpeciesTarget(TENANT, DIVE)),
-    "headtail": lambda: headtail.create_then_populate(HeadtailTarget(TENANT, DIVE)),
+    "species": lambda: species.create_then_populate(SpeciesTarget(TENANT, MISSION)),
+    "headtail": lambda: headtail.create_then_populate(HeadtailTarget(TENANT, MISSION)),
     "laser": lambda: laser.PopulateLaserLabelStudioProjectWorkflow().run(
-        LaserTarget(tenant_id=TENANT, dive_id=DIVE)
+        LaserTarget(tenant_id=TENANT, mission_id=MISSION)
     ),
-    "slate": lambda: slates.PopulateDiveSlateLabelStudioProjectWorkflow().run(
-        StagingTarget(TENANT, DIVE)
+    "slate": lambda: slates.PopulateMissionSlateLabelStudioProjectWorkflow().run(
+        StagingTarget(TENANT, MISSION)
     ),
 }
 
@@ -80,16 +80,16 @@ def test_the_one_policy_is_v1s():
 
 CREATE_ONLY = {
     "species": lambda: species.CreateSpeciesLabelStudioProjectWorkflow().run(
-        SpeciesTarget(TENANT, DIVE)
+        SpeciesTarget(TENANT, MISSION)
     ),
     "headtail": lambda: headtail.CreateHeadTailLabelStudioProjectWorkflow().run(
-        HeadtailTarget(TENANT, DIVE)
+        HeadtailTarget(TENANT, MISSION)
     ),
     "laser": lambda: laser.CreateLaserLabelStudioProjectWorkflow().run(
-        LaserTarget(tenant_id=TENANT, dive_id=DIVE)
+        LaserTarget(tenant_id=TENANT, mission_id=MISSION)
     ),
-    "slate": lambda: slates.CreateDiveSlateLabelStudioProjectWorkflow().run(
-        StagingTarget(TENANT, DIVE)
+    "slate": lambda: slates.CreateMissionSlateLabelStudioProjectWorkflow().run(
+        StagingTarget(TENANT, MISSION)
     ),
 }
 

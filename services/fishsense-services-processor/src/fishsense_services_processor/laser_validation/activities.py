@@ -31,7 +31,7 @@ from temporalio import activity
 
 from fishsense_services_contracts.laser import (
     LASER_PREDICTOR_VERSION,
-    DivePlan,
+    MissionPlan,
     EvaluateLaserAutoAcceptInput,
     LaserAutoAcceptResult,
     LaserAutoAcceptSummary,
@@ -45,9 +45,9 @@ from fishsense_services_contracts.laser import (
     ValidateLaserLabelsInput,
 )
 from fishsense_services_processor.laser_validation.auto_accept import (
-    DiveIneligibleReason,
+    MissionIneligibleReason,
     FrameVerdict,
-    evaluate_dive,
+    evaluate_mission,
 )
 from fishsense_services_processor.laser_validation.judgement import (
     GATE,
@@ -57,9 +57,9 @@ from fishsense_services_processor.laser_validation.judgement import (
     NOT_CONFIDENT,
     REFLECTION,
     TOO_FEW,
-    judge_dive,
+    judge_mission,
 )
-from fishsense_services_processor.laser_validation.remediation import plan_dive
+from fishsense_services_processor.laser_validation.remediation import plan_mission
 from fishsense_services_processor.laser_validation.settings import (
     LaserAutoAcceptSettings,
 )
@@ -67,7 +67,7 @@ from fishsense_services_processor.laser_validation.settings import (
 __all__ = [
     "evaluate_laser_auto_accept",
     "plan_laser_supersede_remediation",
-    "validate_laser_labels_for_dive",
+    "validate_laser_labels_for_mission",
 ]
 
 
@@ -93,7 +93,7 @@ def _points(predictions) -> np.ndarray:
     ).reshape(-1, 2)
 
 
-def _refuse_dive(payload, reason: DiveIneligibleReason, enabled: bool):
+def _refuse_mission(payload, reason: MissionIneligibleReason, enabled: bool):
     """Every frame ineligible, with no margins: v1's `_refuse_dive`, for a
     refusal decided before the fit. The orchestrator writes each verdict that
     differs from the standing one, which is what clears an `auto_accept` left
@@ -102,18 +102,18 @@ def _refuse_dive(payload, reason: DiveIneligibleReason, enabled: bool):
         LaserFrameVerdict(
             prediction_id=p.prediction_id,
             auto_accept=False,
-            gate_verdict=FrameVerdict.DIVE_INELIGIBLE.value,
+            gate_verdict=FrameVerdict.MISSION_INELIGIBLE.value,
         )
         for p in payload.predictions
     ]
     summary = LaserAutoAcceptSummary(
-        dive_id=payload.dive_id,
+        mission_id=payload.mission_id,
         enabled=enabled,
         eligible=False,
         reason=reason.value,
         n_points=len(frames),
         auto_accepted=0,
-        verdicts={FrameVerdict.DIVE_INELIGIBLE.value: len(frames)},
+        verdicts={FrameVerdict.MISSION_INELIGIBLE.value: len(frames)},
     )
     return LaserAutoAcceptResult(summary=summary, frames=frames)
 
@@ -125,14 +125,15 @@ async def evaluate_laser_auto_accept(
     """Judge the dive's WHOLE current prediction set -- the gate's safety
     argument is consensus across the dive -- and return one verdict per
     prediction and the per-dive summary."""
-    dive = payload.dive_id
-    activity.logger.info("dive_id=%s auto-accept gate starting", dive)
+    mission = payload.mission_id
+    activity.logger.info("dive_id=%s auto-accept gate starting", mission)
     activity.heartbeat()
     predictions = payload.predictions
     if not predictions:
-        activity.logger.info("dive_id=%s has no laser predictions", dive)
+        activity.logger.info("dive_id=%s has no laser predictions", mission)
         return LaserAutoAcceptResult(
-            summary=LaserAutoAcceptSummary(dive_id=dive, eligible=False), frames=[]
+            summary=LaserAutoAcceptSummary(mission_id=mission, eligible=False),
+            frames=[],
         )
 
     config = LaserAutoAcceptSettings().config()
@@ -147,18 +148,18 @@ async def evaluate_laser_auto_accept(
         activity.logger.warning(
             "dive_id=%s refused: %d/%d predictions are not from detector v%d "
             "(versions present: %s); re-predict before judging",
-            dive,
+            mission,
             len(stale),
             len(predictions),
             LASER_PREDICTOR_VERSION,
             sorted({str(p.predictor_version) for p in stale}),
         )
-        return _refuse_dive(
-            payload, DiveIneligibleReason.STALE_PREDICTOR, config.enabled
+        return _refuse_mission(
+            payload, MissionIneligibleReason.STALE_PREDICTOR, config.enabled
         )
 
-    gate, decisions = evaluate_dive(
-        payload.dive_number,
+    gate, decisions = evaluate_mission(
+        payload.mission_number,
         [p.capture_number for p in predictions],
         _points(predictions),
         config=config,
@@ -167,7 +168,7 @@ async def evaluate_laser_auto_accept(
     activity.logger.info(
         "dive_id=%s gate enabled=%s eligible=%s reason=%s n=%d "
         "inliers=%d (%.0f%%) line_confidence=%.1f verdicts=%s",
-        dive,
+        mission,
         config.enabled,
         gate.eligible,
         gate.reason.value if gate.reason else None,
@@ -192,7 +193,7 @@ async def evaluate_laser_auto_accept(
     accepted = sum(1 for decision in decisions if decision.auto_accept)
     return LaserAutoAcceptResult(
         summary=LaserAutoAcceptSummary(
-            dive_id=dive,
+            mission_id=mission,
             enabled=config.enabled,
             eligible=gate.eligible,
             reason=gate.reason.value if gate.reason else None,
@@ -225,7 +226,7 @@ def _line(fit) -> LaserLineFit:
 
 
 @activity.defn(name="validate_laser_labels_for_dive")
-async def validate_laser_labels_for_dive(
+async def validate_laser_labels_for_mission(
     payload: ValidateLaserLabelsInput,
 ) -> LaserValidationResult:
     # pylint: disable=too-many-return-statements
@@ -235,30 +236,30 @@ async def validate_laser_labels_for_dive(
     fitted, and the labels to supersede: flagged AND still live, each with the
     rule that took it. Never a revival -- that is the reviewed remediation
     tool's."""
-    dive = payload.dive_id
+    mission = payload.mission_id
     activity.heartbeat()
     labels = payload.labels
     activity.logger.info(
-        "dive_id=%s validation starting; %d laser label rows", dive, len(labels)
+        "dive_id=%s validation starting; %d laser label rows", mission, len(labels)
     )
     calibration = set(payload.calibration_capture_numbers)
     activity.logger.info(
         "dive_id=%s has %d calibration frames among its slate labels; "
         "those are judged at %.0fpx rather than 3 sigma",
-        dive,
+        mission,
         len(calibration),
         COARSE_CALIBRATION_TOLERANCE_PX,
     )
 
-    judgement = judge_dive(labels, calibration)
+    judgement = judge_mission(labels, calibration)
     n_positives = len(judgement.positives)
     result = LaserValidationResult(
-        dive_id=dive, status=judgement.status, positives=n_positives
+        mission_id=mission, status=judgement.status, positives=n_positives
     )
     if judgement.status == TOO_FEW:
         activity.logger.info(
             "dive_id=%s has %d positive laser labels (<%d); skipping line fit",
-            dive,
+            mission,
             n_positives,
             MIN_POINTS_FOR_LINE,
         )
@@ -267,7 +268,7 @@ async def validate_laser_labels_for_dive(
         activity.logger.info(
             "dive_id=%s: line fit returned None despite %d positives "
             "(unexpected; check inputs)",
-            dive,
+            mission,
             n_positives,
         )
         return result
@@ -276,7 +277,7 @@ async def validate_laser_labels_for_dive(
     activity.logger.info(
         "dive_id=%s line fit: n=%d inliers=%d (%.0f%%) residual_std=%.2fpx "
         "label_noise_mad=%.2fpx line_confidence=%.1f confident=%s",
-        dive,
+        mission,
         fit.n_points,
         fit.inlier_count,
         100.0 * fit.inlier_fraction,
@@ -304,7 +305,7 @@ async def validate_laser_labels_for_dive(
             "deg). Likely specular-reflection mislabels; single-line validation "
             "cannot resolve which is real. Skipping supersede; manual "
             "remediation required before this dive's labels feed stage 13.",
-            dive,
+            mission,
             suspect.n_primary,
             suspect.n_secondary,
             suspect.separation_px,
@@ -313,7 +314,7 @@ async def validate_laser_labels_for_dive(
         return result
 
     if judgement.status in (NOT_CONFIDENT, NO_OUTLIERS):
-        activity.logger.info("dive_id=%s: no outlier laser labels", dive)
+        activity.logger.info("dive_id=%s: no outlier laser labels", mission)
         return result
 
     n_outliers = judgement.n_flagged_before_gate
@@ -322,7 +323,7 @@ async def validate_laser_labels_for_dive(
             "dive_id=%s would supersede %d/%d positive laser labels (%.0f%%, "
             "gate=%.0f%%); refusing -- line fit is likely degenerate. Labels "
             "left unchanged for manual review.",
-            dive,
+            mission,
             n_outliers,
             n_positives,
             100.0 * n_outliers / n_positives,
@@ -337,7 +338,7 @@ async def validate_laser_labels_for_dive(
         activity.logger.info(
             "dive_id=%s OUTLIER laser_label_number=%d capture_number=%d "
             "x=%.1f y=%.1f perp=%.2fpx rule=%s -> superseded=True",
-            dive,
+            mission,
             label.number,
             label.capture_number,
             float(label.x),
@@ -358,7 +359,7 @@ async def validate_laser_labels_for_dive(
     if not result.supersede:
         activity.logger.info(
             "dive_id=%s: %d outlier laser labels, all already superseded",
-            dive,
+            mission,
             n_outliers,
         )
     return result
@@ -370,13 +371,13 @@ async def validate_laser_labels_for_dive(
 @activity.defn(name="plan_laser_supersede_remediation")
 async def plan_laser_supersede_remediation(
     payload: PlanLaserRemediationInput,
-) -> DivePlan:
+) -> MissionPlan:
     """One dive's report row. Decides only."""
     activity.heartbeat()
-    return plan_dive(
-        payload.dive_id,
+    return plan_mission(
+        payload.mission_id,
         payload.labels,
         set(payload.calibration_capture_numbers),
         excluded_label_ids=set(payload.excluded_label_ids),
-        dive_excluded=payload.dive_excluded,
+        mission_excluded=payload.mission_excluded,
     )

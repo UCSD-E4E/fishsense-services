@@ -16,7 +16,7 @@ from depth_measure_seed import (
     capture,
     depth,
     device,
-    dive,
+    mission,
     exec_,
     fish,
     head_tail_label,
@@ -58,14 +58,14 @@ async def lite(
         n=device_name,
         d=device_id,
     )
-    dive_id = await dive(owner_engine, tenant_id, device_id=device_id)
+    mission_id = await mission(owner_engine, tenant_id, device_id=device_id)
     await exec_(
         owner_engine,
-        "UPDATE dives SET name = 'Alligator Deep' WHERE id = :d",
-        d=dive_id,
+        "UPDATE missions SET name = 'Alligator Deep' WHERE id = :d",
+        d=mission_id,
     )
-    calibration = await calibrate(owner_engine, tenant_id, dive_id)
-    capture_id = await capture(owner_engine, tenant_id, dive_id, canonical=canonical)
+    calibration = await calibrate(owner_engine, tenant_id, mission_id)
+    capture_id = await capture(owner_engine, tenant_id, mission_id, canonical=canonical)
     await exec_(
         owner_engine,
         "UPDATE captures SET device_id = :dev, captured_at = :at WHERE id = :c",

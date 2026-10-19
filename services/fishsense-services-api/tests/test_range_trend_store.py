@@ -25,7 +25,7 @@ from depth_measure_seed import (  # noqa: F401  (forget_identities: a fixture)
     capture,
     depth,
     device,
-    dive,
+    mission,
     exec_,
     fish,
     forget_identities,
@@ -40,11 +40,11 @@ from fishsense_services_api.range_trend_store import range_trend_inputs
 WEASLY = "Fish Model, Weasly Fish"
 
 
-async def _number(owner_engine, dive_id):
+async def _number(owner_engine, mission_id):
     async with owner_engine.connect() as conn:
         return (
             await conn.execute(
-                text("SELECT number FROM dives WHERE id = :d"), {"d": dive_id}
+                text("SELECT number FROM missions WHERE id = :d"), {"d": mission_id}
             )
         ).scalar_one()
 
@@ -58,15 +58,15 @@ async def _fish_number(owner_engine, fish_id):
         ).scalar_one()
 
 
-async def _inputs(app_engine, tenant_id, dive_number):
+async def _inputs(app_engine, tenant_id, mission_number):
     async with tenant_transaction(app_engine, tenant_id) as conn:
-        return await range_trend_inputs(conn, tenant_id, dive_number)
+        return await range_trend_inputs(conn, tenant_id, mission_number)
 
 
 async def _measured(
     owner_engine,
     lab,
-    dive_id,
+    mission_id,
     calibration,
     fish_id,
     *,
@@ -76,7 +76,7 @@ async def _measured(
     canonical=True,
 ):
     """A capture with a species label, a laser depth and a server measurement."""
-    capture_id = await capture(owner_engine, lab, dive_id, canonical=canonical)
+    capture_id = await capture(owner_engine, lab, mission_id, canonical=canonical)
     laser = await laser_label(owner_engine, lab, capture_id)
     if content is not None:
         await species_label(owner_engine, lab, capture_id, content)
@@ -98,16 +98,16 @@ async def test_reads_the_calibration_measurements_depths_and_rigid_names(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
-    dive_id, calibration = await calibrated_dive(owner_engine, lab)
+    mission_id, calibration = await calibrated_dive(owner_engine, lab)
     weasly = await fish(owner_engine, lab, model="Weasly Fish")
     wild = await fish(owner_engine, lab)
     rigid = await _measured(
-        owner_engine, lab, dive_id, calibration, weasly, length_m=0.31, depth_m=1.2
+        owner_engine, lab, mission_id, calibration, weasly, length_m=0.31, depth_m=1.2
     )
     real = await _measured(
         owner_engine,
         lab,
-        dive_id,
+        mission_id,
         calibration,
         wild,
         content="Fish, Hogfish (Lachnolaimus maximus)",
@@ -115,7 +115,7 @@ async def test_reads_the_calibration_measurements_depths_and_rigid_names(
         depth_m=2.5,
     )
 
-    inputs = await _inputs(app_engine, lab, await _number(owner_engine, dive_id))
+    inputs = await _inputs(app_engine, lab, await _number(owner_engine, mission_id))
 
     assert inputs.laser_position == [0.1, 0.0, 0.0]
     assert inputs.baseline_m == pytest.approx(0.1)
@@ -135,14 +135,14 @@ async def test_a_borrowed_calibration_is_the_one_resolved(owner_engine, app_engi
     await exec_(
         owner_engine,
         "UPDATE laser_calibrations SET laser_position = '[0.12, 0.0, 0.0]' "
-        "WHERE dive_id = :d",
+        "WHERE mission_id = :d",
         d=source,
     )
-    borrower = await dive(
+    borrower = await mission(
         owner_engine,
         lab,
         device_id=await device(owner_engine, lab),
-        source_dive=source,
+        source_mission=source,
     )
 
     inputs = await _inputs(app_engine, lab, await _number(owner_engine, borrower))
@@ -150,14 +150,16 @@ async def test_a_borrowed_calibration_is_the_one_resolved(owner_engine, app_engi
     assert inputs.baseline_m == pytest.approx(0.12)
 
 
-async def test_a_dive_without_a_usable_calibration_has_no_baseline(
+async def test_a_mission_without_a_usable_calibration_has_no_baseline(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
-    dive_id = await dive(owner_engine, lab, device_id=await device(owner_engine, lab))
-    await calibrate(owner_engine, lab, dive_id, outcome="refused")
+    mission_id = await mission(
+        owner_engine, lab, device_id=await device(owner_engine, lab)
+    )
+    await calibrate(owner_engine, lab, mission_id, outcome="refused")
 
-    inputs = await _inputs(app_engine, lab, await _number(owner_engine, dive_id))
+    inputs = await _inputs(app_engine, lab, await _number(owner_engine, mission_id))
 
     assert inputs.laser_position is None
     assert inputs.baseline_m is None
@@ -167,15 +169,15 @@ async def test_only_current_measurements_on_canonical_captures_are_read(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
-    dive_id, old = await calibrated_dive(owner_engine, lab)
+    mission_id, old = await calibrated_dive(owner_engine, lab)
     weasly = await fish(owner_engine, lab, model="Weasly Fish")
     # measured under the calibration the dive no longer resolves to
-    stale = await _measured(owner_engine, lab, dive_id, old, weasly)
-    new = await calibrate(owner_engine, lab, dive_id)
-    current = await _measured(owner_engine, lab, dive_id, new, weasly)
-    await _measured(owner_engine, lab, dive_id, new, weasly, canonical=False)
+    stale = await _measured(owner_engine, lab, mission_id, old, weasly)
+    new = await calibrate(owner_engine, lab, mission_id)
+    current = await _measured(owner_engine, lab, mission_id, new, weasly)
+    await _measured(owner_engine, lab, mission_id, new, weasly, canonical=False)
 
-    inputs = await _inputs(app_engine, lab, await _number(owner_engine, dive_id))
+    inputs = await _inputs(app_engine, lab, await _number(owner_engine, mission_id))
 
     assert [m.capture_id for m in inputs.measurements] == [current]
     assert stale not in inputs.depth_by_capture
@@ -186,31 +188,31 @@ async def test_names_come_only_from_completed_live_species_labels(
 ):
     lab = await tenant(owner_engine)
     # low priority: a relabel does not unbind the measurement (see 0028)
-    dive_id, calibration = await calibrated_dive(owner_engine, lab, priority="low")
+    mission_id, calibration = await calibrated_dive(owner_engine, lab, priority="low")
     weasly = await fish(owner_engine, lab, model="Weasly Fish")
-    superseded = await _measured(owner_engine, lab, dive_id, calibration, weasly)
+    superseded = await _measured(owner_engine, lab, mission_id, calibration, weasly)
     await exec_(
         owner_engine,
         "UPDATE species_labels SET superseded = true WHERE capture_id = :c",
         c=superseded,
     )
-    incomplete = await _measured(owner_engine, lab, dive_id, calibration, weasly)
+    incomplete = await _measured(owner_engine, lab, mission_id, calibration, weasly)
     await exec_(
         owner_engine,
         "UPDATE species_labels SET completed = false WHERE capture_id = :c",
         c=incomplete,
     )
-    relabelled = await _measured(owner_engine, lab, dive_id, calibration, weasly)
+    relabelled = await _measured(owner_engine, lab, mission_id, calibration, weasly)
     await species_label(owner_engine, lab, relabelled, "Calibration Targets, Box")
 
-    inputs = await _inputs(app_engine, lab, await _number(owner_engine, dive_id))
+    inputs = await _inputs(app_engine, lab, await _number(owner_engine, mission_id))
 
     assert superseded not in inputs.name_by_capture
     assert incomplete not in inputs.name_by_capture
     assert inputs.name_by_capture[relabelled] == "Box"  # the latest label
 
 
-async def test_another_tenants_dive_and_an_unknown_number_read_as_none(
+async def test_another_tenants_mission_and_an_unknown_number_read_as_none(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)

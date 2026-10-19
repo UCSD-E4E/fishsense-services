@@ -26,7 +26,7 @@ from datetime import timedelta
 from typing import List, Optional
 
 from temporalio import activity
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -67,8 +67,8 @@ from ._laser_workflows import (
 )
 
 QUEUE = "test-laser-parents"
-TENANT, DIVE = uuid.UUID(int=1), uuid.UUID(int=10)
-TARGET = LaserTarget(tenant_id=TENANT, dive_id=DIVE)
+TENANT, MISSION = uuid.UUID(int=1), uuid.UUID(int=10)
+TARGET = LaserTarget(tenant_id=TENANT, mission_id=MISSION)
 CAPTURES = [uuid.UUID(int=100 + i) for i in range(3)]
 K = [[3000.0, 0.0, 2000.0], [0.0, 3000.0, 1500.0], [0.0, 0.0, 1.0]]
 RAW = ObjectRef(bucket="scratch", key=f"tenants/{TENANT}/raw/abc.ORF")
@@ -119,7 +119,7 @@ class Script:
         async def resolve_pre(target: LaserTarget) -> PreprocessLaserImagesInput:
             record("resolve")
             return PreprocessLaserImagesInput(
-                dive_id=target.dive_id,
+                mission_id=target.mission_id,
                 images=[LaserPreprocessImage(capture_id=c, raw=RAW, jpeg=JPEG)
                         for c in s.images],
                 camera_matrix=K, distortion_coefficients=[0.0] * 5,
@@ -130,7 +130,7 @@ class Script:
         async def resolve_predict(target: LaserTarget) -> PredictLaserImagesInput:
             record("resolve")
             return PredictLaserImagesInput(
-                dive_id=target.dive_id,
+                mission_id=target.mission_id,
                 images=[LaserPredictImage(capture_id=c, raw=RAW) for c in s.images],
                 camera_matrix=K, distortion_coefficients=[0.0] * 5,
             )  # fmt: skip
@@ -180,7 +180,7 @@ class Script:
         async def resolve_gate(target: LaserTarget) -> EvaluateLaserAutoAcceptInput:
             record("resolve-gate")
             return EvaluateLaserAutoAcceptInput(
-                dive_id=target.dive_id, dive_number=7, predictions=[]
+                mission_id=target.mission_id, mission_number=7, predictions=[]
             )
 
         @activity.defn(name="record_laser_gate_verdicts")
@@ -201,13 +201,13 @@ class Script:
 
         @activity.defn(name="create_laser_label_studio_project")
         async def create(target: LaserTarget) -> int:
-            record(f"create:{target.dive_id.int}")
-            return 500 + target.dive_id.int
+            record(f"create:{target.mission_id.int}")
+            return 500 + target.mission_id.int
 
         @activity.defn(name="populate_laser_label_studio_project")
         async def populate(target: LaserTarget, project_id: int) -> int:
-            record(f"populate:{target.dive_id.int}:{project_id}")
-            if target.dive_id.int == 666:
+            record(f"populate:{target.mission_id.int}:{project_id}")
+            if target.mission_id.int == 666:
                 raise RuntimeError("simulated populate failure")
             return 1
 
@@ -230,7 +230,7 @@ class Script:
             s.children.append(("gate", workflow_id, activity.info().task_queue))
             return LaserAutoAcceptResult(
                 summary=LaserAutoAcceptSummary(
-                    dive_id=payload.dive_id, eligible=bool(s.auto_accepted),
+                    mission_id=payload.mission_id, eligible=bool(s.auto_accepted),
                     auto_accepted=s.auto_accepted,
                     verdicts={"auto_accepted": s.auto_accepted},
                 ),
@@ -249,7 +249,7 @@ class Script:
 async def _run(workflow_run, script: Script, *, before=None, arg=None):
     orchestrator, per_image, gpu, light = script.activities()
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with (
             Worker(env.client, task_queue=QUEUE,
@@ -289,7 +289,7 @@ async def test_dispatches_child_with_deterministic_id_and_correct_payload():
 
     assert result == TARGET
     assert script.children == [
-        ("preprocess", f"preprocess-laser-{DIVE}", PROCESSOR_TASK_QUEUE)
+        ("preprocess", f"preprocess-laser-{MISSION}", PROCESSOR_TASK_QUEUE)
     ]
     assert script.events == [
         "select", "resolve", "wake-per-image", "stage", "child", "cleanup", "clear"]  # fmt: skip
@@ -304,14 +304,14 @@ async def test_the_flag_clear_is_scoped_to_what_was_redrawn():
     assert script.cleared == [CAPTURES]
 
 
-async def test_returns_none_when_selector_finds_no_dive():
+async def test_returns_none_when_selector_finds_no_mission():
     script = Script(target=None)
 
     assert await _run(sut.PreprocessLaserImagesParentWorkflow.run, script) is None
     assert script.events == ["select"]
 
 
-async def test_no_work_lowers_the_whole_dives_flags_and_wakes_nothing():
+async def test_no_work_lowers_the_whole_missions_flags_and_wakes_nothing():
     """The flag is the one cohort term that never goes false by itself: dive
     60 blocked 84/465/471 until it was lowered."""
     script = Script(images=[])
@@ -330,7 +330,7 @@ async def test_a_running_child_owns_the_scratch_and_the_flags():
     await _run(
         sut.PreprocessLaserImagesParentWorkflow.run,
         script,
-        before=[f"preprocess-laser-{DIVE}"],
+        before=[f"preprocess-laser-{MISSION}"],
     )
 
     assert "cleanup" not in script.events and "clear" not in script.events
@@ -350,8 +350,8 @@ async def test_full_path_dispatches_child_persists_and_gates():
         "backfill", "wake-light", "resolve-gate", "gate", "record", "apply",
     ]  # fmt: skip
     assert script.children == [
-        ("predict", f"predict-laser-{DIVE}", PROCESSOR_GPU_TASK_QUEUE),
-        ("gate", f"auto-accept-laser-{DIVE}", PROCESSOR_LIGHT_TASK_QUEUE),
+        ("predict", f"predict-laser-{MISSION}", PROCESSOR_GPU_TASK_QUEUE),
+        ("gate", f"auto-accept-laser-{MISSION}", PROCESSOR_LIGHT_TASK_QUEUE),
     ]
 
 
@@ -410,7 +410,7 @@ async def test_a_running_predict_child_owns_the_scratch():
     await _run(
         sut.PredictLaserImagesParentWorkflow.run,
         script,
-        before=[f"predict-laser-{DIVE}"],
+        before=[f"predict-laser-{MISSION}"],
     )
 
     assert script.events == ["select", "resolve", "wake-gpu", "stage"]
@@ -424,7 +424,7 @@ async def test_a_running_gate_is_left_to_the_other_parent():
     await _run(
         sut.PredictLaserImagesParentWorkflow.run,
         script,
-        before=[f"auto-accept-laser-{DIVE}"],
+        before=[f"auto-accept-laser-{MISSION}"],
     )
 
     assert "record" not in script.events and "apply" not in script.events
@@ -440,7 +440,7 @@ async def test_empty_backlog_returns_none_and_touches_nothing():
     assert script.events == ["select"]
 
 
-async def test_selected_dive_is_judged_then_applied():
+async def test_selected_mission_is_judged_then_applied():
     script = Script()
 
     await _run(sut.EvaluateLaserAutoAcceptParentWorkflow.run, script)
@@ -449,7 +449,7 @@ async def test_selected_dive_is_judged_then_applied():
         "select", "wake-light", "resolve-gate", "gate", "record", "apply"]  # fmt: skip
 
 
-async def test_a_refused_dive_is_judged_but_not_applied():
+async def test_a_refused_mission_is_judged_but_not_applied():
     script = Script(auto_accepted=0)
 
     await _run(sut.EvaluateLaserAutoAcceptParentWorkflow.run, script)
@@ -457,7 +457,7 @@ async def test_a_refused_dive_is_judged_but_not_applied():
     assert "record" in script.events and "apply" not in script.events
 
 
-async def test_child_id_matches_the_predict_parent_so_a_dive_is_never_judged_twice():
+async def test_child_id_matches_the_predict_parent_so_a_mission_is_never_judged_twice():
     drain, predict = Script(), Script()
 
     await _run(sut.EvaluateLaserAutoAcceptParentWorkflow.run, drain)
@@ -469,7 +469,7 @@ async def test_child_id_matches_the_predict_parent_so_a_dive_is_never_judged_twi
         for kind, workflow_id, queue in script.children
         if kind == "gate" and queue == PROCESSOR_LIGHT_TASK_QUEUE
     }
-    assert gate_ids == {f"auto-accept-laser-{DIVE}"}
+    assert gate_ids == {f"auto-accept-laser-{MISSION}"}
 
 
 def test_the_whole_drain_fits_inside_v1s_deployed_run_timeout():
@@ -496,15 +496,15 @@ def test_the_whole_drain_fits_inside_v1s_deployed_run_timeout():
 # -- populate ---------------------------------------------------------------------
 
 
-async def test_fans_out_populate_child_per_dive_and_survives_one_failing():
-    dives = [
-        LaserTarget(tenant_id=TENANT, dive_id=uuid.UUID(int=n)) for n in (5, 666, 7)
+async def test_fans_out_populate_child_per_mission_and_survives_one_failing():
+    missions = [
+        LaserTarget(tenant_id=TENANT, mission_id=uuid.UUID(int=n)) for n in (5, 666, 7)
     ]
-    script = Script(populate=dives)
+    script = Script(populate=missions)
 
     result = await _run(sut.PopulateLaserLabelStudioProjectParentWorkflow.run, script)
 
-    assert [t.dive_id.int for t in result] == [5, 666, 7]
+    assert [t.mission_id.int for t in result] == [5, 666, 7]
     for n in (5, 7):
         assert f"create:{n}" in script.events
         assert f"populate:{n}:{500 + n}" in script.events
@@ -519,7 +519,7 @@ async def test_no_dispatch_when_cohort_empty():
     assert script.events == []
 
 
-async def test_create_then_populate_the_one_dive():
+async def test_create_then_populate_the_one_mission():
     script = Script()
 
     written = await _run(
@@ -528,8 +528,8 @@ async def test_create_then_populate_the_one_dive():
 
     assert written == 1
     assert script.events == [
-        f"create:{DIVE.int}",
-        f"populate:{DIVE.int}:{500 + DIVE.int}",
+        f"create:{MISSION.int}",
+        f"populate:{MISSION.int}:{500 + MISSION.int}",
     ]
 
 

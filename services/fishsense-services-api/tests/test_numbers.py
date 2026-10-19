@@ -45,11 +45,11 @@ async def _tenant(conn) -> uuid.UUID:
 
 
 async def _dive(conn, tenant, **columns):
-    names = ", ".join(["tenant_id", "source_path", "dived_at", *columns])
+    names = ", ".join(["tenant_id", "source_path", "started_at", *columns])
     values = ", ".join([":t", ":p", "now()", *(f":{c}" for c in columns)])
     return (
         await conn.execute(
-            text(f"INSERT INTO dives ({names}) VALUES ({values}) RETURNING number"),
+            text(f"INSERT INTO missions ({names}) VALUES ({values}) RETURNING number"),
             {"t": tenant, "p": f"d-{uuid.uuid4()}", **columns},
         )
     ).scalar_one()

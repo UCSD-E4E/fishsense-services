@@ -2,12 +2,12 @@
 
 Ported from fishsense-lite@77e8f8e5 services/fishsense-api/src/fishsense_api/
 controllers/: the stage-2 cohort (`select_next_for_species_preprocessing`)
-and the species-population cohort (`select_dives_needing_species_population`)
+and the species-population cohort (`select_missions_needing_species_population`)
 in dive_cohort_controller.py; `_set_needs_reprocess` (species) in
 label_reprocess_controller.py; the species-label reads and upsert
-(`get_species_labels_for_dive`, `put_species_label`) in label_controller.py;
-`get_clusters` / `post_cluster` in image_controller.py; and `set_dive_slate`,
-`set_dive_calibration_target`, `set_notes` and `_clear_refusal` in
+(`get_species_labels_for_mission`, `put_species_label`) in label_controller.py;
+`get_clusters` / `post_cluster` in image_controller.py; and `set_mission_slate`,
+`set_mission_calibration_target`, `set_notes` and `_clear_refusal` in
 dive_controller.py. The workers' SDK reads that fed stage 2, populate and
 stage 6.1 are single queries here, and their filtering stays in the
 orchestrator where v1's tests pin it.
@@ -47,7 +47,7 @@ v2 changes:
   them;
 * **writing a link expires a refusal instead of clearing it**: v2's refusal
   is an append-only `laser_calibrations` row, so the write stamps
-  `dives.calibration_links_changed_at` (migration 0022) and a refused
+  `missions.calibration_links_changed_at` (migration 0022) and a refused
   row older than the stamp no longer stands (`REFUSAL_OUTLIVED_SQL`);
 * calibration targets are versioned by `valid_from`, so a name resolves to its
   current row.
@@ -62,7 +62,10 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from fishsense_services_api.camera_sql import RECTIFIABLE_CAMERA_MODEL, RECTIFIABLE_DIVE
+from fishsense_services_api.camera_sql import (
+    RECTIFIABLE_CAMERA_MODEL,
+    RECTIFIABLE_MISSION,
+)
 from fishsense_services_api.clustering_store import (
     VALID_LASER,
     ForeignCapture,
@@ -84,15 +87,15 @@ __all__ = [
     "SpeciesPopulationFacts",
     "SpeciesPreprocessFacts",
     "calibration_targets_by_name",
-    "clear_dive_calibration_target",
-    "dives_needing_species_population",
-    "next_dive_for_species_preprocessing",
+    "clear_mission_calibration_target",
+    "missions_needing_species_population",
+    "next_mission_for_species_preprocessing",
     "note_unidentified_slate",
     "persist_label_studio_clusters",
     "record_species_label",
     "refusal_outlived_by_link_change",
-    "set_dive_calibration_target",
-    "set_dive_slate_template",
+    "set_mission_calibration_target",
+    "set_mission_slate_template",
     "set_species_needs_reprocess",
     "slate_templates_by_name",
     "species_grouping_facts",
@@ -141,14 +144,14 @@ SPECIES_PREPROCESS_WORK = f"""
             SELECT 1 FROM captures c
             JOIN laser_labels l
               ON l.tenant_id = c.tenant_id AND l.capture_id = c.id
-            WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+            WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id
               AND c.is_canonical AND {VALID_LASER}
               AND NOT {HAS_LIVE_SPECIES_TASK}
               -- The qualifying capture must itself be clustered:
               -- the resolver needs its cluster for "i of N".
               AND EXISTS (
-                  SELECT 1 FROM dive_frame_cluster_captures m
-                  JOIN dive_frame_clusters k
+                  SELECT 1 FROM mission_frame_cluster_captures m
+                  JOIN mission_frame_clusters k
                     ON k.tenant_id = m.tenant_id
                    AND k.id = m.cluster_id
                   WHERE m.tenant_id = c.tenant_id
@@ -160,7 +163,7 @@ SPECIES_PREPROCESS_WORK = f"""
             SELECT 1 FROM captures c
             JOIN species_labels s
               ON s.tenant_id = c.tenant_id AND s.capture_id = c.id
-            WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+            WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id
               AND c.is_canonical AND s.needs_reprocess
               AND NOT s.superseded
         )
@@ -169,7 +172,7 @@ SPECIES_PREPROCESS_WORK = f"""
 
 #: The stage-2 cohort over dive `d`, but for the tenant and priority terms the
 #: selector adds. v2: only a dive the resolver can rectify (`camera_sql`).
-SPECIES_PREPROCESS_COHORT = f"{RECTIFIABLE_DIVE} AND {SPECIES_PREPROCESS_WORK}"
+SPECIES_PREPROCESS_COHORT = f"{RECTIFIABLE_MISSION} AND {SPECIES_PREPROCESS_WORK}"
 
 _LABEL_COLUMNS = """
     s.id, s.number, s.capture_id, s.ls_project_id, s.ls_task_id, s.completed,
@@ -181,7 +184,7 @@ _LABEL_COLUMNS = """
 
 @dataclass(frozen=True)
 class SpeciesCandidate:
-    dive_id: uuid.UUID
+    mission_id: uuid.UUID
     created_at: datetime
 
 
@@ -265,14 +268,14 @@ class SpeciesGroupingFacts:
 # -- the cohorts ------------------------------------------------------------------
 
 
-async def next_dive_for_species_preprocessing(
+async def next_mission_for_species_preprocessing(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> SpeciesCandidate | None:
     """The tenant's oldest dive in the stage-2 cohort."""
     row = (
         await conn.execute(
             text(f"""
-                SELECT d.id, d.created_at FROM dives d
+                SELECT d.id, d.created_at FROM missions d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
                   AND {SPECIES_PREPROCESS_COHORT}
                 ORDER BY d.created_at, d.id
@@ -284,7 +287,7 @@ async def next_dive_for_species_preprocessing(
     return None if row is None else SpeciesCandidate(row.id, row.created_at)
 
 
-async def dives_needing_species_population(
+async def missions_needing_species_population(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> list[SpeciesCandidate]:
     """Every dive of the tenant needing species tasks (re)populated, oldest
@@ -292,13 +295,13 @@ async def dives_needing_species_population(
     checks itself."""
     rows = await conn.execute(
         text(f"""
-            SELECT d.id, d.created_at FROM dives d
+            SELECT d.id, d.created_at FROM missions d
             WHERE d.tenant_id = :tenant AND d.priority = 'high'
               AND EXISTS (
                   SELECT 1 FROM captures c
                   JOIN laser_labels l
                     ON l.tenant_id = c.tenant_id AND l.capture_id = c.id
-                  WHERE c.tenant_id = d.tenant_id AND c.dive_id = d.id
+                  WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id
                     AND c.is_canonical AND {VALID_LASER}
                     AND NOT {HAS_LIVE_SPECIES_TASK}
               )
@@ -313,7 +316,7 @@ async def dives_needing_species_population(
 
 
 async def _canonical_captures(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID, *, laser: bool
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, laser: bool
 ) -> list[SpeciesCapture]:
     valid = (
         f"""AND EXISTS (
@@ -329,11 +332,11 @@ async def _canonical_captures(
             SELECT c.id, c.number, c.checksum, c.v1_id IS NOT NULL AS from_v1,
                    c.captured_at
             FROM captures c
-            WHERE c.tenant_id = :tenant AND c.dive_id = :dive AND c.is_canonical
+            WHERE c.tenant_id = :tenant AND c.mission_id = :mission AND c.is_canonical
               {valid}
             ORDER BY c.captured_at, c.number
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     return [
         SpeciesCapture(r.id, r.number, r.checksum, r.from_v1, r.captured_at)
@@ -342,36 +345,36 @@ async def _canonical_captures(
 
 
 async def _prediction_clusters(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> list[list[uuid.UUID]]:
     rows = await conn.execute(
         text("""
             SELECT array_agg(c.id ORDER BY c.captured_at, c.number) AS members
-            FROM dive_frame_clusters k
-            JOIN dive_frame_cluster_captures m
+            FROM mission_frame_clusters k
+            JOIN mission_frame_cluster_captures m
               ON m.tenant_id = k.tenant_id AND m.cluster_id = k.id
             JOIN captures c ON c.tenant_id = m.tenant_id AND c.id = m.capture_id
-            WHERE k.tenant_id = :tenant AND k.dive_id = :dive
+            WHERE k.tenant_id = :tenant AND k.mission_id = :mission
               AND k.formed_by = 'prediction'
             GROUP BY k.id
             ORDER BY min(c.captured_at), min(c.number), k.id
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     return [list(r.members) for r in rows]
 
 
 async def _live_species_labels(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> list[SpeciesLabelRow]:
     rows = await conn.execute(
         text(f"""
             SELECT {_LABEL_COLUMNS} FROM species_labels s
             JOIN captures c ON c.tenant_id = s.tenant_id AND c.id = s.capture_id
-            WHERE s.tenant_id = :tenant AND c.dive_id = :dive AND NOT s.superseded
+            WHERE s.tenant_id = :tenant AND c.mission_id = :mission AND NOT s.superseded
             ORDER BY c.captured_at, c.number, s.number
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     return [SpeciesLabelRow(*r) for r in rows]
 
@@ -382,19 +385,19 @@ def _floats(value) -> list:
 
 
 async def species_preprocess_facts(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> SpeciesPreprocessFacts | None:
     """What the stage-2 resolver reads; None if the tenant has no such dive."""
-    dive = (
+    mission = (
         await conn.execute(
-            text("SELECT device_id FROM dives WHERE tenant_id = :t AND id = :d"),
-            {"t": tenant_id, "d": dive_id},
+            text("SELECT device_id FROM missions WHERE tenant_id = :t AND id = :d"),
+            {"t": tenant_id, "d": mission_id},
         )
     ).one_or_none()
-    if dive is None:
+    if mission is None:
         return None
     intrinsics = None
-    if dive.device_id is not None:
+    if mission.device_id is not None:
         calibration = (
             await conn.execute(
                 text("""
@@ -405,7 +408,7 @@ async def species_preprocess_facts(
                     """),
                 {
                     "t": tenant_id,
-                    "device": dive.device_id,
+                    "device": mission.device_id,
                     "model": RECTIFIABLE_CAMERA_MODEL,
                 },
             )
@@ -419,50 +422,50 @@ async def species_preprocess_facts(
         text(f"""
             SELECT DISTINCT c.id FROM captures c
             JOIN laser_labels l ON l.tenant_id = c.tenant_id AND l.capture_id = c.id
-            WHERE c.tenant_id = :tenant AND c.dive_id = :dive AND {VALID_LASER}
+            WHERE c.tenant_id = :tenant AND c.mission_id = :mission AND {VALID_LASER}
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     return SpeciesPreprocessFacts(
-        device_id=dive.device_id,
+        device_id=mission.device_id,
         intrinsics=intrinsics,
-        captures=await _canonical_captures(conn, tenant_id, dive_id, laser=False),
-        prediction_clusters=await _prediction_clusters(conn, tenant_id, dive_id),
+        captures=await _canonical_captures(conn, tenant_id, mission_id, laser=False),
+        prediction_clusters=await _prediction_clusters(conn, tenant_id, mission_id),
         valid_laser=frozenset(valid.scalars()),
-        species_labels=await _live_species_labels(conn, tenant_id, dive_id),
+        species_labels=await _live_species_labels(conn, tenant_id, mission_id),
     )
 
 
 async def species_population_facts(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> SpeciesPopulationFacts:
     """What populate selects its targets from."""
     return SpeciesPopulationFacts(
-        candidates=await _canonical_captures(conn, tenant_id, dive_id, laser=True),
-        species_labels=await _live_species_labels(conn, tenant_id, dive_id),
+        candidates=await _canonical_captures(conn, tenant_id, mission_id, laser=True),
+        species_labels=await _live_species_labels(conn, tenant_id, mission_id),
     )
 
 
 async def species_grouping_facts(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> SpeciesGroupingFacts:
     """What stage 6.1 reads."""
     grouped = (
         await conn.execute(
             text("""
                 SELECT EXISTS (
-                    SELECT 1 FROM dive_frame_clusters
-                    WHERE tenant_id = :tenant AND dive_id = :dive
+                    SELECT 1 FROM mission_frame_clusters
+                    WHERE tenant_id = :tenant AND mission_id = :mission
                       AND formed_by = 'label_studio'
                 )
                 """),
-            {"tenant": tenant_id, "dive": dive_id},
+            {"tenant": tenant_id, "mission": mission_id},
         )
     ).scalar_one()
     return SpeciesGroupingFacts(
         already_grouped=grouped,
-        prediction_clusters=await _prediction_clusters(conn, tenant_id, dive_id),
-        species_labels=await _live_species_labels(conn, tenant_id, dive_id),
+        prediction_clusters=await _prediction_clusters(conn, tenant_id, mission_id),
+        species_labels=await _live_species_labels(conn, tenant_id, mission_id),
     )
 
 
@@ -472,7 +475,7 @@ async def species_grouping_facts(
 async def set_species_needs_reprocess(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     value: bool,
     *,
     only_incomplete: bool = True,
@@ -499,13 +502,13 @@ async def set_species_needs_reprocess(
             UPDATE species_labels s SET needs_reprocess = :value
             FROM captures c
             WHERE s.tenant_id = :tenant AND c.tenant_id = s.tenant_id
-              AND c.id = s.capture_id AND c.dive_id = :dive AND c.is_canonical
+              AND c.id = s.capture_id AND c.mission_id = :mission AND c.is_canonical
               {" ".join(conditions)}
             """),
         {
             "value": value,
             "tenant": tenant_id,
-            "dive": dive_id,
+            "mission": mission_id,
             "captures": list(capture_ids or []),
         },
     )
@@ -591,7 +594,7 @@ async def supersede_species_labels(
 async def persist_label_studio_clusters(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     groups: list[list[uuid.UUID]],
 ) -> int | None:
     """Write stage 6.1's label-studio clusters, all or nothing, in the
@@ -609,44 +612,44 @@ async def persist_label_studio_clusters(
     """
     await conn.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-        {"key": f"label-studio-clusters:{dive_id}"},
+        {"key": f"label-studio-clusters:{mission_id}"},
     )
-    if (await species_grouping_facts(conn, tenant_id, dive_id)).already_grouped:
+    if (await species_grouping_facts(conn, tenant_id, mission_id)).already_grouped:
         return None
 
     members = {capture for group in groups for capture in group}
-    of_dive = {
+    of_mission = {
         r.id: r.is_canonical
         for r in await conn.execute(
             text("""
                 SELECT id, is_canonical FROM captures
-                WHERE tenant_id = :tenant AND dive_id = :dive AND id = ANY(:ids)
+                WHERE tenant_id = :tenant AND mission_id = :mission AND id = ANY(:ids)
                 """),
-            {"tenant": tenant_id, "dive": dive_id, "ids": list(members)},
+            {"tenant": tenant_id, "mission": mission_id, "ids": list(members)},
         )
     }
-    if foreign := members - of_dive.keys():
+    if foreign := members - of_mission.keys():
         raise ForeignCapture(
-            f"not captures of dive {dive_id}: {sorted(map(str, foreign))}"
+            f"not captures of dive {mission_id}: {sorted(map(str, foreign))}"
         )
-    groups = [kept for group in groups if (kept := [c for c in group if of_dive[c]])]
+    groups = [kept for group in groups if (kept := [c for c in group if of_mission[c]])]
     for group in groups:
         if len(set(group)) != len(group):
-            raise InvalidClusters(f"a capture repeats within a group of {dive_id}")
+            raise InvalidClusters(f"a capture repeats within a group of {mission_id}")
         cluster_id = (
             await conn.execute(
                 text("""
-                    INSERT INTO dive_frame_clusters
-                        (tenant_id, dive_id, formed_by, updated_at)
-                    VALUES (:tenant, :dive, 'label_studio', now())
+                    INSERT INTO mission_frame_clusters
+                        (tenant_id, mission_id, formed_by, updated_at)
+                    VALUES (:tenant, :mission, 'label_studio', now())
                     RETURNING id
                     """),
-                {"tenant": tenant_id, "dive": dive_id},
+                {"tenant": tenant_id, "mission": mission_id},
             )
         ).scalar_one()
         await conn.execute(
             text("""
-                INSERT INTO dive_frame_cluster_captures
+                INSERT INTO mission_frame_cluster_captures
                     (tenant_id, cluster_id, capture_id)
                 SELECT :tenant, :cluster, unnest(CAST(:captures AS uuid[]))
                 """),
@@ -670,45 +673,45 @@ async def calibration_targets_by_name(conn: AsyncConnection) -> dict[str, uuid.U
     return {r.name: r.id for r in rows}
 
 
-async def _set_link(conn, tenant_id, dive_id, column, value) -> bool:
+async def _set_link(conn, tenant_id, mission_id, column, value) -> bool:
     updated = await conn.execute(
         text(f"""
-            UPDATE dives SET {column} = :value, calibration_links_changed_at = now()
-            WHERE tenant_id = :tenant AND id = :dive
+            UPDATE missions SET {column} = :value, calibration_links_changed_at = now()
+            WHERE tenant_id = :tenant AND id = :mission
             """),
-        {"value": value, "tenant": tenant_id, "dive": dive_id},
+        {"value": value, "tenant": tenant_id, "mission": mission_id},
     )
     return updated.rowcount > 0
 
 
-async def set_dive_slate_template(
+async def set_mission_slate_template(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     slate_template_id: uuid.UUID,
 ) -> bool:
     """v1's `set_dive_slate`: set the dive's slate template, and expire any
     standing calibration refusal. False if the tenant has no such dive."""
     return await _set_link(
-        conn, tenant_id, dive_id, "slate_template_id", slate_template_id
+        conn, tenant_id, mission_id, "slate_template_id", slate_template_id
     )
 
 
-async def set_dive_calibration_target(
+async def set_mission_calibration_target(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     calibration_target_id: uuid.UUID,
 ) -> bool:
     """v1's `set_dive_calibration_target`: set the dive's planar calibration
     target, and expire any standing refusal. False if there is no such dive."""
     return await _set_link(
-        conn, tenant_id, dive_id, "calibration_target_id", calibration_target_id
+        conn, tenant_id, mission_id, "calibration_target_id", calibration_target_id
     )
 
 
-async def clear_dive_calibration_target(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+async def clear_mission_calibration_target(
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> bool:
     """v1's `clear_dive_calibration_target`: unlink the dive from any board
     (idempotent), so it leaves the checkerboard cohort. Like v1's, it does not
@@ -716,32 +719,32 @@ async def clear_dive_calibration_target(
     -- so it does not stamp the link change. False if there is no such dive."""
     updated = await conn.execute(
         text("""
-            UPDATE dives SET calibration_target_id = NULL
-            WHERE tenant_id = :tenant AND id = :dive
+            UPDATE missions SET calibration_target_id = NULL
+            WHERE tenant_id = :tenant AND id = :mission
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     return updated.rowcount > 0
 
 
 async def note_unidentified_slate(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID, note: str
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID, note: str
 ) -> bool:
     """Write `note` on a dive with no note; True if written. Never overwrites
     an operator's note, never touches priority (v1)."""
     updated = await conn.execute(
         text("""
-            UPDATE dives SET notes = :note
-            WHERE tenant_id = :tenant AND id = :dive
+            UPDATE missions SET notes = :note
+            WHERE tenant_id = :tenant AND id = :mission
               AND (notes IS NULL OR notes = '')
             """),
-        {"note": note, "tenant": tenant_id, "dive": dive_id},
+        {"note": note, "tenant": tenant_id, "mission": mission_id},
     )
     return updated.rowcount > 0
 
 
 async def refusal_outlived_by_link_change(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> bool:
     """Whether the dive's current calibration row is a refusal that a later
     link change has expired (`REFUSAL_OUTLIVED_SQL`)."""
@@ -750,13 +753,13 @@ async def refusal_outlived_by_link_change(
             await conn.execute(
                 text(f"""
                     SELECT {REFUSAL_OUTLIVED_SQL}
-                    FROM dives d
+                    FROM missions d
                     JOIN current_laser_calibrations r
-                      ON r.tenant_id = d.tenant_id AND r.dive_id = d.id
-                    WHERE d.tenant_id = :tenant AND d.id = :dive
+                      ON r.tenant_id = d.tenant_id AND r.mission_id = d.id
+                    WHERE d.tenant_id = :tenant AND d.id = :mission
                       AND r.outcome = 'refused'
                     """),
-                {"tenant": tenant_id, "dive": dive_id},
+                {"tenant": tenant_id, "mission": mission_id},
             )
         ).scalar_one_or_none()
     )
@@ -766,28 +769,28 @@ class SpeciesCatalog(ServicePrincipal):
     """The species stages' database side, as the orchestrator's service
     principal."""
 
-    async def next_dive_for_species_preprocessing(
+    async def next_mission_for_species_preprocessing(
         self, tenant_id: uuid.UUID
     ) -> SpeciesCandidate | None:
         async with self._tenant(tenant_id) as conn:
-            return await next_dive_for_species_preprocessing(conn, tenant_id)
+            return await next_mission_for_species_preprocessing(conn, tenant_id)
 
-    async def dives_needing_species_population(
+    async def missions_needing_species_population(
         self, tenant_id: uuid.UUID
     ) -> list[SpeciesCandidate]:
         async with self._tenant(tenant_id) as conn:
-            return await dives_needing_species_population(conn, tenant_id)
+            return await missions_needing_species_population(conn, tenant_id)
 
     async def species_preprocess_facts(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> SpeciesPreprocessFacts | None:
         async with self._tenant(tenant_id) as conn:
-            return await species_preprocess_facts(conn, tenant_id, dive_id)
+            return await species_preprocess_facts(conn, tenant_id, mission_id)
 
     async def set_species_needs_reprocess(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         value: bool,
         *,
         only_incomplete: bool = True,
@@ -797,17 +800,17 @@ class SpeciesCatalog(ServicePrincipal):
             return await set_species_needs_reprocess(
                 conn,
                 tenant_id,
-                dive_id,
+                mission_id,
                 value,
                 only_incomplete=only_incomplete,
                 capture_ids=capture_ids,
             )
 
     async def species_population_facts(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> SpeciesPopulationFacts:
         async with self._tenant(tenant_id) as conn:
-            return await species_population_facts(conn, tenant_id, dive_id)
+            return await species_population_facts(conn, tenant_id, mission_id)
 
     async def record_species_label(
         self,
@@ -835,16 +838,18 @@ class SpeciesCatalog(ServicePrincipal):
             return await supersede_species_labels(conn, tenant_id, label_ids)
 
     async def species_grouping_facts(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> SpeciesGroupingFacts:
         async with self._tenant(tenant_id) as conn:
-            return await species_grouping_facts(conn, tenant_id, dive_id)
+            return await species_grouping_facts(conn, tenant_id, mission_id)
 
     async def persist_label_studio_clusters(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, groups: list[list[uuid.UUID]]
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, groups: list[list[uuid.UUID]]
     ) -> int | None:
         async with self._tenant(tenant_id) as conn:
-            return await persist_label_studio_clusters(conn, tenant_id, dive_id, groups)
+            return await persist_label_studio_clusters(
+                conn, tenant_id, mission_id, groups
+            )
 
     async def slate_templates_by_name(
         self, tenant_id: uuid.UUID
@@ -858,27 +863,27 @@ class SpeciesCatalog(ServicePrincipal):
         async with self._tenant(tenant_id) as conn:
             return await calibration_targets_by_name(conn)
 
-    async def set_dive_slate_template(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, slate_template_id: uuid.UUID
+    async def set_mission_slate_template(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, slate_template_id: uuid.UUID
     ) -> bool:
         async with self._tenant(tenant_id) as conn:
-            return await set_dive_slate_template(
-                conn, tenant_id, dive_id, slate_template_id
+            return await set_mission_slate_template(
+                conn, tenant_id, mission_id, slate_template_id
             )
 
-    async def set_dive_calibration_target(
+    async def set_mission_calibration_target(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         calibration_target_id: uuid.UUID,
     ) -> bool:
         async with self._tenant(tenant_id) as conn:
-            return await set_dive_calibration_target(
-                conn, tenant_id, dive_id, calibration_target_id
+            return await set_mission_calibration_target(
+                conn, tenant_id, mission_id, calibration_target_id
             )
 
     async def note_unidentified_slate(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, note: str
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, note: str
     ) -> bool:
         async with self._tenant(tenant_id) as conn:
-            return await note_unidentified_slate(conn, tenant_id, dive_id, note)
+            return await note_unidentified_slate(conn, tenant_id, mission_id, note)

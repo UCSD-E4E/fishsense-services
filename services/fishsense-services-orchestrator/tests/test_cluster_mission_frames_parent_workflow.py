@@ -21,23 +21,23 @@ from datetime import datetime, timedelta, timezone
 from typing import List
 
 from temporalio import activity, workflow
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
 from fishsense_services_contracts import (
     PROCESSOR_LIGHT_TASK_QUEUE,
-    ClusterDiveFrameImage,
-    ClusterDiveFramesInput,
+    ClusterMissionFrameImage,
+    ClusterMissionFramesInput,
 )
 from fishsense_services_orchestrator.clustering.activities import ClusteringTarget
 from fishsense_services_orchestrator.clustering.workflow import (
-    ClusterDiveFramesParentWorkflow,
+    ClusterMissionFramesParentWorkflow,
 )
 
 _BASE = datetime(2026, 5, 5, 10, 0, 0, tzinfo=timezone.utc)
 TENANT = uuid.uuid4()
-DIVE = uuid.uuid4()
+MISSION = uuid.uuid4()
 A, B, C, D = (uuid.UUID(int=i) for i in range(1, 5))
 
 
@@ -45,12 +45,12 @@ A, B, C, D = (uuid.UUID(int=i) for i in range(1, 5))
 class _StubChildWorkflow:
     # pylint: disable=too-few-public-methods
     @workflow.run
-    async def run(self, payload: ClusterDiveFramesInput) -> List[List[uuid.UUID]]:
+    async def run(self, payload: ClusterMissionFramesInput) -> List[List[uuid.UUID]]:
         await workflow.execute_activity(
             "_record_child_dispatch",
             args=(
                 workflow.info().workflow_id,
-                payload.dive_id,
+                payload.mission_id,
                 [img.capture_id for img in payload.images],
             ),
             schedule_to_close_timeout=timedelta(seconds=5),
@@ -62,10 +62,10 @@ class _StubChildWorkflow:
 def _make_recording_activity(captures: List[tuple], events: List[str]):
     @activity.defn(name="_record_child_dispatch")
     async def record_child_dispatch(
-        workflow_id: str, dive_id: uuid.UUID, capture_ids: List[uuid.UUID]
+        workflow_id: str, mission_id: uuid.UUID, capture_ids: List[uuid.UUID]
     ) -> None:
         events.append("child")
-        captures.append((workflow_id, dive_id, capture_ids))
+        captures.append((workflow_id, mission_id, capture_ids))
 
     return record_child_dispatch
 
@@ -83,7 +83,7 @@ def _make_stubs(
         return selector_result
 
     @activity.defn(name="resolve_clustering_inputs")
-    async def stub_resolve(target: ClusteringTarget) -> ClusterDiveFramesInput:
+    async def stub_resolve(target: ClusteringTarget) -> ClusterMissionFramesInput:
         assert resolver_result is not None
         return resolver_result
 
@@ -103,13 +103,13 @@ async def _run(selector_result, resolver_result, *, before=None, events=None):
     child_runs: List[tuple] = []
     events = [] if events is None else events
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with (
             Worker(
                 env.client,
                 task_queue="test-stage1-parent",
-                workflows=[ClusterDiveFramesParentWorkflow],
+                workflows=[ClusterMissionFramesParentWorkflow],
                 activities=_make_stubs(
                     selector_result, resolver_result, persist_calls, events
                 ),
@@ -124,7 +124,7 @@ async def _run(selector_result, resolver_result, *, before=None, events=None):
             if before:
                 await before(env.client)
             result = await env.client.execute_workflow(
-                ClusterDiveFramesParentWorkflow.run,
+                ClusterMissionFramesParentWorkflow.run,
                 id=f"test-stage1-parent-{uuid.uuid4()}",
                 task_queue="test-stage1-parent",
             )
@@ -132,12 +132,12 @@ async def _run(selector_result, resolver_result, *, before=None, events=None):
 
 
 def _inputs(images=True):
-    return ClusterDiveFramesInput(
-        dive_id=DIVE,
+    return ClusterMissionFramesInput(
+        mission_id=MISSION,
         images=(
             [
-                ClusterDiveFrameImage(capture_id=A, taken_datetime=_BASE),
-                ClusterDiveFrameImage(
+                ClusterMissionFrameImage(capture_id=A, taken_datetime=_BASE),
+                ClusterMissionFrameImage(
                     capture_id=B, taken_datetime=_BASE + timedelta(seconds=1)
                 ),
             ]
@@ -147,7 +147,7 @@ def _inputs(images=True):
     )
 
 
-TARGET = ClusteringTarget(tenant_id=TENANT, dive_id=DIVE)
+TARGET = ClusteringTarget(tenant_id=TENANT, mission_id=MISSION)
 
 
 async def test_dispatches_child_with_deterministic_id_and_persists_clusters():
@@ -155,14 +155,14 @@ async def test_dispatches_child_with_deterministic_id_and_persists_clusters():
 
     assert result == TARGET
     assert len(child_runs) == 1
-    child_id, child_dive_id, capture_ids = child_runs[0]
-    assert child_id == f"cluster-{DIVE}"
-    assert child_dive_id == DIVE
+    child_id, child_mission_id, capture_ids = child_runs[0]
+    assert child_id == f"cluster-{MISSION}"
+    assert child_mission_id == MISSION
     assert capture_ids == [A, B]
     assert persist_calls == [(TARGET, [[A, B], [C, D]])]
 
 
-async def test_returns_none_when_no_dive():
+async def test_returns_none_when_no_mission():
     result, child_runs, persist_calls = await _run(None, None)
 
     assert result is None
@@ -188,7 +188,7 @@ async def test_a_completed_child_with_the_same_id_does_not_stop_the_persist():
         await client.execute_workflow(
             "DiveFrameClusteringWorkflow",
             _inputs(),
-            id=f"cluster-{DIVE}",
+            id=f"cluster-{MISSION}",
             task_queue=PROCESSOR_LIGHT_TASK_QUEUE,
             result_type=list,
         )

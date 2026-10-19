@@ -34,7 +34,7 @@ from fishsense_services_orchestrator.species.labeling import (
     SPECIES_LABELING_CONFIG_XML,
 )
 
-from ._species import DIVE, TENANT, FakeSpeciesCatalog, FakeStore
+from ._species import MISSION, TENANT, FakeSpeciesCatalog, FakeStore
 
 T0 = datetime(2026, 1, 1, tzinfo=UTC)
 REEF = uuid.uuid4()
@@ -55,7 +55,7 @@ async def test_passes_through_the_oldest_candidate_across_tenants():
     )
 
     target = await ActivityEnvironment().run(
-        _activities(catalog).select_next_dive_for_species_preprocessing
+        _activities(catalog).select_next_mission_for_species_preprocessing
     )
 
     assert target == SpeciesTarget(REEF, old)
@@ -66,13 +66,13 @@ async def test_returns_none_when_no_tenant_has_a_candidate():
 
     assert (
         await ActivityEnvironment().run(
-            _activities(catalog).select_next_dive_for_species_preprocessing
+            _activities(catalog).select_next_mission_for_species_preprocessing
         )
         is None
     )
 
 
-async def test_passes_through_every_dive_needing_population_oldest_first():
+async def test_passes_through_every_mission_needing_population_oldest_first():
     a, b, c = (uuid.uuid4() for _ in range(3))
     catalog = FakeSpeciesCatalog(
         tenants=[TENANT, REEF],
@@ -83,7 +83,7 @@ async def test_passes_through_every_dive_needing_population_oldest_first():
     )
 
     targets = await ActivityEnvironment().run(
-        _activities(catalog).select_dives_needing_species_population
+        _activities(catalog).select_missions_needing_species_population
     )
 
     assert targets == [
@@ -98,13 +98,13 @@ async def test_returns_empty_list_when_cohort_empty():
 
     assert (
         await ActivityEnvironment().run(
-            _activities(catalog).select_dives_needing_species_population
+            _activities(catalog).select_missions_needing_species_population
         )
         == []
     )
 
 
-async def test_the_clear_lowers_the_named_frames_or_the_whole_dive():
+async def test_the_clear_lowers_the_named_frames_or_the_whole_mission():
     """`None` is the whole dive (the no-work backstop); a list -- empty
     included -- is only those frames (v1's `ClearReprocessFlagsInput`)."""
     catalog = FakeSpeciesCatalog()
@@ -114,13 +114,13 @@ async def test_the_clear_lowers_the_named_frames_or_the_whole_dive():
     for scope in (None, [frame], []):
         await ActivityEnvironment().run(
             activities.clear_species_reprocess_flags,
-            ClearReprocessFlagsInput(TENANT, DIVE, scope),
+            ClearReprocessFlagsInput(TENANT, MISSION, scope),
         )
 
     assert catalog.calls == [
-        ("flag", DIVE, False, None),
-        ("flag", DIVE, False, [frame]),
-        ("flag", DIVE, False, []),
+        ("flag", MISSION, False, None),
+        ("flag", MISSION, False, [frame]),
+        ("flag", MISSION, False, []),
     ]
 
 
@@ -128,14 +128,14 @@ class FakeLabelProjects:
     def __init__(self):
         self.calls = []
 
-    async def ensure_dive_project(
-        self, tenant_id, dive_id, kind, *, suffix, labeling_config_xml
+    async def ensure_mission_project(
+        self, tenant_id, mission_id, kind, *, suffix, labeling_config_xml
     ):
-        self.calls.append((tenant_id, dive_id, kind, suffix, labeling_config_xml))
+        self.calls.append((tenant_id, mission_id, kind, suffix, labeling_config_xml))
         return 4242
 
 
-async def test_create_finds_or_creates_the_dives_species_project():
+async def test_create_finds_or_creates_the_missions_species_project():
     """Title `{name} #{number} - Species Labeling`, healed onto v1's XML."""
     projects = FakeLabelProjects()
 
@@ -143,10 +143,10 @@ async def test_create_finds_or_creates_the_dives_species_project():
         _activities(
             FakeSpeciesCatalog(), label_projects=projects
         ).create_species_label_studio_project,
-        SpeciesTarget(TENANT, DIVE),
+        SpeciesTarget(TENANT, MISSION),
     )
 
     assert project_id == 4242
     assert projects.calls == [
-        (TENANT, DIVE, "species", "Species Labeling", SPECIES_LABELING_CONFIG_XML)
+        (TENANT, MISSION, "species", "Species Labeling", SPECIES_LABELING_CONFIG_XML)
     ]

@@ -23,7 +23,7 @@ import uuid
 
 import pytest
 from temporalio import activity
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
 from temporalio.worker import Worker
@@ -33,12 +33,12 @@ from fishsense_services_api.regroup_store import ClustersChanged
 from fishsense_services_orchestrator.ops.regroup.activities import RegroupActivities
 from fishsense_services_orchestrator.ops.regroup.contracts import RegroupReport
 from fishsense_services_orchestrator.ops.regroup.plan import plan_regroup
-from fishsense_services_orchestrator.ops.regroup.workflow import RegroupDiveWorkflow
+from fishsense_services_orchestrator.ops.regroup.workflow import RegroupMissionWorkflow
 
-from .test_regroup_plan import _dive_341
+from .test_regroup_plan import _mission_341
 
 LAB = uuid.UUID("7b0c7d4e-3f58-4d8e-9a3c-0c5f1f7f2d11")
-DIVE = uuid.UUID("11111111-2222-4333-8444-555555555555")
+MISSION = uuid.UUID("11111111-2222-4333-8444-555555555555")
 
 
 class FakeCatalog:
@@ -51,38 +51,40 @@ class FakeCatalog:
     async def member_tenants(self):
         return [LAB]
 
-    async def dive_by_number(self, tenant_id, number):
-        return DIVE if (tenant_id, number) == (LAB, 341) else None
+    async def mission_by_number(self, tenant_id, number):
+        return MISSION if (tenant_id, number) == (LAB, 341) else None
 
-    async def regroup_facts(self, tenant_id, dive_id):
-        assert (tenant_id, dive_id) == (LAB, DIVE)
+    async def regroup_facts(self, tenant_id, mission_id):
+        assert (tenant_id, mission_id) == (LAB, MISSION)
         return self.facts
 
     async def replace_label_studio_clusters(
-        self, tenant_id, dive_id, clusters, *, expected_fingerprint
+        self, tenant_id, mission_id, clusters, *, expected_fingerprint
     ):
         if self.changed:
             raise ClustersChanged("changed")
         if self.refuse is not None:
             raise self.refuse
-        self.writes.append((tenant_id, dive_id, list(clusters), expected_fingerprint))
+        self.writes.append(
+            (tenant_id, mission_id, list(clusters), expected_fingerprint)
+        )
         return [k.fish_id for k in clusters]
 
 
 async def _run(catalog, *args) -> RegroupReport:
     return await ActivityEnvironment().run(
-        RegroupActivities(catalog=catalog).regroup_dive, *args
+        RegroupActivities(catalog=catalog).regroup_mission, *args
     )
 
 
-async def test_the_dive_alone_is_a_dry_run_that_reports_the_plan():
-    catalog = FakeCatalog(_dive_341())
+async def test_the_mission_alone_is_a_dry_run_that_reports_the_plan():
+    catalog = FakeCatalog(_mission_341())
 
     report = await _run(catalog, 341)
 
     assert catalog.writes == []
     assert report.applied is False
-    assert report.plan_sha256 == plan_regroup(_dive_341()).sha256
+    assert report.plan_sha256 == plan_regroup(_mission_341()).sha256
     assert [(m.capture_number, m.from_fish, m.to_fish) for m in report.moves] == [
         (302, 305, 307)
     ]
@@ -92,7 +94,7 @@ async def test_the_dive_alone_is_a_dry_run_that_reports_the_plan():
 
 @pytest.mark.parametrize("digest", [None, "0" * 64])
 async def test_an_apply_without_the_reviewed_plan_is_refused(digest):
-    catalog = FakeCatalog(_dive_341())
+    catalog = FakeCatalog(_mission_341())
 
     with pytest.raises(ApplicationError) as refused:
         await _run(catalog, 341, True, digest)
@@ -103,18 +105,18 @@ async def test_an_apply_without_the_reviewed_plan_is_refused(digest):
 
 
 async def test_an_apply_of_the_reviewed_plan_writes_it():
-    facts = _dive_341()
+    facts = _mission_341()
     plan = plan_regroup(facts)
     catalog = FakeCatalog(facts)
 
     report = await _run(catalog, 341, True, plan.sha256)
 
     assert report.applied is True
-    assert catalog.writes == [(LAB, DIVE, plan.clusters, facts.fingerprint)]
+    assert catalog.writes == [(LAB, MISSION, plan.clusters, facts.fingerprint)]
 
 
-async def test_an_apply_of_a_dive_already_grouped_that_way_writes_nothing():
-    facts = _dive_341(
+async def test_an_apply_of_a_mission_already_grouped_that_way_writes_nothing():
+    facts = _mission_341(
         current=((307, [300, 301, 302, 303]), (305, [434, 437])), stray=307
     )
     catalog = FakeCatalog(facts)
@@ -126,7 +128,7 @@ async def test_an_apply_of_a_dive_already_grouped_that_way_writes_nothing():
 
 
 async def test_clusters_changed_since_the_plan_are_refused():
-    facts = _dive_341()
+    facts = _mission_341()
     catalog = FakeCatalog(facts, changed=True)
 
     with pytest.raises(ApplicationError) as refused:
@@ -142,7 +144,7 @@ async def test_clusters_changed_since_the_plan_are_refused():
      ValueError("not real fish of the tenant")],
 )  # fmt: skip
 async def test_every_store_refusal_is_not_retried(refusal):
-    facts = _dive_341()
+    facts = _mission_341()
     catalog = FakeCatalog(facts, refuse=refusal)
 
     with pytest.raises(ApplicationError) as refused:
@@ -152,9 +154,9 @@ async def test_every_store_refusal_is_not_retried(refusal):
     assert refused.value.non_retryable
 
 
-async def test_an_unknown_dive_is_not_retried():
+async def test_an_unknown_mission_is_not_retried():
     with pytest.raises(ApplicationError) as refused:
-        await _run(FakeCatalog(_dive_341()), 9999)
+        await _run(FakeCatalog(_mission_341()), 9999)
 
     assert refused.value.type == "DiveNotFound"
     assert refused.value.non_retryable
@@ -170,23 +172,23 @@ async def _execute(args):
 
     @activity.defn(name="regroup_dive")
     async def regroup(
-        dive_number: int, apply: bool, digest: str | None
+        mission_number: int, apply: bool, digest: str | None
     ) -> RegroupReport:
-        calls.append((dive_number, apply, digest))
+        calls.append((mission_number, apply, digest))
         return RegroupReport(
-            dive_number=dive_number, applied=apply, noop=False, plan_sha256="x",
+            mission_number=mission_number, applied=apply, noop=False, plan_sha256="x",
             priority="high", clusters_before=0, clusters_after=0, measured_frames=0,
         )  # fmt: skip
 
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
-            env.client, task_queue=QUEUE, workflows=[RegroupDiveWorkflow],
+            env.client, task_queue=QUEUE, workflows=[RegroupMissionWorkflow],
             activities=[regroup],
         ):  # fmt: skip
             report = await env.client.execute_workflow(
-                RegroupDiveWorkflow.run, args=args,
+                RegroupMissionWorkflow.run, args=args,
                 id=f"{QUEUE}-{uuid.uuid4()}", task_queue=QUEUE,
             )  # fmt: skip
     return report, calls

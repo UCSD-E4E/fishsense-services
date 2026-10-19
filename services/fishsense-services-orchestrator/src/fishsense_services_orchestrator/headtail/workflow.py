@@ -164,7 +164,7 @@ class PreprocessHeadtailImagesParentWorkflow:
         )
         workflow.logger.info(
             "dispatching headtail preprocess to the processor dive=%s images=%d",
-            target.dive_id,
+            target.mission_id,
             len(inputs.images),
         )
 
@@ -173,19 +173,21 @@ class PreprocessHeadtailImagesParentWorkflow:
             # is re-selected -- and re-staged from the NAS -- every hour.
             workflow.logger.warning(
                 "reprocess flag resolved to no work; lowering it dive=%s",
-                target.dive_id,
+                target.mission_id,
             )
             await _clear_flags(target, None)
             return target
 
-        staging = StagingTarget(tenant_id=target.tenant_id, dive_id=target.dive_id)
+        staging = StagingTarget(
+            tenant_id=target.tenant_id, mission_id=target.mission_id
+        )
         await wake_per_image_processor()
         await stage_raw(staging)
         try:
             await workflow.execute_child_workflow(
                 "PreprocessHeadtailImagesWorkflow",
                 inputs,
-                id=raw_scratch_reader_id("preprocess-headtail", target.dive_id),
+                id=raw_scratch_reader_id("preprocess-headtail", target.mission_id),
                 task_queue=PROCESSOR_TASK_QUEUE,
                 execution_timeout=timedelta(hours=1),
                 id_reuse_policy=CHILD_ID_REUSE,
@@ -196,7 +198,7 @@ class PreprocessHeadtailImagesParentWorkflow:
             workflow.logger.info(
                 "preprocess-headtail-%s is still running; leaving its raw bytes "
                 "and reprocess flags alone",
-                target.dive_id,
+                target.mission_id,
             )
             return target
 
@@ -211,7 +213,9 @@ async def _clear_flags(target: HeadtailTarget, checksums: Optional[List[str]]) -
     await workflow.execute_activity(
         "clear_headtail_reprocess_flags",
         ClearHeadtailReprocessFlags(
-            tenant_id=target.tenant_id, dive_id=target.dive_id, checksums=checksums
+            tenant_id=target.tenant_id,
+            mission_id=target.mission_id,
+            checksums=checksums,
         ),
         schedule_to_close_timeout=timedelta(minutes=15),
         retry_policy=_DB_FAIL_FAST,
@@ -248,7 +252,7 @@ class PredictHeadtailImagesParentWorkflow:
         )
         workflow.logger.info(
             "dispatching headtail predict to the processor dive=%s images=%d",
-            target.dive_id,
+            target.mission_id,
             len(inputs.images),
         )
         if not inputs.images:
@@ -259,7 +263,7 @@ class PredictHeadtailImagesParentWorkflow:
             workflow.logger.warning(
                 "no worker available for the headtail-predict queue; "
                 "skipping dive=%s this firing",
-                target.dive_id,
+                target.mission_id,
             )
             return None
         workflow.logger.info("headtail predict running on %s capacity", mode)
@@ -269,7 +273,7 @@ class PredictHeadtailImagesParentWorkflow:
                 await workflow.execute_child_workflow(
                     "PredictHeadtailImagesWorkflow",
                     inputs,
-                    id=f"predict-headtail-{target.dive_id}",
+                    id=f"predict-headtail-{target.mission_id}",
                     task_queue=PROCESSOR_GPU_TASK_QUEUE,
                     execution_timeout=PREDICT_CHILD_TIMEOUT,
                     id_reuse_policy=CHILD_ID_REUSE,
@@ -279,7 +283,7 @@ class PredictHeadtailImagesParentWorkflow:
         except WorkflowAlreadyStartedError:
             workflow.logger.info(
                 "predict-headtail-%s is still running; it persists and backfills",
-                target.dive_id,
+                target.mission_id,
             )
             return target
 
@@ -359,7 +363,7 @@ class PopulateHeadTailLabelStudioProjectParentWorkflow:
                     await workflow.execute_child_workflow(
                         "PopulateHeadTailLabelStudioProjectWorkflow",
                         target,
-                        id=f"populate-headtail-{target.dive_id}",
+                        id=f"populate-headtail-{target.mission_id}",
                         execution_timeout=timedelta(minutes=30),
                         id_reuse_policy=CHILD_ID_REUSE,
                     )
@@ -367,7 +371,7 @@ class PopulateHeadTailLabelStudioProjectParentWorkflow:
                     workflow.logger.info(
                         "populate-headtail-%s already running; skipping duplicate "
                         "dispatch",
-                        target.dive_id,
+                        target.mission_id,
                     )
 
         # One dive's failure must not abort the fan-out.
@@ -377,7 +381,7 @@ class PopulateHeadTailLabelStudioProjectParentWorkflow:
         for target, outcome in zip(targets, outcomes):
             if isinstance(outcome, BaseException):
                 workflow.logger.error(
-                    "populate-headtail-%s failed: %s", target.dive_id, outcome
+                    "populate-headtail-%s failed: %s", target.mission_id, outcome
                 )
         return targets
 

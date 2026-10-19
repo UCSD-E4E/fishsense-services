@@ -61,13 +61,13 @@ from fishsense_services_orchestrator.object_store.contracts import StagingTarget
 from fishsense_services_orchestrator.slates.contracts import PopulateSlateProject
 
 __all__ = [
-    "DIVE_SLATE_LABELING_CONFIG_XML",
-    "DIVE_SLATE_PROJECT_TITLE_SUFFIX",
-    "DiveSlateProjectActivities",
+    "MISSION_SLATE_LABELING_CONFIG_XML",
+    "MISSION_SLATE_PROJECT_TITLE_SUFFIX",
+    "MissionSlateProjectActivities",
     "build_slate_task",
 ]
 
-DIVE_SLATE_PROJECT_TITLE_SUFFIX = "Dive Slate Labeling"
+MISSION_SLATE_PROJECT_TITLE_SUFFIX = "Dive Slate Labeling"
 
 # Labeling-config XML from the prod dive-slate project (v1's constant). Control
 # names map 1:1 to the slate label's fields, and the sync reads them by name:
@@ -76,7 +76,7 @@ DIVE_SLATE_PROJECT_TITLE_SUFFIX = "Dive Slate Labeling"
 #   * `skipped_points` (TextArea)    -> skipped_points
 # The `upside_down` Choices control was removed 2026-07-31 -- never read
 # downstream, and the slate geometry made it redundant.
-DIVE_SLATE_LABELING_CONFIG_XML = """\
+MISSION_SLATE_LABELING_CONFIG_XML = """\
 <View>
 
   <Image name="image" value="$image" zoom="true"/>
@@ -100,11 +100,11 @@ class _Catalog(Protocol):
     """See ``fishsense_services_api.slate_store.SlateCatalog``."""
 
     async def slate_populate_candidates(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> list[SlatePopulateCapture]: ...
 
-    async def dive_has_slate_labels_in_project(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, ls_project_id: int
+    async def mission_has_slate_labels_in_project(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, ls_project_id: int
     ) -> bool: ...
 
     async def record_slate_label(
@@ -121,7 +121,7 @@ class _Catalog(Protocol):
     async def supersede_stale_slate_labels(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         *,
         ls_project_id: int,
         keep_capture_ids: list[uuid.UUID],
@@ -141,7 +141,7 @@ def build_slate_task(capture: SlatePopulateCapture, jpeg: ObjectRef) -> dict:
     }
 
 
-class DiveSlateProjectActivities:
+class MissionSlateProjectActivities:
     def __init__(self, *, catalog: _Catalog, label_projects, label_studio, store):
         self._catalog = catalog
         self._projects = label_projects
@@ -149,19 +149,19 @@ class DiveSlateProjectActivities:
         self._store = store
 
     @activity.defn(name="create_dive_slate_label_studio_project")
-    async def create_dive_slate_label_studio_project(
+    async def create_mission_slate_label_studio_project(
         self, target: StagingTarget
     ) -> int:
         """The dive's slate-labeling project, found or created; its id."""
-        project_id = await self._projects.ensure_dive_project(
+        project_id = await self._projects.ensure_mission_project(
             target.tenant_id,
-            target.dive_id,
+            target.mission_id,
             "slate",
-            suffix=DIVE_SLATE_PROJECT_TITLE_SUFFIX,
-            labeling_config_xml=DIVE_SLATE_LABELING_CONFIG_XML,
+            suffix=MISSION_SLATE_PROJECT_TITLE_SUFFIX,
+            labeling_config_xml=MISSION_SLATE_LABELING_CONFIG_XML,
         )
         activity.logger.info(
-            "dive-slate LS project dive=%s project_id=%d", target.dive_id, project_id
+            "dive-slate LS project dive=%s project_id=%d", target.mission_id, project_id
         )
         return project_id
 
@@ -185,16 +185,18 @@ class DiveSlateProjectActivities:
         return present
 
     @activity.defn(name="populate_dive_slate_label_studio_project")
-    async def populate_dive_slate_label_studio_project(
+    async def populate_mission_slate_label_studio_project(
         self, payload: PopulateSlateProject
     ) -> int:
         """Push slate tasks for the dive into its project; the rows recorded."""
-        tenant_id, dive_id = payload.tenant_id, payload.dive_id
+        tenant_id, mission_id = payload.tenant_id, payload.mission_id
         project_id = payload.ls_project_id
 
-        candidates = await self._catalog.slate_populate_candidates(tenant_id, dive_id)
-        had_rows = await self._catalog.dive_has_slate_labels_in_project(
-            tenant_id, dive_id, project_id
+        candidates = await self._catalog.slate_populate_candidates(
+            tenant_id, mission_id
+        )
+        had_rows = await self._catalog.mission_has_slate_labels_in_project(
+            tenant_id, mission_id, project_id
         )
         present = await self._located(tenant_id, candidates)
 
@@ -219,20 +221,20 @@ class DiveSlateProjectActivities:
         if not present:
             activity.logger.info(
                 "dive %s has no slate frames ready for labeling; nothing imported",
-                dive_id,
+                mission_id,
             )
 
         # Exempt on CANDIDATES, not on what survived the JPEG gate: a deferred
         # JPEG means "not yet", not "no longer wanted".
         superseded = await self._catalog.supersede_stale_slate_labels(
             tenant_id,
-            dive_id,
+            mission_id,
             ls_project_id=project_id,
             keep_capture_ids=[capture.capture_id for capture in candidates],
         )
         if superseded:
             activity.logger.info(
-                "superseded %d stale slate label(s) of dive %s", superseded, dive_id
+                "superseded %d stale slate label(s) of dive %s", superseded, mission_id
             )
 
         if result.complete and (result.recorded > 0 or had_rows):

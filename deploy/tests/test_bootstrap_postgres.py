@@ -92,8 +92,8 @@ def _v1_as_the_slot_has_it(container) -> None:
     admin.dispose()
     v1 = _admin(container, "fishsense")
     with v1.connect() as conn:
-        conn.execute(text("CREATE TABLE dive (id int PRIMARY KEY, name text)"))
-        conn.execute(text("INSERT INTO dive VALUES (490, 'Nathans Pool')"))
+        conn.execute(text("CREATE TABLE mission (id int PRIMARY KEY, name text)"))
+        conn.execute(text("INSERT INTO mission VALUES (490, 'Nathans Pool')"))
     v1.dispose()
 
 
@@ -187,7 +187,7 @@ def test_the_owner_has_no_statement_timeout(migrated):
 
 def test_the_app_role_connects_under_rls(migrated):
     app = _login(migrated, "fishsense_app")
-    assert _scalar(app, "SELECT count(*) FROM dives") == 0
+    assert _scalar(app, "SELECT count(*) FROM missions") == 0
     assert _scalar(app, "SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user") is False  # fmt: skip
 
 
@@ -201,10 +201,10 @@ def test_v1s_roles_cannot_connect_to_v2s_database(migrated):
 
 def test_the_backup_reads_v1s_archive_and_superset_and_writes_neither(migrated):
     archive = _login(migrated, "fishsense_backup", "fishsense")
-    assert _scalar(archive, "SELECT name FROM dive WHERE id = 490") == "Nathans Pool"
+    assert _scalar(archive, "SELECT name FROM mission WHERE id = 490") == "Nathans Pool"
     assert _scalar(_login(migrated, "fishsense_backup", "superset"), "SELECT 1") == 1
     with pytest.raises(ProgrammingError, match="permission denied"):
-        _scalar(archive, "INSERT INTO dive VALUES (1, 'x') RETURNING id")
+        _scalar(archive, "INSERT INTO mission VALUES (1, 'x') RETURNING id")
 
 
 def test_v1s_database_is_untouched(migrated):
@@ -355,8 +355,8 @@ def test_the_smoke_login_reads_the_research_views(with_lab):
     count = _scalar(
         _login(cluster, "fishsense_smoke"),
         "SELECT count(*) FROM v1.measurement m JOIN v1.image i ON i.id = m.image_id "
-        "WHERE i.dive_id = :dive AND m.length_m IS NOT NULL",
-        dive=490,
+        "WHERE i.dive_id = :mission AND m.length_m IS NOT NULL",
+        mission=490,
     )
     assert count == 0
 

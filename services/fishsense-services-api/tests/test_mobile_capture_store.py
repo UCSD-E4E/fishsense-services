@@ -164,7 +164,7 @@ async def test_the_capture_row_names_its_rgb_by_checksum_and_device(
             await conn.execute(
                 text(
                     "SELECT c.checksum, c.checksum_algorithm, c.raw_object_key, "
-                    "c.is_canonical, c.dive_id, d.kind, d.serial "
+                    "c.is_canonical, c.mission_id, d.kind, d.serial "
                     "FROM captures c JOIN devices d ON d.id = c.device_id "
                     "WHERE c.id = :id"
                 ),
@@ -176,7 +176,7 @@ async def test_the_capture_row_names_its_rgb_by_checksum_and_device(
     assert (
         row.raw_object_key == f"mobile/captures/{capture.client_capture_uuid}/rgb_jpeg"
     )
-    assert row.is_canonical and row.dive_id is None
+    assert row.is_canonical and row.mission_id is None
     assert (row.kind, row.serial) == ("mobile", "install-1")
 
 

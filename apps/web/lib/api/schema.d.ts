@@ -42,159 +42,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/tenants/{slug}/dives": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Dives */
-        get: operations["list_dives"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tenants/{slug}/dives/{number}/calibration-refusal": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Clear Dive Calibration Refusal
-         * @description Clear dive ``number``'s standing calibration refusal, so it is
-         *     fitted again (idempotent): for a change its labels don't show.
-         */
-        delete: operations["clear_dive_calibration_refusal"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tenants/{slug}/dives/{number}/calibration-source": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Clear Dive Calibration Source
-         * @description Unlink dive ``number`` from any borrowed calibration (idempotent).
-         */
-        delete: operations["clear_dive_calibration_source"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tenants/{slug}/dives/{number}/calibration-source/{source_number}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Set Dive Calibration Source
-         * @description Dive ``number`` borrows dive ``source_number``'s laser calibration.
-         *
-         *     400 on a self-link; 404 if either dive is missing from the tenant.
-         */
-        put: operations["set_dive_calibration_source"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tenants/{slug}/dives/{number}/calibration-target": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Clear Dive Calibration Target
-         * @description Unlink dive ``number`` from any calibration target (idempotent): it
-         *     leaves the checkerboard cohort. A standing refusal is left as it is.
-         */
-        delete: operations["clear_dive_calibration_target"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tenants/{slug}/dives/{number}/calibration-target/{target_number}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Set Dive Calibration Target
-         * @description Dive ``number`` was shot against calibration target
-         *     ``target_number``: it enters the checkerboard cohort, and a standing
-         *     calibration refusal expires.
-         *
-         *     404 if the dive is missing from the tenant or no target has that
-         *     number.
-         */
-        put: operations["set_dive_calibration_target"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tenants/{slug}/dives/{number}/labels/{kind}/needs-reprocess": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Raise Needs Reprocess
-         * @description Redraw dive ``number``'s ``kind`` frames: the dive re-enters that
-         *     kind's preprocessing, and the JPEGs are redrawn where they are.
-         *     Incomplete labels only unless ``only_incomplete=false``.
-         */
-        put: operations["raise_needs_reprocess"];
-        post?: never;
-        /**
-         * Clear Needs Reprocess
-         * @description Withdraw a redraw of dive ``number``'s ``kind`` frames (idempotent:
-         *     0 when none was asked for).
-         */
-        delete: operations["clear_needs_reprocess"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/tenants/{slug}/label-studio-projects": {
         parameters: {
             query?: never;
@@ -227,6 +74,159 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/missions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Missions */
+        get: operations["list_missions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/missions/{number}/calibration-refusal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Clear Mission Calibration Refusal
+         * @description Clear dive ``number``'s standing calibration refusal, so it is
+         *     fitted again (idempotent): for a change its labels don't show.
+         */
+        delete: operations["clear_mission_calibration_refusal"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/missions/{number}/calibration-source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Clear Mission Calibration Source
+         * @description Unlink dive ``number`` from any borrowed calibration (idempotent).
+         */
+        delete: operations["clear_mission_calibration_source"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/missions/{number}/calibration-source/{source_number}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Mission Calibration Source
+         * @description Dive ``number`` borrows dive ``source_number``'s laser calibration.
+         *
+         *     400 on a self-link; 404 if either dive is missing from the tenant.
+         */
+        put: operations["set_mission_calibration_source"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/missions/{number}/calibration-target": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Clear Mission Calibration Target
+         * @description Unlink dive ``number`` from any calibration target (idempotent): it
+         *     leaves the checkerboard cohort. A standing refusal is left as it is.
+         */
+        delete: operations["clear_mission_calibration_target"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/missions/{number}/calibration-target/{target_number}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Mission Calibration Target
+         * @description Dive ``number`` was shot against calibration target
+         *     ``target_number``: it enters the checkerboard cohort, and a standing
+         *     calibration refusal expires.
+         *
+         *     404 if the dive is missing from the tenant or no target has that
+         *     number.
+         */
+        put: operations["set_mission_calibration_target"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/missions/{number}/labels/{kind}/needs-reprocess": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Raise Needs Reprocess
+         * @description Redraw dive ``number``'s ``kind`` frames: the dive re-enters that
+         *     kind's preprocessing, and the JPEGs are redrawn where they are.
+         *     Incomplete labels only unless ``only_incomplete=false``.
+         */
+        put: operations["raise_needs_reprocess"];
+        post?: never;
+        /**
+         * Clear Needs Reprocess
+         * @description Withdraw a redraw of dive ``number``'s ``kind`` frames (idempotent:
+         *     0 when none was asked for).
+         */
+        delete: operations["clear_needs_reprocess"];
         options?: never;
         head?: never;
         patch?: never;
@@ -542,36 +542,6 @@ export interface components {
             /** Name */
             name: string | null;
         };
-        /** Dive */
-        Dive: {
-            /** Calibration Source Number */
-            calibration_source_number: number | null;
-            /** Calibration Target Number */
-            calibration_target_number: number | null;
-            /**
-             * Dived At
-             * Format: date-time
-             */
-            dived_at: string;
-            /** Name */
-            name: string | null;
-            /** Number */
-            number: number;
-            /**
-             * Priority
-             * @enum {string}
-             */
-            priority: "low" | "high" | "none";
-            /** Slate Template Number */
-            slate_template_number: number | null;
-        };
-        /** DiveView */
-        DiveView: {
-            /** Name */
-            name: string | null;
-            /** Number */
-            number: number | null;
-        };
         /** FileView */
         FileView: {
             /** Content Type */
@@ -689,6 +659,36 @@ export interface components {
             origin: string;
             snout: components["schemas"]["Point"];
         };
+        /** Mission */
+        Mission: {
+            /** Calibration Source Number */
+            calibration_source_number: number | null;
+            /** Calibration Target Number */
+            calibration_target_number: number | null;
+            /** Name */
+            name: string | null;
+            /** Number */
+            number: number;
+            /**
+             * Priority
+             * @enum {string}
+             */
+            priority: "low" | "high" | "none";
+            /** Slate Template Number */
+            slate_template_number: number | null;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+        };
+        /** MissionView */
+        MissionView: {
+            /** Name */
+            name: string | null;
+            /** Number */
+            number: number | null;
+        };
         /** MyMembership */
         MyMembership: {
             /** Is Admin */
@@ -748,7 +748,6 @@ export interface components {
             /** Client Capture Uuid */
             client_capture_uuid: string | null;
             device: components["schemas"]["DeviceView"];
-            dive: components["schemas"]["DiveView"] | null;
             /**
              * Fish Id
              * Format: uuid
@@ -760,6 +759,7 @@ export interface components {
             location: components["schemas"]["Coordinates"] | null;
             /** Method */
             method: string;
+            mission: components["schemas"]["MissionView"] | null;
             /** Photo Url */
             photo_url: string | null;
             /** Place Name */
@@ -920,7 +920,43 @@ export interface operations {
             };
         };
     };
-    list_dives: {
+    list_label_studio_project_ids: {
+        parameters: {
+            query: {
+                kind: "laser" | "head_tail" | "species" | "slate";
+                incomplete?: boolean;
+                /** @description laser only: the auto-accept gate is done here */
+                gated?: boolean | null;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": number[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_my_membership: {
         parameters: {
             query?: never;
             header?: never;
@@ -937,7 +973,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Dive"][];
+                    "application/json": components["schemas"]["MyMembership"];
                 };
             };
             /** @description Validation Error */
@@ -951,7 +987,38 @@ export interface operations {
             };
         };
     };
-    clear_dive_calibration_refusal: {
+    list_missions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Mission"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_mission_calibration_refusal: {
         parameters: {
             query?: {
                 /** @description why, kept with the clear */
@@ -984,7 +1051,7 @@ export interface operations {
             };
         };
     };
-    clear_dive_calibration_source: {
+    clear_mission_calibration_source: {
         parameters: {
             query?: never;
             header?: never;
@@ -1014,7 +1081,7 @@ export interface operations {
             };
         };
     };
-    set_dive_calibration_source: {
+    set_mission_calibration_source: {
         parameters: {
             query?: never;
             header?: never;
@@ -1033,7 +1100,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Dive"];
+                    "application/json": components["schemas"]["Mission"];
                 };
             };
             /** @description Validation Error */
@@ -1047,7 +1114,7 @@ export interface operations {
             };
         };
     };
-    clear_dive_calibration_target: {
+    clear_mission_calibration_target: {
         parameters: {
             query?: never;
             header?: never;
@@ -1077,7 +1144,7 @@ export interface operations {
             };
         };
     };
-    set_dive_calibration_target: {
+    set_mission_calibration_target: {
         parameters: {
             query?: never;
             header?: never;
@@ -1096,7 +1163,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Dive"];
+                    "application/json": components["schemas"]["Mission"];
                 };
             };
             /** @description Validation Error */
@@ -1165,73 +1232,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Cleared"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_label_studio_project_ids: {
-        parameters: {
-            query: {
-                kind: "laser" | "head_tail" | "species" | "slate";
-                incomplete?: boolean;
-                /** @description laser only: the auto-accept gate is done here */
-                gated?: boolean | null;
-            };
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": number[];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_my_membership: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MyMembership"];
                 };
             };
             /** @description Validation Error */

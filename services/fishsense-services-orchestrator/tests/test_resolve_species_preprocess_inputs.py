@@ -15,7 +15,7 @@ member's i/N is its position in the WHOLE prediction cluster; an eligible
 frame in no cluster is its own 1 of 1, after the real clusters.
 
 v2 changes, pinned last: the device's intrinsics stand in for v1's
-`dive.camera_id`; each member carries the staged raw ref and the JPEG target
+`mission.camera_id`; each member carries the staged raw ref and the JPEG target
 (over v1's JPEG for a migrated frame).
 """
 
@@ -30,7 +30,7 @@ from fishsense_services_orchestrator.species.contracts import SpeciesTarget
 
 from ._species import (
     D,
-    DIVE,
+    MISSION,
     K,
     LAYOUT,
     TENANT,
@@ -43,7 +43,7 @@ from ._species import (
     species,
 )
 
-TARGET = SpeciesTarget(TENANT, DIVE)
+TARGET = SpeciesTarget(TENANT, MISSION)
 
 
 def _clusters(result: PreprocessSpeciesImagesInput) -> list[list[str]]:
@@ -77,7 +77,7 @@ async def test_keeps_laser_valid_unlabeled_images_in_cluster_order():
         )
     )
 
-    assert result.dive_id == DIVE
+    assert result.mission_id == MISSION
     assert _clusters(result) == [["aaa", "bbb"], ["ccc"]]
     assert result.camera_matrix == K
     assert result.distortion_coefficients == D
@@ -146,7 +146,7 @@ async def test_drops_image_ids_that_no_longer_have_image_rows():
     assert _clusters(result) == [["aaa"]]
 
 
-async def test_raises_when_dive_not_found():
+async def test_raises_when_mission_not_found():
     with pytest.raises(ValueError, match="not found"):
         await _resolve(None)
 
@@ -170,7 +170,7 @@ async def test_raises_when_no_intrinsics():
 # (fishsense_services_api tests/test_species_store.py).
 
 
-async def test_selector_picks_dive__resolver_emits_at_least_one_image():
+async def test_selector_picks_mission__resolver_emits_at_least_one_image():
     result = await _resolve(
         facts(images=[_image(31, "ccc")], clusters=[[31]], valid=[31])
     )
@@ -178,7 +178,7 @@ async def test_selector_picks_dive__resolver_emits_at_least_one_image():
     assert _clusters(result) == [["ccc"]]
 
 
-async def test_selector_skips_dive__resolver_returns_empty():
+async def test_selector_skips_mission__resolver_returns_empty():
     result = await _resolve(
         facts(
             images=[_image(11, "aaa"), _image(12, "bbb")],
@@ -191,7 +191,7 @@ async def test_selector_skips_dive__resolver_returns_empty():
     assert not result.cluster_members
 
 
-async def test_selector_picks_dive__resolver_only_emits_unlabeled_subset():
+async def test_selector_picks_mission__resolver_only_emits_unlabeled_subset():
     result = await _resolve(
         facts(
             images=[_image(11, "aaa"), _image(12, "bbb")],

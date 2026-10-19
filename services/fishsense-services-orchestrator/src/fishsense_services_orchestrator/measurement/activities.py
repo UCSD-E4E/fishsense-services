@@ -42,7 +42,7 @@ from fishsense_services_contracts.measurement import (
 )
 from fishsense_services_contracts.taxonomy import parse_species_names
 from fishsense_services_orchestrator.laser_depth.activities import (
-    DiveTarget,
+    MissionTarget,
     oldest_candidate,
     run_id,
 )
@@ -83,16 +83,16 @@ class MeasurementCatalog(Protocol):
 
     async def member_tenants(self) -> list[uuid.UUID]: ...
 
-    async def next_dive_for_measurement(
+    async def next_mission_for_measurement(
         self, tenant_id: uuid.UUID
     ) -> MeasurementCandidate | None: ...
 
     async def measurement_work(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> MeasurementWork: ...
 
     async def persist_measurements(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, **result
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, **result
     ) -> PersistedMeasurements: ...
 
 
@@ -101,11 +101,11 @@ class MeasurementActivities:
         self._catalog = catalog
 
     @activity.defn(name="select_next_dive_for_measurement")
-    async def select_next_dive_for_measurement(self) -> DiveTarget | None:
+    async def select_next_mission_for_measurement(self) -> MissionTarget | None:
         """The oldest dive in the stage-14 cohort, across tenants."""
         best = await oldest_candidate(
             await self._catalog.member_tenants(),
-            self._catalog.next_dive_for_measurement,
+            self._catalog.next_mission_for_measurement,
         )
         if best is None:
             activity.logger.info("no high-priority dives needing fish measurement")
@@ -113,22 +113,22 @@ class MeasurementActivities:
             activity.logger.info(
                 "next high-priority dive needing fish measurement: tenant=%s dive=%s",
                 best.tenant_id,
-                best.dive_id,
+                best.mission_id,
             )
         return best
 
     @activity.defn(name="resolve_measurement_inputs")
     async def resolve_measurement_inputs(
-        self, target: DiveTarget
+        self, target: MissionTarget
     ) -> MeasurementResolution:
         """The camera matrix, the effective laser calibration, and per capture
         to measure its one laser dot and one head/tail pair."""
-        work = await self._catalog.measurement_work(target.tenant_id, target.dive_id)
+        work = await self._catalog.measurement_work(target.tenant_id, target.mission_id)
         payload = None
         if work.geometry is not None and work.captures:
             geometry = work.geometry
             payload = MeasureFishInput(
-                dive_id=target.dive_id,
+                mission_id=target.mission_id,
                 camera_matrix=geometry.camera_matrix,
                 calibration=LaserCalibrationGeometry(
                     laser_calibration_id=geometry.laser_calibration_id,
@@ -159,7 +159,7 @@ class MeasurementActivities:
             "resolved measurement inputs dive=%s captures=%d already_measured=%d "
             "unmeasurable_species=%d missing_cluster=%d missing_laser_or_headtail=%d "
             "refused=%d",
-            target.dive_id,
+            target.mission_id,
             len(work.captures),
             work.skipped_already_measured,
             work.skipped_unmeasurable_species,
@@ -179,7 +179,7 @@ class MeasurementActivities:
     @activity.defn(name="persist_measurements")
     async def persist_measurements(
         self,
-        target: DiveTarget,
+        target: MissionTarget,
         laser_calibration_id: uuid.UUID,
         result: MeasureFishResult,
     ) -> PersistedMeasurementRun:
@@ -205,7 +205,7 @@ class MeasurementActivities:
         ]
         persisted = await self._catalog.persist_measurements(
             target.tenant_id,
-            target.dive_id,
+            target.mission_id,
             laser_calibration_id=laser_calibration_id,
             algorithm=result.algorithm,
             algorithm_version=result.algorithm_version,
@@ -217,7 +217,7 @@ class MeasurementActivities:
         activity.logger.info(
             "persisted measurements dive=%s measured=%d refused=%d stale=%d "
             "fish_created=%d clusters_bound=%d",
-            target.dive_id,
+            target.mission_id,
             persisted.measured,
             persisted.refused,
             persisted.skipped_stale,

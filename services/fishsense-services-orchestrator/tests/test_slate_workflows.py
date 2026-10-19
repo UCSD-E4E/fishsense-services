@@ -28,7 +28,7 @@ from typing import List
 import pytest
 from temporalio import activity
 from temporalio.client import WorkflowFailureError
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -38,13 +38,13 @@ from fishsense_services_orchestrator.slates.contracts import PopulateSlateProjec
 from fishsense_services_orchestrator.slates.workflows import (
     POPULATE_RETRY,
     PROJECT_CONCURRENCY,
-    CreateDiveSlateLabelStudioProjectWorkflow,
-    PopulateDiveSlateLabelStudioProjectWorkflow,
-    SyncLabelStudioDiveSlateLabelsWorkflow,
+    CreateMissionSlateLabelStudioProjectWorkflow,
+    PopulateMissionSlateLabelStudioProjectWorkflow,
+    SyncLabelStudioMissionSlateLabelsWorkflow,
 )
 
 TENANT = uuid.UUID(int=1)
-TARGET = StagingTarget(tenant_id=TENANT, dive_id=uuid.UUID(int=393))
+TARGET = StagingTarget(tenant_id=TENANT, mission_id=uuid.UUID(int=393))
 QUEUE = "test-slate-workflows"
 
 
@@ -53,7 +53,7 @@ async def _execute(workflow_cls, arg, activities, *, max_concurrent=None):
         {} if max_concurrent is None else {"max_concurrent_activities": max_concurrent}
     )
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with Worker(
             env.client,
@@ -92,13 +92,13 @@ async def test_emits_create_then_populate_in_order():
     calls: list = []
 
     result = await _execute(
-        PopulateDiveSlateLabelStudioProjectWorkflow, TARGET, _populate_stubs(calls)
+        PopulateMissionSlateLabelStudioProjectWorkflow, TARGET, _populate_stubs(calls)
     )
 
     assert [c[0] for c in calls] == ["create", "populate"]
     assert calls[0][1] == TARGET
     assert calls[1][1] == PopulateSlateProject(
-        tenant_id=TENANT, dive_id=TARGET.dive_id, ls_project_id=7
+        tenant_id=TENANT, mission_id=TARGET.mission_id, ls_project_id=7
     ), "populate takes the created project id"
     assert result == 42
 
@@ -107,7 +107,7 @@ async def test_timeouts_are_v1s():
     calls: list = []
 
     await _execute(
-        PopulateDiveSlateLabelStudioProjectWorkflow, TARGET, _populate_stubs(calls)
+        PopulateMissionSlateLabelStudioProjectWorkflow, TARGET, _populate_stubs(calls)
     )
 
     create_info, populate_info = calls[0][2], calls[1][2]
@@ -143,7 +143,7 @@ async def test_the_create_workflow_returns_the_project():
     calls: list = []
 
     project = await _execute(
-        CreateDiveSlateLabelStudioProjectWorkflow, TARGET, _populate_stubs(calls)
+        CreateMissionSlateLabelStudioProjectWorkflow, TARGET, _populate_stubs(calls)
     )
 
     assert project == 7
@@ -167,7 +167,7 @@ async def test_workflow_invokes_project_ids_then_one_sync_per_project():
         calls.append(("sync", project.ls_project_id))
 
     await _execute(
-        SyncLabelStudioDiveSlateLabelsWorkflow, None, [stub_projects, stub_sync]
+        SyncLabelStudioMissionSlateLabelsWorkflow, None, [stub_projects, stub_sync]
     )
 
     assert calls[0] == ("projects",)
@@ -186,7 +186,7 @@ async def test_workflow_with_no_projects_does_not_invoke_per_project_sync():
         synced.append(project.ls_project_id)
 
     await _execute(
-        SyncLabelStudioDiveSlateLabelsWorkflow, None, [stub_projects, stub_sync]
+        SyncLabelStudioMissionSlateLabelsWorkflow, None, [stub_projects, stub_sync]
     )
 
     assert not synced
@@ -214,7 +214,7 @@ async def test_per_project_activity_caps_concurrency_at_workflow_level():
             in_flight -= 1
 
     await _execute(
-        SyncLabelStudioDiveSlateLabelsWorkflow,
+        SyncLabelStudioMissionSlateLabelsWorkflow,
         None,
         [stub_projects, stub_sync],
         max_concurrent=50,
@@ -244,7 +244,7 @@ async def test_one_failing_project_does_not_stop_the_others():
 
     with pytest.raises(WorkflowFailureError) as excinfo:
         await _execute(
-            SyncLabelStudioDiveSlateLabelsWorkflow, None, [stub_projects, stub_sync]
+            SyncLabelStudioMissionSlateLabelsWorkflow, None, [stub_projects, stub_sync]
         )
 
     assert sorted(synced) == [66, 68]

@@ -60,12 +60,12 @@ from fishsense_services_api.headtail_store import (
     InvalidPredictions,
     UnsupportedCameraModel,
     clear_headtail_needs_reprocess,
-    dives_needing_headtail_population,
+    missions_needing_headtail_population,
     headtail_populate_state,
     headtail_predict_captures,
     headtail_preprocess_inputs,
-    next_dive_for_headtail_prediction,
-    next_dive_for_headtail_preprocessing,
+    next_mission_for_headtail_prediction,
+    next_mission_for_headtail_preprocessing,
     persist_headtail_predictions,
     record_head_tail_task,
     set_headtail_needs_reprocess,
@@ -134,7 +134,7 @@ async def _dive(
         device = await _device(owner_engine, tenant)
     return await _exec(
         owner_engine,
-        "INSERT INTO dives (tenant_id, source_path, name, dived_at, priority, "
+        "INSERT INTO missions (tenant_id, source_path, name, started_at, priority, "
         "device_id, created_at) VALUES (:t, :p, 'd', :at, :prio, :dev, :at) "
         "RETURNING id",
         t=tenant,
@@ -146,15 +146,15 @@ async def _dive(
 
 
 async def _capture(
-    owner_engine, tenant, dive, *, checksum=None, canonical=True, v1_id=None, at=T0
+    owner_engine, tenant, mission, *, checksum=None, canonical=True, v1_id=None, at=T0
 ):
     return await _exec(
         owner_engine,
-        "INSERT INTO captures (tenant_id, dive_id, source_path, captured_at, "
+        "INSERT INTO captures (tenant_id, mission_id, source_path, captured_at, "
         "checksum, is_canonical, v1_id) VALUES (:t, :d, :p, :at, :c, :canon, :v1) "
         "RETURNING id",
         t=tenant,
-        d=dive,
+        d=mission,
         p=f"/c/{uuid.uuid4()}.ORF",
         at=at,
         c=checksum or uuid.uuid4().hex,
@@ -247,21 +247,21 @@ async def _in(app_engine, tenant, fn, *args, **kwargs):
 
 
 async def _next_preprocess(app_engine, tenant):
-    candidate = await _in(app_engine, tenant, next_dive_for_headtail_preprocessing)
-    return None if candidate is None else candidate.dive_id
+    candidate = await _in(app_engine, tenant, next_mission_for_headtail_preprocessing)
+    return None if candidate is None else candidate.mission_id
 
 
 async def _next_predict(app_engine, tenant):
     candidate = await _in(
-        app_engine, tenant, next_dive_for_headtail_prediction, predictor_version=V
+        app_engine, tenant, next_mission_for_headtail_prediction, predictor_version=V
     )
-    return None if candidate is None else candidate.dive_id
+    return None if candidate is None else candidate.mission_id
 
 
 async def _population(app_engine, tenant):
     return [
-        c.dive_id
-        for c in await _in(app_engine, tenant, dives_needing_headtail_population)
+        c.mission_id
+        for c in await _in(app_engine, tenant, missions_needing_headtail_population)
     ]
 
 
@@ -287,7 +287,7 @@ async def test_headtail_preprocessing_requires_valid_laser_without_any_headtail(
     assert await _next_preprocess(app_engine, lab) == d2
 
 
-async def test_headtail_preprocessing_excludes_dive_with_only_incomplete_headtail(
+async def test_headtail_preprocessing_excludes_mission_with_only_incomplete_headtail(
     owner_engine, app_engine
 ):
     """Once populate seeds an incomplete row (with a real project) for every
@@ -300,7 +300,7 @@ async def test_headtail_preprocessing_excludes_dive_with_only_incomplete_headtai
     assert await _next_preprocess(app_engine, lab) is None
 
 
-async def test_headtail_preprocessing_excludes_dive_when_sentinel_coexists_with_real_label(
+async def test_headtail_preprocessing_excludes_mission_when_sentinel_coexists_with_real_label(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
@@ -318,12 +318,12 @@ async def test_headtail_preprocessing_ignores_null_project_sentinels(
     """NULL-project rows are sentinels: they must NOT drop a dive from the
     head/tail cohort."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(owner_engine, lab)
-    capture = await _capture(owner_engine, lab, dive)
+    mission = await _dive(owner_engine, lab)
+    capture = await _capture(owner_engine, lab, mission)
     await _laser(owner_engine, lab, capture)
     await _headtail(owner_engine, lab, capture, project=None, completed=False)
 
-    assert await _next_preprocess(app_engine, lab) == dive
+    assert await _next_preprocess(app_engine, lab) == mission
 
 
 async def test_a_superseded_headtail_row_does_not_count_as_done(
@@ -331,12 +331,12 @@ async def test_a_superseded_headtail_row_does_not_count_as_done(
 ):
     """Dead letters don't count as done (v1's `superseded == False`)."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(owner_engine, lab)
-    capture = await _capture(owner_engine, lab, dive)
+    mission = await _dive(owner_engine, lab)
+    capture = await _capture(owner_engine, lab, mission)
     await _laser(owner_engine, lab, capture)
     await _headtail(owner_engine, lab, capture, superseded=True)
 
-    assert await _next_preprocess(app_engine, lab) == dive
+    assert await _next_preprocess(app_engine, lab) == mission
 
 
 @pytest.mark.parametrize(
@@ -392,12 +392,12 @@ async def test_the_oldest_candidate_comes_first(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
     newer = await _dive(owner_engine, lab, at=T0 + timedelta(hours=1))
     older = await _dive(owner_engine, lab, at=T0)
-    for dive in (newer, older):
-        await _laser(owner_engine, lab, await _capture(owner_engine, lab, dive))
+    for mission in (newer, older):
+        await _laser(owner_engine, lab, await _capture(owner_engine, lab, mission))
 
-    candidate = await _in(app_engine, lab, next_dive_for_headtail_preprocessing)
+    candidate = await _in(app_engine, lab, next_mission_for_headtail_preprocessing)
 
-    assert (candidate.dive_id, candidate.created_at) == (older, T0)
+    assert (candidate.mission_id, candidate.created_at) == (older, T0)
 
 
 async def test_the_cohort_is_per_tenant(owner_engine, app_engine):
@@ -411,7 +411,7 @@ async def test_the_cohort_is_per_tenant(owner_engine, app_engine):
     assert await _next_preprocess(app_engine, lab) is None
 
 
-async def _unrenderable_dive(owner_engine, tenant, setup, *, at=T0):
+async def _unrenderable_mission(owner_engine, tenant, setup, *, at=T0):
     """A dive stage 5.1's resolver refuses: no device, a device with no
     calibration, or one whose current calibration is not a pinhole."""
     if setup == "no-device":
@@ -425,14 +425,14 @@ _UNRENDERABLE = ["no-device", "no-calibration", "axial"]
 
 
 @pytest.mark.parametrize("setup", _UNRENDERABLE)
-async def test_a_dive_stage_5_1_cannot_render_is_not_selected_nor_blocks_a_younger_one(
+async def test_a_mission_stage_5_1_cannot_render_is_not_selected_nor_blocks_a_younger_one(
     owner_engine, app_engine, setup
 ):
     """v2: the cohort carries the resolver's refusals. v1 selected a dive
     whose resolver then raised, every hour, and -- oldest first -- nothing
     behind it ever ran; across tenants it blocks every tenant."""
     lab = await _tenant(owner_engine)
-    stuck = await _unrenderable_dive(owner_engine, lab, setup)
+    stuck = await _unrenderable_mission(owner_engine, lab, setup)
     stuck_capture = await _capture(owner_engine, lab, stuck)
     await _laser(owner_engine, lab, stuck_capture)
     await _headtail(owner_engine, lab, stuck_capture, needs_reprocess=True)
@@ -451,8 +451,8 @@ async def test_only_the_current_calibration_decides_renderability(
     device = await _device(
         owner_engine, lab, calibrations=((K, D, "pinhole"), (K, D, "axial_refractive"))
     )
-    dive = await _dive(owner_engine, lab, device=device)
-    await _laser(owner_engine, lab, await _capture(owner_engine, lab, dive))
+    mission = await _dive(owner_engine, lab, device=device)
+    await _laser(owner_engine, lab, await _capture(owner_engine, lab, mission))
 
     assert await _next_preprocess(app_engine, lab) is None
 
@@ -460,36 +460,36 @@ async def test_only_the_current_calibration_decides_renderability(
 # -- the flag branch (v1's test_cohort_needs_reprocess_all_kinds) ------------------
 
 
-async def _labelled_dive(owner_engine, tenant, *, flagged, canonical=True):
-    dive = await _dive(owner_engine, tenant)
-    capture = await _capture(owner_engine, tenant, dive, canonical=canonical)
+async def _labelled_mission(owner_engine, tenant, *, flagged, canonical=True):
+    mission = await _dive(owner_engine, tenant)
+    capture = await _capture(owner_engine, tenant, mission, canonical=canonical)
     await _laser(owner_engine, tenant, capture)
     await _headtail(owner_engine, tenant, capture, needs_reprocess=flagged)
-    return dive, capture
+    return mission, capture
 
 
-async def test_fully_labelled_dive_is_not_selected_without_a_flag(
+async def test_fully_labelled_mission_is_not_selected_without_a_flag(
     owner_engine, app_engine
 ):
     """The control. If this ever fails the test below proves nothing."""
     lab = await _tenant(owner_engine)
-    await _labelled_dive(owner_engine, lab, flagged=False)
+    await _labelled_mission(owner_engine, lab, flagged=False)
 
     assert await _next_preprocess(app_engine, lab) is None
 
 
-async def test_flagged_dive_is_selected(owner_engine, app_engine):
+async def test_flagged_mission_is_selected(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive, _ = await _labelled_dive(owner_engine, lab, flagged=True)
+    mission, _ = await _labelled_mission(owner_engine, lab, flagged=True)
 
-    assert await _next_preprocess(app_engine, lab) == dive
+    assert await _next_preprocess(app_engine, lab) == mission
 
 
 async def test_flag_on_a_non_canonical_image_does_not_select(owner_engine, app_engine):
     """A flag on a duplicate would select a dive the resolver finds no work
     for, and it would re-stage its raw bytes from the NAS every hour forever."""
     lab = await _tenant(owner_engine)
-    await _labelled_dive(owner_engine, lab, flagged=True, canonical=False)
+    await _labelled_mission(owner_engine, lab, flagged=True, canonical=False)
 
     assert await _next_preprocess(app_engine, lab) is None
 
@@ -497,7 +497,7 @@ async def test_flag_on_a_non_canonical_image_does_not_select(owner_engine, app_e
 async def test_flag_on_a_superseded_row_does_not_select(owner_engine, app_engine):
     """The resolver never sees a superseded row, so neither may the cohort."""
     lab = await _tenant(owner_engine)
-    dive, capture = await _labelled_dive(owner_engine, lab, flagged=False)
+    mission, capture = await _labelled_mission(owner_engine, lab, flagged=False)
     await _headtail(
         owner_engine, lab, capture, project=2, completed=False, superseded=True,
         needs_reprocess=True,
@@ -509,11 +509,11 @@ async def test_flag_on_a_superseded_row_does_not_select(owner_engine, app_engine
 # -- the preprocess resolver (v1's resolver tests) ---------------------------------
 
 
-async def _inputs(app_engine, tenant, dive):
-    return await _in(app_engine, tenant, headtail_preprocess_inputs, dive)
+async def _inputs(app_engine, tenant, mission):
+    return await _in(app_engine, tenant, headtail_preprocess_inputs, mission)
 
 
-async def _resolver_dive(owner_engine, tenant, **device):
+async def _resolver_mission(owner_engine, tenant, **device):
     device_id = await _device(owner_engine, tenant, **device)
     return await _dive(owner_engine, tenant, device=device_id)
 
@@ -522,9 +522,9 @@ async def test_returns_only_valid_laser_without_any_real_headtail(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive = await _resolver_dive(owner_engine, lab)
+    mission = await _resolver_mission(owner_engine, lab)
     c1, c2, c3, c4 = [
-        await _capture(owner_engine, lab, dive, checksum=ch * 32)
+        await _capture(owner_engine, lab, mission, checksum=ch * 32)
         for ch in ("a", "b", "c", "d")
     ]
     await _laser(owner_engine, lab, c1)  # valid + completed headtail -> dropped
@@ -534,7 +534,7 @@ async def test_returns_only_valid_laser_without_any_real_headtail(
     await _headtail(owner_engine, lab, c1, completed=True)
     await _headtail(owner_engine, lab, c4, completed=False)
 
-    inputs = await _inputs(app_engine, lab, dive)
+    inputs = await _inputs(app_engine, lab, mission)
 
     assert [c.checksum for c in inputs.captures] == ["c" * 32]
     assert inputs.captures[0].capture_id == c3
@@ -546,15 +546,15 @@ async def test_image_with_only_null_project_sentinel_treated_as_unlabeled(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive = await _resolver_dive(owner_engine, lab)
-    c1 = await _capture(owner_engine, lab, dive, checksum="a" * 32)
-    c2 = await _capture(owner_engine, lab, dive, checksum="b" * 32)
+    mission = await _resolver_mission(owner_engine, lab)
+    c1 = await _capture(owner_engine, lab, mission, checksum="a" * 32)
+    c2 = await _capture(owner_engine, lab, mission, checksum="b" * 32)
     for capture in (c1, c2):
         await _laser(owner_engine, lab, capture)
     await _headtail(owner_engine, lab, c1, completed=False, project=None)
     await _headtail(owner_engine, lab, c2, completed=False, project=71)
 
-    inputs = await _inputs(app_engine, lab, dive)
+    inputs = await _inputs(app_engine, lab, mission)
 
     assert [c.checksum for c in inputs.captures] == ["a" * 32]
 
@@ -563,59 +563,59 @@ async def test_drops_lasers_that_are_incomplete_superseded_or_null_xy(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive = await _resolver_dive(owner_engine, lab)
+    mission = await _resolver_mission(owner_engine, lab)
     for laser in (
         {"completed": False}, {"superseded": True}, {"x": None}, {"y": None},
     ):  # fmt: skip
         await _laser(
-            owner_engine, lab, await _capture(owner_engine, lab, dive), **laser
+            owner_engine, lab, await _capture(owner_engine, lab, mission), **laser
         )
 
-    assert (await _inputs(app_engine, lab, dive)).captures == []
+    assert (await _inputs(app_engine, lab, mission)).captures == []
 
 
 async def test_empty_when_no_laser_labels(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive = await _resolver_dive(owner_engine, lab)
-    await _capture(owner_engine, lab, dive)
+    mission = await _resolver_mission(owner_engine, lab)
+    await _capture(owner_engine, lab, mission)
 
-    assert (await _inputs(app_engine, lab, dive)).captures == []
+    assert (await _inputs(app_engine, lab, mission)).captures == []
 
 
 async def test_canonical_frames_only(owner_engine, app_engine):
     """Mirrors the cohort: the dispatched work must match what it promised."""
     lab = await _tenant(owner_engine)
-    dive = await _resolver_dive(owner_engine, lab)
+    mission = await _resolver_mission(owner_engine, lab)
     await _laser(
-        owner_engine, lab, await _capture(owner_engine, lab, dive, canonical=False)
+        owner_engine, lab, await _capture(owner_engine, lab, mission, canonical=False)
     )
 
-    assert (await _inputs(app_engine, lab, dive)).captures == []
+    assert (await _inputs(app_engine, lab, mission)).captures == []
 
 
 async def test_two_valid_lasers_on_one_frame_render_it_once(owner_engine, app_engine):
     """v1 listed a frame once per valid laser (461 prod images carry two), so
     its JPEG was rendered twice by concurrent activities. Once is enough."""
     lab = await _tenant(owner_engine)
-    dive = await _resolver_dive(owner_engine, lab)
-    capture = await _capture(owner_engine, lab, dive)
+    mission = await _resolver_mission(owner_engine, lab)
+    capture = await _capture(owner_engine, lab, mission)
     await _laser(owner_engine, lab, capture)
     await _laser(owner_engine, lab, capture, x=101.0)
 
-    assert [c.capture_id for c in (await _inputs(app_engine, lab, dive)).captures] == [
-        capture
-    ]
+    assert [
+        c.capture_id for c in (await _inputs(app_engine, lab, mission)).captures
+    ] == [capture]
 
 
 async def test_a_capture_says_whether_it_came_from_v1(owner_engine, app_engine):
     """The orchestrator writes a migrated frame's JPEG over v1's, where its
     Label Studio tasks already point."""
     lab = await _tenant(owner_engine)
-    dive = await _resolver_dive(owner_engine, lab)
-    migrated = await _capture(owner_engine, lab, dive, v1_id=77)
+    mission = await _resolver_mission(owner_engine, lab)
+    migrated = await _capture(owner_engine, lab, mission, v1_id=77)
     await _laser(owner_engine, lab, migrated)
 
-    (capture,) = (await _inputs(app_engine, lab, dive)).captures
+    (capture,) = (await _inputs(app_engine, lab, mission)).captures
     assert (capture.capture_id, capture.from_v1) == (migrated, True)
 
 
@@ -626,24 +626,24 @@ class TestFlaggedImages:
         self, owner_engine, app_engine
     ):
         lab = await _tenant(owner_engine)
-        dive = await _resolver_dive(owner_engine, lab)
-        capture = await _capture(owner_engine, lab, dive)
+        mission = await _resolver_mission(owner_engine, lab)
+        capture = await _capture(owner_engine, lab, mission)
         await _laser(owner_engine, lab, capture)
         await _headtail(owner_engine, lab, capture, needs_reprocess=True)
 
-        captures = (await _inputs(app_engine, lab, dive)).captures
+        captures = (await _inputs(app_engine, lab, mission)).captures
         assert [c.capture_id for c in captures] == [capture]
 
     async def test_unflagged_labelled_image_is_still_excluded(
         self, owner_engine, app_engine
     ):
         lab = await _tenant(owner_engine)
-        dive = await _resolver_dive(owner_engine, lab)
-        capture = await _capture(owner_engine, lab, dive)
+        mission = await _resolver_mission(owner_engine, lab)
+        capture = await _capture(owner_engine, lab, mission)
         await _laser(owner_engine, lab, capture)
         await _headtail(owner_engine, lab, capture, needs_reprocess=False)
 
-        assert (await _inputs(app_engine, lab, dive)).captures == []
+        assert (await _inputs(app_engine, lab, mission)).captures == []
 
     async def test_flagged_image_resolves_though_its_laser_was_superseded(
         self, owner_engine, app_engine
@@ -651,12 +651,12 @@ class TestFlaggedImages:
         """The cohort's flag branch has no laser gate, so the resolver's must
         not either -- or a laser superseded after flagging wedges the dive."""
         lab = await _tenant(owner_engine)
-        dive = await _resolver_dive(owner_engine, lab)
-        capture = await _capture(owner_engine, lab, dive)
+        mission = await _resolver_mission(owner_engine, lab)
+        capture = await _capture(owner_engine, lab, mission)
         await _laser(owner_engine, lab, capture, superseded=True)
         await _headtail(owner_engine, lab, capture, needs_reprocess=True)
 
-        captures = (await _inputs(app_engine, lab, dive)).captures
+        captures = (await _inputs(app_engine, lab, mission)).captures
         assert [c.capture_id for c in captures] == [capture]
 
     async def test_eligible_frames_come_before_flagged_ones(
@@ -664,13 +664,13 @@ class TestFlaggedImages:
     ):
         """v1's order: the laser-cascaded frames, then the flagged ones."""
         lab = await _tenant(owner_engine)
-        dive = await _resolver_dive(owner_engine, lab)
-        flagged = await _capture(owner_engine, lab, dive)
+        mission = await _resolver_mission(owner_engine, lab)
+        flagged = await _capture(owner_engine, lab, mission)
         await _headtail(owner_engine, lab, flagged, needs_reprocess=True)
-        fresh = await _capture(owner_engine, lab, dive)
+        fresh = await _capture(owner_engine, lab, mission)
         await _laser(owner_engine, lab, fresh)
 
-        captures = (await _inputs(app_engine, lab, dive)).captures
+        captures = (await _inputs(app_engine, lab, mission)).captures
         assert [c.capture_id for c in captures] == [fresh, flagged]
 
     async def test_a_frame_both_eligible_and_flagged_is_rendered_once(
@@ -679,28 +679,28 @@ class TestFlaggedImages:
         """A flagged sentinel (no project) on a laser-valid frame is reached
         by both branches; v1 de-duplicated them (`seen`)."""
         lab = await _tenant(owner_engine)
-        dive = await _resolver_dive(owner_engine, lab)
-        capture = await _capture(owner_engine, lab, dive)
+        mission = await _resolver_mission(owner_engine, lab)
+        capture = await _capture(owner_engine, lab, mission)
         await _laser(owner_engine, lab, capture)
         await _headtail(
             owner_engine, lab, capture, project=None, completed=False,
             needs_reprocess=True,
         )  # fmt: skip
 
-        captures = (await _inputs(app_engine, lab, dive)).captures
+        captures = (await _inputs(app_engine, lab, mission)).captures
         assert [c.capture_id for c in captures] == [capture]
 
 
 async def test_eligible_frames_come_in_laser_label_order(owner_engine, app_engine):
     """v1 walked the dive's laser labels, so frames came in label order."""
     lab = await _tenant(owner_engine)
-    dive = await _resolver_dive(owner_engine, lab)
-    first_captured = await _capture(owner_engine, lab, dive)
-    second_captured = await _capture(owner_engine, lab, dive)
+    mission = await _resolver_mission(owner_engine, lab)
+    first_captured = await _capture(owner_engine, lab, mission)
+    second_captured = await _capture(owner_engine, lab, mission)
     await _laser(owner_engine, lab, second_captured)
     await _laser(owner_engine, lab, first_captured)
 
-    captures = (await _inputs(app_engine, lab, dive)).captures
+    captures = (await _inputs(app_engine, lab, mission)).captures
     assert [c.capture_id for c in captures] == [second_captured, first_captured]
 
 
@@ -709,50 +709,52 @@ async def test_eligible_frames_come_in_laser_label_order(owner_engine, app_engin
     [("no-dive", "not found"), ("no-device", "no device"),
      ("no-calibration", "no camera calibration")],
 )  # fmt: skip
-async def test_raises_when_dive_or_device_or_calibration_missing(
+async def test_raises_when_mission_or_device_or_calibration_missing(
     owner_engine, app_engine, setup, match
 ):
     lab = await _tenant(owner_engine)
     if setup == "no-dive":
-        dive = uuid.uuid4()
+        mission = uuid.uuid4()
     elif setup == "no-device":
-        dive = await _dive(owner_engine, lab, device=None)
+        mission = await _dive(owner_engine, lab, device=None)
     else:
-        dive = await _resolver_dive(owner_engine, lab, calibrations=())
+        mission = await _resolver_mission(owner_engine, lab, calibrations=())
 
     with pytest.raises(ValueError, match=match):
-        await _inputs(app_engine, lab, dive)
+        await _inputs(app_engine, lab, mission)
 
 
 async def test_the_current_calibration_is_the_latest(owner_engine, app_engine):
     """Calibrations are append-only; a correction is a new row."""
     newer = [[1.0, 0.0, 1.0], [0.0, 1.0, 1.0], [0.0, 0.0, 1.0]]
     lab = await _tenant(owner_engine)
-    dive = await _resolver_dive(
+    mission = await _resolver_mission(
         owner_engine, lab, calibrations=((K, D, "pinhole"), (newer, D, "pinhole"))
     )
 
-    assert (await _inputs(app_engine, lab, dive)).camera_matrix == newer
+    assert (await _inputs(app_engine, lab, mission)).camera_matrix == newer
 
 
 async def test_a_one_row_distortion_vector_is_flattened(owner_engine, app_engine):
     """`cv2.calibrateCamera` returns (1, 5); the contract takes a flat list."""
     lab = await _tenant(owner_engine)
-    dive = await _resolver_dive(owner_engine, lab, calibrations=((K, [D], "pinhole"),))
+    mission = await _resolver_mission(
+        owner_engine, lab, calibrations=((K, [D], "pinhole"),)
+    )
 
-    assert (await _inputs(app_engine, lab, dive)).distortion_coefficients == D
+    assert (await _inputs(app_engine, lab, mission)).distortion_coefficients == D
 
 
 async def test_a_non_pinhole_calibration_is_refused(owner_engine, app_engine):
     """v2: stage 5.1 rectifies with pinhole maths. An axial (flat-port)
     camera must not be silently undistorted as if it were one (PLAN.md §8)."""
     lab = await _tenant(owner_engine)
-    dive = await _resolver_dive(
+    mission = await _resolver_mission(
         owner_engine, lab, calibrations=((K, D, "axial_refractive"),)
     )
 
     with pytest.raises(UnsupportedCameraModel, match="axial_refractive"):
-        await _inputs(app_engine, lab, dive)
+        await _inputs(app_engine, lab, mission)
 
 
 # -- the flags (v1's _set_needs_reprocess tests, head/tail kind) --------------------
@@ -767,16 +769,16 @@ async def _flags(owner_engine) -> dict[uuid.UUID, bool]:
 
 
 async def _scoping_seed(owner_engine, tenant):
-    dive = await _dive(owner_engine, tenant)
+    mission = await _dive(owner_engine, tenant)
     rows = {}
     for key, completed, canonical in (
         ("open", False, True),  # open, canonical      -> flagged
         ("done", True, True),  # completed, canonical -> NOT flagged by default
         ("dup", False, False),  # open, non-canonical  -> never flagged
     ):
-        capture = await _capture(owner_engine, tenant, dive, canonical=canonical)
+        capture = await _capture(owner_engine, tenant, mission, canonical=canonical)
         rows[key] = await _headtail(owner_engine, tenant, capture, completed=completed)
-    return dive, rows
+    return mission, rows
 
 
 class TestScoping:
@@ -784,9 +786,9 @@ class TestScoping:
         self, owner_engine, app_engine
     ):
         lab = await _tenant(owner_engine)
-        dive, rows = await _scoping_seed(owner_engine, lab)
+        mission, rows = await _scoping_seed(owner_engine, lab)
 
-        assert await _in(app_engine, lab, set_headtail_needs_reprocess, dive) == 1
+        assert await _in(app_engine, lab, set_headtail_needs_reprocess, mission) == 1
         flags = await _flags(owner_engine)
         assert flags[rows["open"]] is True
         assert flags[rows["done"]] is False, "already answered -- nothing to redraw"
@@ -796,10 +798,14 @@ class TestScoping:
         self, owner_engine, app_engine
     ):
         lab = await _tenant(owner_engine)
-        dive, rows = await _scoping_seed(owner_engine, lab)
+        mission, rows = await _scoping_seed(owner_engine, lab)
 
         n = await _in(
-            app_engine, lab, set_headtail_needs_reprocess, dive, only_incomplete=False
+            app_engine,
+            lab,
+            set_headtail_needs_reprocess,
+            mission,
+            only_incomplete=False,
         )
 
         assert n == 2
@@ -814,24 +820,28 @@ class TestScoping:
         self, owner_engine, app_engine
     ):
         lab = await _tenant(owner_engine)
-        dive, rows = await _scoping_seed(owner_engine, lab)
+        mission, rows = await _scoping_seed(owner_engine, lab)
         await _in(
-            app_engine, lab, set_headtail_needs_reprocess, dive, only_incomplete=False
+            app_engine,
+            lab,
+            set_headtail_needs_reprocess,
+            mission,
+            only_incomplete=False,
         )
 
-        assert await _in(app_engine, lab, clear_headtail_needs_reprocess, dive) == 2
+        assert await _in(app_engine, lab, clear_headtail_needs_reprocess, mission) == 2
         assert not any((await _flags(owner_engine)).values())
 
     async def test_is_idempotent_in_both_directions(self, owner_engine, app_engine):
         lab = await _tenant(owner_engine)
-        dive, _ = await _scoping_seed(owner_engine, lab)
+        mission, _ = await _scoping_seed(owner_engine, lab)
 
-        assert await _in(app_engine, lab, set_headtail_needs_reprocess, dive) == 1
-        assert await _in(app_engine, lab, set_headtail_needs_reprocess, dive) == 1
-        assert await _in(app_engine, lab, clear_headtail_needs_reprocess, dive) == 2
-        assert await _in(app_engine, lab, clear_headtail_needs_reprocess, dive) == 2
+        assert await _in(app_engine, lab, set_headtail_needs_reprocess, mission) == 1
+        assert await _in(app_engine, lab, set_headtail_needs_reprocess, mission) == 1
+        assert await _in(app_engine, lab, clear_headtail_needs_reprocess, mission) == 2
+        assert await _in(app_engine, lab, clear_headtail_needs_reprocess, mission) == 2
 
-    async def test_dive_with_no_labels_returns_zero(self, owner_engine, app_engine):
+    async def test_mission_with_no_labels_returns_zero(self, owner_engine, app_engine):
         """The parent clears unconditionally; an error would fail the workflow."""
         lab = await _tenant(owner_engine)
 
@@ -846,35 +856,35 @@ class TestScoping:
         """A flag on a superseded row is visible to the cohort and invisible
         to the resolver -- the mismatch that re-stages a dive every hour."""
         lab = await _tenant(owner_engine)
-        dive = await _dive(owner_engine, lab)
+        mission = await _dive(owner_engine, lab)
         row = await _headtail(
-            owner_engine, lab, await _capture(owner_engine, lab, dive),
+            owner_engine, lab, await _capture(owner_engine, lab, mission),
             completed=False, superseded=True,
         )  # fmt: skip
 
-        assert await _in(app_engine, lab, set_headtail_needs_reprocess, dive) == 0
+        assert await _in(app_engine, lab, set_headtail_needs_reprocess, mission) == 0
         assert (await _flags(owner_engine))[row] is False
 
     async def test_clearing_reaches_a_row_superseded_after_it_was_flagged(
         self, owner_engine, app_engine
     ):
         lab = await _tenant(owner_engine)
-        dive = await _dive(owner_engine, lab)
+        mission = await _dive(owner_engine, lab)
         row = await _headtail(
-            owner_engine, lab, await _capture(owner_engine, lab, dive),
+            owner_engine, lab, await _capture(owner_engine, lab, mission),
             superseded=True, needs_reprocess=True,
         )  # fmt: skip
 
-        assert await _in(app_engine, lab, clear_headtail_needs_reprocess, dive) == 1
+        assert await _in(app_engine, lab, clear_headtail_needs_reprocess, mission) == 1
         assert (await _flags(owner_engine))[row] is False
 
 
 class TestClearScope:
     async def _two_flagged(self, owner_engine, tenant):
-        dive = await _dive(owner_engine, tenant)
+        mission = await _dive(owner_engine, tenant)
         rows = {}
         for key in ("redrawn", "raised_mid_run"):
-            capture = await _capture(owner_engine, tenant, dive, checksum=None)
+            capture = await _capture(owner_engine, tenant, mission, checksum=None)
             rows[key] = (
                 await _checksum(owner_engine, capture),
                 await _headtail(
@@ -882,16 +892,18 @@ class TestClearScope:
                     needs_reprocess=True,
                 ),
             )  # fmt: skip
-        return dive, rows
+        return mission, rows
 
     async def test_scoped_clear_leaves_a_flag_raised_during_the_run(
         self, owner_engine, app_engine
     ):
         lab = await _tenant(owner_engine)
-        dive, rows = await self._two_flagged(owner_engine, lab)
+        mission, rows = await self._two_flagged(owner_engine, lab)
         redrawn, _ = rows["redrawn"]
 
-        n = await _in(app_engine, lab, clear_headtail_needs_reprocess, dive, [redrawn])
+        n = await _in(
+            app_engine, lab, clear_headtail_needs_reprocess, mission, [redrawn]
+        )
 
         assert n == 1
         flags = await _flags(owner_engine)
@@ -902,18 +914,20 @@ class TestClearScope:
         self, owner_engine, app_engine
     ):
         lab = await _tenant(owner_engine)
-        dive, _ = await self._two_flagged(owner_engine, lab)
+        mission, _ = await self._two_flagged(owner_engine, lab)
 
-        assert await _in(app_engine, lab, clear_headtail_needs_reprocess, dive) == 2
+        assert await _in(app_engine, lab, clear_headtail_needs_reprocess, mission) == 2
 
     async def test_an_empty_scope_is_not_read_as_no_scope(
         self, owner_engine, app_engine
     ):
         """`[]` means "this run redrew nothing", which must clear nothing."""
         lab = await _tenant(owner_engine)
-        dive, _ = await self._two_flagged(owner_engine, lab)
+        mission, _ = await self._two_flagged(owner_engine, lab)
 
-        assert await _in(app_engine, lab, clear_headtail_needs_reprocess, dive, []) == 0
+        assert (
+            await _in(app_engine, lab, clear_headtail_needs_reprocess, mission, []) == 0
+        )
         assert all((await _flags(owner_engine)).values())
 
 
@@ -921,21 +935,21 @@ class TestClearScope:
 
 
 async def _predict_seed(owner_engine, tenant, *, at=T0, **laser):
-    dive = await _dive(owner_engine, tenant, at=at)
-    capture = await _capture(owner_engine, tenant, dive)
+    mission = await _dive(owner_engine, tenant, at=at)
+    capture = await _capture(owner_engine, tenant, mission)
     laser_id = await _laser(owner_engine, tenant, capture, **laser)
-    return dive, capture, laser_id
+    return mission, capture, laser_id
 
 
-async def test_selects_a_dive_with_a_valid_laser_and_no_prediction(
+async def test_selects_a_mission_with_a_valid_laser_and_no_prediction(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive, _, _ = await _predict_seed(owner_engine, lab)
-    assert await _next_predict(app_engine, lab) == dive
+    mission, _, _ = await _predict_seed(owner_engine, lab)
+    assert await _next_predict(app_engine, lab) == mission
 
 
-async def test_ignores_a_dive_with_no_valid_laser(owner_engine, app_engine):
+async def test_ignores_a_mission_with_no_valid_laser(owner_engine, app_engine):
     """The whole stage is gated on the dot: no laser, nothing to crop around."""
     lab = await _tenant(owner_engine)
     await _predict_seed(owner_engine, lab, completed=False)
@@ -969,16 +983,16 @@ async def test_an_incomplete_populate_seeded_row_is_not_a_label(
     """Populate seeds rows that carry a project; keyed on project id, the
     cohort would starve the detector on exactly the dives it should assist."""
     lab = await _tenant(owner_engine)
-    dive, capture, _ = await _predict_seed(owner_engine, lab)
+    mission, capture, _ = await _predict_seed(owner_engine, lab)
     await _headtail(owner_engine, lab, capture, completed=False)
-    assert await _next_predict(app_engine, lab) == dive
+    assert await _next_predict(app_engine, lab) == mission
 
 
 async def test_a_superseded_human_label_re_enters_the_cohort(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive, capture, _ = await _predict_seed(owner_engine, lab)
+    mission, capture, _ = await _predict_seed(owner_engine, lab)
     await _headtail(owner_engine, lab, capture, superseded=True)
-    assert await _next_predict(app_engine, lab) == dive
+    assert await _next_predict(app_engine, lab) == mission
 
 
 @pytest.mark.parametrize("version", [0, None], ids=["stale", "null"])
@@ -988,9 +1002,9 @@ async def test_stale_or_null_predictor_version_re_enters_the_cohort(
     """Mismatch, not absence. `IS DISTINCT FROM`: a NULL (migrated) row is
     stale, and `!=` would answer NULL and select nothing."""
     lab = await _tenant(owner_engine)
-    dive, capture, _ = await _predict_seed(owner_engine, lab)
+    mission, capture, _ = await _predict_seed(owner_engine, lab)
     await _prediction(owner_engine, lab, capture, version=version, v1_id=1)
-    assert await _next_predict(app_engine, lab) == dive
+    assert await _next_predict(app_engine, lab) == mission
 
 
 @pytest.mark.parametrize(
@@ -1003,10 +1017,10 @@ async def test_prediction_from_a_superseded_laser_is_stale(
     of the wrong thing entirely. v2: an abstention names its dot too (the
     processor's), so a corrected dot re-opens a "no fish" as well."""
     lab = await _tenant(owner_engine)
-    dive, capture, _ = await _predict_seed(owner_engine, lab)
+    mission, capture, _ = await _predict_seed(owner_engine, lab)
     dead = await _laser(owner_engine, lab, capture, superseded=True)
     await _prediction(owner_engine, lab, capture, laser=dead, status=status)
-    assert await _next_predict(app_engine, lab) == dive
+    assert await _next_predict(app_engine, lab) == mission
 
 
 async def test_only_the_current_prediction_counts(owner_engine, app_engine):
@@ -1021,21 +1035,21 @@ async def test_only_the_current_prediction_counts(owner_engine, app_engine):
 
 async def test_predict_only_high_priority(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive = await _dive(owner_engine, lab, priority="low")
-    await _laser(owner_engine, lab, await _capture(owner_engine, lab, dive))
+    mission = await _dive(owner_engine, lab, priority="low")
+    await _laser(owner_engine, lab, await _capture(owner_engine, lab, mission))
     assert await _next_predict(app_engine, lab) is None
 
 
 async def test_predict_non_canonical_images_are_ignored(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive = await _dive(owner_engine, lab)
+    mission = await _dive(owner_engine, lab)
     await _laser(
-        owner_engine, lab, await _capture(owner_engine, lab, dive, canonical=False)
+        owner_engine, lab, await _capture(owner_engine, lab, mission, canonical=False)
     )
     assert await _next_predict(app_engine, lab) is None
 
 
-async def test_returns_the_oldest_dive_first(owner_engine, app_engine):
+async def test_returns_the_oldest_mission_first(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
     await _predict_seed(owner_engine, lab, at=T0 + timedelta(hours=1))
     older, _, _ = await _predict_seed(owner_engine, lab, at=T0)
@@ -1052,48 +1066,48 @@ async def test_first_prediction_is_preferred_over_an_upgrade(owner_engine, app_e
     fresh, _, _ = await _predict_seed(owner_engine, lab, at=T0 + timedelta(hours=1))
 
     candidate = await _in(
-        app_engine, lab, next_dive_for_headtail_prediction, predictor_version=V
+        app_engine, lab, next_mission_for_headtail_prediction, predictor_version=V
     )
 
-    assert (candidate.dive_id, candidate.never_predicted) == (fresh, True)
+    assert (candidate.mission_id, candidate.never_predicted) == (fresh, True)
 
 
 @pytest.mark.parametrize("setup", _UNRENDERABLE)
-async def test_predict_skips_a_dive_stage_5_1_cannot_render(
+async def test_predict_skips_a_mission_stage_5_1_cannot_render(
     owner_engine, app_engine, setup
 ):
     """Predict reads stage 5.1's JPEG; a dive 5.1 refuses never gets one, so
     its resolver would defer every image every hour -- and, never predicted,
     it would outrank every dive behind it forever."""
     lab = await _tenant(owner_engine)
-    stuck = await _unrenderable_dive(owner_engine, lab, setup)
+    stuck = await _unrenderable_mission(owner_engine, lab, setup)
     await _laser(owner_engine, lab, await _capture(owner_engine, lab, stuck))
     younger, _, _ = await _predict_seed(owner_engine, lab, at=T0 + timedelta(hours=1))
 
     assert await _next_predict(app_engine, lab) == younger
 
 
-async def test_an_upgrade_only_dive_is_still_selected_when_nothing_else_needs_one(
+async def test_an_upgrade_only_mission_is_still_selected_when_nothing_else_needs_one(
     owner_engine, app_engine
 ):
     """Preference, not exclusion: the upgrade queue must still drain."""
     lab = await _tenant(owner_engine)
-    dive, capture, _ = await _predict_seed(owner_engine, lab)
+    mission, capture, _ = await _predict_seed(owner_engine, lab)
     await _prediction(owner_engine, lab, capture, version=FALLBACK)
 
     candidate = await _in(
-        app_engine, lab, next_dive_for_headtail_prediction, predictor_version=V
+        app_engine, lab, next_mission_for_headtail_prediction, predictor_version=V
     )
 
-    assert (candidate.dive_id, candidate.never_predicted) == (dive, False)
+    assert (candidate.mission_id, candidate.never_predicted) == (mission, False)
 
 
 # -- the predict resolver (v1's test_resolve_headtail_predict_inputs.py) -------------
 
 
-async def _needing(app_engine, tenant, dive):
+async def _needing(app_engine, tenant, mission):
     return await _in(
-        app_engine, tenant, headtail_predict_captures, dive, predictor_version=V
+        app_engine, tenant, headtail_predict_captures, mission, predictor_version=V
     )
 
 
@@ -1101,9 +1115,9 @@ async def test_selects_an_unpredicted_image_with_a_valid_laser(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive, capture, laser = await _predict_seed(owner_engine, lab)
+    mission, capture, laser = await _predict_seed(owner_engine, lab)
 
-    (picked,) = await _needing(app_engine, lab, dive)
+    (picked,) = await _needing(app_engine, lab, mission)
 
     assert picked.capture_id == capture
     assert [(d.laser_label_id, d.x, d.y) for d in picked.dots] == [
@@ -1123,38 +1137,38 @@ async def test_selects_an_unpredicted_image_with_a_valid_laser(
 async def test_skips_an_image_with_no_usable_laser(owner_engine, app_engine, laser):
     """The dot is the crop centre; without one there is nothing to predict on."""
     lab = await _tenant(owner_engine)
-    dive, _, _ = await _predict_seed(owner_engine, lab, **laser)
-    assert await _needing(app_engine, lab, dive) == []
+    mission, _, _ = await _predict_seed(owner_engine, lab, **laser)
+    assert await _needing(app_engine, lab, mission) == []
 
 
 async def test_skips_an_image_a_human_already_labelled(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive, capture, _ = await _predict_seed(owner_engine, lab)
+    mission, capture, _ = await _predict_seed(owner_engine, lab)
     await _headtail(owner_engine, lab, capture, completed=True)
-    assert await _needing(app_engine, lab, dive) == []
+    assert await _needing(app_engine, lab, mission) == []
 
 
 async def test_an_incomplete_headtail_row_is_not_a_label(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive, capture, _ = await _predict_seed(owner_engine, lab)
+    mission, capture, _ = await _predict_seed(owner_engine, lab)
     await _headtail(owner_engine, lab, capture, completed=False)
-    assert [p.capture_id for p in await _needing(app_engine, lab, dive)] == [capture]
+    assert [p.capture_id for p in await _needing(app_engine, lab, mission)] == [capture]
 
 
 async def test_skips_an_image_with_a_current_prediction(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive, capture, laser = await _predict_seed(owner_engine, lab)
+    mission, capture, laser = await _predict_seed(owner_engine, lab)
     await _prediction(owner_engine, lab, capture, laser=laser)
-    assert await _needing(app_engine, lab, dive) == []
+    assert await _needing(app_engine, lab, mission) == []
 
 
 @pytest.mark.parametrize("version", [0, None, FALLBACK])
 async def test_reselects_a_stale_or_null_version(owner_engine, app_engine, version):
     lab = await _tenant(owner_engine)
-    dive, capture, laser = await _predict_seed(owner_engine, lab)
+    mission, capture, laser = await _predict_seed(owner_engine, lab)
     await _prediction(owner_engine, lab, capture, version=version, laser=laser, v1_id=9)
 
-    (picked,) = await _needing(app_engine, lab, dive)
+    (picked,) = await _needing(app_engine, lab, mission)
 
     assert picked.capture_id == capture
     assert (picked.has_existing_prediction, picked.existing_laser_superseded) == (
@@ -1169,13 +1183,13 @@ async def test_reselects_when_the_predictions_laser_was_superseded(
     """A prediction naming a label no longer in the live set was made from a
     dot since dead-lettered; the surviving dot is the one to use."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(owner_engine, lab)
-    capture = await _capture(owner_engine, lab, dive)
+    mission = await _dive(owner_engine, lab)
+    capture = await _capture(owner_engine, lab, mission)
     dead = await _laser(owner_engine, lab, capture, superseded=True)
     live = await _laser(owner_engine, lab, capture)
     await _prediction(owner_engine, lab, capture, laser=dead)
 
-    (picked,) = await _needing(app_engine, lab, dive)
+    (picked,) = await _needing(app_engine, lab, mission)
 
     assert [d.laser_label_id for d in picked.dots] == [live], "the surviving dot"
     assert (picked.has_existing_prediction, picked.existing_laser_superseded) == (
@@ -1186,21 +1200,21 @@ async def test_reselects_when_the_predictions_laser_was_superseded(
 
 async def test_skips_non_canonical_images(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive = await _dive(owner_engine, lab)
+    mission = await _dive(owner_engine, lab)
     await _laser(
-        owner_engine, lab, await _capture(owner_engine, lab, dive, canonical=False)
+        owner_engine, lab, await _capture(owner_engine, lab, mission, canonical=False)
     )
-    assert await _needing(app_engine, lab, dive) == []
+    assert await _needing(app_engine, lab, mission) == []
 
 
 async def test_carries_every_valid_dot_in_order(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive = await _dive(owner_engine, lab)
-    capture = await _capture(owner_engine, lab, dive)
+    mission = await _dive(owner_engine, lab)
+    capture = await _capture(owner_engine, lab, mission)
     first = await _laser(owner_engine, lab, capture, x=10.0, y=20.0)
     second = await _laser(owner_engine, lab, capture, x=11.0, y=21.0)
 
-    (picked,) = await _needing(app_engine, lab, dive)
+    (picked,) = await _needing(app_engine, lab, mission)
 
     assert [(d.x, d.y) for d in picked.dots] == [(10.0, 20.0), (11.0, 21.0)]
     assert [d.laser_label_id for d in picked.dots] == [first, second]
@@ -1240,11 +1254,11 @@ async def test_persist_appends_and_the_latest_is_current(owner_engine, app_engin
     """v1 upserted on the image; v2 appends, so a re-run is history, and
     `current_head_tail_predictions` is what every reader sees."""
     lab = await _tenant(owner_engine)
-    dive, capture, laser = await _predict_seed(owner_engine, lab)
+    mission, capture, laser = await _predict_seed(owner_engine, lab)
 
     for x in (1.0, 5.0):
         written = await _in(
-            app_engine, lab, persist_headtail_predictions, dive,
+            app_engine, lab, persist_headtail_predictions, mission,
             [_row(capture, head_x=x, laser_label_id=laser)],
         )  # fmt: skip
         assert written == 1
@@ -1270,10 +1284,10 @@ async def test_an_abstention_is_recorded_with_its_reason(
     """An abstention is a row, not a missing row: the cohort selects on
     absence, so an unrecorded one would be re-predicted every hour."""
     lab = await _tenant(owner_engine)
-    dive, capture, _ = await _predict_seed(owner_engine, lab)
+    mission, capture, _ = await _predict_seed(owner_engine, lab)
 
     await _in(
-        app_engine, lab, persist_headtail_predictions, dive,
+        app_engine, lab, persist_headtail_predictions, mission,
         [_row(capture, status=status, head_x=None, head_y=None, tail_x=None,
               tail_y=None)],
     )  # fmt: skip
@@ -1282,17 +1296,17 @@ async def test_an_abstention_is_recorded_with_its_reason(
     assert await _next_predict(app_engine, lab) is None
 
 
-async def test_a_prediction_for_a_capture_outside_the_dive_is_refused(
+async def test_a_prediction_for_a_capture_outside_the_mission_is_refused(
     owner_engine, app_engine
 ):
     """v2 (PLAN.md §9.11): the processor's output is checked, all or nothing."""
     lab = await _tenant(owner_engine)
-    dive, capture, _ = await _predict_seed(owner_engine, lab)
+    mission, capture, _ = await _predict_seed(owner_engine, lab)
     _, elsewhere, _ = await _predict_seed(owner_engine, lab)
 
     with pytest.raises(ForeignCapture):
         await _in(
-            app_engine, lab, persist_headtail_predictions, dive,
+            app_engine, lab, persist_headtail_predictions, mission,
             [_row(capture), _row(elsewhere)],
         )  # fmt: skip
 
@@ -1305,14 +1319,14 @@ async def test_a_prediction_naming_another_captures_laser_is_refused(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive = await _dive(owner_engine, lab)
-    capture = await _capture(owner_engine, lab, dive)
-    other = await _capture(owner_engine, lab, dive)
+    mission = await _dive(owner_engine, lab)
+    capture = await _capture(owner_engine, lab, mission)
+    other = await _capture(owner_engine, lab, mission)
     others_laser = await _laser(owner_engine, lab, other)
 
     with pytest.raises(ForeignLaserLabel):
         await _in(
-            app_engine, lab, persist_headtail_predictions, dive,
+            app_engine, lab, persist_headtail_predictions, mission,
             [_row(capture, laser_label_id=others_laser)],
         )  # fmt: skip
     assert issubclass(ForeignLaserLabel, InvalidPredictions)
@@ -1325,9 +1339,9 @@ async def test_population_selects_a_predicted_unlabelled_image(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive, capture, _ = await _predict_seed(owner_engine, lab)
+    mission, capture, _ = await _predict_seed(owner_engine, lab)
     await _prediction(owner_engine, lab, capture)
-    assert await _population(app_engine, lab) == [dive]
+    assert await _population(app_engine, lab) == [mission]
 
 
 async def test_unpredicted_images_are_not_populated(owner_engine, app_engine):
@@ -1340,9 +1354,9 @@ async def test_unpredicted_images_are_not_populated(owner_engine, app_engine):
 
 async def test_an_abstention_still_opens_the_gate(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive, capture, _ = await _predict_seed(owner_engine, lab)
+    mission, capture, _ = await _predict_seed(owner_engine, lab)
     await _prediction(owner_engine, lab, capture, status="no_detections")
-    assert await _population(app_engine, lab) == [dive]
+    assert await _population(app_engine, lab) == [mission]
 
 
 async def test_drops_out_once_labelling_is_complete(owner_engine, app_engine):
@@ -1359,10 +1373,10 @@ async def test_stays_in_the_cohort_while_labelling_is_incomplete(
     """ "No completed label", not "no row" -- so the idempotent populate
     self-heals hourly until labelers finish."""
     lab = await _tenant(owner_engine)
-    dive, capture, _ = await _predict_seed(owner_engine, lab)
+    mission, capture, _ = await _predict_seed(owner_engine, lab)
     await _prediction(owner_engine, lab, capture)
     await _headtail(owner_engine, lab, capture, completed=False)
-    assert await _population(app_engine, lab) == [dive]
+    assert await _population(app_engine, lab) == [mission]
 
 
 async def test_population_requires_a_valid_laser(owner_engine, app_engine):
@@ -1402,22 +1416,22 @@ async def test_populate_state_reads_candidates_predictions_and_live_labels(
     """v1's populate read `get_laser_labels`, `get_headtail_labels` and
     `get_headtail_predictions` for the dive; one snapshot here."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(owner_engine, lab)
-    valid = await _capture(owner_engine, lab, dive, v1_id=12)
+    mission = await _dive(owner_engine, lab)
+    valid = await _capture(owner_engine, lab, mission, v1_id=12)
     await _laser(owner_engine, lab, valid)
     await _laser(owner_engine, lab, valid)  # a second dot: still one candidate
-    done = await _capture(owner_engine, lab, dive)
+    done = await _capture(owner_engine, lab, mission)
     await _laser(owner_engine, lab, done)
     await _headtail(owner_engine, lab, done, completed=True, task=5)
-    no_laser = await _capture(owner_engine, lab, dive)
+    no_laser = await _capture(owner_engine, lab, mission)
     stale = await _headtail(owner_engine, lab, no_laser, completed=False, task=6)
     await _headtail(owner_engine, lab, no_laser, project=2, superseded=True, task=7)
     await _prediction(owner_engine, lab, valid, version=FALLBACK)
     await _prediction(owner_engine, lab, valid, version=V)
 
-    state = await _in(app_engine, lab, headtail_populate_state, dive)
+    state = await _in(app_engine, lab, headtail_populate_state, mission)
 
-    assert state.dive_number > 0
+    assert state.mission_number > 0
     assert [(c.capture_id, c.number, c.from_v1) for c in state.candidates] == [
         (valid, 12, True)
     ]
@@ -1493,16 +1507,16 @@ async def test_recording_again_revives_the_row_and_never_erases_a_labelers_work(
     assert (label.completed, label.head_x, label.head_y) == (True, 10.0, 20.0)
 
 
-async def test_supersede_retires_only_the_named_live_incomplete_rows_of_the_dive(
+async def test_supersede_retires_only_the_named_live_incomplete_rows_of_the_mission(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive = await _dive(owner_engine, lab)
+    mission = await _dive(owner_engine, lab)
     stale = await _headtail(
-        owner_engine, lab, await _capture(owner_engine, lab, dive), completed=False
+        owner_engine, lab, await _capture(owner_engine, lab, mission), completed=False
     )
     done = await _headtail(
-        owner_engine, lab, await _capture(owner_engine, lab, dive), completed=True
+        owner_engine, lab, await _capture(owner_engine, lab, mission), completed=True
     )
     elsewhere = await _headtail(
         owner_engine,
@@ -1512,7 +1526,7 @@ async def test_supersede_retires_only_the_named_live_incomplete_rows_of_the_dive
     )
 
     n = await _in(
-        app_engine, lab, supersede_head_tail_labels, dive, [stale, done, elsewhere]
+        app_engine, lab, supersede_head_tail_labels, mission, [stale, done, elsewhere]
     )
 
     assert n == 1
@@ -1539,6 +1553,6 @@ async def test_the_catalog_acts_only_in_tenants_it_is_a_member_of(
     catalog = HeadtailCatalog(app_engine, sub=ORCHESTRATOR)
 
     assert await catalog.member_tenants() == [lab]
-    assert await catalog.next_dive_for_headtail_preprocessing(lab) is not None
+    assert await catalog.next_mission_for_headtail_preprocessing(lab) is not None
     with pytest.raises(PermissionError):
-        await catalog.next_dive_for_headtail_preprocessing(reef)
+        await catalog.next_mission_for_headtail_preprocessing(reef)

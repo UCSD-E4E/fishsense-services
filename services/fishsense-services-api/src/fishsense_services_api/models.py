@@ -189,10 +189,10 @@ class Device(Base):
     number: Mapped[int] = _number()
 
 
-class Dive(Base):
+class Mission(Base):
     """A Lite offload session; ``priority`` is v1's commit/park flag."""
 
-    __tablename__ = "dives"
+    __tablename__ = "missions"
     __table_args__ = (
         UniqueConstraint("tenant_id", "id"),
         UniqueConstraint("tenant_id", "source_path"),
@@ -200,14 +200,15 @@ class Dive(Base):
             ["tenant_id", "device_id"], ["devices.tenant_id", "devices.id"]
         ),
         ForeignKeyConstraint(
-            ["tenant_id", "calibration_source_dive_id"],
-            ["dives.tenant_id", "dives.id"],
+            ["tenant_id", "calibration_source_mission_id"],
+            ["missions.tenant_id", "missions.id"],
         ),
         CheckConstraint(
-            "priority IN ('low', 'high', 'none')", name="dives_priority_check"
+            "priority IN ('low', 'high', 'none')", name="missions_priority_check"
         ),
         CheckConstraint(
-            "calibration_source_dive_id <> id", name="dives_calibration_not_self_check"
+            "calibration_source_mission_id <> id",
+            name="missions_calibration_not_self_check",
         ),
     )
 
@@ -217,10 +218,12 @@ class Dive(Base):
     number: Mapped[int] = _number()
     name: Mapped[str | None] = mapped_column(Text)
     source_path: Mapped[str] = mapped_column(Text)
-    dived_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     priority: Mapped[str] = mapped_column(Text, server_default=text("'low'::text"))
     notes: Mapped[str | None] = mapped_column(Text)
-    flip_dive_slate: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    flip_mission_slate: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false")
+    )
     device_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     slate_template_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("slate_templates.id")
@@ -228,7 +231,7 @@ class Dive(Base):
     calibration_target_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("calibration_targets.id")
     )
-    calibration_source_dive_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    calibration_source_mission_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     #: When the species sync last wrote the slate template or calibration
     #: target: a calibration refusal older than this has expired (0022).
     calibration_links_changed_at: Mapped[datetime | None] = mapped_column(
@@ -244,7 +247,9 @@ class Capture(Base):
     __table_args__ = (
         UniqueConstraint("tenant_id", "id"),
         UniqueConstraint("tenant_id", "source_path"),
-        ForeignKeyConstraint(["tenant_id", "dive_id"], ["dives.tenant_id", "dives.id"]),
+        ForeignKeyConstraint(
+            ["tenant_id", "mission_id"], ["missions.tenant_id", "missions.id"]
+        ),
         ForeignKeyConstraint(
             ["tenant_id", "device_id"], ["devices.tenant_id", "devices.id"]
         ),
@@ -269,7 +274,7 @@ class Capture(Base):
             postgresql_where=text("is_canonical"),
         ),
         # A dive's captures, per dive (0029).
-        Index("captures_tenant_id_dive_id_idx", "tenant_id", "dive_id"),
+        Index("captures_tenant_id_mission_id_idx", "tenant_id", "mission_id"),
         # A mobile capture's id from the app: the sync's idempotency key (0038).
         UniqueConstraint(
             "tenant_id",
@@ -282,7 +287,7 @@ class Capture(Base):
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
     v1_id: Mapped[int | None] = _v1_id()
     number: Mapped[int] = _number()
-    dive_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    mission_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     device_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     source_path: Mapped[str | None] = mapped_column(Text)
     raw_object_key: Mapped[str | None] = mapped_column(Text)
@@ -355,7 +360,9 @@ class LaserCalibration(Base):
     __tablename__ = "laser_calibrations"
     __table_args__ = (
         UniqueConstraint("tenant_id", "id"),
-        ForeignKeyConstraint(["tenant_id", "dive_id"], ["dives.tenant_id", "dives.id"]),
+        ForeignKeyConstraint(
+            ["tenant_id", "mission_id"], ["missions.tenant_id", "missions.id"]
+        ),
         ForeignKeyConstraint(
             ["tenant_id", "camera_calibration_id"],
             ["camera_calibrations.tenant_id", "camera_calibrations.id"],
@@ -383,7 +390,7 @@ class LaserCalibration(Base):
         BigInteger, unique=True, nullable=True
     )
     seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
-    dive_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    mission_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     camera_calibration_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     producer: Mapped[str | None] = mapped_column(Text)
     outcome: Mapped[str] = mapped_column(Text)
@@ -433,16 +440,18 @@ class LaserCalibrationRefusalClear(Base):
     created_at: Mapped[datetime] = _created_at()
 
 
-class DiveLaserLine(Base):
+class MissionLaserLine(Base):
     """The within-dive laser-dot line fit; append-only (latest ``seq`` per dive)."""
 
-    __tablename__ = "dive_laser_lines"
+    __tablename__ = "mission_laser_lines"
     __table_args__ = (
         UniqueConstraint("tenant_id", "id"),
-        ForeignKeyConstraint(["tenant_id", "dive_id"], ["dives.tenant_id", "dives.id"]),
+        ForeignKeyConstraint(
+            ["tenant_id", "mission_id"], ["missions.tenant_id", "missions.id"]
+        ),
         CheckConstraint(
             "inlier_count <= n_points",
-            name="dive_laser_lines_inliers_within_points_check",
+            name="mission_laser_lines_inliers_within_points_check",
         ),
     )
 
@@ -451,7 +460,7 @@ class DiveLaserLine(Base):
     v1_id: Mapped[int | None] = _v1_id()
     number: Mapped[int] = _number()
     seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
-    dive_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    mission_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     a: Mapped[float] = mapped_column(Double)
     b: Mapped[float] = mapped_column(Double)
     c: Mapped[float] = mapped_column(Double)
@@ -849,15 +858,17 @@ class Fish(Base):
     created_at: Mapped[datetime] = _created_at()
 
 
-class DiveFrameCluster(Base):
-    __tablename__ = "dive_frame_clusters"
+class MissionFrameCluster(Base):
+    __tablename__ = "mission_frame_clusters"
     __table_args__ = (
         UniqueConstraint("tenant_id", "id"),
-        ForeignKeyConstraint(["tenant_id", "dive_id"], ["dives.tenant_id", "dives.id"]),
+        ForeignKeyConstraint(
+            ["tenant_id", "mission_id"], ["missions.tenant_id", "missions.id"]
+        ),
         ForeignKeyConstraint(["tenant_id", "fish_id"], ["fish.tenant_id", "fish.id"]),
         CheckConstraint(
             "formed_by IN ('prediction', 'label_studio')",
-            name="dive_frame_clusters_formed_by_check",
+            name="mission_frame_clusters_formed_by_check",
         ),
     )
 
@@ -865,21 +876,21 @@ class DiveFrameCluster(Base):
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
     v1_id: Mapped[int | None] = _v1_id()
     number: Mapped[int] = _number()
-    dive_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    mission_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     formed_by: Mapped[str | None] = mapped_column(Text)
     fish_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created_at()
 
 
-class DiveFrameClusterCapture(Base):
+class MissionFrameClusterCapture(Base):
     """A capture's membership in a cluster; goes with the cluster."""
 
-    __tablename__ = "dive_frame_cluster_captures"
+    __tablename__ = "mission_frame_cluster_captures"
     __table_args__ = (
         ForeignKeyConstraint(
             ["tenant_id", "cluster_id"],
-            ["dive_frame_clusters.tenant_id", "dive_frame_clusters.id"],
+            ["mission_frame_clusters.tenant_id", "mission_frame_clusters.id"],
             ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
@@ -887,7 +898,7 @@ class DiveFrameClusterCapture(Base):
         ),
         # A capture's clusters, for measurement_subjects (0028).
         Index(
-            "dive_frame_cluster_captures_tenant_id_capture_id_idx",
+            "mission_frame_cluster_captures_tenant_id_capture_id_idx",
             "tenant_id",
             "capture_id",
         ),
@@ -1102,12 +1113,14 @@ class LabelStudioProject(Base):
     __table_args__ = (
         UniqueConstraint("tenant_id", "id"),
         UniqueConstraint("tenant_id", "kind", "ls_project_id"),
-        ForeignKeyConstraint(["tenant_id", "dive_id"], ["dives.tenant_id", "dives.id"]),
+        ForeignKeyConstraint(
+            ["tenant_id", "mission_id"], ["missions.tenant_id", "missions.id"]
+        ),
     )
 
     id: Mapped[uuid.UUID] = _id()
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
-    dive_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    mission_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     kind: Mapped[str] = mapped_column(Text)
     ls_project_id: Mapped[int] = mapped_column(Integer)
     title: Mapped[str | None] = mapped_column(Text)
@@ -1178,7 +1191,7 @@ class AutomaticLaserCalibration(Base):
     __tablename__ = "automatic_laser_calibrations"
     __table_args__ = (
         UniqueConstraint("tenant_id", "id"),
-        _fk(("tenant_id", "dive_id"), "dives"),
+        _fk(("tenant_id", "mission_id"), "missions"),
         _fk(("tenant_id", "camera_calibration_id"), "camera_calibrations"),
     )
 
@@ -1186,7 +1199,7 @@ class AutomaticLaserCalibration(Base):
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
     seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
     producer: Mapped[str] = _producer()
-    dive_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    mission_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     camera_calibration_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     method: Mapped[str] = mapped_column(
         Text, server_default=text("'size_constancy'::text")
@@ -1377,7 +1390,9 @@ class AutomaticResultsExclusion(Base):
 
     __tablename__ = "automatic_results_exclusions"
     __table_args__ = (
-        ForeignKeyConstraint(["tenant_id", "dive_id"], ["dives.tenant_id", "dives.id"]),
+        ForeignKeyConstraint(
+            ["tenant_id", "mission_id"], ["missions.tenant_id", "missions.id"]
+        ),
         CheckConstraint(
             "btrim(reason) <> ''", name="automatic_results_exclusions_reason_check"
         ),
@@ -1386,7 +1401,7 @@ class AutomaticResultsExclusion(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("tenants.id", ondelete="CASCADE"), primary_key=True
     )
-    dive_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    mission_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     reason: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
 
@@ -1425,20 +1440,24 @@ class AutomaticResultsFailure(Base):
     __tablename__ = "automatic_results_failures"
     __table_args__ = (
         UniqueConstraint("tenant_id", "id"),
-        ForeignKeyConstraint(["tenant_id", "dive_id"], ["dives.tenant_id", "dives.id"]),
+        ForeignKeyConstraint(
+            ["tenant_id", "mission_id"], ["missions.tenant_id", "missions.id"]
+        ),
         CheckConstraint(
             "step IN ('frames', 'calibration', 'lengths', 'species')",
             name="automatic_results_failures_step_check",
         ),
         Index(
-            "automatic_results_failures_tenant_id_dive_id_idx", "tenant_id", "dive_id"
+            "automatic_results_failures_tenant_id_mission_id_idx",
+            "tenant_id",
+            "mission_id",
         ),
     )
 
     id: Mapped[uuid.UUID] = _id()
     tenant_id: Mapped[uuid.UUID] = _tenant_id()
     seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
-    dive_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    mission_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     step: Mapped[str] = mapped_column(Text)
     error: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()

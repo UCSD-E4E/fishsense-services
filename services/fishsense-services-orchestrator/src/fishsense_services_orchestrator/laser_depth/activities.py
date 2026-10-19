@@ -3,8 +3,8 @@
 Ported from fishsense-lite@77e8f8e5 services/fishsense-api-workflow-worker/src/
 fishsense_api_workflow_worker/activities/
 select_next_high_priority_dive_for_laser_depth_activity.py (and the shared
-`cohort_selection.select_next_dive`), plus the read and write halves of the
-data-worker's compute_laser_depths_activity.py (`load_dive_calibration_context`,
+`cohort_selection.select_next_mission`), plus the read and write halves of the
+data-worker's compute_laser_depths_activity.py (`load_mission_calibration_context`,
 the labels and depths it read, the `put_laser_depth` it wrote). v1's selector
 was one SDK call; v2's call the laser-depth catalog
 (`fishsense_services_api.laser_depth_store`), which owns the cohort, the work
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, Annotated
 
 from temporalio import activity
 
@@ -38,9 +38,10 @@ from fishsense_services_contracts.laser_depth import (
     LaserDepthCapture,
     LaserDot,
 )
+from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = [
-    "DiveTarget",
+    "MissionTarget",
     "LaserDepthActivities",
     "LaserDepthCatalog",
     "LaserDepthResolution",
@@ -51,9 +52,9 @@ __all__ = [
 
 
 @dataclass(frozen=True)
-class DiveTarget:
+class MissionTarget:
     tenant_id: uuid.UUID
-    dive_id: uuid.UUID
+    mission_id: Annotated[uuid.UUID, renamed_from("dive_id", "mission_id")]
 
 
 @dataclass(frozen=True)
@@ -80,25 +81,25 @@ class LaserDepthCatalog(Protocol):
 
     async def member_tenants(self) -> list[uuid.UUID]: ...
 
-    async def next_dive_for_laser_depth(
+    async def next_mission_for_laser_depth(
         self, tenant_id: uuid.UUID
     ) -> LaserDepthCandidate | None: ...
 
     async def laser_depth_work(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> LaserDepthWork: ...
 
     async def persist_laser_depths(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, **result
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, **result
     ) -> PersistedDepths: ...
 
 
-async def oldest_candidate(tenants, next_for_tenant) -> DiveTarget | None:
+async def oldest_candidate(tenants, next_for_tenant) -> MissionTarget | None:
     """The oldest candidate across the tenants: v1's `ORDER BY id LIMIT 1`,
     kept first in, first out across tenants (the clustering selector's rule).
     Ties go to the lower dive number, v1's id for a migrated dive: every
     migrated dive shares one created_at, and their UUIDs are in no order."""
-    best: DiveTarget | None = None
+    best: MissionTarget | None = None
     best_key = None
     for tenant_id in tenants:
         candidate = await next_for_tenant(tenant_id)
@@ -106,7 +107,7 @@ async def oldest_candidate(tenants, next_for_tenant) -> DiveTarget | None:
             continue
         key = (candidate.created_at, candidate.number)
         if best_key is None or key < best_key:
-            best, best_key = DiveTarget(tenant_id, candidate.dive_id), key
+            best, best_key = MissionTarget(tenant_id, candidate.mission_id), key
     return best
 
 
@@ -123,11 +124,11 @@ class LaserDepthActivities:
         self._catalog = catalog
 
     @activity.defn(name="select_next_dive_for_laser_depth")
-    async def select_next_dive_for_laser_depth(self) -> DiveTarget | None:
+    async def select_next_mission_for_laser_depth(self) -> MissionTarget | None:
         """The oldest dive in the laser-depth cohort, across tenants."""
         best = await oldest_candidate(
             await self._catalog.member_tenants(),
-            self._catalog.next_dive_for_laser_depth,
+            self._catalog.next_mission_for_laser_depth,
         )
         if best is None:
             activity.logger.info("no high-priority dives needing laser depths")
@@ -135,22 +136,22 @@ class LaserDepthActivities:
             activity.logger.info(
                 "next high-priority dive needing laser depths: tenant=%s dive=%s",
                 best.tenant_id,
-                best.dive_id,
+                best.mission_id,
             )
         return best
 
     @activity.defn(name="resolve_laser_depth_inputs")
     async def resolve_laser_depth_inputs(
-        self, target: DiveTarget
+        self, target: MissionTarget
     ) -> LaserDepthResolution:
         """The camera matrix, the effective laser calibration, and per capture
         needing a depth its valid labels in the order to try them."""
-        work = await self._catalog.laser_depth_work(target.tenant_id, target.dive_id)
+        work = await self._catalog.laser_depth_work(target.tenant_id, target.mission_id)
         payload = None
         if work.geometry is not None and work.captures:
             geometry = work.geometry
             payload = ComputeLaserDepthsInput(
-                dive_id=target.dive_id,
+                mission_id=target.mission_id,
                 camera_matrix=geometry.camera_matrix,
                 calibration=LaserCalibrationGeometry(
                     laser_calibration_id=geometry.laser_calibration_id,
@@ -171,7 +172,7 @@ class LaserDepthActivities:
         activity.logger.info(
             "resolved laser-depth inputs dive=%s captures=%d skipped_current=%d "
             "skipped_refused=%d skipped_unusable_label=%d",
-            target.dive_id,
+            target.mission_id,
             len(work.captures),
             work.skipped_current,
             work.skipped_refused,
@@ -187,7 +188,7 @@ class LaserDepthActivities:
     @activity.defn(name="persist_laser_depths")
     async def persist_laser_depths(
         self,
-        target: DiveTarget,
+        target: MissionTarget,
         laser_calibration_id: uuid.UUID,
         result: ComputeLaserDepthsResult,
     ) -> PersistedLaserDepths:
@@ -221,7 +222,7 @@ class LaserDepthActivities:
                 )
         persisted = await self._catalog.persist_laser_depths(
             target.tenant_id,
-            target.dive_id,
+            target.mission_id,
             laser_calibration_id=laser_calibration_id,
             core_version=result.core_version,
             depths=depths,
@@ -230,7 +231,7 @@ class LaserDepthActivities:
         )
         activity.logger.info(
             "persisted laser depths dive=%s computed=%d refused=%d stale=%d",
-            target.dive_id,
+            target.mission_id,
             persisted.written,
             persisted.refused,
             persisted.skipped_stale,

@@ -5,7 +5,7 @@ nas_errors.py.
 Shared classification of Synology FileStation errors into retryable and
 permanent.
 
-Extracted from `stage_raw_bytes_for_dive_activity` when ingest needed the same
+Extracted from `stage_raw_bytes_for_mission_activity` when ingest needed the same
 judgement. The rule it encodes is worth stating once: **retry/backoff belongs to
 the Temporal retry policy on the activity call, never to an inner loop.** An
 inner loop underneath Temporal's outer retry is what produced the

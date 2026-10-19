@@ -13,13 +13,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 
 from fishsense_services_contracts import (
     PROCESSOR_LIGHT_TASK_QUEUE,
-    ClusterDiveFrameImage,
-    ClusterDiveFramesInput,
+    ClusterMissionFrameImage,
+    ClusterMissionFramesInput,
 )
 from fishsense_services_processor.worker import ProcessorSettings, build_worker
 
@@ -27,10 +27,10 @@ BASE = datetime(2026, 5, 5, 10, 0, tzinfo=UTC)
 
 
 async def test_the_light_worker_clusters_on_the_light_queue():
-    payload = ClusterDiveFramesInput(
-        dive_id=uuid.uuid4(),
+    payload = ClusterMissionFramesInput(
+        mission_id=uuid.uuid4(),
         images=[
-            ClusterDiveFrameImage(
+            ClusterMissionFrameImage(
                 capture_id=uuid.UUID(int=i), taken_datetime=BASE + timedelta(seconds=i)
             )
             for i in range(3)
@@ -38,13 +38,13 @@ async def test_the_light_worker_clusters_on_the_light_queue():
     )
 
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with build_worker(env.client, role="light"):
             clusters = await env.client.execute_workflow(
                 "DiveFrameClusteringWorkflow",
                 payload,
-                id=f"cluster-{payload.dive_id}",
+                id=f"cluster-{payload.mission_id}",
                 task_queue=PROCESSOR_LIGHT_TASK_QUEUE,
                 result_type=list[list[uuid.UUID]],
             )

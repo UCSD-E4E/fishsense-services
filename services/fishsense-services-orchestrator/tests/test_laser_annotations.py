@@ -21,7 +21,7 @@ from fishsense_services_orchestrator.laser.annotations import (
     Dot,
     auto_accepted_annotations,
     build_laser_task,
-    dive_laser_label,
+    mission_laser_label,
     prediction_annotations,
 )
 
@@ -36,25 +36,25 @@ IMAGE = TaskImage(
 # -- the dive's colour -------------------------------------------------------------
 
 
-def test_unanimous_green_dive_is_labelled_green():
-    assert dive_laser_label(["green"] * 5) == "Green Laser"
+def test_unanimous_green_mission_is_labelled_green():
+    assert mission_laser_label(["green"] * 5) == "Green Laser"
 
 
-def test_a_single_misread_frame_does_not_split_the_dive():
-    assert dive_laser_label(["green"] * 9 + ["red"]) == "Green Laser"
+def test_a_single_misread_frame_does_not_split_the_mission():
+    assert mission_laser_label(["green"] * 9 + ["red"]) == "Green Laser"
 
 
 def test_abstentions_do_not_count_as_votes():
-    assert dive_laser_label([None, None, None, "green"]) == "Green Laser"
+    assert mission_laser_label([None, None, None, "green"]) == "Green Laser"
 
 
 def test_no_votes_falls_back_to_the_more_common_colour():
-    assert dive_laser_label([]) == "Red Laser"
-    assert dive_laser_label([None]) == "Red Laser"
+    assert mission_laser_label([]) == "Red Laser"
+    assert mission_laser_label([None]) == "Red Laser"
 
 
 def test_a_tie_falls_back_rather_than_picking_arbitrarily():
-    assert dive_laser_label(["red", "green"]) == "Red Laser"
+    assert mission_laser_label(["red", "green"]) == "Red Laser"
 
 
 # -- the pre-annotation ------------------------------------------------------------

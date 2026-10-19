@@ -71,10 +71,10 @@ def _activities(deps: Deps):
         label_studio_factory=lambda: LabelStudioClient.from_settings(label_studio),
     )
     return [
-        activities.select_next_dive_for_species_prediction,
+        activities.select_next_mission_for_species_prediction,
         activities.resolve_species_predict_inputs,
         activities.persist_species_predictions,
-        activities.backfill_species_predictions_for_dive,
+        activities.backfill_species_predictions_for_mission,
     ]
 
 

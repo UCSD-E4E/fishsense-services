@@ -15,9 +15,9 @@ import numpy as np
 import pytest
 
 from fishsense_services_api.automatic_validation import (
-    PAPER_POOL_DIVES,
-    PAPER_REEF_CALIBRATED_DIVES,
-    PAPER_REEF_DIVES,
+    PAPER_POOL_MISSIONS,
+    PAPER_REEF_CALIBRATED_MISSIONS,
+    PAPER_REEF_MISSIONS,
     ValidationFrame,
     depth,
     fish_p90,
@@ -45,11 +45,11 @@ def _dot_at(z):
     return (float(q[0]), float(q[1]))
 
 
-def test_the_paper_dives():
+def test_the_paper_missions():
     """run_e2e.py ORDER; tail/stage.py CALIBRATED_REEF plus the two green dives."""
-    assert PAPER_POOL_DIVES == (58, 59, 60, 61, 66, 76, 84, 87, 94, 114)
-    assert PAPER_REEF_CALIBRATED_DIVES == (347, 341, 465, 349, 279, 471, 436, 383)
-    assert set(PAPER_REEF_DIVES) == {*PAPER_REEF_CALIBRATED_DIVES, 362, 366}
+    assert PAPER_POOL_MISSIONS == (58, 59, 60, 61, 66, 76, 84, 87, 94, 114)
+    assert PAPER_REEF_CALIBRATED_MISSIONS == (347, 341, 465, 349, 279, 471, 436, 383)
+    assert set(PAPER_REEF_MISSIONS) == {*PAPER_REEF_CALIBRATED_MISSIONS, 362, 366}
 
 
 def test_depth_is_the_laser_points_z():
@@ -68,12 +68,12 @@ def test_fish_p90_is_productions_estimator():
     assert fish_p90([3.0]) == 3.0
 
 
-def _pool(z, true_length=0.4, model="Grouper", dive=58, **overrides):
+def _pool(z, true_length=0.4, model="Grouper", mission=58, **overrides):
     dot = _dot_at(z)
     half = true_length / 2 * K[0, 0] / z
     ht = (dot[0] - half, dot[1], dot[0] + half, dot[1])
     fields = dict(
-        capture_number=int(z * 1000), dive_number=dive, set="pool", model=model,
+        capture_number=int(z * 1000), mission_number=mission, set="pool", model=model,
         true_length_m=true_length, green=False, camera_matrix=K.tolist(),
         human_dot=dot, human_head_tail=ht, auto_dot=dot, auto_head_tail=ht,
         stored_calibration=(O.tolist(), A.tolist()),
@@ -117,8 +117,11 @@ def test_a_frame_with_no_automatic_head_tail_costs_coverage_not_error():
     assert rows["F"].fish_p90_mae == pytest.approx(0.0, abs=1e-9)
 
 
-def test_per_fish_error_is_per_dive_and_model():
-    frames = [_pool(1.0, dive=58), _pool(1.0, dive=59, model="Snook", true_length=0.5)]
+def test_per_fish_error_is_per_mission_and_model():
+    frames = [
+        _pool(1.0, mission=58),
+        _pool(1.0, mission=59, model="Snook", true_length=0.5),
+    ]
     assert pool_ladder(frames)[0].fish_n == 2
 
 
@@ -178,10 +181,10 @@ def test_the_papers_reef_frames_are_its_own_791():
     (v1 image ids, which v2 captures carry as `v1_id`): all of the calibrated
     dives' frames, and 362 and 366 sampled to 200 each (pandas, seed 0)."""
     assert len(PAPER_REEF_FRAMES) == 791
-    by_dive = {}
-    for dive, _ in PAPER_REEF_FRAMES.values():
-        by_dive[dive] = by_dive.get(dive, 0) + 1
-    assert by_dive == {279: 35, 341: 98, 347: 146, 349: 39, 362: 200, 366: 200,
+    by_mission = {}
+    for mission, _ in PAPER_REEF_FRAMES.values():
+        by_mission[mission] = by_mission.get(mission, 0) + 1
+    assert by_mission == {279: 35, 341: 98, 347: 146, 349: 39, 362: 200, 366: 200,
                        383: 9, 436: 1, 465: 40, 471: 23}  # fmt: skip
     assert sum(measured for _, measured in PAPER_REEF_FRAMES.values()) == 502
 
@@ -222,12 +225,12 @@ def _session(err_px):
     one along the dive line u = (0, -1)."""
     k = [[2850.0, 0.0, 2000.0], [0.0, 2850.0, 1500.0], [0.0, 0.0, 1.0]]
     stored = (0.0, -0.3, 1.0)  # v = (2000, 645); v . u = -645
-    return SessionCalibration(dive_number=62, camera_matrix=k, stored_axis=stored,
+    return SessionCalibration(mission_number=62, camera_matrix=k, stored_axis=stored,
                               vanishing_px=-645.0 + err_px,
                               line_direction=(0.0, -1.0))  # fmt: skip
 
 
-def test_table3s_error_is_the_vanishing_point_offset_along_the_dive_line():
+def test_table3s_error_is_the_vanishing_point_offset_along_the_mission_line():
     """register.py: err_px = tv_fit - v.u, u the dive line's direction
     oriented to negative y; err_deg = degrees(err_px / 2850)."""
     assert calibration_error_deg(_session(10.0)) == pytest.approx(
@@ -249,7 +252,7 @@ def test_table3_puts_the_papers_error_beside_ours():
     assert PAPER_TABLE3[62] == pytest.approx(0.033)
     assert PAPER_TABLE3[114] == pytest.approx(-0.129)
     (row,) = table3([_session(10.0)])
-    assert row.dive_number == 62
+    assert row.mission_number == 62
     assert row.err_deg == pytest.approx(np.degrees(10.0 / 2850.0))
     assert row.paper_err_deg == pytest.approx(0.033)
 
@@ -270,7 +273,7 @@ def test_the_report_shows_both_coverage_seeds_rejected_frames_and_table3():
 
 def test_table3_lists_every_expected_session_even_without_a_fit():
     rows = table3([_session(10.0)], expected=(62, 63))
-    assert [(r.dive_number, r.err_deg is None) for r in rows] == [
+    assert [(r.mission_number, r.err_deg is None) for r in rows] == [
         (62, False),
         (63, True),
     ]

@@ -39,7 +39,7 @@ class PredictHeadtailImagesWorkflow:
     ) -> List[HeadtailPredictionResult]:
         workflow.logger.info(
             "predicting headtail images dive_id=%s images=%d",
-            payload.dive_id,
+            payload.mission_id,
             len(payload.images),
         )
         results = await asyncio.gather(

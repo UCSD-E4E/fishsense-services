@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import List, Optional, Protocol, Sequence
+from typing import List, Optional, Protocol, Sequence, Annotated
 
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
@@ -56,6 +56,7 @@ from fishsense_services_contracts.object_store import HEADTAIL_JPEG_FOLDER
 from fishsense_services_orchestrator.object_store.store import (
     OrchestratorObjectStore,
 )
+from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = [
     "ClearHeadtailReprocessFlags",
@@ -70,7 +71,7 @@ class HeadtailTarget:
     """A dive of a tenant. Serialises as the object store's `StagingTarget`."""
 
     tenant_id: uuid.UUID
-    dive_id: uuid.UUID
+    mission_id: Annotated[uuid.UUID, renamed_from("dive_id", "mission_id")]
 
 
 @dataclass(frozen=True)
@@ -80,7 +81,7 @@ class ClearHeadtailReprocessFlags:
     no-work backstop; a list, empty included, is only those frames."""
 
     tenant_id: uuid.UUID
-    dive_id: uuid.UUID
+    mission_id: Annotated[uuid.UUID, renamed_from("dive_id", "mission_id")]
     checksums: Optional[List[str]] = None
 
 
@@ -89,33 +90,33 @@ class HeadtailCatalog(Protocol):
 
     async def member_tenants(self) -> list[uuid.UUID]: ...
 
-    async def next_dive_for_headtail_preprocessing(
+    async def next_mission_for_headtail_preprocessing(
         self, tenant_id: uuid.UUID
     ) -> HeadtailCandidate | None: ...
 
     async def headtail_preprocess_inputs(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> HeadtailPreprocessInputs: ...
 
     async def clear_headtail_needs_reprocess(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         checksums: Sequence[str] | None = None,
     ) -> int: ...
 
-    async def next_dive_for_headtail_prediction(
+    async def next_mission_for_headtail_prediction(
         self, tenant_id: uuid.UUID, *, predictor_version: int
     ) -> PredictionCandidate | None: ...
 
     async def headtail_predict_captures(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, *, predictor_version: int
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, predictor_version: int
     ) -> list[PredictCapture]: ...
 
     async def persist_headtail_predictions(
         self,
         tenant_id: uuid.UUID,
-        dive_id: uuid.UUID,
+        mission_id: uuid.UUID,
         rows: Sequence[HeadTailPredictionRow],
     ) -> int: ...
 
@@ -130,20 +131,20 @@ class HeadtailActivities:
     # -- stage 5.1 ------------------------------------------------------------------
 
     @activity.defn(name="select_next_dive_for_headtail_preprocessing")
-    async def select_next_dive_for_headtail_preprocessing(
+    async def select_next_mission_for_headtail_preprocessing(
         self,
     ) -> Optional[HeadtailTarget]:
         """The oldest dive in the stage-5.1 cohort, across tenants."""
         best, best_key = None, None
         for tenant_id in await self._catalog.member_tenants():
-            candidate = await self._catalog.next_dive_for_headtail_preprocessing(
+            candidate = await self._catalog.next_mission_for_headtail_preprocessing(
                 tenant_id
             )
             if candidate is None:
                 continue
-            key = (candidate.created_at, str(candidate.dive_id))
+            key = (candidate.created_at, str(candidate.mission_id))
             if best_key is None or key < best_key:
-                best, best_key = HeadtailTarget(tenant_id, candidate.dive_id), key
+                best, best_key = HeadtailTarget(tenant_id, candidate.mission_id), key
         activity.logger.info("next dive for headtail preprocessing: %s", best)
         return best
 
@@ -154,7 +155,7 @@ class HeadtailActivities:
         """The dive's frames to render, where each is staged and where its JPEG
         goes, and the intrinsics to rectify with."""
         inputs = await self._catalog.headtail_preprocess_inputs(
-            target.tenant_id, target.dive_id
+            target.tenant_id, target.mission_id
         )
         images = []
         for capture in inputs.captures:
@@ -173,12 +174,12 @@ class HeadtailActivities:
             )
         activity.logger.info(
             "resolved headtail preprocess inputs dive=%s images=%d",
-            target.dive_id,
+            target.mission_id,
             len(images),
         )
         return PreprocessHeadtailImagesInput(
             tenant_id=target.tenant_id,
-            dive_id=target.dive_id,
+            mission_id=target.mission_id,
             images=images,
             camera_matrix=inputs.camera_matrix,
             distortion_coefficients=inputs.distortion_coefficients,
@@ -191,11 +192,11 @@ class HeadtailActivities:
         """Lower the dive's stage-5.1 redraw flags, scoped to the frames
         redrawn. Idempotent: a dive never flagged clears 0."""
         cleared = await self._catalog.clear_headtail_needs_reprocess(
-            request.tenant_id, request.dive_id, request.checksums
+            request.tenant_id, request.mission_id, request.checksums
         )
         activity.logger.info(
             "cleared headtail reprocess flags dive=%s rows=%d scope=%s",
-            request.dive_id,
+            request.mission_id,
             cleared,
             "whole dive" if request.checksums is None else len(request.checksums),
         )
@@ -204,7 +205,7 @@ class HeadtailActivities:
     # -- predict --------------------------------------------------------------------
 
     @activity.defn(name="select_next_dive_for_headtail_prediction")
-    async def select_next_dive_for_headtail_prediction(
+    async def select_next_mission_for_headtail_prediction(
         self,
     ) -> Optional[HeadtailTarget]:
         """The next dive for the detector across tenants: never-predicted
@@ -212,7 +213,7 @@ class HeadtailActivities:
         oldest."""
         best, best_key = None, None
         for tenant_id in await self._catalog.member_tenants():
-            candidate = await self._catalog.next_dive_for_headtail_prediction(
+            candidate = await self._catalog.next_mission_for_headtail_prediction(
                 tenant_id, predictor_version=HEADTAIL_PREDICTOR_VERSION
             )
             if candidate is None:
@@ -220,10 +221,10 @@ class HeadtailActivities:
             key = (
                 not candidate.never_predicted,
                 candidate.created_at,
-                str(candidate.dive_id),
+                str(candidate.mission_id),
             )
             if best_key is None or key < best_key:
-                best, best_key = HeadtailTarget(tenant_id, candidate.dive_id), key
+                best, best_key = HeadtailTarget(tenant_id, candidate.mission_id), key
         activity.logger.info("next dive for headtail prediction: %s", best)
         return best
 
@@ -236,7 +237,7 @@ class HeadtailActivities:
         predicts, and they overlap routinely)."""
         captures = await self._catalog.headtail_predict_captures(
             target.tenant_id,
-            target.dive_id,
+            target.mission_id,
             predictor_version=HEADTAIL_PREDICTOR_VERSION,
         )
         images = []
@@ -266,12 +267,12 @@ class HeadtailActivities:
             )
         activity.logger.info(
             "resolved headtail predict inputs dive=%s needing=%d deferred_no_jpeg=%d",
-            target.dive_id,
+            target.mission_id,
             len(images),
             len(captures) - len(images),
         )
         return PredictHeadtailImagesInput(
-            tenant_id=target.tenant_id, dive_id=target.dive_id, images=images
+            tenant_id=target.tenant_id, mission_id=target.mission_id, images=images
         )
 
     @activity.defn(name="persist_headtail_predictions")
@@ -284,23 +285,23 @@ class HeadtailActivities:
         if refused:
             raise ApplicationError(
                 f"refusing head/tail results with status {refused} for dive "
-                f"{target.dive_id}: not a prediction or an abstention",
+                f"{target.mission_id}: not a prediction or an abstention",
                 type="InvalidPredictions",
                 non_retryable=True,
             )
         rows = [HeadTailPredictionRow(**r.model_dump()) for r in results]
         try:
             written = await self._catalog.persist_headtail_predictions(
-                target.tenant_id, target.dive_id, rows
+                target.tenant_id, target.mission_id, rows
             )
         except InvalidPredictions as exc:
             raise ApplicationError(
-                f"refusing the processor's predictions for dive {target.dive_id}: "
+                f"refusing the processor's predictions for dive {target.mission_id}: "
                 f"{exc}",
                 type="InvalidPredictions",
                 non_retryable=True,
             ) from exc
         activity.logger.info(
-            "persisted %d headtail predictions for dive=%s", written, target.dive_id
+            "persisted %d headtail predictions for dive=%s", written, target.mission_id
         )
         return written

@@ -25,7 +25,7 @@ import boto3
 import pytest
 from moto import mock_aws
 from pydantic import ValidationError
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -124,10 +124,10 @@ class _Catalog:
     def __init__(self, captures):
         self._captures = captures
 
-    async def captures_to_stage(self, tenant_id, dive_id):
+    async def captures_to_stage(self, tenant_id, mission_id):
         return list(self._captures)
 
-    async def checksums_to_clean(self, tenant_id, dive_id):
+    async def checksums_to_clean(self, tenant_id, mission_id):
         return sorted(c.checksum for c in self._captures)
 
 
@@ -147,8 +147,8 @@ async def _until_visible(client, query, *, running: bool) -> None:
 
 
 async def test_a_parent_stages_and_cleanup_waits_for_a_running_reader():
-    tenant, dive = uuid.uuid4(), uuid.uuid4()
-    target = StagingTarget(tenant_id=tenant, dive_id=dive)
+    tenant, mission = uuid.uuid4(), uuid.uuid4()
+    target = StagingTarget(tenant_id=tenant, mission_id=mission)
     captures = [StagingCapture(uuid.uuid4(), f"d/P{n}.ORF", _md5(n)) for n in (1, 2)]
     catalog = _Catalog(captures)
 
@@ -176,7 +176,7 @@ async def test_a_parent_stages_and_cleanup_waits_for_a_running_reader():
             return {o["Key"] for o in resp.get("Contents", [])}
 
         async with await WorkflowEnvironment.start_local(
-            data_converter=pydantic_data_converter
+            data_converter=DATA_CONVERTER
         ) as temporal:
             client = temporal.client
             async with Worker(
@@ -184,22 +184,22 @@ async def test_a_parent_stages_and_cleanup_waits_for_a_running_reader():
                 task_queue=QUEUE,
                 workflows=[StageThenCleanUpWorkflow, RawReaderStandInWorkflow],
                 activities=[
-                    staging.stage_raw_bytes_for_dive,
-                    cleanup.cleanup_raw_bytes_for_dive,
+                    staging.stage_raw_bytes_for_mission,
+                    cleanup.cleanup_raw_bytes_for_mission,
                 ],
             ):
                 reader = await client.start_workflow(
                     RawReaderStandInWorkflow.run,
-                    id=raw_scratch_reader_id("preprocess-laser", dive),
+                    id=raw_scratch_reader_id("preprocess-laser", mission),
                     task_queue=QUEUE,
                 )
-                query = build_scratch_in_use_query(dive)
+                query = build_scratch_in_use_query(mission)
                 await _until_visible(client, query, running=True)
 
                 staged, held = await client.execute_workflow(
                     StageThenCleanUpWorkflow.run,
                     target,
-                    id=f"stage-then-clean-{dive}",
+                    id=f"stage-then-clean-{mission}",
                     task_queue=QUEUE,
                 )
                 kept = _staged()
@@ -211,7 +211,7 @@ async def test_a_parent_stages_and_cleanup_waits_for_a_running_reader():
                 again, cleaned = await client.execute_workflow(
                     StageThenCleanUpWorkflow.run,
                     target,
-                    id=f"stage-then-clean-again-{dive}",
+                    id=f"stage-then-clean-again-{mission}",
                     task_queue=QUEUE,
                 )
 

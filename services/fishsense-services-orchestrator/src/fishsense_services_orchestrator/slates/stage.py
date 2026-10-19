@@ -30,14 +30,14 @@ from fishsense_services_orchestrator.registry import Deps, ScheduledWorkflow, St
 from fishsense_services_orchestrator.slates.activities import SlateActivities
 from fishsense_services_orchestrator.slates.pdfs import SlatePdfs
 from fishsense_services_orchestrator.slates.populate import (
-    DiveSlateProjectActivities,
+    MissionSlateProjectActivities,
 )
 from fishsense_services_orchestrator.slates.sync import SlateSyncActivities
 from fishsense_services_orchestrator.slates.workflows import (
-    CreateDiveSlateLabelStudioProjectWorkflow,
-    PopulateDiveSlateLabelStudioProjectWorkflow,
+    CreateMissionSlateLabelStudioProjectWorkflow,
+    PopulateMissionSlateLabelStudioProjectWorkflow,
     PreprocessSlateImagesParentWorkflow,
-    SyncLabelStudioDiveSlateLabelsWorkflow,
+    SyncLabelStudioMissionSlateLabelsWorkflow,
 )
 
 
@@ -55,7 +55,7 @@ def _activities(deps: Deps):
         storage=LabelStudioStorageSettings(),
     )
     stage9 = SlateActivities(catalog=catalog, store=store, pdfs=pdfs)
-    project = DiveSlateProjectActivities(
+    project = MissionSlateProjectActivities(
         catalog=catalog, label_projects=projects, label_studio=label_studio, store=store
     )
     sync = SlateSyncActivities(
@@ -67,12 +67,12 @@ def _activities(deps: Deps):
         pdfs=pdfs,
     )
     return [
-        stage9.select_next_dive_for_slate_preprocessing,
+        stage9.select_next_mission_for_slate_preprocessing,
         stage9.resolve_slate_preprocess_inputs,
         stage9.stage_slate_pdf,
         stage9.clear_slate_reprocess_flags,
-        project.create_dive_slate_label_studio_project,
-        project.populate_dive_slate_label_studio_project,
+        project.create_mission_slate_label_studio_project,
+        project.populate_mission_slate_label_studio_project,
         sync.slate_label_projects,
         sync.sync_slate_labels,
     ]
@@ -82,9 +82,9 @@ STAGE = Stage(
     name="slates",
     workflows=[
         PreprocessSlateImagesParentWorkflow,
-        CreateDiveSlateLabelStudioProjectWorkflow,
-        PopulateDiveSlateLabelStudioProjectWorkflow,
-        SyncLabelStudioDiveSlateLabelsWorkflow,
+        CreateMissionSlateLabelStudioProjectWorkflow,
+        PopulateMissionSlateLabelStudioProjectWorkflow,
+        SyncLabelStudioMissionSlateLabelsWorkflow,
     ],
     build_activities=_activities,
     schedules=[
@@ -98,7 +98,7 @@ STAGE = Stage(
         ),
         ScheduledWorkflow(
             schedule_id="sync-label-studio-dive-slate-labels",
-            workflow=SyncLabelStudioDiveSlateLabelsWorkflow,
+            workflow=SyncLabelStudioMissionSlateLabelsWorkflow,
             every=timedelta(hours=1),
             offset=timedelta(0),
             run_timeout=timedelta(hours=3),

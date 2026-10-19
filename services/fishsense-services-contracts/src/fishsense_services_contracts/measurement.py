@@ -3,7 +3,7 @@
 Ported from the shape of fishsense-lite@77e8f8e5
 services/fishsense-data-processing-workflow-worker/src/
 fishsense_data_processing_workflow_worker/activities/measure_fish_activity.py,
-which took a bare `dive_id` and did its own SDK reads and writes. In v2 the
+which took a bare `mission_id` and did its own SDK reads and writes. In v2 the
 orchestrator decides what to measure -- which captures, and per capture the
 one laser label and the one head/tail label -- and binds the result to a fish
 when it persists it. The processor does only the geometry: the laser dot's
@@ -25,7 +25,7 @@ v2 changes:
 from typing import Annotated, Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 from fishsense_services_contracts.laser_depth import (
     CameraMatrix,
@@ -33,6 +33,7 @@ from fishsense_services_contracts.laser_depth import (
     LaserCalibrationGeometry,
     LaserDot,
 )
+from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = [
     "FishLength",
@@ -63,7 +64,8 @@ class MeasureFishCapture(BaseModel):
 
 
 class MeasureFishInput(BaseModel):
-    dive_id: UUID
+    model_config = ConfigDict(validate_by_name=True)
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     camera_matrix: CameraMatrix
     calibration: LaserCalibrationGeometry
     captures: list[MeasureFishCapture]
@@ -89,7 +91,8 @@ class FishLength(BaseModel):
 
 
 class MeasureFishResult(BaseModel):
-    dive_id: UUID
+    model_config = ConfigDict(validate_by_name=True)
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     algorithm: str = Field(min_length=1)
     algorithm_version: str = Field(min_length=1)
     #: The fishsense-core wheel that computed it.

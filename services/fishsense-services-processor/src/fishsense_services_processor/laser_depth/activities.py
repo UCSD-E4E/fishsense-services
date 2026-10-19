@@ -81,7 +81,7 @@ async def compute_laser_depths(
                 # the dive's calibration, not this image, that is broken.
                 raise ApplicationError(
                     f"laser calibration {payload.calibration.laser_calibration_id}"
-                    f" of dive {payload.dive_id} is unusable: {exc}",
+                    f" of dive {payload.mission_id} is unusable: {exc}",
                     type="UnusableLaserCalibration",
                     non_retryable=True,
                 ) from exc
@@ -101,7 +101,7 @@ async def compute_laser_depths(
             activity.logger.debug(
                 "dive_id=%s capture_id=%s laser_label_id=%s: depth=%s; "
                 "trying the capture's next valid label",
-                payload.dive_id,
+                payload.mission_id,
                 capture.capture_id,
                 dot.laser_label_id,
                 point.depth_m,
@@ -125,7 +125,7 @@ async def compute_laser_depths(
                 "dive_id=%s capture_id=%s: none of its %d valid laser label(s) "
                 "intersect laser_calibration_id=%s in front of the camera; "
                 "refusing it",
-                payload.dive_id,
+                payload.mission_id,
                 capture.capture_id,
                 len(capture.laser_labels),
                 payload.calibration.laser_calibration_id,
@@ -141,10 +141,10 @@ async def compute_laser_depths(
 
     activity.logger.info(
         "dive_id=%s laser depths: computed=%d refused=%d",
-        payload.dive_id,
+        payload.mission_id,
         computed,
         refused,
     )
     return ComputeLaserDepthsResult(
-        dive_id=payload.dive_id, core_version=core_version(), captures=outcomes
+        mission_id=payload.mission_id, core_version=core_version(), captures=outcomes
     )

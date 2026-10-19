@@ -7,8 +7,8 @@ Ported from fishsense-lite@77e8f8e5:
   landing page and triage both use (`label_controller.py`
   `get_*_label_studio_project_ids`, `_gate_scan`);
 * services/fishsense-api/tests/test_calibration_source_endpoints.py, the
-  set / clear half (`dive_controller.py` `set_dive_calibration_source`,
-  `clear_dive_calibration_source`). Its resolution half (own calibration
+  set / clear half (`mission_controller.py` `set_mission_calibration_source`,
+  `clear_mission_calibration_source`). Its resolution half (own calibration
   first, then the link) is `effective_laser_calibrations` (0018), which the
   calibration slice owns.
 
@@ -36,7 +36,7 @@ from fishsense_services_api.portal_store import (
     SelfLink,
     clear_calibration_source,
     label_studio_project_ids,
-    list_dives,
+    list_missions,
     set_calibration_source,
 )
 
@@ -60,34 +60,34 @@ def seed(owner_engine, lab):
     """Seed as the owner (as migrate-v1 would), in the lab tenant."""
 
     class Seed:
-        async def dive(
+        async def mission(
             self, number, *, name=None, tenant=None, slate=None, source=None
         ):
             async with owner_engine.begin() as conn:
                 return await _one(
                     conn,
-                    "INSERT INTO dives (tenant_id, v1_id, name, source_path, dived_at, "
-                    "slate_template_id, calibration_source_dive_id) "
+                    "INSERT INTO missions (tenant_id, v1_id, name, source_path, started_at, "
+                    "slate_template_id, calibration_source_mission_id) "
                     "VALUES (:t, :n, :name, :p, :at, :slate, :source) RETURNING id",
                     t=tenant or lab, n=number, name=name, p=f"/dives/{number}",
                     at=T0, slate=slate, source=source,
                 )  # fmt: skip
 
-        async def image(self, image_id, dive=None, tenant=None):
+        async def image(self, image_id, mission=None, tenant=None):
             """v1's `_image`: a capture, with its v1 id."""
             async with owner_engine.begin() as conn:
-                dive = dive or await _one(
+                mission = mission or await _one(
                     conn,
-                    "INSERT INTO dives (tenant_id, source_path, dived_at) "
+                    "INSERT INTO missions (tenant_id, source_path, started_at) "
                     "VALUES (:t, :p, :at) RETURNING id",
                     t=tenant or lab, p=f"/dives/for-{image_id}-{uuid.uuid4()}", at=T0,
                 )  # fmt: skip
                 return await _one(
                     conn,
-                    "INSERT INTO captures (tenant_id, v1_id, dive_id, source_path, "
+                    "INSERT INTO captures (tenant_id, v1_id, mission_id, source_path, "
                     "captured_at, checksum) VALUES (:t, :id, :d, :p, :at, :c) "
                     "RETURNING id",
-                    t=tenant or lab, id=image_id, d=dive, p=f"/img-{image_id}",
+                    t=tenant or lab, id=image_id, d=mission, p=f"/img-{image_id}",
                     at=T0, c=f"{image_id:032d}",
                 )  # fmt: skip
 
@@ -125,14 +125,14 @@ def seed(owner_engine, lab):
                     id=number,
                 )
 
-        async def calibration_source(self, dive_id):
+        async def calibration_source(self, mission_id):
             async with owner_engine.connect() as conn:
                 return await _one(
                     conn,
-                    "SELECT s.number FROM dives d "
-                    "LEFT JOIN dives s ON s.id = d.calibration_source_dive_id "
+                    "SELECT s.number FROM missions d "
+                    "LEFT JOIN missions s ON s.id = d.calibration_source_mission_id "
                     "WHERE d.id = :d",
-                    d=dive_id,
+                    d=mission_id,
                 )
 
     return Seed()
@@ -373,25 +373,25 @@ async def test_another_tenants_projects_are_not_listed(
 # -- dives, by number --------------------------------------------------------------
 
 
-async def test_dives_are_listed_by_number_with_what_the_portal_shows(
+async def test_missions_are_listed_by_number_with_what_the_portal_shows(
     seed, app_engine, lab
 ):
     slate = await seed.slate_template(9005)
-    source = await seed.dive(1, name="slate dive", slate=slate)
-    await seed.dive(2, name="fish dive", source=source)
+    source = await seed.mission(1, name="slate dive", slate=slate)
+    await seed.mission(2, name="fish dive", source=source)
 
     async with tenant_transaction(app_engine, lab) as conn:
-        dives = await list_dives(conn, lab)
+        missions = await list_missions(conn, lab)
 
     assert [
         (d.number, d.name, d.slate_template_number, d.calibration_source_number)
-        for d in dives
+        for d in missions
     ] == [(1, "slate dive", 9005, None), (2, "fish dive", None, 1)]
-    assert dives[0].dived_at == T0
-    assert dives[0].priority == "low"
+    assert missions[0].started_at == T0
+    assert missions[0].priority == "low"
 
 
-async def test_another_tenants_dives_are_not_listed(
+async def test_another_tenants_missions_are_not_listed(
     seed, app_engine, lab, owner_engine
 ):
     async with owner_engine.begin() as conn:
@@ -399,11 +399,11 @@ async def test_another_tenants_dives_are_not_listed(
             conn,
             "INSERT INTO tenants (slug, name) VALUES ('partner', 'p') RETURNING id",
         )
-    await seed.dive(1)
-    await seed.dive(2, tenant=partner)
+    await seed.mission(1)
+    await seed.mission(2, tenant=partner)
 
     async with tenant_transaction(app_engine, lab) as conn:
-        assert [d.number for d in await list_dives(conn, lab)] == [1]
+        assert [d.number for d in await list_missions(conn, lab)] == [1]
 
 
 # -- the calibration-source link (test_calibration_source_endpoints.py) -----------
@@ -419,9 +419,9 @@ async def _clear(app_engine, tenant, number):
         await clear_calibration_source(conn, tenant, number)
 
 
-async def test_set_calibration_source_links_the_dives(seed, app_engine, lab):
-    await seed.dive(1)
-    two = await seed.dive(2)
+async def test_set_calibration_source_links_the_missions(seed, app_engine, lab):
+    await seed.mission(1)
+    two = await seed.mission(2)
 
     returned = await _set(app_engine, lab, 2, 1)
 
@@ -431,29 +431,29 @@ async def test_set_calibration_source_links_the_dives(seed, app_engine, lab):
 
 
 async def test_set_calibration_source_rejects_self_link(seed, app_engine, lab):
-    await seed.dive(1)
+    await seed.mission(1)
 
     with pytest.raises(SelfLink):
         await _set(app_engine, lab, 1, 1)
 
 
 async def test_set_calibration_source_404_when_source_missing(seed, app_engine, lab):
-    await seed.dive(1)
+    await seed.mission(1)
 
     with pytest.raises(DiveNotFound) as error:
         await _set(app_engine, lab, 1, 999)
-    assert error.value.which == "calibration source dive"
+    assert error.value.which == "calibration source mission"
 
 
-async def test_set_calibration_source_404_when_dive_missing(seed, app_engine, lab):
-    await seed.dive(1)
+async def test_set_calibration_source_404_when_mission_missing(seed, app_engine, lab):
+    await seed.mission(1)
 
     with pytest.raises(DiveNotFound) as error:
         await _set(app_engine, lab, 999, 1)
-    assert error.value.which == "dive"
+    assert error.value.which == "mission"
 
 
-async def test_a_dive_cannot_borrow_another_tenants_calibration(
+async def test_a_mission_cannot_borrow_another_tenants_calibration(
     seed, app_engine, lab, owner_engine
 ):
     """v2 change (PLAN.md §9.17): borrowing stays within a tenant. Another
@@ -463,8 +463,8 @@ async def test_a_dive_cannot_borrow_another_tenants_calibration(
             conn,
             "INSERT INTO tenants (slug, name) VALUES ('partner', 'p') RETURNING id",
         )
-    mine = await seed.dive(1)
-    await seed.dive(2, tenant=partner)
+    mine = await seed.mission(1)
+    await seed.mission(2, tenant=partner)
 
     with pytest.raises(DiveNotFound):
         await _set(app_engine, lab, 1, 2)
@@ -472,9 +472,9 @@ async def test_a_dive_cannot_borrow_another_tenants_calibration(
 
 
 async def test_relinking_replaces_the_source(seed, app_engine, lab):
-    await seed.dive(1)
-    await seed.dive(3)
-    two = await seed.dive(2)
+    await seed.mission(1)
+    await seed.mission(3)
+    two = await seed.mission(2)
 
     await _set(app_engine, lab, 2, 1)
     await _set(app_engine, lab, 2, 3)
@@ -483,8 +483,8 @@ async def test_relinking_replaces_the_source(seed, app_engine, lab):
 
 
 async def test_clear_calibration_source_unlinks(seed, app_engine, lab):
-    source = await seed.dive(1)
-    two = await seed.dive(2, source=source)
+    source = await seed.mission(1)
+    two = await seed.mission(2, source=source)
 
     await _clear(app_engine, lab, 2)
 
@@ -492,14 +492,14 @@ async def test_clear_calibration_source_unlinks(seed, app_engine, lab):
 
 
 async def test_clear_calibration_source_is_idempotent(seed, app_engine, lab):
-    one = await seed.dive(1)
+    one = await seed.mission(1)
 
     await _clear(app_engine, lab, 1)  # already null
 
     assert await seed.calibration_source(one) is None
 
 
-async def test_clear_calibration_source_404_when_dive_missing(app_engine, lab):
+async def test_clear_calibration_source_404_when_mission_missing(app_engine, lab):
     with pytest.raises(DiveNotFound):
         await _clear(app_engine, lab, 999)
 
@@ -515,10 +515,10 @@ async def test_the_store_scopes_to_the_tenant_itself_not_only_through_rls(
             conn,
             "INSERT INTO tenants (slug, name) VALUES ('partner', 'p') RETURNING id",
         )
-    source = await seed.dive(1)
-    await seed.dive(2, source=source)
-    partner_source = await seed.dive(3, tenant=partner)
-    await seed.dive(4, tenant=partner, source=partner_source)
+    source = await seed.mission(1)
+    await seed.mission(2, source=source)
+    partner_source = await seed.mission(3, tenant=partner)
+    await seed.mission(4, tenant=partner, source=partner_source)
     await seed.label("laser_labels", await seed.image(1, source), project_id=42)
     await seed.label(
         "laser_labels", await seed.image(2, partner_source, tenant=partner), project_id=77,
@@ -527,8 +527,8 @@ async def test_the_store_scopes_to_the_tenant_itself_not_only_through_rls(
 
     async with owner_engine.connect() as conn:
         assert await label_studio_project_ids(conn, lab, "laser") == [42]
-        dives = await list_dives(conn, lab)
-    assert [(d.number, d.calibration_source_number) for d in dives] == [
+        missions = await list_missions(conn, lab)
+    assert [(d.number, d.calibration_source_number) for d in missions] == [
         (1, None),
         (2, 1),
     ]

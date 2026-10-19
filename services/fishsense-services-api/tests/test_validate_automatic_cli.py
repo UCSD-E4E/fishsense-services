@@ -21,7 +21,7 @@ from depth_measure_seed import (  # noqa: F401  (forget_identities: a fixture)
     calibrate,
     capture,
     device,
-    dive,
+    mission,
     exec_,
     forget_identities,
     head_tail_label,
@@ -46,17 +46,17 @@ from fishsense_services_api.db import tenant_transaction
 from research_seed import references  # noqa: F401  (a fixture)
 
 
-async def _paper_dive(owner_engine, lab, number):
+async def _paper_mission(owner_engine, lab, number):
     device_id = await device(owner_engine, lab)
-    dive_id = await dive(owner_engine, lab, device_id=device_id)
-    await exec_(owner_engine, "UPDATE dives SET number = :n WHERE id = :d",
-                n=number, d=dive_id)  # fmt: skip
-    await calibrate(owner_engine, lab, dive_id)
-    return dive_id
+    mission_id = await mission(owner_engine, lab, device_id=device_id)
+    await exec_(owner_engine, "UPDATE missions SET number = :n WHERE id = :d",
+                n=number, d=mission_id)  # fmt: skip
+    await calibrate(owner_engine, lab, mission_id)
+    return mission_id
 
 
-async def _labelled(owner_engine, lab, dive_id, content, *, green=False):
-    c = await capture(owner_engine, lab, dive_id)
+async def _labelled(owner_engine, lab, mission_id, content, *, green=False):
+    c = await capture(owner_engine, lab, mission_id)
     label = await laser_label(owner_engine, lab, c, x=2048.0, y=1600.0)
     if green:
         await exec_(owner_engine, "UPDATE laser_labels SET label = 'Green Laser' "
@@ -68,29 +68,31 @@ async def _labelled(owner_engine, lab, dive_id, content, *, green=False):
     return c
 
 
-async def _auto(app_engine, lab, dive_id, c):
+async def _auto(app_engine, lab, mission_id, c):
     async with tenant_transaction(app_engine, lab) as conn:
-        await persist_automatic_head_tails(conn, lab, dive_id, [AutomaticHeadTailRow(
+        await persist_automatic_head_tails(conn, lab, mission_id, [AutomaticHeadTailRow(
             capture_id=c, status="predicted", predictor_version=1, laser_x=2049.0,
             laser_y=1601.0, head_x=1905.0, head_y=1600.0, tail_x=2210.0,
             tail_y=1600.0, mask_bbox=[1, 2, 3, 4], sam_score=0.9, checkpoint="s",
         )])  # fmt: skip
 
 
-async def test_frames_are_the_human_labelled_frames_of_the_paper_dives(
+async def test_frames_are_the_human_labelled_frames_of_the_paper_missions(
     owner_engine, app_engine, references
 ):
     await references("Grouper", 0.36)
     lab = await tenant(owner_engine)
-    pool = await _paper_dive(owner_engine, lab, 58)
-    reef = await _paper_dive(owner_engine, lab, 347)
+    pool = await _paper_mission(owner_engine, lab, 58)
+    reef = await _paper_mission(owner_engine, lab, 347)
     model = await _labelled(owner_engine, lab, pool, "Fish Model, Grouper")
     fish = await _labelled(owner_engine, lab, reef, None, green=True)
     await _labelled(owner_engine, lab, reef, "Slate, Laser on slate")
     await _auto(app_engine, lab, pool, model)
 
     async with tenant_transaction(app_engine, lab) as conn:
-        frames = await validation_frames(conn, lab, pool_dives=[58], reef_dives=[347])
+        frames = await validation_frames(
+            conn, lab, pool_missions=[58], reef_missions=[347]
+        )
 
     by_set = {f.set: f for f in frames}
     assert len(frames) == 2
@@ -109,7 +111,7 @@ async def test_outputs_from_a_file_replace_the_databases(
 ):
     await references("Ruler", 0.3429)
     lab = await tenant(owner_engine)
-    pool = await _paper_dive(owner_engine, lab, 58)
+    pool = await _paper_mission(owner_engine, lab, 58)
     c = await _labelled(owner_engine, lab, pool, "Calibration Targets, Ruler")
     async with owner_engine.connect() as conn:
         from sqlalchemy import text
@@ -123,7 +125,7 @@ async def test_outputs_from_a_file_replace_the_databases(
                         "auto_head_tail_humandot": [5.0, 6.0, 7.0, 8.0]}}  # fmt: skip
 
     async with tenant_transaction(app_engine, lab) as conn:
-        (f,) = await validation_frames(conn, lab, pool_dives=[58], reef_dives=[],
+        (f,) = await validation_frames(conn, lab, pool_missions=[58], reef_missions=[],
                                        outputs=outputs)  # fmt: skip
 
     assert (f.model, f.true_length_m) == ("Ruler", 0.3429)
@@ -138,11 +140,11 @@ async def test_a_frame_the_file_does_not_name_was_not_run(
     a frame it never ran is no evidence either way, so it is left out."""
     await references("Ruler", 0.3429)
     lab = await tenant(owner_engine)
-    pool = await _paper_dive(owner_engine, lab, 58)
+    pool = await _paper_mission(owner_engine, lab, 58)
     await _labelled(owner_engine, lab, pool, "Calibration Targets, Ruler")
 
     async with tenant_transaction(app_engine, lab) as conn:
-        frames = await validation_frames(conn, lab, pool_dives=[58], reef_dives=[],
+        frames = await validation_frames(conn, lab, pool_missions=[58], reef_missions=[],
                                          outputs={})  # fmt: skip
 
     assert frames == []
@@ -152,7 +154,7 @@ async def test_the_cli_prints_the_papers_tables(owner_engine, app_engine, app_ur
                                                 monkeypatch, capsys, references):  # fmt: skip
     await references("Grouper", 0.36)
     lab = await tenant(owner_engine)
-    pool = await _paper_dive(owner_engine, lab, 58)
+    pool = await _paper_mission(owner_engine, lab, 58)
     c = await _labelled(owner_engine, lab, pool, "Fish Model, Grouper")
     await _auto(app_engine, lab, pool, c)
     monkeypatch.setenv("FISHSENSE_DATABASE_URL", app_url)
@@ -173,7 +175,7 @@ async def test_the_cli_reads_label_free_calibrations_from_a_file(
 ):
     await references("Grouper", 0.36)
     lab = await tenant(owner_engine)
-    pool = await _paper_dive(owner_engine, lab, 58)
+    pool = await _paper_mission(owner_engine, lab, 58)
     c = await _labelled(owner_engine, lab, pool, "Fish Model, Grouper")
     await _auto(app_engine, lab, pool, c)
     cal = tmp_path / "label_free.json"
@@ -205,7 +207,7 @@ async def test_the_papers_listed_reef_frames_include_the_rejected_ones(
     exactly those, and a listed frame whose head/tail label has no points --
     a labeller's "not measurable" -- is in, as rejected."""
     lab = await tenant(owner_engine)
-    reef = await _paper_dive(owner_engine, lab, 347)
+    reef = await _paper_mission(owner_engine, lab, 347)
     measured = await _labelled(owner_engine, lab, reef, None)
     rejected = await capture(owner_engine, lab, reef)
     await laser_label(owner_engine, lab, rejected, x=2048.0, y=1600.0)
@@ -219,7 +221,7 @@ async def test_the_papers_listed_reef_frames_include_the_rejected_ones(
 
     async with tenant_transaction(app_engine, lab) as conn:
         frames = await validation_frames(
-            conn, lab, pool_dives=[], reef_dives=[347],
+            conn, lab, pool_missions=[], reef_missions=[347],
             reef_frames={9001: (347, True), 9002: (347, False)},
         )  # fmt: skip
 
@@ -233,7 +235,7 @@ async def test_a_sessions_calibrations_are_its_stored_axis_and_its_own_fit(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
-    session = await _paper_dive(owner_engine, lab, 62)
+    session = await _paper_mission(owner_engine, lab, 62)
     async with tenant_transaction(app_engine, lab) as conn:
         await persist_automatic_calibration(conn, lab, session, AutomaticCalibrationRow(
             outcome="accepted", algorithm_version="1", laser_position=[0.03, -0.1, 0.0],
@@ -244,6 +246,6 @@ async def test_a_sessions_calibrations_are_its_stored_axis_and_its_own_fit(
         ))  # fmt: skip
         (s,) = await session_calibrations(conn, lab, [62])
 
-    assert s.dive_number == 62
+    assert s.mission_number == 62
     assert s.stored_axis is not None
     assert (s.vanishing_px, list(s.line_direction)) == (-2000.0, [-0.29, -0.957])

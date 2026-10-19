@@ -97,7 +97,7 @@ class TestList:
         assert phone["photo_url"].startswith(
             "http://garage.test:3900/fishsense-tenant-lab/mobile/captures/"
         )
-        assert phone["dive"] is None
+        assert phone["mission"] is None
 
         assert (decoy["capture_id"], decoy["fish_id"]) == (
             str(lite_capture),
@@ -105,7 +105,7 @@ class TestList:
         )
         assert decoy["method"] == "laser"
         assert decoy["device"] == {"kind": "lite", "name": "FSL-07"}
-        assert decoy["dive"]["name"] == "Alligator Deep"
+        assert decoy["mission"]["name"] == "Alligator Deep"
         assert decoy["fish_model"] == {"name": "Ginny", "known_length_m": 0.3127}
         assert decoy["species"] is None
         assert decoy["photo_url"] is None

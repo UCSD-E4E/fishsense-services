@@ -25,13 +25,13 @@ from temporalio.testing import ActivityEnvironment
 
 from fishsense_services_orchestrator.ingest.activities import (
     EXIF_HEADER_BYTES,
-    DiveFolderListing,
+    MissionFolderListing,
     IngestActivities,
     stored_path,
 )
 from fishsense_services_orchestrator.ingest.catalog import ResolvedDevice
 from fishsense_services_orchestrator.ingest.contracts import (
-    IngestDiveRequest,
+    IngestMissionRequest,
     SubfolderReport,
 )
 from fishsense_services_orchestrator.ingest.nas import NasEntry
@@ -47,7 +47,7 @@ ROOT = "/fishsense_data/REEF/data"
 FOLDER = f"{ROOT}/2024.06.20.REEF/082929_FishModels_FSL07"
 TENANT = uuid.uuid4()
 DEVICE = uuid.uuid4()
-SOURCE_DIVE = uuid.uuid4()
+SOURCE_MISSION = uuid.uuid4()
 SLATE = uuid.uuid4()
 
 
@@ -59,10 +59,10 @@ def _settings(root: str = ROOT) -> NasSettings:
 class FakeCatalog:
     """What preflight asks the database, answered from memory."""
 
-    def __init__(self, devices=None, dives=None, slates=None, tenants=None):
+    def __init__(self, devices=None, missions=None, slates=None, tenants=None):
         default = {SERIAL: ResolvedDevice(DEVICE, "FSL-07", True)}
         self.devices = default if devices is None else devices
-        self.dives = dives or {}  # path -> id
+        self.missions = missions or {}  # path -> id
         self.slates = {"H-Slate": SLATE} if slates is None else slates
         self.tenants = {"lab": TENANT} if tenants is None else tenants
 
@@ -72,11 +72,13 @@ class FakeCatalog:
     async def resolve_device(self, tenant_id, serial):
         return self.devices.get(serial)
 
-    async def dive_by_path(self, tenant_id, path):
-        return self.dives.get(path)
+    async def mission_by_path(self, tenant_id, path):
+        return self.missions.get(path)
 
-    async def dives_with_leaf(self, tenant_id, leaf):
-        return [(i, p) for p, i in self.dives.items() if p.rsplit("/", 1)[-1] == leaf]
+    async def missions_with_leaf(self, tenant_id, leaf):
+        return [
+            (i, p) for p, i in self.missions.items() if p.rsplit("/", 1)[-1] == leaf
+        ]
 
     async def slate_template(self, name):
         return self.slates.get(name)
@@ -87,7 +89,7 @@ def _entry(name: str, size: int = 15_000_000, folder: str = FOLDER):
 
 
 def _listing(names=("PA010001.ORF", "PA010002.ORF"), subfolders=()):
-    return DiveFolderListing(
+    return MissionFolderListing(
         folder_path=FOLDER,
         files=[_entry(n) for n in names],
         subfolders=list(subfolders),
@@ -96,9 +98,9 @@ def _listing(names=("PA010001.ORF", "PA010002.ORF"), subfolders=()):
 
 def _request(**kwargs):
     kwargs.setdefault("tenant", "lab")
-    kwargs.setdefault("dive_path", "2024.06.20.REEF/082929_FishModels_FSL07")
+    kwargs.setdefault("mission_path", "2024.06.20.REEF/082929_FishModels_FSL07")
     kwargs.setdefault("self_calibrates", True)
-    return IngestDiveRequest(**kwargs)
+    return IngestMissionRequest(**kwargs)
 
 
 def _nas(headers=None):
@@ -195,7 +197,7 @@ async def test_an_explicit_device_serial_overrides_serial_resolution():
     assert preflight.resolved_device_id == other
 
 
-async def test_a_dive_spanning_two_serials_fails():
+async def test_a_mission_spanning_two_serials_fails():
     """One folder is one rig. Mixed intrinsics inside a single dive can't be
     expressed in the schema."""
     other = build_orf(
@@ -246,7 +248,7 @@ async def test_both_calibration_intents_given_fails():
     preflight = await _run(
         _request(self_calibrates=True, calibration_source_path="slate/dive"),
         _listing(),
-        catalog=FakeCatalog(dives={"slate/dive": SOURCE_DIVE}),
+        catalog=FakeCatalog(missions={"slate/dive": SOURCE_MISSION}),
     )
 
     assert any("calibration" in e for e in preflight.errors)
@@ -256,14 +258,14 @@ async def test_borrowing_calibration_alone_is_valid():
     preflight = await _run(
         _request(self_calibrates=False, calibration_source_path="slate/dive"),
         _listing(),
-        catalog=FakeCatalog(dives={"slate/dive": SOURCE_DIVE}),
+        catalog=FakeCatalog(missions={"slate/dive": SOURCE_MISSION}),
     )
 
     assert preflight.errors == []
-    assert preflight.resolved_calibration_source_dive_id == SOURCE_DIVE
+    assert preflight.resolved_calibration_source_mission_id == SOURCE_MISSION
 
 
-async def test_borrowing_from_a_dive_the_tenant_does_not_have_fails():
+async def test_borrowing_from_a_mission_the_tenant_does_not_have_fails():
     """v2: the source is named by path, so it has to resolve -- a link to
     nothing would be a dive that can never be measured."""
     preflight = await _run(
@@ -393,11 +395,13 @@ async def test_totals_and_subfolders_are_carried_into_the_report():
     assert any("rollover" in w for w in preflight.warnings)
 
 
-async def test_a_leaf_name_collision_with_an_existing_dive_warns():
+async def test_a_leaf_name_collision_with_an_existing_mission_warns():
     """Layer 1 of duplicate detection. Catches the real prod case: dives 64 and
     66 are both `082929_FishModels_FSL07`."""
     existing = uuid.uuid4()
-    catalog = FakeCatalog(dives={"2023.01.01.REEF/082929_FishModels_FSL07": existing})
+    catalog = FakeCatalog(
+        missions={"2023.01.01.REEF/082929_FishModels_FSL07": existing}
+    )
 
     preflight = await _run(_request(), _listing(), catalog=catalog)
 
@@ -405,14 +409,16 @@ async def test_a_leaf_name_collision_with_an_existing_dive_warns():
     assert any(str(existing) in w for w in preflight.warnings)
 
 
-async def test_re_ingesting_the_same_path_says_the_dive_will_drop_to_low():
+async def test_re_ingesting_the_same_path_says_the_mission_will_drop_to_low():
     """v2, found by the dry run on real data. A collision at the *same* path is
     not "may be a re-ingest" -- it is one, and create's upsert re-opens that
     dive at low until finalize promotes it again, so a committed dive leaves
     the hourly cohorts for the duration. The operator should know before
     submitting."""
     existing = uuid.uuid4()
-    catalog = FakeCatalog(dives={"2024.06.20.REEF/082929_FishModels_FSL07": existing})
+    catalog = FakeCatalog(
+        missions={"2024.06.20.REEF/082929_FishModels_FSL07": existing}
+    )
 
     preflight = await _run(_request(), _listing(), catalog=catalog)
 
@@ -452,11 +458,11 @@ def test_stored_path_round_trips_back_to_the_nas_path_it_came_from():
 
 async def test_a_folder_outside_the_root_keeps_absolute_frame_paths():
     folder = "/fishsense_data/2025.01.17.FishSense.San Diego/ED-00/FSL-10D/Ginny"
-    listing = DiveFolderListing(
+    listing = MissionFolderListing(
         folder_path=folder, files=[_entry("P1170188.ORF", folder=folder)]
     )
 
-    preflight = await _run(_request(dive_path=folder), listing)
+    preflight = await _run(_request(mission_path=folder), listing)
 
     assert preflight.errors == []
     assert preflight.images[0].path == f"{folder}/P1170188.ORF"

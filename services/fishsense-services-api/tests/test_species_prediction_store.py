@@ -43,7 +43,7 @@ from fishsense_services_api.species_prediction_store import (
     InvalidSpeciesPredictions,
     SpeciesPredictionCatalog,
     SpeciesPredictionRow,
-    next_dive_for_species_prediction,
+    next_mission_for_species_prediction,
     persist_species_predictions,
     species_predict_captures,
     species_prediction_state,
@@ -75,7 +75,7 @@ async def _tenant(owner_engine, slug="lab") -> uuid.UUID:
 async def _dive(owner_engine, tenant, *, priority="high", at=T0):
     return await _exec(
         owner_engine,
-        "INSERT INTO dives (tenant_id, source_path, name, dived_at, priority, "
+        "INSERT INTO missions (tenant_id, source_path, name, started_at, priority, "
         "created_at) VALUES (:t, :p, 'd', :at, :prio, :at) RETURNING id",
         t=tenant,
         p=f"/d/{uuid.uuid4()}",
@@ -84,13 +84,13 @@ async def _dive(owner_engine, tenant, *, priority="high", at=T0):
     )
 
 
-async def _capture(owner_engine, tenant, dive, *, canonical=True):
+async def _capture(owner_engine, tenant, mission, *, canonical=True):
     return await _exec(
         owner_engine,
-        "INSERT INTO captures (tenant_id, dive_id, source_path, captured_at, "
+        "INSERT INTO captures (tenant_id, mission_id, source_path, captured_at, "
         "checksum, is_canonical) VALUES (:t, :d, :p, :at, :c, :canon) RETURNING id",
         t=tenant,
-        d=dive,
+        d=mission,
         p=f"/c/{uuid.uuid4()}.ORF",
         at=T0,
         c=uuid.uuid4().hex,
@@ -135,12 +135,12 @@ async def _species(owner_engine, tenant, capture, headtail, *, version=V,
     )
 
 
-async def _seed(owner_engine, tenant, *, at=T0, **dive):
+async def _seed(owner_engine, tenant, *, at=T0, **mission):
     """A dive with one canonical capture whose head/tail mask has a box."""
-    dive_id = await _dive(owner_engine, tenant, at=at, **dive)
-    capture = await _capture(owner_engine, tenant, dive_id)
+    mission_id = await _dive(owner_engine, tenant, at=at, **mission)
+    capture = await _capture(owner_engine, tenant, mission_id)
     headtail = await _headtail(owner_engine, tenant, capture)
-    return dive_id, capture, headtail
+    return mission_id, capture, headtail
 
 
 async def _in(app_engine, tenant, fn, *args, **kwargs):
@@ -150,9 +150,9 @@ async def _in(app_engine, tenant, fn, *args, **kwargs):
 
 async def _next(app_engine, tenant):
     candidate = await _in(
-        app_engine, tenant, next_dive_for_species_prediction, predictor_version=V
+        app_engine, tenant, next_mission_for_species_prediction, predictor_version=V
     )
-    return None if candidate is None else candidate.dive_id
+    return None if candidate is None else candidate.mission_id
 
 
 # -- the head/tail mask box (0033) ----------------------------------------------------
@@ -160,14 +160,14 @@ async def _next(app_engine, tenant):
 
 async def test_a_head_tail_prediction_persists_its_mask_box(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive = await _dive(owner_engine, lab)
-    capture = await _capture(owner_engine, lab, dive)
+    mission = await _dive(owner_engine, lab)
+    capture = await _capture(owner_engine, lab, mission)
     row = HeadTailPredictionRow(
         capture_id=capture, status="predicted", head_x=1.0, head_y=2.0, tail_x=3.0,
         tail_y=4.0, predictor_version=2, mask_bbox=BOX,
     )  # fmt: skip
 
-    await _in(app_engine, lab, persist_headtail_predictions, dive, [row])
+    await _in(app_engine, lab, persist_headtail_predictions, mission, [row])
 
     async with owner_engine.connect() as conn:
         current = (
@@ -185,11 +185,11 @@ async def test_the_box_is_optional(owner_engine, app_engine):
     """Additive: an abstention has none, and neither does a row written before
     the column (or by a processor older than contract 5)."""
     lab = await _tenant(owner_engine)
-    dive = await _dive(owner_engine, lab)
-    capture = await _capture(owner_engine, lab, dive)
+    mission = await _dive(owner_engine, lab)
+    capture = await _capture(owner_engine, lab, mission)
 
     await _in(
-        app_engine, lab, persist_headtail_predictions, dive,
+        app_engine, lab, persist_headtail_predictions, mission,
         [HeadTailPredictionRow(capture_id=capture, status="no_detections",
                                predictor_version=2)],
     )  # fmt: skip
@@ -216,9 +216,9 @@ async def test_selects_a_boxed_fish_with_no_species_prediction(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive, _, _ = await _seed(owner_engine, lab)
+    mission, _, _ = await _seed(owner_engine, lab)
 
-    assert await _next(app_engine, lab) == dive
+    assert await _next(app_engine, lab) == mission
 
 
 async def test_a_head_tail_abstention_has_no_fish_to_classify(owner_engine, app_engine):
@@ -263,10 +263,10 @@ async def test_an_abstention_is_a_prediction_too(owner_engine, app_engine):
 @pytest.mark.parametrize("version", [FALLBACK, V + 1])
 async def test_another_version_is_stale(owner_engine, app_engine, version):
     lab = await _tenant(owner_engine)
-    dive, capture, headtail = await _seed(owner_engine, lab)
+    mission, capture, headtail = await _seed(owner_engine, lab)
     await _species(owner_engine, lab, capture, headtail, version=version)
 
-    assert await _next(app_engine, lab) == dive
+    assert await _next(app_engine, lab) == mission
 
 
 async def test_a_prediction_cropped_from_an_older_head_tail_row_is_stale(
@@ -276,27 +276,27 @@ async def test_a_prediction_cropped_from_an_older_head_tail_row_is_stale(
     have kept another fish: the species row cropped from the old one no
     longer describes it."""
     lab = await _tenant(owner_engine)
-    dive, capture, old = await _seed(owner_engine, lab)
+    mission, capture, old = await _seed(owner_engine, lab)
     await _species(owner_engine, lab, capture, old)
     await _headtail(owner_engine, lab, capture, box=[10, 10, 90, 50])
 
-    assert await _next(app_engine, lab) == dive
+    assert await _next(app_engine, lab) == mission
 
 
 async def test_only_the_current_species_prediction_counts(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive, capture, headtail = await _seed(owner_engine, lab)
+    mission, capture, headtail = await _seed(owner_engine, lab)
     await _species(owner_engine, lab, capture, headtail)
     await _species(owner_engine, lab, capture, headtail, version=FALLBACK)
 
-    assert await _next(app_engine, lab) == dive
+    assert await _next(app_engine, lab) == mission
 
 
 async def test_only_high_priority_canonical_captures(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
     await _seed(owner_engine, lab, priority="low")
-    dive = await _dive(owner_engine, lab)
-    duplicate = await _capture(owner_engine, lab, dive, canonical=False)
+    mission = await _dive(owner_engine, lab)
+    duplicate = await _capture(owner_engine, lab, mission, canonical=False)
     await _headtail(owner_engine, lab, duplicate)
 
     assert await _next(app_engine, lab) is None
@@ -310,23 +310,23 @@ async def test_never_predicted_first_then_the_oldest(owner_engine, app_engine):
     older, _, _ = await _seed(owner_engine, lab, at=T0 + timedelta(hours=1))
 
     candidate = await _in(
-        app_engine, lab, next_dive_for_species_prediction, predictor_version=V
+        app_engine, lab, next_mission_for_species_prediction, predictor_version=V
     )
-    assert (candidate.dive_id, candidate.never_predicted) == (older, True)
+    assert (candidate.mission_id, candidate.never_predicted) == (older, True)
     assert newer != older and upgrade != older
 
 
-async def test_an_upgrade_only_dive_is_selected_when_nothing_else_needs_one(
+async def test_an_upgrade_only_mission_is_selected_when_nothing_else_needs_one(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive, capture, headtail = await _seed(owner_engine, lab)
+    mission, capture, headtail = await _seed(owner_engine, lab)
     await _species(owner_engine, lab, capture, headtail, version=FALLBACK)
 
     candidate = await _in(
-        app_engine, lab, next_dive_for_species_prediction, predictor_version=V
+        app_engine, lab, next_mission_for_species_prediction, predictor_version=V
     )
-    assert (candidate.dive_id, candidate.never_predicted) == (dive, False)
+    assert (candidate.mission_id, candidate.never_predicted) == (mission, False)
 
 
 # -- the resolver mirrors the cohort ---------------------------------------------------
@@ -336,17 +336,17 @@ async def test_resolves_each_fish_with_its_box_and_crop_source(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive, fresh, fresh_ht = await _seed(owner_engine, lab)
-    stale = await _capture(owner_engine, lab, dive)
+    mission, fresh, fresh_ht = await _seed(owner_engine, lab)
+    stale = await _capture(owner_engine, lab, mission)
     stale_ht = await _headtail(owner_engine, lab, stale, box=[1, 2, 30, 40])
     await _species(owner_engine, lab, stale, stale_ht, version=FALLBACK)
-    done = await _capture(owner_engine, lab, dive)
+    done = await _capture(owner_engine, lab, mission)
     await _species(owner_engine, lab, done, await _headtail(owner_engine, lab, done))
-    no_fish = await _capture(owner_engine, lab, dive)
+    no_fish = await _capture(owner_engine, lab, mission)
     await _headtail(owner_engine, lab, no_fish, box=None, status="no_detections")
 
     captures = await _in(
-        app_engine, lab, species_predict_captures, dive, predictor_version=V
+        app_engine, lab, species_predict_captures, mission, predictor_version=V
     )
 
     assert [(c.capture_id, c.headtail_prediction_id, c.mask_bbox,
@@ -388,11 +388,11 @@ async def _current(owner_engine, capture):
 
 async def test_persist_appends_and_the_latest_is_current(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive, capture, headtail = await _seed(owner_engine, lab)
+    mission, capture, headtail = await _seed(owner_engine, lab)
 
     for p in (0.5, 0.9):
         assert await _in(
-            app_engine, lab, persist_species_predictions, dive,
+            app_engine, lab, persist_species_predictions, mission,
             [_row(capture, headtail, top1_probability=p)],
         ) == 1  # fmt: skip
 
@@ -412,10 +412,10 @@ async def test_persist_appends_and_the_latest_is_current(owner_engine, app_engin
 
 async def test_an_abstention_is_recorded_without_scores(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
-    dive, capture, headtail = await _seed(owner_engine, lab)
+    mission, capture, headtail = await _seed(owner_engine, lab)
 
     await _in(
-        app_engine, lab, persist_species_predictions, dive,
+        app_engine, lab, persist_species_predictions, mission,
         [_row(capture, headtail, status="decode_failed", predicted_choice=None,
               top1_probability=None, margin=None, top5=[])],
     )  # fmt: skip
@@ -438,17 +438,17 @@ async def test_a_prediction_without_its_scores_is_refused(owner_engine):
         )
 
 
-async def test_a_prediction_for_a_capture_outside_the_dive_is_refused(
+async def test_a_prediction_for_a_capture_outside_the_mission_is_refused(
     owner_engine, app_engine
 ):
     """PLAN.md §9.11: the processor's output is checked, all or nothing."""
     lab = await _tenant(owner_engine)
-    dive, capture, headtail = await _seed(owner_engine, lab)
+    mission, capture, headtail = await _seed(owner_engine, lab)
     _, elsewhere, elsewhere_ht = await _seed(owner_engine, lab)
 
     with pytest.raises(ForeignCapture):
         await _in(
-            app_engine, lab, persist_species_predictions, dive,
+            app_engine, lab, persist_species_predictions, mission,
             [_row(capture, headtail), _row(elsewhere, elsewhere_ht)],
         )  # fmt: skip
 
@@ -461,13 +461,13 @@ async def test_a_prediction_cropped_from_another_captures_mask_is_refused(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive, capture, _ = await _seed(owner_engine, lab)
-    other = await _capture(owner_engine, lab, dive)
+    mission, capture, _ = await _seed(owner_engine, lab)
+    other = await _capture(owner_engine, lab, mission)
     others_headtail = await _headtail(owner_engine, lab, other)
 
     with pytest.raises(ForeignHeadtailPrediction):
         await _in(
-            app_engine, lab, persist_species_predictions, dive,
+            app_engine, lab, persist_species_predictions, mission,
             [_row(capture, others_headtail)],
         )  # fmt: skip
     assert issubclass(ForeignHeadtailPrediction, InvalidSpeciesPredictions)
@@ -477,10 +477,10 @@ async def test_persisting_never_writes_a_species_label(owner_engine, app_engine)
     """Pre-annotation only: a human confirms every label, and
     `pre_annotation` stays reserved and unwritten."""
     lab = await _tenant(owner_engine)
-    dive, capture, headtail = await _seed(owner_engine, lab)
+    mission, capture, headtail = await _seed(owner_engine, lab)
 
     await _in(
-        app_engine, lab, persist_species_predictions, dive, [_row(capture, headtail)]
+        app_engine, lab, persist_species_predictions, mission, [_row(capture, headtail)]
     )
 
     async with owner_engine.connect() as conn:
@@ -544,7 +544,7 @@ async def test_the_state_is_current_predictions_and_live_tasks(
     owner_engine, app_engine
 ):
     lab = await _tenant(owner_engine)
-    dive, capture, headtail = await _seed(owner_engine, lab)
+    mission, capture, headtail = await _seed(owner_engine, lab)
     await _species(owner_engine, lab, capture, headtail, version=FALLBACK)
     latest = await _species(owner_engine, lab, capture, headtail)
     task = next(_TASKS)
@@ -554,10 +554,12 @@ async def test_the_state_is_current_predictions_and_live_tasks(
     _, elsewhere, elsewhere_ht = await _seed(owner_engine, lab)
     await _species(owner_engine, lab, elsewhere, elsewhere_ht)
 
-    state = await _in(app_engine, lab, species_prediction_state, dive)
+    state = await _in(app_engine, lab, species_prediction_state, mission)
 
-    number = await _exec(owner_engine, "SELECT number FROM dives WHERE id = :d", d=dive)
-    assert state.dive_number == number
+    number = await _exec(
+        owner_engine, "SELECT number FROM missions WHERE id = :d", d=mission
+    )
+    assert state.mission_number == number
     (prediction,) = state.predictions
     assert (prediction.id, prediction.capture_id, prediction.predictor_version) == (
         latest,
@@ -580,6 +582,6 @@ async def test_the_catalog_acts_only_in_tenants_it_is_a_member_of(
     catalog = SpeciesPredictionCatalog(app_engine, sub=ORCHESTRATOR)
 
     assert await catalog.member_tenants() == [lab]
-    assert await catalog.next_dive_for_species_prediction(lab, predictor_version=V)
+    assert await catalog.next_mission_for_species_prediction(lab, predictor_version=V)
     with pytest.raises(PermissionError):
-        await catalog.next_dive_for_species_prediction(reef, predictor_version=V)
+        await catalog.next_mission_for_species_prediction(reef, predictor_version=V)

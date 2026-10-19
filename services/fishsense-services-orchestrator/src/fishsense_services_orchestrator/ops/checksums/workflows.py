@@ -54,16 +54,16 @@ with workflow.unsafe.imports_passed_through():
     import pydantic  # noqa: F401  pylint: disable=unused-import
 
     from fishsense_services_orchestrator.ops.checksums.contracts import (
-        DiveVerificationSummary,
-        VerifyAllDivesProgress,
-        VerifyAllDivesReport,
+        MissionVerificationSummary,
+        VerifyAllMissionsProgress,
+        VerifyAllMissionsReport,
         VerifyChecksumsReport,
     )
 
-__all__ = ["VerifyAllDivesChecksumsWorkflow", "VerifyDiveChecksumsWorkflow"]
+__all__ = ["VerifyAllMissionsChecksumsWorkflow", "VerifyMissionChecksumsWorkflow"]
 
 # One dive can be ~500 whole-file downloads driven serially.
-_PER_DIVE_TIMEOUT = timedelta(hours=6)
+_PER_MISSION_TIMEOUT = timedelta(hours=6)
 # One frame at a time, so a gap this long means the transfer is wedged.
 _HEARTBEAT_TIMEOUT = timedelta(minutes=10)
 # Bounded: this is diagnostic, not load-bearing. If the NAS is having a bad
@@ -77,52 +77,52 @@ _VERIFY_RETRY = RetryPolicy(
 )
 
 
-async def _verify(dive_number: int, limit: Optional[int]) -> VerifyChecksumsReport:
+async def _verify(mission_number: int, limit: Optional[int]) -> VerifyChecksumsReport:
     return await workflow.execute_activity(
         "verify_dive_checksums",
-        args=(dive_number, limit),
+        args=(mission_number, limit),
         # Without it the payload decodes to a plain dict.
         result_type=VerifyChecksumsReport,
-        schedule_to_close_timeout=_PER_DIVE_TIMEOUT,
+        schedule_to_close_timeout=_PER_MISSION_TIMEOUT,
         heartbeat_timeout=_HEARTBEAT_TIMEOUT,
         retry_policy=_VERIFY_RETRY,
     )
 
 
-@workflow.defn
-class VerifyDiveChecksumsWorkflow:
+@workflow.defn(name="VerifyDiveChecksumsWorkflow")
+class VerifyMissionChecksumsWorkflow:
     # pylint: disable=too-few-public-methods
     """Compare one dive's stored checksums and capture times with the NAS."""
 
     @workflow.run
     async def run(
-        self, dive_number: int, limit: Optional[int] = None
+        self, mission_number: int, limit: Optional[int] = None
     ) -> VerifyChecksumsReport:
         """Verify the dive, optionally sampling its first `limit` frames."""
-        return await _verify(dive_number, limit)
+        return await _verify(mission_number, limit)
 
 
-@workflow.defn
-class VerifyAllDivesChecksumsWorkflow:
+@workflow.defn(name="VerifyAllDivesChecksumsWorkflow")
+class VerifyAllMissionsChecksumsWorkflow:
     """Verify every dive with a canonical capture, one at a time."""
 
     def __init__(self) -> None:
-        self._progress = VerifyAllDivesProgress()
+        self._progress = VerifyAllMissionsProgress()
 
     @workflow.query
-    def progress(self) -> VerifyAllDivesProgress:
+    def progress(self) -> VerifyAllMissionsProgress:
         """Live counts: a full sweep runs for days."""
         return self._progress
 
     @workflow.run
     async def run(
         self,
-        limit_per_dive: Optional[int] = None,
-        dive_numbers: Optional[List[int]] = None,
-    ) -> VerifyAllDivesReport:
-        if dive_numbers is None:
+        limit_per_mission: Optional[int] = None,
+        mission_numbers: Optional[List[int]] = None,
+    ) -> VerifyAllMissionsReport:
+        if mission_numbers is None:
             self._progress.state = "selecting"
-            dive_numbers = await workflow.execute_activity(
+            mission_numbers = await workflow.execute_activity(
                 "select_canonical_dive_numbers",
                 result_type=List[int],
                 schedule_to_close_timeout=timedelta(minutes=5),
@@ -131,18 +131,18 @@ class VerifyAllDivesChecksumsWorkflow:
                 ),
             )
 
-        report = VerifyAllDivesReport(dives_requested=len(dive_numbers))
+        report = VerifyAllMissionsReport(missions_requested=len(mission_numbers))
         self._progress.state = "verifying"
-        self._progress.total_dives = len(dive_numbers)
+        self._progress.total_missions = len(mission_numbers)
 
-        for dive_number in dive_numbers:
-            self._progress.current_dive_number = dive_number
+        for mission_number in mission_numbers:
+            self._progress.current_mission_number = mission_number
             try:
-                result = await _verify(dive_number, limit_per_dive)
-                summary = DiveVerificationSummary(
-                    dive_number=result.dive_number,
+                result = await _verify(mission_number, limit_per_mission)
+                summary = MissionVerificationSummary(
+                    mission_number=result.mission_number,
                     checked=result.checked,
-                    total_in_dive=result.total_in_dive,
+                    total_in_mission=result.total_in_mission,
                     checksum_matched=result.checksum_matched,
                     mismatches=result.mismatches,
                     timestamp_mismatches=result.timestamp_mismatches,
@@ -153,35 +153,37 @@ class VerifyAllDivesChecksumsWorkflow:
                 # Data about the corpus, not a reason to discard the sweep; and
                 # `error` keeps it distinguishable from a clean result.
                 workflow.logger.warning(
-                    "verification failed dive=%d: %s", dive_number, exc
+                    "verification failed dive=%d: %s", mission_number, exc
                 )
-                report.dives.append(
-                    DiveVerificationSummary(dive_number=dive_number, error=str(exc))
+                report.missions.append(
+                    MissionVerificationSummary(
+                        mission_number=mission_number, error=str(exc)
+                    )
                 )
-                self._progress.dives_errored += 1
-                self._progress.dives_with_findings += 1
-                self._progress.dives_done += 1
+                self._progress.missions_errored += 1
+                self._progress.missions_with_findings += 1
+                self._progress.missions_done += 1
                 continue
 
-            report.dives.append(summary)
-            report.dives_verified += 1
+            report.missions.append(summary)
+            report.missions_verified += 1
             report.images_checked += summary.checked
             report.checksum_matched += summary.checksum_matched
 
-            self._progress.dives_done += 1
+            self._progress.missions_done += 1
             self._progress.images_checked += summary.checked
             self._progress.checksum_matched += summary.checksum_matched
             if not summary.is_clean:
-                self._progress.dives_with_findings += 1
+                self._progress.missions_with_findings += 1
 
         self._progress.state = "done"
-        self._progress.current_dive_number = None
+        self._progress.current_mission_number = None
         workflow.logger.info(
             "sweep complete dives=%d verified=%d images=%d matched=%d findings=%d",
-            report.dives_requested,
-            report.dives_verified,
+            report.missions_requested,
+            report.missions_verified,
             report.images_checked,
             report.checksum_matched,
-            len(report.dives_with_findings),
+            len(report.missions_with_findings),
         )
         return report

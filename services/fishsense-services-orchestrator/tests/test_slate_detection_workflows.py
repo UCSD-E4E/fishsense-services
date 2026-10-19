@@ -25,7 +25,7 @@ from typing import List
 import pytest
 from temporalio import activity, workflow
 from temporalio.client import WorkflowFailureError
-from temporalio.contrib.pydantic import pydantic_data_converter
+from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
@@ -53,8 +53,8 @@ from fishsense_services_orchestrator.slate_detect.workflow import (
 )
 
 TENANT = uuid.uuid4()
-DIVE = uuid.uuid4()
-TARGET = StagingTarget(TENANT, DIVE)
+MISSION = uuid.uuid4()
+TARGET = StagingTarget(TENANT, MISSION)
 QUEUE = "test-slate-detect-parent"
 K = [[3500.0, 0.0, 2000.0], [0.0, 3500.0, 1500.0], [0.0, 0.0, 1.0]]
 SHA = "b8d377ba22d155e7056a5e9ae747fdd0970c7c73dee981bbee17d95c8156cf78"
@@ -71,7 +71,7 @@ CHILD_TAKES: list[timedelta] = [timedelta(0)]
 def _inputs(n=1):
     return DetectSlateImagesInput(
         tenant_id=TENANT,
-        dive_id=DIVE,
+        mission_id=MISSION,
         camera_matrix=K,
         distortion_coefficients=[0.0] * 5,
         images=[
@@ -155,14 +155,14 @@ def _stubs(*, mode="gpu", images=1, selected=TARGET, stage_fails=None):
 
     @activity.defn(name="stage_raw_bytes_for_dive")
     async def stage(target: StagingTarget) -> StageRawBytesResult:
-        EVENTS.append(("stage", target.dive_id))
-        if stage_fails and target.dive_id in stage_fails:
-            raise stage_fails[target.dive_id]
+        EVENTS.append(("stage", target.mission_id))
+        if stage_fails and target.mission_id in stage_fails:
+            raise stage_fails[target.mission_id]
         return StageRawBytesResult(staged=1, skipped_already_present=0, no_path=0)
 
     @activity.defn(name="cleanup_raw_bytes_for_dive")
     async def cleanup(target: StagingTarget) -> CleanupRawBytesResult:
-        EVENTS.append(("cleanup", target.dive_id))
+        EVENTS.append(("cleanup", target.mission_id))
         return CleanupRawBytesResult(deleted=1)
 
     @activity.defn(name="persist_slate_presence_predictions")
@@ -180,7 +180,7 @@ async def _run(child_results=(), before=None, child_takes=timedelta(0), **stubs)
     CHILD_RESULTS.extend(child_results)
     CHILD_TAKES[0] = child_takes
     async with await WorkflowEnvironment.start_time_skipping(
-        data_converter=pydantic_data_converter
+        data_converter=DATA_CONVERTER
     ) as env:
         async with (
             Worker(
@@ -213,10 +213,10 @@ async def test_a_normal_run_stages_detects_persists_and_cleans_up():
     assert await _run([_result(), _result()]) == TARGET
     assert EVENTS == [
         ("wake",),
-        ("stage", DIVE),
-        ("child", f"detect-slate-{DIVE}"),
+        ("stage", MISSION),
+        ("child", f"detect-slate-{MISSION}"),
         ("persist", 2),
-        ("cleanup", DIVE),
+        ("cleanup", MISSION),
     ]
 
 
@@ -233,7 +233,7 @@ async def test_the_cpu_fallback_serves_the_same_queue():
 async def test_no_results_persists_nothing_but_still_cleans_up():
     await _run([])
     assert "persist" not in _kinds()
-    assert ("cleanup", DIVE) in EVENTS
+    assert ("cleanup", MISSION) in EVENTS
 
 
 async def test_no_worker_available_means_no_staging_and_no_child():
@@ -246,7 +246,7 @@ async def test_no_images_needs_no_worker():
     assert not EVENTS
 
 
-async def test_no_dive_is_none():
+async def test_no_mission_is_none():
     assert await _run(selected=None) is None
     assert not EVENTS
 
@@ -258,7 +258,7 @@ async def test_a_child_already_running_means_do_nothing_more():
         await client.start_workflow(
             "DetectSlatePresenceWorkflow",
             _inputs(),
-            id=f"detect-slate-{DIVE}",
+            id=f"detect-slate-{MISSION}",
             task_queue="nobody-polls-this",
         )
 
@@ -275,40 +275,40 @@ def _children():
 
 
 async def test_one_run_drains_the_backlog_until_the_cohort_is_empty():
-    dives = [_dive(), _dive(), _dive()]
-    assert await _run([_result()], selected=dives) == dives[-1]
-    assert _children() == [f"detect-slate-{d.dive_id}" for d in dives]
+    missions = [_dive(), _dive(), _dive()]
+    assert await _run([_result()], selected=missions) == missions[-1]
+    assert _children() == [f"detect-slate-{d.mission_id}" for d in missions]
     assert [e for e in EVENTS if e[0] == "cleanup"] == [
-        ("cleanup", d.dive_id) for d in dives
+        ("cleanup", d.mission_id) for d in missions
     ]
 
 
-async def test_no_new_dive_is_started_once_the_drain_window_has_passed():
+async def test_no_new_mission_is_started_once_the_drain_window_has_passed():
     """The window bounds when a dive may start, not how long it may run."""
-    dives = [_dive() for _ in range(5)]
+    missions = [_dive() for _ in range(5)]
     most = sut.DETECT_DRAIN_WINDOW * 0.6
-    assert await _run([_result()], selected=dives, child_takes=most) == dives[1]
-    assert _children() == [f"detect-slate-{d.dive_id}" for d in dives[:2]]
+    assert await _run([_result()], selected=missions, child_takes=most) == missions[1]
+    assert _children() == [f"detect-slate-{d.mission_id}" for d in missions[:2]]
 
 
-async def test_a_dive_handed_back_twice_ends_the_run():
+async def test_a_mission_handed_back_twice_ends_the_run():
     """A dive whose frames all fail to persist stays in the cohort; taking it
     again would spin until the window closed."""
     assert await _run([_result()]) == TARGET
-    assert _children() == [f"detect-slate-{DIVE}"]
+    assert _children() == [f"detect-slate-{MISSION}"]
 
 
 async def test_the_gpu_going_away_mid_drain_ends_the_run():
-    dives = [_dive(), _dive(), _dive()]
-    got = await _run([_result()], selected=dives, mode=["gpu", "unavailable"])
-    assert got == dives[0]
-    assert _children() == [f"detect-slate-{dives[0].dive_id}"]
-    assert ("stage", dives[1].dive_id) not in EVENTS
+    missions = [_dive(), _dive(), _dive()]
+    got = await _run([_result()], selected=missions, mode=["gpu", "unavailable"])
+    assert got == missions[0]
+    assert _children() == [f"detect-slate-{missions[0].mission_id}"]
+    assert ("stage", missions[1].mission_id) not in EVENTS
 
 
-async def test_a_dive_with_nothing_to_detect_does_not_end_the_drain():
-    dives = [_dive(), _dive()]
-    assert await _run(images=0, selected=dives) == dives[-1]
+async def test_a_mission_with_nothing_to_detect_does_not_end_the_drain():
+    missions = [_dive(), _dive()]
+    assert await _run(images=0, selected=missions) == missions[-1]
     assert not EVENTS
 
 
@@ -333,31 +333,31 @@ def _missing():
     )
 
 
-async def test_the_run_passes_the_dives_it_took_to_the_cohort():
-    dives = [_dive(), _dive()]
-    await _run([_result()], selected=dives)
+async def test_the_run_passes_the_missions_it_took_to_the_cohort():
+    missions = [_dive(), _dive()]
+    await _run([_result()], selected=missions)
     assert SELECTS == [
         (),
-        (dives[0].dive_id,),
-        (dives[0].dive_id, dives[1].dive_id),
+        (missions[0].mission_id,),
+        (missions[0].mission_id, missions[1].mission_id),
     ]
 
 
-async def test_a_dive_whose_raws_are_missing_is_cleaned_up_and_skipped():
+async def test_a_mission_whose_raws_are_missing_is_cleaned_up_and_skipped():
     """A frame moved on the NAS since ingest must not hold the backlog: the
     dive is cleaned up and the run goes on to the next one."""
     bad, good = _dive(), _dive()
     got = await _run(
-        [_result()], selected=[bad, good], stage_fails={bad.dive_id: _missing()}
+        [_result()], selected=[bad, good], stage_fails={bad.mission_id: _missing()}
     )
     assert got == good
-    assert _children() == [f"detect-slate-{good.dive_id}"]
-    assert ("cleanup", bad.dive_id) in EVENTS
+    assert _children() == [f"detect-slate-{good.mission_id}"]
+    assert ("cleanup", bad.mission_id) in EVENTS
     assert ("persist", 1) in EVENTS
 
 
 async def test_any_other_staging_failure_still_fails_the_run():
     boom = ApplicationError("bucket gone", type="Boom", non_retryable=True)
     with pytest.raises(WorkflowFailureError):
-        await _run([_result()], stage_fails={DIVE: boom})
+        await _run([_result()], stage_fails={MISSION: boom})
     assert _children() == []

@@ -18,7 +18,7 @@ each dive's apply refuses any id its fresh plan does not contain.
 
 v2 changes: dives and labels are named by number (v1's ids for migrated rows,
 so a v1 exclusion file still reads); "every dive" is resolved by the workflow
-(`all_dives`), since this CLI holds no database connection.
+(`all_missions`), since this CLI holds no database connection.
 """
 
 from __future__ import annotations
@@ -45,40 +45,70 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     sub = parser.add_subparsers(dest="command", required=True)
     dry = sub.add_parser("dry-run", help="plan every dive; write nothing")
     dry.add_argument("--out", required=True, help="where to write the report")
-    dry.add_argument("--dives", help="comma-separated dive numbers (default: all)")
-    dry.add_argument("--exclusions", help='JSON {"dive_ids": [], "label_ids": []}')
+    dry.add_argument(
+        "--missions", "--dives", help="comma-separated dive numbers (default: all)"
+    )
+    dry.add_argument(
+        "--exclusions",
+        help='JSON {"mission_ids": [], "label_ids": []} ("dive_ids" still read)',
+    )
     apply = sub.add_parser("apply", help="apply a reviewed dry-run report")
     apply.add_argument("--report", required=True, help="the reviewed report")
     apply.add_argument("--out", help="where to write the apply report")
     return parser.parse_args(argv)
 
 
+def with_current_names(report: dict) -> dict:
+    """A dry-run report under today's names. One reviewed before Phase 2a
+    names its rows `dives` and each one's id `dive_id`, and its exclusions
+    `excluded_dive_ids` -- dropped, a reviewed exclusion would lapse."""
+    report = dict(report)
+    if "missions" not in report and "dives" in report:
+        report["missions"] = report.pop("dives")
+    report["missions"] = [
+        {
+            ("mission_id" if key == "dive_id" else key): value
+            for key, value in row.items()
+        }
+        for row in report.get("missions", [])
+    ]
+    if "excluded_mission_ids" not in report and "excluded_dive_ids" in report:
+        report["excluded_mission_ids"] = report.pop("excluded_dive_ids")
+    return report
+
+
 def build_request(args: argparse.Namespace) -> RemediateLaserSupersedesInput:
     """The workflow input for these arguments."""
     if args.command == "apply":
         with open(args.report, encoding="utf-8") as handle:
-            report = json.load(handle)
+            report = with_current_names(json.load(handle))
         if report.get("mode") != "dry_run":
             sys.exit(f"{args.report} is not a dry-run report; refusing to apply it")
         return RemediateLaserSupersedesInput(
-            dive_ids=sorted(row["dive_id"] for row in report["dives"]),
-            excluded_dive_ids=list(report.get("excluded_dive_ids", [])),
+            mission_ids=sorted(row["mission_id"] for row in report["missions"]),
+            excluded_mission_ids=list(report.get("excluded_mission_ids", [])),
             excluded_label_ids=list(report.get("excluded_label_ids", [])),
             apply=True,
             expected_plan_sha256=report["plan_sha256"],
         )
 
-    exclusions = {"dive_ids": [], "label_ids": []}
+    exclusions = {"mission_ids": [], "label_ids": []}
     if args.exclusions:
         with open(args.exclusions, encoding="utf-8") as handle:
-            exclusions.update(json.load(handle))
-    dive_ids = (
-        sorted(int(d) for d in args.dives.split(",") if d.strip()) if args.dives else []
+            loaded = json.load(handle)
+        # A file reviewed before Phase 2a names them `dive_ids`.
+        if "dive_ids" in loaded:
+            loaded.setdefault("mission_ids", loaded.pop("dive_ids"))
+        exclusions.update(loaded)
+    mission_ids = (
+        sorted(int(d) for d in args.missions.split(",") if d.strip())
+        if args.missions
+        else []
     )
     return RemediateLaserSupersedesInput(
-        dive_ids=dive_ids,
-        all_dives=not args.dives,
-        excluded_dive_ids=[int(d) for d in exclusions["dive_ids"]],
+        mission_ids=mission_ids,
+        all_missions=not args.missions,
+        excluded_mission_ids=[int(d) for d in exclusions["mission_ids"]],
         excluded_label_ids=[int(i) for i in exclusions["label_ids"]],
     )
 
@@ -113,7 +143,7 @@ async def _run(args: argparse.Namespace) -> None:
     totals = report["totals"]
     print(
         f"{report['mode']}: {totals['to_revive']} to revive across "
-        f"{totals['dives']} dives; digest {report['plan_sha256']}; report -> {out}"
+        f"{totals['missions']} dives; digest {report['plan_sha256']}; report -> {out}"
     )
 
 

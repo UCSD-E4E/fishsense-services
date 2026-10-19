@@ -52,10 +52,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from fishsense_services_api.laser_depth_store import (
-    DiveGeometry,
+    MissionGeometry,
     Dot,
-    dive_geometry,
-    lock_dive,
+    mission_geometry,
+    lock_mission,
 )
 from fishsense_services_api.service_principal import ServicePrincipal
 
@@ -70,7 +70,7 @@ __all__ = [
     "PersistedMeasurements",
     "SpeciesNames",
     "measurement_work",
-    "next_dive_for_measurement",
+    "next_mission_for_measurement",
     "persist_measurements",
 ]
 
@@ -80,7 +80,7 @@ __all__ = [
 #: 0029).
 MEASUREMENT_COHORT = """EXISTS (
     SELECT 1 FROM measurement_work w
-    WHERE w.tenant_id = d.tenant_id AND w.dive_id = d.id
+    WHERE w.tenant_id = d.tenant_id AND w.mission_id = d.id
 )"""
 
 #: `content_of_image` -> (common name, scientific name), or None.
@@ -89,7 +89,7 @@ SpeciesNames = Callable[[str | None], tuple[str, str] | None]
 
 @dataclass(frozen=True)
 class MeasurementCandidate:
-    dive_id: uuid.UUID
+    mission_id: uuid.UUID
     created_at: datetime
     #: The tiebreak: v1's id for a migrated dive, and every migrated dive
     #: shares one created_at (v1 recorded none), so the UUID would drain
@@ -126,7 +126,7 @@ class MeasureCapture:
 class MeasurementWork:
     """A dive's stage-14 work, and v1's counters for what it skipped."""
 
-    geometry: DiveGeometry | None
+    geometry: MissionGeometry | None
     captures: list[MeasureCapture]
     skipped_already_measured: int
     skipped_unmeasurable_species: int
@@ -182,14 +182,14 @@ def _capture(row) -> MeasureCapture:
     )
 
 
-async def next_dive_for_measurement(
+async def next_mission_for_measurement(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> MeasurementCandidate | None:
     """The tenant's oldest high-priority dive with stage-14 work."""
     row = (
         await conn.execute(
             text(f"""
-                SELECT d.id, d.created_at, d.number FROM dives d
+                SELECT d.id, d.created_at, d.number FROM missions d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
                   AND {MEASUREMENT_COHORT}
                 ORDER BY d.created_at, d.number
@@ -206,17 +206,17 @@ async def next_dive_for_measurement(
 
 
 async def measurement_work(
-    conn: AsyncConnection, tenant_id: uuid.UUID, dive_id: uuid.UUID
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> MeasurementWork:
     """What the processor is given for the dive, in capture order."""
-    geometry = await dive_geometry(conn, tenant_id, dive_id)
+    geometry = await mission_geometry(conn, tenant_id, mission_id)
     rows = await conn.execute(
         text(f"""
             SELECT {_WORK_COLUMNS} FROM measurement_work
-            WHERE tenant_id = :tenant AND dive_id = :dive
+            WHERE tenant_id = :tenant AND mission_id = :mission
             ORDER BY capture_number
             """),
-        {"tenant": tenant_id, "dive": dive_id},
+        {"tenant": tenant_id, "mission": mission_id},
     )
     captures = [_capture(r) for r in rows]
 
@@ -252,7 +252,7 @@ async def measurement_work(
                     FROM captures c
                     JOIN measurement_subjects s
                       ON s.tenant_id = c.tenant_id AND s.capture_id = c.id
-                    WHERE c.tenant_id = :tenant AND c.dive_id = :dive
+                    WHERE c.tenant_id = :tenant AND c.mission_id = :mission
                       AND c.is_canonical AND s.top_three
                 )
                 SELECT
@@ -270,7 +270,7 @@ async def measurement_work(
                     ) AS refused
                 FROM subjects
                 """),
-            {"tenant": tenant_id, "dive": dive_id},
+            {"tenant": tenant_id, "mission": mission_id},
         )
     ).one()
     return MeasurementWork(
@@ -287,7 +287,7 @@ async def measurement_work(
 async def _open_work(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     laser_calibration_id: uuid.UUID,
     record: LengthRecord,
 ) -> MeasureCapture | None:
@@ -296,10 +296,10 @@ async def _open_work(
         await conn.execute(
             text(f"""
                 SELECT {_WORK_COLUMNS} FROM measurement_work
-                WHERE tenant_id = :tenant AND dive_id = :dive
+                WHERE tenant_id = :tenant AND mission_id = :mission
                   AND capture_id = :capture
                 """),
-            {"tenant": tenant_id, "dive": dive_id, "capture": record.capture_id},
+            {"tenant": tenant_id, "mission": mission_id, "capture": record.capture_id},
         )
     ).one_or_none()
     if row is None or row.laser_calibration_id != laser_calibration_id:
@@ -392,7 +392,7 @@ async def _real_fish(
     bound = (
         await conn.execute(
             text("""
-                SELECT fish_id FROM dive_frame_clusters
+                SELECT fish_id FROM mission_frame_clusters
                 WHERE tenant_id = :tenant AND id = :cluster
                 FOR UPDATE
                 """),
@@ -404,7 +404,7 @@ async def _real_fish(
     fish_id = await new_real_fish(conn, tenant_id, names)
     await conn.execute(
         text("""
-            UPDATE dive_frame_clusters SET fish_id = :fish, updated_at = now()
+            UPDATE mission_frame_clusters SET fish_id = :fish, updated_at = now()
             WHERE tenant_id = :tenant AND id = :cluster
             """),
         {"tenant": tenant_id, "cluster": cluster_id, "fish": fish_id},
@@ -446,7 +446,7 @@ async def _model_fish(
 async def persist_measurements(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
-    dive_id: uuid.UUID,
+    mission_id: uuid.UUID,
     *,
     laser_calibration_id: uuid.UUID,
     algorithm: str,
@@ -459,7 +459,7 @@ async def persist_measurements(
     """Bind each length to its fish and append it -- or record its refusal --
     in the caller's transaction, if it still answers the capture's open work.
     """
-    await lock_dive(conn, "measure-fish", dive_id)
+    await lock_mission(conn, "measure-fish", mission_id)
     provenance = {
         "algorithm": algorithm,
         "algorithm_version": algorithm_version,
@@ -468,7 +468,9 @@ async def persist_measurements(
     }
     measured = refused = stale = fish_created = clusters_bound = 0
     for record in lengths:
-        work = await _open_work(conn, tenant_id, dive_id, laser_calibration_id, record)
+        work = await _open_work(
+            conn, tenant_id, mission_id, laser_calibration_id, record
+        )
         if work is None:
             stale += 1
             continue
@@ -537,20 +539,20 @@ async def persist_measurements(
 class MeasurementCatalog(ServicePrincipal):
     """Stage 14's database side, as the orchestrator's service principal."""
 
-    async def next_dive_for_measurement(
+    async def next_mission_for_measurement(
         self, tenant_id: uuid.UUID
     ) -> MeasurementCandidate | None:
         async with self._tenant(tenant_id) as conn:
-            return await next_dive_for_measurement(conn, tenant_id)
+            return await next_mission_for_measurement(conn, tenant_id)
 
     async def measurement_work(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
     ) -> MeasurementWork:
         async with self._tenant(tenant_id) as conn:
-            return await measurement_work(conn, tenant_id, dive_id)
+            return await measurement_work(conn, tenant_id, mission_id)
 
     async def persist_measurements(
-        self, tenant_id: uuid.UUID, dive_id: uuid.UUID, **result
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, **result
     ) -> PersistedMeasurements:
         async with self._tenant(tenant_id) as conn:
-            return await persist_measurements(conn, tenant_id, dive_id, **result)
+            return await persist_measurements(conn, tenant_id, mission_id, **result)
