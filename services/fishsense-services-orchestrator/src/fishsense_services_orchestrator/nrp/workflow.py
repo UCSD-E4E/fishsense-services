@@ -45,10 +45,11 @@ SCALING_RETRY_POLICY = RetryPolicy(
 WAKE_TIMEOUT = timedelta(minutes=5)
 
 #: The most `wake_gpu_processor` can take, retries included. Longer than the
-#: other wakes' 5 minutes because this one waits for a pod (10 minutes by
-#: default) and may then wait for a second one after flipping to the CPU
-#: fallback. A parent's run timeout must cover it and its child.
-GPU_WAKE_TIMEOUT = timedelta(minutes=30)
+#: other wakes' 5 minutes because this one waits for a pod (20 minutes by
+#: default, a cold image pull) and may then wait for a second one after
+#: flipping to the CPU fallback. A parent's run timeout must cover it and its
+#: child.
+GPU_WAKE_TIMEOUT = timedelta(minutes=50)
 
 
 async def wake_per_image_processor() -> None:

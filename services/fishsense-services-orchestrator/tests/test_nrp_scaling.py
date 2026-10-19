@@ -414,3 +414,16 @@ def test_two_first_writes_of_the_gpu_state_both_land():
     scaling.write_gpu_state(RacingCore(), "fishsense", "state", GpuState())
 
     assert calls == ["patch", "create", "patch"]
+
+
+def test_the_gpu_wake_waits_out_a_cold_start():
+    """2026-10-19: a new release's GPU image (3.7 GB) pulled in 4 min, then the
+    node's container create timed out once and retried; the pod was Ready at
+    ~11 min, past the old 10 min wait, which counts as no GPU. The wait
+    covers a cold start, and the wake's own budget covers the wait twice
+    (the GPU pod, then the CPU fallback's)."""
+    from fishsense_services_orchestrator.nrp.workflow import GPU_WAKE_TIMEOUT
+
+    start = NrpSettings().gpu_start_timeout_seconds
+    assert start >= 20 * 60
+    assert GPU_WAKE_TIMEOUT.total_seconds() >= 2 * start + 5 * 60
