@@ -1297,8 +1297,17 @@ the UI as it lands (decided 2026-10-17)*
      mission. Temporal names, wire field names (contract v7, byte-identical
      payloads to v6), stored values, and the research / Superset surfaces keep
      their old names (CLAUDE.md).
-   - 2b: deployments, mission purpose, and the port with its provenance
-     (backfill dry-run first).
+   - ***2b-1, built 2026-10-18:*** migration 0047 adds `deployments` and, on
+     each mission, `purpose`, `port` + `port_source` + `port_note`, place, and
+     raw e4edm metadata. The port defaults to `unknown`, and the database
+     refuses a known port without a source. Ingest takes a `D` label from the
+     path or the frames' Artist, or an operator's `port`. The API and web show
+     missions and deployments, and admins can state a port only where the
+     owner's rules haven't already set it. `backfill-mission-facts` is a dry
+     run by default, and applies only the fingerprint of a reviewed plan.
+     Nothing gates on the port yet.
+   - 2b-2: run the backfill in production (dry run reviewed first), then
+     stages refuse `port = 'unknown'`.
 3. Direct e4edm ingest (the never-ingested Canyonview / Scripps Pier / Sealab / NIWC
    datasets are the first users).
 4. **Lite photo upload** (the owner's direction, 2026-10-18). Lite photos are uploaded into

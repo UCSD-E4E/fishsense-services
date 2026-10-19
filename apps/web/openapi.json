@@ -527,6 +527,167 @@
         "title": "DeclaredFile",
         "type": "object"
       },
+      "Deployment": {
+        "properties": {
+          "ended_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended On"
+          },
+          "missions": {
+            "title": "Missions",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "source_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Path"
+          },
+          "started_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started On"
+          }
+        },
+        "required": [
+          "number",
+          "name",
+          "source_path",
+          "started_on",
+          "ended_on",
+          "notes",
+          "missions"
+        ],
+        "title": "Deployment",
+        "type": "object"
+      },
+      "DeploymentDetail": {
+        "properties": {
+          "ended_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended On"
+          },
+          "missions": {
+            "items": {
+              "$ref": "#/components/schemas/Mission"
+            },
+            "title": "Missions",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "readme": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Readme"
+          },
+          "source_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Path"
+          },
+          "started_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started On"
+          }
+        },
+        "required": [
+          "number",
+          "name",
+          "source_path",
+          "started_on",
+          "ended_on",
+          "notes",
+          "readme",
+          "missions"
+        ],
+        "title": "DeploymentDetail",
+        "type": "object"
+      },
       "DepthGeometry": {
         "properties": {
           "height": {
@@ -1132,6 +1293,28 @@
             ],
             "title": "Calibration Target Number"
           },
+          "deployment_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployment Name"
+          },
+          "deployment_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployment Number"
+          },
           "name": {
             "anyOf": [
               {
@@ -1147,6 +1330,33 @@
             "title": "Number",
             "type": "integer"
           },
+          "port": {
+            "enum": [
+              "corrective_optic",
+              "flat",
+              "dome",
+              "unknown"
+            ],
+            "title": "Port",
+            "type": "string"
+          },
+          "port_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "backfill",
+                  "device_suffix",
+                  "operator",
+                  "calibration"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port Source"
+          },
           "priority": {
             "enum": [
               "low",
@@ -1155,6 +1365,36 @@
             ],
             "title": "Priority",
             "type": "string"
+          },
+          "purpose": {
+            "anyOf": [
+              {
+                "enum": [
+                  "survey",
+                  "lens_calibration",
+                  "laser_calibration",
+                  "slate",
+                  "known_length",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purpose"
+          },
+          "site": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Site"
           },
           "slate_template_number": {
             "anyOf": [
@@ -1180,9 +1420,247 @@
           "priority",
           "slate_template_number",
           "calibration_target_number",
-          "calibration_source_number"
+          "calibration_source_number",
+          "purpose",
+          "port",
+          "port_source",
+          "site",
+          "deployment_number",
+          "deployment_name"
         ],
         "title": "Mission",
+        "type": "object"
+      },
+      "MissionDetail": {
+        "properties": {
+          "calibration_source_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calibration Source Number"
+          },
+          "calibration_target_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calibration Target Number"
+          },
+          "captures": {
+            "title": "Captures",
+            "type": "integer"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "deployment_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployment Name"
+          },
+          "deployment_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployment Number"
+          },
+          "device_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Name"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "port": {
+            "enum": [
+              "corrective_optic",
+              "flat",
+              "dome",
+              "unknown"
+            ],
+            "title": "Port",
+            "type": "string"
+          },
+          "port_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port Note"
+          },
+          "port_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "backfill",
+                  "device_suffix",
+                  "operator",
+                  "calibration"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port Source"
+          },
+          "priority": {
+            "enum": [
+              "low",
+              "high",
+              "none"
+            ],
+            "title": "Priority",
+            "type": "string"
+          },
+          "purpose": {
+            "anyOf": [
+              {
+                "enum": [
+                  "survey",
+                  "lens_calibration",
+                  "laser_calibration",
+                  "slate",
+                  "known_length",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purpose"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "site": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Site"
+          },
+          "slate_template_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slate Template Number"
+          },
+          "source_path": {
+            "title": "Source Path",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "name",
+          "started_at",
+          "priority",
+          "slate_template_number",
+          "calibration_target_number",
+          "calibration_source_number",
+          "purpose",
+          "port",
+          "port_source",
+          "site",
+          "deployment_number",
+          "deployment_name",
+          "source_path",
+          "notes",
+          "port_note",
+          "country",
+          "region",
+          "device_name",
+          "captures"
+        ],
+        "title": "MissionDetail",
         "type": "object"
       },
       "MissionView": {
@@ -1261,6 +1739,55 @@
           "is_admin"
         ],
         "title": "MyTenant",
+        "type": "object"
+      },
+      "NewDeployment": {
+        "properties": {
+          "ended_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended On"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "started_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started On"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "NewDeployment",
         "type": "object"
       },
       "ObservationDetailView": {
@@ -1525,6 +2052,64 @@
         "title": "Point",
         "type": "object"
       },
+      "PortStatement": {
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "port": {
+            "enum": [
+              "corrective_optic",
+              "flat",
+              "dome",
+              "unknown"
+            ],
+            "title": "Port",
+            "type": "string"
+          }
+        },
+        "required": [
+          "port"
+        ],
+        "title": "PortStatement",
+        "type": "object"
+      },
+      "PurposeStatement": {
+        "properties": {
+          "purpose": {
+            "anyOf": [
+              {
+                "enum": [
+                  "survey",
+                  "lens_calibration",
+                  "laser_calibration",
+                  "slate",
+                  "known_length",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purpose"
+          }
+        },
+        "required": [
+          "purpose"
+        ],
+        "title": "PurposeStatement",
+        "type": "object"
+      },
       "SpeciesView": {
         "properties": {
           "common_name": {
@@ -1714,6 +2299,160 @@
           }
         ],
         "summary": "My Memberships"
+      }
+    },
+    "/tenants/{slug}/deployments": {
+      "get": {
+        "operationId": "list_deployments",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Deployment"
+                  },
+                  "title": "Response List Deployments",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Deployments"
+      },
+      "post": {
+        "operationId": "create_deployment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewDeployment"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Deployment"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Post Deployment"
+      }
+    },
+    "/tenants/{slug}/deployments/{number}": {
+      "get": {
+        "operationId": "get_deployment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get One Deployment"
       }
     },
     "/tenants/{slug}/devices": {
@@ -1998,6 +2737,60 @@
           }
         ],
         "summary": "Get Missions"
+      }
+    },
+    "/tenants/{slug}/missions/{number}": {
+      "get": {
+        "operationId": "get_mission",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MissionDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Mission"
       }
     },
     "/tenants/{slug}/missions/{number}/calibration-refusal": {
@@ -2292,6 +3085,117 @@
         "summary": "Set Mission Calibration Target"
       }
     },
+    "/tenants/{slug}/missions/{number}/deployment": {
+      "delete": {
+        "operationId": "clear_mission_deployment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Mission Deployment"
+      }
+    },
+    "/tenants/{slug}/missions/{number}/deployment/{deployment_number}": {
+      "put": {
+        "operationId": "set_mission_deployment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "deployment_number",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Deployment Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MissionDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put Mission Deployment"
+      }
+    },
     "/tenants/{slug}/missions/{number}/labels/{kind}/needs-reprocess": {
       "delete": {
         "description": "Withdraw a redraw of dive ``number``'s ``kind`` frames (idempotent:\n0 when none was asked for).",
@@ -2438,6 +3342,135 @@
           }
         ],
         "summary": "Raise Needs Reprocess"
+      }
+    },
+    "/tenants/{slug}/missions/{number}/port": {
+      "put": {
+        "description": "State the mission's camera port as an operator (``unknown``\nwithdraws it). 409 where the owner's rules already say otherwise.",
+        "operationId": "set_mission_port",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortStatement"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MissionDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Mission Port"
+      }
+    },
+    "/tenants/{slug}/missions/{number}/purpose": {
+      "put": {
+        "operationId": "set_mission_purpose",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurposeStatement"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MissionDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Mission Purpose"
       }
     },
     "/tenants/{slug}/mobile/captures": {

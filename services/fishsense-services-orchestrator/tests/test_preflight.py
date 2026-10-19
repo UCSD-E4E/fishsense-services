@@ -419,8 +419,11 @@ async def test_re_ingesting_the_same_path_says_the_mission_will_drop_to_low():
     catalog = FakeCatalog(
         missions={"2024.06.20.REEF/082929_FishModels_FSL07": existing}
     )
+    # Port and purpose stated, so their own warnings (test_preflight_port)
+    # stay out of the way.
+    request = _request(port="corrective_optic", purpose="known_length")
 
-    preflight = await _run(_request(), _listing(), catalog=catalog)
+    preflight = await _run(request, _listing(), catalog=catalog)
 
     assert preflight.errors == []
     (warning,) = preflight.warnings

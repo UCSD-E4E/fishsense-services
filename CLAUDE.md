@@ -161,6 +161,14 @@ Q() { docker exec fishsense-postgres-1 psql -U postgres -d fishsense_services -A
 
 ## Measurement work
 
+- **A mission's camera port is `unknown` unless something says otherwise**
+  (migration 0047; the owner's rules, 2026-10-16). Data ingested before the
+  rules, and any device labelled with the `D` suffix (`FSL-10D`), is the
+  corrective optic. An operator or a lens calibration can state a port.
+  Nothing else counts: a missing `D` does not mean flat, and folder names
+  and lab notes are not evidence. Never write a port without its
+  `port_source`.
+
 Calibration, accuracy and validation claims follow the user's rigour rules:
 - every estimator gets a control with a known answer;
 - count observations against unknowns before computing;

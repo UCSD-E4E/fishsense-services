@@ -30,6 +30,7 @@ from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
 
 from fishsense_services_api.ingest_store import ContentOverlap
+from fishsense_services_api.mission_store import PortIsRuled
 from fishsense_services_orchestrator.ingest.activities import (
     INCOMPLETE_INGEST_TYPE,
     IngestActivities,
@@ -213,6 +214,61 @@ async def test_carries_the_camera_and_calibration_intent():
     assert created["slate_template_id"] == slate
     assert created["flip_mission_slate"] is True
     assert created["source_path"] == FOLDER
+
+
+async def test_carries_the_port_and_purpose_preflight_resolved():
+    """0047: the port and what said so, as preflight decided them; the purpose
+    as the request stated it."""
+    catalog = RecordingCatalog()
+
+    await _create(
+        _request(purpose="known_length"),
+        _preflight(resolved_port="corrective_optic",
+                   resolved_port_source="device_suffix",
+                   resolved_port_note="device labelled FSL-07D",
+                   resolved_purpose="known_length"),
+        catalog,
+    )  # fmt: skip
+
+    created = catalog.created[0]
+    assert (created["port"], created["port_source"], created["port_note"]) == (
+        "corrective_optic",
+        "device_suffix",
+        "device labelled FSL-07D",
+    )
+    assert created["purpose"] == "known_length"
+
+
+async def test_a_port_contradicting_the_owners_rule_fails_without_retrying():
+    """Re-ingesting a mission whose port is the owner's rule, stating another:
+    the store refuses, and no retry will change its mind."""
+
+    class RuledCatalog(RecordingCatalog):
+        async def create_mission(self, tenant_id, **mission):
+            raise PortIsRuled("x is corrective_optic by the owner's rule")
+
+    with pytest.raises(ApplicationError) as excinfo:
+        await _create(
+            _request(port="flat"),
+            _preflight(resolved_port="flat", resolved_port_source="operator"),
+            RuledCatalog(),
+        )
+
+    assert excinfo.value.non_retryable
+    assert "owner's rule" in str(excinfo.value)
+
+
+async def test_an_unknown_port_is_created_unknown():
+    catalog = RecordingCatalog()
+
+    await _create(_request(), _preflight(), catalog)
+
+    created = catalog.created[0]
+    assert (created["port"], created["port_source"], created["purpose"]) == (
+        "unknown",
+        None,
+        None,
+    )
 
 
 async def test_a_self_calibrating_mission_has_no_calibration_link():

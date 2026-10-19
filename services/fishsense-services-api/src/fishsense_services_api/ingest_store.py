@@ -31,6 +31,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api.mission_facts import RULED
+from fishsense_services_api.mission_store import PortIsRuled
 from fishsense_services_api.service_principal import NotAMember, ServicePrincipal
 
 __all__ = [
@@ -95,6 +97,13 @@ async def resolve_device(
     return ResolvedDevice(row.id, row.name, row.calibrated)
 
 
+#: On a re-ingest, the mission's port stands: nothing new was stated, or the
+#: owner's rules said it.
+_KEEP_PORT = "excluded.port = 'unknown' OR missions.port_source IN ({})".format(
+    ", ".join(f"'{source}'" for source in RULED)
+)
+
+
 async def create_mission(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
@@ -106,21 +115,49 @@ async def create_mission(
     slate_template_id: uuid.UUID | None = None,
     calibration_source_mission_id: uuid.UUID | None = None,
     flip_mission_slate: bool = False,
+    port: str = "unknown",
+    port_source: str | None = None,
+    port_note: str | None = None,
+    purpose: str | None = None,
 ) -> uuid.UUID:
     """Create (or re-open) the dive at **low**, whatever the request asked for.
 
     `started_at` is provisional -- preflight's max header timestamp -- and finalize
     replaces it with the scan's. Re-running ingest returns the same dive, back
     at low until finalize promotes it again.
+
+    0047: re-opening never forgets what is known. An ``unknown`` port or an
+    unstated purpose leaves the mission's as they are, a port by the owner's
+    rules (``backfill``, ``device_suffix``) is kept, and a different one stated
+    against it is refused (`PortIsRuled`) rather than silently dropped.
     """
+    existing = (
+        await conn.execute(
+            text(
+                "SELECT port, port_source FROM missions "
+                "WHERE tenant_id = :t AND source_path = :p FOR UPDATE"
+            ),
+            {"t": tenant_id, "p": source_path},
+        )
+    ).one_or_none()
+    if (
+        existing is not None
+        and existing.port_source in RULED
+        and port not in ("unknown", existing.port)
+    ):
+        raise PortIsRuled(
+            f"{source_path} is {existing.port} by the owner's rule "
+            f"({existing.port_source}); ingest stated {port}"
+        )
     return (
         await conn.execute(
             text("""
                 INSERT INTO missions (tenant_id, source_path, name, started_at, priority,
                                    device_id, slate_template_id,
-                                   calibration_source_mission_id, flip_mission_slate)
+                                   calibration_source_mission_id, flip_mission_slate,
+                                   port, port_source, port_note, purpose)
                 VALUES (:tenant, :path, :name, :started_at, 'low', :device, :slate,
-                        :source, :flip)
+                        :source, :flip, :port, :port_source, :port_note, :purpose)
                 ON CONFLICT (tenant_id, source_path) DO UPDATE SET
                     name = excluded.name,
                     started_at = excluded.started_at,
@@ -128,9 +165,16 @@ async def create_mission(
                     device_id = excluded.device_id,
                     slate_template_id = excluded.slate_template_id,
                     calibration_source_mission_id = excluded.calibration_source_mission_id,
-                    flip_mission_slate = excluded.flip_mission_slate
+                    flip_mission_slate = excluded.flip_mission_slate,
+                    port = CASE WHEN {keep} THEN missions.port
+                                ELSE excluded.port END,
+                    port_source = CASE WHEN {keep} THEN missions.port_source
+                                       ELSE excluded.port_source END,
+                    port_note = CASE WHEN {keep} THEN missions.port_note
+                                     ELSE excluded.port_note END,
+                    purpose = coalesce(excluded.purpose, missions.purpose)
                 RETURNING id
-                """),
+                """.format(keep=_KEEP_PORT)),
             {
                 "tenant": tenant_id,
                 "path": source_path,
@@ -140,6 +184,10 @@ async def create_mission(
                 "slate": slate_template_id,
                 "source": calibration_source_mission_id,
                 "flip": flip_mission_slate,
+                "port": port,
+                "port_source": port_source,
+                "port_note": port_note,
+                "purpose": purpose,
             },
         )
     ).scalar_one()

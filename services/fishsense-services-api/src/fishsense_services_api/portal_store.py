@@ -59,6 +59,7 @@ __all__ = [
     "clear_calibration_target",
     "label_studio_project_ids",
     "list_missions",
+    "mission_summary",
     "set_calibration_source",
     "set_calibration_target",
     "set_needs_reprocess",
@@ -118,6 +119,14 @@ class MissionSummary:
     slate_template_number: int | None
     calibration_target_number: int | None
     calibration_source_number: int | None
+    #: What the mission is for, its camera port and what said so, and its
+    #: field trip (0047).
+    purpose: str | None
+    port: str
+    port_source: str | None
+    site: str | None
+    deployment_number: int | None
+    deployment_name: str | None
 
 
 def _gate_scan(*, judged: bool) -> str:
@@ -193,24 +202,49 @@ _MISSION_SUMMARY = """
     SELECT d.number, d.name, d.started_at, d.priority,
            t.number AS slate_template_number,
            g.number AS calibration_target_number,
-           s.number AS calibration_source_number
+           s.number AS calibration_source_number,
+           d.purpose, d.port, d.port_source, d.site,
+           p.number AS deployment_number, p.name AS deployment_name
     FROM missions d
     LEFT JOIN slate_templates t ON t.id = d.slate_template_id
     LEFT JOIN calibration_targets g ON g.id = d.calibration_target_id
     LEFT JOIN missions s
       ON s.tenant_id = d.tenant_id AND s.id = d.calibration_source_mission_id
+    LEFT JOIN deployments p
+      ON p.tenant_id = d.tenant_id AND p.id = d.deployment_id
     WHERE d.tenant_id = :tenant_id
 """
 
 
 async def list_missions(
-    conn: AsyncConnection, tenant_id: uuid.UUID
+    conn: AsyncConnection,
+    tenant_id: uuid.UUID,
+    *,
+    deployment_number: int | None = None,
 ) -> list[MissionSummary]:
-    """Every dive in the tenant, by number (v1: every dive, unordered)."""
+    """Every dive in the tenant, by number (v1: every dive, unordered); only
+    those of one deployment when ``deployment_number`` is given."""
+    where = "" if deployment_number is None else " AND p.number = :deployment"
     rows = await conn.execute(
-        text(_MISSION_SUMMARY + " ORDER BY d.number"), {"tenant_id": tenant_id}
+        text(_MISSION_SUMMARY + where + " ORDER BY d.number"),
+        {"tenant_id": tenant_id, "deployment": deployment_number},
     )
     return [MissionSummary(**row._mapping) for row in rows]
+
+
+async def mission_summary(
+    conn: AsyncConnection, tenant_id: uuid.UUID, number: int
+) -> MissionSummary:
+    """Mission ``number`` as the portal shows it; `DiveNotFound` if missing."""
+    row = (
+        await conn.execute(
+            text(_MISSION_SUMMARY + " AND d.number = :n"),
+            {"tenant_id": tenant_id, "n": number},
+        )
+    ).one_or_none()
+    if row is None:
+        raise DiveNotFound("mission", number)
+    return MissionSummary(**row._mapping)
 
 
 async def _mission_id(

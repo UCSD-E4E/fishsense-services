@@ -78,6 +78,29 @@ class IngestMissionRequest(BaseModel):
         bool, renamed_from("flip_dive_slate", "flip_mission_slate")
     ] = False
 
+    #: The camera port, when the operator knows it; recorded as theirs
+    #: (``operator``, with ``port_note``). A device labelled with the ``D``
+    #: suffix (``FSL-10D``, on the path or in every frame's Artist) is the
+    #: corrective optic without being told, and a statement contradicting it
+    #: fails preflight. Otherwise the port is ``unknown`` -- a missing ``D``
+    #: is not evidence of a flat port (the owner's rules, 2026-10-16) -- and
+    #: the stages that measure refuse it (PLAN.md §4.9).
+    port: Literal["corrective_optic", "flat", "dome"] | None = None
+    port_note: str | None = None
+    #: What the mission is for. Stored only when stated; preflight suggests
+    #: one from the name otherwise.
+    purpose: (
+        Literal[
+            "survey",
+            "lens_calibration",
+            "laser_calibration",
+            "slate",
+            "known_length",
+            "other",
+        ]
+        | None
+    ) = None
+
     #: Preflight only: list, read EXIF headers, validate, write nothing.
     dry_run: bool = False
 
@@ -148,6 +171,13 @@ class IngestPreflight(BaseModel):
     #: v2: the tenant's device the frames resolve to.
     resolved_device_id: uuid.UUID | None = None
     resolved_device_name: str | None = None
+    #: The mission's port and what said so (0047): ``device_suffix`` from a
+    #: ``D`` label, ``operator`` from the request, else ``unknown``.
+    resolved_port: str = "unknown"
+    resolved_port_source: str | None = None
+    resolved_port_note: str | None = None
+    #: The request's purpose; never an inferred one.
+    resolved_purpose: str | None = None
     total_bytes: int = 0
     #: Every problem at once -- one round trip for the operator, not a sequence.
     errors: List[str] = []

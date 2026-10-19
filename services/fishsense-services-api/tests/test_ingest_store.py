@@ -21,6 +21,7 @@ import pytest
 from sqlalchemy import text
 
 from fishsense_services_api.db import tenant_transaction
+from fishsense_services_api.mission_store import PortIsRuled
 from fishsense_services_api.ingest_store import (
     IngestCatalog,
     NotAMember,
@@ -430,3 +431,89 @@ async def test_the_catalog_rechecks_membership_on_every_tenant_call(
                            {"t": tenants["lab"]})  # fmt: skip
     with pytest.raises(NotAMember):
         await catalog.mission_by_path(tenants["lab"], "anything")
+
+
+# --- the port and purpose (0047) ----------------------------------------------
+
+
+async def _create(app_engine, tenant, path, **facts):
+    async with tenant_transaction(app_engine, tenant) as conn:
+        return await create_mission(
+            conn, tenant, source_path=path, name="m", started_at=T0, **facts
+        )
+
+
+async def _port_and_purpose(owner_engine, mission):
+    async with owner_engine.connect() as conn:
+        return (
+            await conn.execute(
+                text(
+                    "SELECT port, port_source, port_note, purpose FROM missions "
+                    "WHERE id = :m"
+                ),
+                {"m": mission},
+            )
+        ).one()
+
+
+async def test_a_mission_is_created_with_its_port_and_purpose(owner_engine, app_engine):
+    lab = await _tenant(owner_engine, "lab")
+
+    mission = await _create(
+        app_engine, lab, "/d/1", port="flat", port_source="operator",
+        port_note="pool test", purpose="other",
+    )  # fmt: skip
+
+    assert tuple(await _port_and_purpose(owner_engine, mission)) == (
+        "flat",
+        "operator",
+        "pool test",
+        "other",
+    )
+
+
+async def test_re_ingesting_without_a_statement_keeps_what_is_known(
+    owner_engine, app_engine
+):
+    """A re-ingest of a backfilled mission says nothing about its port; that
+    must not reset the owner's rule to unknown, nor clear a stated purpose."""
+    lab = await _tenant(owner_engine, "lab")
+    mission = await _create(
+        app_engine, lab, "/d/1", port="corrective_optic", port_source="backfill",
+        port_note="the owner's rule", purpose="survey",
+    )  # fmt: skip
+
+    again = await _create(app_engine, lab, "/d/1")
+
+    assert again == mission
+    assert tuple(await _port_and_purpose(owner_engine, mission)) == (
+        "corrective_optic",
+        "backfill",
+        "the owner's rule",
+        "survey",
+    )
+
+
+async def test_re_ingesting_cannot_contradict_the_owners_rule(owner_engine, app_engine):
+    lab = await _tenant(owner_engine, "lab")
+    mission = await _create(
+        app_engine, lab, "/d/1", port="corrective_optic", port_source="device_suffix"
+    )
+
+    with pytest.raises(PortIsRuled):
+        await _create(app_engine, lab, "/d/1", port="flat", port_source="operator")
+
+    assert (await _port_and_purpose(owner_engine, mission)).port == "corrective_optic"
+
+
+async def test_re_ingesting_with_a_statement_replaces_an_operators(
+    owner_engine, app_engine
+):
+    lab = await _tenant(owner_engine, "lab")
+    mission = await _create(
+        app_engine, lab, "/d/1", port="flat", port_source="operator"
+    )
+
+    await _create(app_engine, lab, "/d/1", port="dome", port_source="operator")
+
+    assert (await _port_and_purpose(owner_engine, mission)).port == "dome"

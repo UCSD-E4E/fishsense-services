@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.memberships import Membership
+from fishsense_services_api.mission_facts import Port, PortSource, Purpose
 from fishsense_services_api.portal_store import (
     CalibrationTargetNotFound,
     DiveNotFound,
@@ -70,6 +71,12 @@ class Mission(BaseModel):
     slate_template_number: int | None
     calibration_target_number: int | None
     calibration_source_number: int | None
+    purpose: Purpose | None
+    port: Port
+    port_source: PortSource | None
+    site: str | None
+    deployment_number: int | None
+    deployment_name: str | None
 
 
 # A dive's number: v1's id for a migrated dive. Non-negative, as v1's web

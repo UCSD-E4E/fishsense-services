@@ -9,12 +9,13 @@ constraints the migrations create without explicit names still line up.
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     Double,
     ForeignKey,
@@ -189,6 +190,30 @@ class Device(Base):
     number: Mapped[int] = _number()
 
 
+class Deployment(Base):
+    """One field trip: e4e-data-management's dataset (0047). Never a processor
+    Deployment, which is a Kubernetes object."""
+
+    __tablename__ = "deployments"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        UniqueConstraint("tenant_id", "name"),
+        UniqueConstraint("tenant_id", "source_path"),
+        CheckConstraint("ended_on >= started_on", name="deployments_dates_check"),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    number: Mapped[int] = mapped_column(BigInteger, Identity(), unique=True)
+    name: Mapped[str] = mapped_column(Text)
+    source_path: Mapped[str | None] = mapped_column(Text)
+    started_on: Mapped[date | None] = mapped_column(Date)
+    ended_on: Mapped[date | None] = mapped_column(Date)
+    readme: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+
 class Mission(Base):
     """A Lite offload session; ``priority`` is v1's commit/park flag."""
 
@@ -209,6 +234,26 @@ class Mission(Base):
         CheckConstraint(
             "calibration_source_mission_id <> id",
             name="missions_calibration_not_self_check",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "deployment_id"],
+            ["deployments.tenant_id", "deployments.id"],
+        ),
+        Index(None, "tenant_id", "deployment_id"),
+        CheckConstraint(
+            "purpose IN ('survey', 'lens_calibration', 'laser_calibration', "
+            "'slate', 'known_length', 'other')",
+            name="missions_purpose_check",
+        ),
+        CheckConstraint(
+            "port IN ('corrective_optic', 'flat', 'dome', 'unknown')",
+            name="missions_port_check",
+        ),
+        CheckConstraint(
+            "CASE WHEN port = 'unknown' THEN port_source IS NULL "
+            "ELSE port_source IS NOT NULL AND port_source IN "
+            "('backfill', 'device_suffix', 'operator', 'calibration') END",
+            name="missions_port_source_check",
         ),
     )
 
@@ -238,6 +283,19 @@ class Mission(Base):
         DateTime(timezone=True)
     )
     created_at: Mapped[datetime] = _created_at()
+    #: The field trip, when one is recorded (0047).
+    deployment_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    #: What the mission is for; NULL until someone says (0047).
+    purpose: Mapped[str | None] = mapped_column(Text)
+    #: The camera port, and what said so; ``unknown`` has no source (0047).
+    port: Mapped[str] = mapped_column(Text, server_default=text("'unknown'::text"))
+    port_source: Mapped[str | None] = mapped_column(Text)
+    port_note: Mapped[str | None] = mapped_column(Text)
+    country: Mapped[str | None] = mapped_column(Text)
+    region: Mapped[str | None] = mapped_column(Text)
+    site: Mapped[str | None] = mapped_column(Text)
+    #: The mission's e4edm ``metadata.json``, verbatim.
+    source_metadata: Mapped[dict | None] = mapped_column(JSONB)
 
 
 class Capture(Base):
