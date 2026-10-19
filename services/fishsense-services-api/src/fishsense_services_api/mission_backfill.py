@@ -10,13 +10,18 @@ of what predates ``ingested_before`` is ``backfill``. A port already stated is
 never touched.
 
 **Deployments.** Each e4edm dataset folder on a mission's path
-(``YYYY.MM.DD.PROJECT.LOCATION``) is a deployment, dated by its missions'
-start times; a deployment of that name already in the tenant is reused, and a
-mission already in one is left there.
+(``YYYY.MM.DD.PROJECT.LOCATION``) is a deployment; a deployment of that name
+already in the tenant is reused, and a mission already in one is left there.
+It starts on the date its name gives. Its end is left unset: mission times
+are UTC and the site's zone is not recorded, so an evening dive in San Diego
+falls on the next UTC day, and an end date derived from them would be wrong
+by a day as often as not.
 
 **Purposes** are inferred from the name (``mission_facts.infer_purpose``) where
 none is stated, and an operator may override any of them by mission number --
-to a purpose, or to None to leave it unstated.
+to a purpose, or to None to leave it unstated. The backfill only fills what
+is unstated, so an override naming a mission whose purpose is already stated
+is refused rather than silently changing nothing.
 
 A plan is read-only, and its fingerprint covers everything it would write,
 the overrides included. Applying takes the fingerprint of the plan that was
@@ -37,6 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from fishsense_services_api.mission_facts import (
     PURPOSES,
+    dataset_date,
     dataset_of,
     device_label_in_path,
     infer_purpose,
@@ -168,6 +174,16 @@ async def plan_backfill(
     missing = set(overrides) - {r.number for r in rows}
     if missing:
         raise ValueError(f"no such mission: {', '.join(map(str, sorted(missing)))}")
+    stated = sorted(
+        f"{r.number} ({r.purpose})"
+        for r in rows
+        if r.number in overrides and r.purpose is not None
+    )
+    if stated:
+        raise ValueError(
+            f"purpose already stated for mission {', '.join(stated)}: the backfill "
+            "fills only unstated purposes; change these on the mission's page"
+        )
     existing = {
         r.name: r.source_path
         for r in await conn.execute(
@@ -210,8 +226,8 @@ async def plan_backfill(
         PlannedDeployment(
             name=name,
             source_path=trip["source_path"],
-            started_on=None if name in existing else min(trip["days"]),
-            ended_on=None if name in existing else max(trip["days"]),
+            started_on=None if name in existing else dataset_date(name),
+            ended_on=None,
             exists=name in existing,
             missions=len(trip["days"]),
         )

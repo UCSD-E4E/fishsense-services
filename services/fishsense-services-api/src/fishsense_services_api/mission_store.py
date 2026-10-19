@@ -23,9 +23,10 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from fishsense_services_api.mission_facts import RULED
 from fishsense_services_api.portal_store import (
     DiveNotFound,
+    MissionDetail,
     MissionSummary,
     list_missions,
-    mission_summary,
+    mission_detail,
 )
 
 __all__ = [
@@ -61,18 +62,6 @@ class DeploymentNotFound(LookupError):
 
 
 @dataclass(frozen=True)
-class MissionDetail:
-    summary: MissionSummary
-    source_path: str
-    notes: str | None
-    port_note: str | None
-    country: str | None
-    region: str | None
-    device_name: str | None
-    captures: int
-
-
-@dataclass(frozen=True)
 class DeploymentSummary:
     number: int
     name: str
@@ -92,31 +81,6 @@ _DEPLOYMENTS = """
     WHERE p.tenant_id = :t
 """
 _DEPLOYMENTS_TAIL = " GROUP BY p.id ORDER BY p.started_on DESC NULLS LAST, p.number"
-
-
-async def mission_detail(
-    conn: AsyncConnection, tenant_id: uuid.UUID, number: int
-) -> MissionDetail:
-    row = (
-        await conn.execute(
-            text("""
-                SELECT d.source_path, d.notes, d.port_note, d.country, d.region,
-                       v.name AS device_name,
-                       (SELECT count(*) FROM captures c
-                        WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id)
-                           AS captures
-                FROM missions d
-                LEFT JOIN devices v ON v.tenant_id = d.tenant_id AND v.id = d.device_id
-                WHERE d.tenant_id = :t AND d.number = :n
-                """),
-            {"t": tenant_id, "n": number},
-        )
-    ).one_or_none()
-    if row is None:
-        raise DiveNotFound("mission", number)
-    return MissionDetail(
-        summary=await mission_summary(conn, tenant_id, number), **row._mapping
-    )
 
 
 async def _locked_port(conn, tenant_id, number):

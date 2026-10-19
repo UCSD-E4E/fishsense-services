@@ -139,6 +139,12 @@ def test_purpose_is_inferred_from_the_name(name, path, purpose):
             "2023-08-14 ED-00 FSL-02D LaserCalibration3 fish",
             "/d/LaserCalibration3 [split A fish 19:00:49-19:02:33]",
         ),
+        # Calibration sessions the rules' exact phrases miss: not surveys.
+        ("Checkerboard", "/d/Checkerboard"),
+        ("082929_LaserCal_FSL05", "/d/082929_LaserCal_FSL05"),
+        ("Calibration", "/d/Calibration"),
+        ("intrinsics", "/d/intrinsics"),
+        ("FSL-05 cal 2", "/d/FSL-05 cal 2"),
         # A pool session no rule names.
         ("2023-08-18 Nathans Pool 04", "/d/2023.08.18.FishSense.Nathans Pool/04"),
         ("2023-08-18 Nathans Pool 08_18_Pool_Test_FSL-02", "/d/Pool_Test_FSL-02"),

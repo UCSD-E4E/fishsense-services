@@ -84,13 +84,11 @@ class Mission(BaseModel):
 MissionNumber = Annotated[int, Path(ge=0)]
 
 
-def add_portal_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
-    """Register the portal's routes. ``membership`` is the app's dependency that
-    authenticates the caller and resolves their membership in ``{slug}``."""
+def admin_of(membership):
+    """The dependency that admits only the tenant's admins, given the app's
+    ``membership`` dependency (shared with ``missions_api``)."""
 
-    Member = Annotated[Membership, Depends(membership)]
-
-    def admin(member: Member) -> Membership:
+    def admin(member: Annotated[Membership, Depends(membership)]) -> Membership:
         # Membership first (a non-member gets the same 404 as everywhere),
         # then the role -- before any dive is looked up, so a non-admin
         # learns nothing about which dives exist.
@@ -100,7 +98,15 @@ def add_portal_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
             )
         return member
 
-    Admin = Annotated[Membership, Depends(admin)]
+    return admin
+
+
+def add_portal_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
+    """Register the portal's routes. ``membership`` is the app's dependency that
+    authenticates the caller and resolves their membership in ``{slug}``."""
+
+    Member = Annotated[Membership, Depends(membership)]
+    Admin = Annotated[Membership, Depends(admin_of(membership))]
 
     @app.get(
         "/tenants/{slug}/membership",

@@ -14,7 +14,7 @@ The list of missions stays the portal's (``portal_api``), now with the facts.
 """
 
 from datetime import date
-from typing import Annotated, Literal
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Response, status
 from pydantic import BaseModel, Field, model_validator
@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.memberships import Membership
-from fishsense_services_api.mission_facts import Purpose
+from fishsense_services_api.mission_facts import Port, Purpose
 from fishsense_services_api.mission_store import (
     DeploymentExists,
     DeploymentNotFound,
@@ -37,7 +37,7 @@ from fishsense_services_api.mission_store import (
     set_port,
     set_purpose,
 )
-from fishsense_services_api.portal_api import Mission, MissionNumber
+from fishsense_services_api.portal_api import Mission, MissionNumber, admin_of
 from fishsense_services_api.portal_store import DiveNotFound
 
 __all__ = ["add_mission_routes"]
@@ -57,7 +57,7 @@ class MissionDetail(Mission):
 
 class PortStatement(BaseModel):
     #: ``unknown`` withdraws an operator's statement.
-    port: Literal["corrective_optic", "flat", "dome", "unknown"]
+    port: Port
     #: What the operator knows it from, kept with the port.
     note: str | None = None
 
@@ -101,15 +101,7 @@ class NewDeployment(BaseModel):
 
 def add_mission_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
     Member = Annotated[Membership, Depends(membership)]
-
-    def admin(member: Member) -> Membership:
-        if not member.is_admin:
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN, "this needs the tenant's admin role"
-            )
-        return member
-
-    Admin = Annotated[Membership, Depends(admin)]
+    Admin = Annotated[Membership, Depends(admin_of(membership))]
 
     async def _detail(conn, member, number) -> MissionDetail:
         found = await mission_detail(conn, member.tenant_id, number)

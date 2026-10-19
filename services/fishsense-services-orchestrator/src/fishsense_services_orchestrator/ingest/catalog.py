@@ -47,6 +47,11 @@ class Catalog(Protocol):
     ) -> list[tuple[uuid.UUID, str]]:
         """The tenant's dives whose folder name is ``leaf``: (id, path)."""
 
+    async def mission_port(
+        self, tenant_id: uuid.UUID, path: str
+    ) -> tuple[str, str | None] | None:
+        """The (port, port_source) of the tenant's mission at this path."""
+
     async def slate_template(self, name: str) -> uuid.UUID | None:
         """The (global) slate template with this name."""
 

@@ -12,9 +12,21 @@ otherwise preflight says what the name suggests.
 from __future__ import annotations
 
 from fishsense_services_orchestrator.ingest.activities import MissionFolderListing
+from fishsense_services_orchestrator.ingest.catalog import ResolvedDevice
 
 from ._tiff_builder import build_orf
-from .test_preflight import FOLDER, SERIAL, _entry, _listing, _request, _run
+from .test_preflight import (
+    DEVICE,
+    FOLDER,
+    SERIAL,
+    FakeCatalog,
+    _entry,
+    _listing,
+    _request,
+    _run,
+)
+
+PATH = "2024.06.20.REEF/082929_FishModels_FSL07"
 
 D_FOLDER = "/fishsense_data/REEF/data/2025.01.17.FishSense.San Diego/ED-00/FSL-07D/Box"
 
@@ -121,3 +133,63 @@ async def test_a_stated_purpose_is_kept():
 
     assert preflight.resolved_purpose == "known_length"
     assert not any("purpose" in w for w in preflight.warnings)
+
+
+async def test_one_tagged_frame_is_not_every_frame():
+    """A D in one frame's Artist and none in the rest is partial evidence; a
+    port from the owner's rule cannot be changed afterwards, so it must not be
+    recorded from part of the folder."""
+    tagged = build_orf(
+        date_time="2024:08:21 08:56:51", serial_number=SERIAL, artist="FSL-07D"
+    )
+    untagged = build_orf(
+        date_time="2024:08:21 08:56:52", serial_number=SERIAL, artist=None
+    )
+
+    preflight = await _run(
+        _request(),
+        _listing(),
+        headers={"PA010001.ORF": tagged, "PA010002.ORF": untagged},
+    )
+
+    assert (preflight.resolved_port, preflight.resolved_port_source) == (
+        "unknown",
+        None,
+    )
+
+
+async def test_a_device_named_with_its_d_matches_its_own_artist():
+    catalog = FakeCatalog(devices={SERIAL: ResolvedDevice(DEVICE, "FSL-07D", True)})
+
+    preflight = await _run(
+        _request(), _listing(), catalog=catalog, headers=_artist("FSL-07D")
+    )
+
+    assert not any("disagrees" in w for w in preflight.warnings)
+
+
+async def test_contradicting_an_existing_missions_ruled_port_is_a_preflight_error():
+    """Every problem at once: a re-ingest stating another port than the
+    owner's rule fixed is found here, not when create refuses it."""
+    catalog = FakeCatalog(ports={PATH: ("corrective_optic", "backfill")})
+
+    preflight = await _run(_request(port="flat"), _listing(), catalog=catalog)
+
+    assert any("owner's rule" in e and "flat" in e for e in preflight.errors)
+
+
+async def test_a_re_ingest_that_agrees_or_states_nothing_is_fine():
+    catalog = FakeCatalog(ports={PATH: ("corrective_optic", "backfill")})
+
+    agrees = await _run(_request(port="corrective_optic"), _listing(), catalog=catalog)
+    silent = await _run(_request(), _listing(), catalog=catalog)
+
+    assert agrees.errors == [] and silent.errors == []
+
+
+async def test_an_operators_earlier_port_can_be_restated():
+    catalog = FakeCatalog(ports={PATH: ("flat", "operator")})
+
+    preflight = await _run(_request(port="dome"), _listing(), catalog=catalog)
+
+    assert preflight.errors == []

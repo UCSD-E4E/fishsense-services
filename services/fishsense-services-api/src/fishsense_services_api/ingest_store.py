@@ -44,6 +44,7 @@ __all__ = [
     "content_overlap",
     "create_mission",
     "mission_by_path",
+    "mission_port",
     "missions_with_leaf",
     "finalize_mission",
     "register_capture",
@@ -95,6 +96,22 @@ async def resolve_device(
     if row is None:
         return None
     return ResolvedDevice(row.id, row.name, row.calibrated)
+
+
+async def mission_port(
+    conn: AsyncConnection, tenant_id: uuid.UUID, path: str
+) -> tuple[str, str | None] | None:
+    """(port, port_source) of the tenant's mission at ``path``, or None."""
+    row = (
+        await conn.execute(
+            text(
+                "SELECT port, port_source FROM missions "
+                "WHERE tenant_id = :t AND source_path = :p"
+            ),
+            {"t": tenant_id, "p": path},
+        )
+    ).one_or_none()
+    return None if row is None else (row.port, row.port_source)
 
 
 #: On a re-ingest, the mission's port stands: nothing new was stated, or the
@@ -396,6 +413,12 @@ class IngestCatalog(ServicePrincipal):
     ) -> list[tuple[uuid.UUID, str]]:
         async with self._tenant(tenant_id) as conn:
             return await missions_with_leaf(conn, tenant_id, leaf)
+
+    async def mission_port(
+        self, tenant_id: uuid.UUID, path: str
+    ) -> tuple[str, str | None] | None:
+        async with self._tenant(tenant_id) as conn:
+            return await mission_port(conn, tenant_id, path)
 
     async def slate_template(self, name: str) -> uuid.UUID | None:
         async with self._engine.connect() as conn:

@@ -24,6 +24,7 @@ import uuid
 from datetime import datetime
 from typing import List, Literal, Annotated
 
+from fishsense_services_api.mission_facts import Purpose, StatedPort
 from pydantic import BaseModel, ConfigDict
 from fishsense_services_contracts.renamed import renamed_from
 
@@ -85,21 +86,11 @@ class IngestMissionRequest(BaseModel):
     #: fails preflight. Otherwise the port is ``unknown`` -- a missing ``D``
     #: is not evidence of a flat port (the owner's rules, 2026-10-16) -- and
     #: the stages that measure refuse it (PLAN.md §4.9).
-    port: Literal["corrective_optic", "flat", "dome"] | None = None
+    port: StatedPort | None = None
     port_note: str | None = None
     #: What the mission is for. Stored only when stated; preflight suggests
     #: one from the name otherwise.
-    purpose: (
-        Literal[
-            "survey",
-            "lens_calibration",
-            "laser_calibration",
-            "slate",
-            "known_length",
-            "other",
-        ]
-        | None
-    ) = None
+    purpose: Purpose | None = None
 
     #: Preflight only: list, read EXIF headers, validate, write nothing.
     dry_run: bool = False

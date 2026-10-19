@@ -26,6 +26,7 @@ from temporalio.exceptions import ApplicationError
 
 from fishsense_services_api.mission_store import PortIsRuled
 from fishsense_services_api.mission_facts import (
+    RULED,
     device_label_in_path,
     infer_purpose,
     port_from_device_label,
@@ -317,8 +318,16 @@ class IngestActivities:
             )
 
         port, port_source, port_note = _resolve_port(
-            request, listing.folder_path, artists, errors, warnings
+            request,
+            listing.folder_path,
+            [image.artist for image in images],
+            errors,
+            warnings,
         )
+        if tenant_id is not None and port != "unknown":
+            await _check_ruled_port(
+                catalog, tenant_id, request.mission_path, port, errors
+            )
         if request.purpose is None:
             suggested, why = infer_purpose(
                 request.mission_name or leaf_name(request.mission_path),
@@ -698,16 +707,25 @@ def _check_calibration_intent(request: IngestMissionRequest) -> List[str]:
 def _resolve_port(
     request: IngestMissionRequest,
     folder_path: str,
-    artists: set[str],
+    frame_artists: list[str | None],
     errors: list[str],
     warnings: list[str],
 ) -> tuple[str, str | None, str | None]:
     """(port, source, note): a ``D`` label, else the operator's statement,
-    else ``unknown`` -- the owner's rules, 2026-10-16 (PLAN.md §4.9)."""
+    else ``unknown`` -- the owner's rules, 2026-10-16 (PLAN.md §4.9).
+
+    ``frame_artists`` has one entry per frame read, blank or not: a D in some
+    frames' Artist and none in the others is partial evidence, and a port by
+    the owner's rule cannot be changed afterwards."""
     label = device_label_in_path(folder_path)
     where = "on the folder path"
-    if label is None and artists and all(map(port_from_device_label, artists)):
-        label, where = sorted(artists)[0], "in every frame's EXIF Artist"
+    if (
+        label is None
+        and frame_artists
+        and all(port_from_device_label(a) for a in frame_artists)
+    ):
+        label = sorted(a for a in frame_artists if a)[0]
+        where = "in every frame's EXIF Artist"
     if label is not None:
         if request.port not in (None, "corrective_optic"):
             errors.append(
@@ -729,6 +747,28 @@ def _resolve_port(
         "measure will refuse this mission until its port is stated (`port`)."
     )
     return "unknown", None, None
+
+
+async def _check_ruled_port(
+    catalog: Catalog,
+    tenant_id: uuid.UUID,
+    path: str,
+    port: str,
+    errors: list[str],
+) -> None:
+    """A re-ingest may not state another port than the owner's rule fixed for
+    the mission already at this path: create would refuse it, so say so here,
+    with every other problem."""
+    existing = await catalog.mission_port(tenant_id, path)
+    if existing is None:
+        return
+    existing_port, existing_source = existing
+    if existing_source in RULED and existing_port != port:
+        errors.append(
+            f"The mission already at {path} is {existing_port} by the owner's rule "
+            f"({existing_source}); this ingest says {port}. A ruled port is not "
+            "changed by ingest."
+        )
 
 
 async def _resolve_device(
@@ -773,7 +813,9 @@ async def _resolve_device(
     # device name or a re-housed body. Nothing else would ever notice.
     # FSL-10D is the body named FSL-10: the suffix is its port (§4.9).
     for artist in sorted(
-        a for a in artists if a and strip_port_suffix(a) != match.name
+        a
+        for a in artists
+        if a and strip_port_suffix(a) != strip_port_suffix(match.name)
     ):
         warnings.append(
             f"EXIF Artist {artist!r} disagrees with the resolved device's name "

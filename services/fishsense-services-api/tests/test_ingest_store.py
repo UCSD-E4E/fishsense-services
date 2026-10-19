@@ -517,3 +517,15 @@ async def test_re_ingesting_with_a_statement_replaces_an_operators(
     await _create(app_engine, lab, "/d/1", port="dome", port_source="operator")
 
     assert (await _port_and_purpose(owner_engine, mission)).port == "dome"
+
+
+async def test_the_catalog_reads_a_missions_port_by_path(app_engine, seed_memberships):
+    tenants = await seed_memberships({ORCHESTRATOR: {"lab": "member"}})
+    lab = tenants["lab"]
+    await _create(
+        app_engine, lab, "/d/1", port="corrective_optic", port_source="backfill"
+    )
+    catalog = IngestCatalog(app_engine, sub=ORCHESTRATOR)
+
+    assert await catalog.mission_port(lab, "/d/1") == ("corrective_optic", "backfill")
+    assert await catalog.mission_port(lab, "/d/2") is None

@@ -19,6 +19,7 @@ Pure rules, shared by ingest and the backfill so the two cannot drift:
 """
 
 import re
+from datetime import date
 from pathlib import PurePosixPath
 from typing import Literal, get_args
 
@@ -28,8 +29,10 @@ __all__ = [
     "PURPOSES",
     "Port",
     "PortSource",
+    "StatedPort",
     "Purpose",
     "RULED",
+    "dataset_date",
     "dataset_of",
     "device_label_in_path",
     "infer_purpose",
@@ -52,6 +55,8 @@ Purpose = Literal[
     "survey", "lens_calibration", "laser_calibration", "slate", "known_length", "other"
 ]
 Port = Literal["corrective_optic", "flat", "dome", "unknown"]
+#: A port someone states: ``unknown`` is the absence of one.
+StatedPort = Literal["corrective_optic", "flat", "dome"]
 PortSource = Literal["backfill", "device_suffix", "operator", "calibration"]
 #: Sources that are the owner's rules: fact, which an operator cannot contradict.
 RULED = ("backfill", "device_suffix")
@@ -80,6 +85,11 @@ _PURPOSE_RULES = (
     ("slate", re.compile(r"slate", re.I)),
 )
 _POOL = re.compile(r"pool", re.I)
+#: Calibration words the rules' exact phrases miss ("Checkerboard", "LaserCal",
+#: "intrinsics", "cal 2"): such a session is not a survey, whatever else it is.
+_CALIBRATION = re.compile(
+    r"calib|checker|intrinsic|(?:laser|lens)\s*_?cal|(?<![a-z])cal(?![a-z])", re.I
+)
 
 
 def port_from_device_label(label: str | None) -> str | None:
@@ -107,6 +117,11 @@ def device_label_in_path(source_path: str) -> str | None:
     return None
 
 
+def dataset_date(name: str) -> date:
+    """The date an e4edm dataset's name starts with (``YYYY.MM.DD``)."""
+    return date(*(int(part) for part in name.split(".")[:3]))
+
+
 def dataset_of(source_path: str) -> tuple[str, str] | None:
     """The e4edm dataset a mission's folder sits in, as (name, path), or None."""
     parts = source_path.split("/")
@@ -129,6 +144,8 @@ def infer_purpose(name: str | None, source_path: str) -> tuple[str | None, str]:
         return None, f"the name says both {' and '.join(found)}"
     if found:
         return found[0], f"the name says {found[0].replace('_', ' ')}"
+    if _CALIBRATION.search(said):
+        return None, "a calibration no rule names"
     if _POOL.search(said):
         return None, "a pool session no rule names"
     return "survey", "no calibration or known-length word in the name"
@@ -137,3 +154,4 @@ def infer_purpose(name: str | None, source_path: str) -> tuple[str | None, str]:
 assert get_args(Purpose) == PURPOSES
 assert get_args(Port) == PORTS
 assert get_args(PortSource) == PORT_SOURCES
+assert set(get_args(StatedPort)) == set(PORTS) - {"unknown"}

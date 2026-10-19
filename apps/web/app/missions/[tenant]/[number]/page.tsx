@@ -27,9 +27,11 @@ export default async function MissionPage({ params }: Props) {
   const number = Number(rawNumber);
   const session = await requireSignedIn(`/missions/${tenant}/${number}`);
   const token = session.accessToken ?? "";
-  const mission = await getMission(token, tenant, number);
+  const [mission, tenants] = await Promise.all([
+    getMission(token, tenant, number),
+    getMyTenants(token),
+  ]);
   if (!mission) notFound();
-  const tenants = await getMyTenants(token);
   const isAdmin = tenants.some((t) => t.slug === tenant && t.isAdmin);
   const deployments: Deployment[] = isAdmin ? await getDeployments(token, tenant) : [];
   const place = [mission.site, mission.region, mission.country].filter(Boolean).join(", ");

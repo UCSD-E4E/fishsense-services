@@ -52,7 +52,8 @@ export function FactsForms({
   deployments: Deployment[];
 }) {
   const [port, setPort] = useState<string>(mission.port);
-  const [note, setNote] = useState("");
+  // The recorded note, so saving the port again keeps its provenance.
+  const [note, setNote] = useState(mission.port_note ?? "");
   const [purpose, setPurpose] = useState<string>(mission.purpose ?? "");
   const [deployment, setDeployment] = useState<string>(
     mission.deployment_number != null ? String(mission.deployment_number) : "",

@@ -142,7 +142,8 @@ async def test_dataset_folders_become_deployments(owner_engine, app_engine):
         lab,
         f"{SAN_DIEGO}/ED-00/FSL-10D/Box",
         name="ED-00 FSL-10D Box",
-        started_at=datetime(2025, 1, 17, 18, tzinfo=timezone.utc),
+        # 17 January in San Diego, the 18th in UTC.
+        started_at=datetime(2025, 1, 18, 1, tzinfo=timezone.utc),
     )
     second = await _mission(
         owner_engine,
@@ -161,7 +162,9 @@ async def test_dataset_folders_become_deployments(owner_engine, app_engine):
         SAN_DIEGO,
         False,
     )
-    assert (str(trip.started_on), str(trip.ended_on)) == ("2025-01-17", "2025-01-19")
+    # The dataset's name dates its start; mission times are UTC and the
+    # site's zone is not recorded, so no end date is made up from them.
+    assert (str(trip.started_on), trip.ended_on) == ("2025-01-17", None)
     changes = _by_number(plan)
     assert changes[first].deployment == changes[second].deployment == trip.name
     assert changes[loose].deployment is None
@@ -262,3 +265,19 @@ async def test_a_plan_sees_only_its_tenant(owner_engine, app_engine):
     plan = await _plan(app_engine, lab)
 
     assert plan.missions == () and plan.deployments == ()
+
+
+async def test_an_override_of_a_stated_purpose_is_refused_not_ignored(
+    owner_engine, app_engine
+):
+    """The backfill fills only what is unstated. An override naming a mission
+    whose purpose is already stated would silently change nothing; it is
+    refused, so the reviewed plan never claims a correction it won't make."""
+    lab = await _tenant(owner_engine, "lab")
+    stated = await _mission(owner_engine, lab, "d/Alligator", name="Alligator",
+                            purpose="survey")  # fmt: skip
+
+    with pytest.raises(
+        ValueError, match=rf"already stated for mission {stated} \(survey\)"
+    ):
+        await _plan(app_engine, lab, purpose_overrides={stated: "slate"})
