@@ -846,7 +846,7 @@ export interface components {
              */
             priority: "low" | "high" | "none";
             /** Purpose */
-            purpose: ("survey" | "lens_calibration" | "laser_calibration" | "slate" | "known_length" | "other") | null;
+            purpose: ("survey" | "lens_calibration" | "laser_calibration" | "known_length" | "other") | null;
             /** Site */
             site: string | null;
             /** Slate Template Number */
@@ -894,7 +894,7 @@ export interface components {
              */
             priority: "low" | "high" | "none";
             /** Purpose */
-            purpose: ("survey" | "lens_calibration" | "laser_calibration" | "slate" | "known_length" | "other") | null;
+            purpose: ("survey" | "lens_calibration" | "laser_calibration" | "known_length" | "other") | null;
             /** Region */
             region: string | null;
             /** Site */
@@ -1024,7 +1024,7 @@ export interface components {
         /** PurposeStatement */
         PurposeStatement: {
             /** Purpose */
-            purpose: ("survey" | "lens_calibration" | "laser_calibration" | "slate" | "known_length" | "other") | null;
+            purpose: ("survey" | "lens_calibration" | "laser_calibration" | "known_length" | "other") | null;
         };
         /** SpeciesView */
         SpeciesView: {

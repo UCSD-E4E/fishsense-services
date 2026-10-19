@@ -118,8 +118,19 @@ def test_other_folders_name_no_deployment(path):
         ("082929_FishModels_FSL04", "/d/082929_FishModels_FSL04", "known_length"),
         ("083123_Fish Deg Angle Tests_FSL06", "/d/x", "known_length"),
         ("083123_Fish Degree Angle Test_FSL-01", "/d/x", "known_length"),
-        ("082323_Slate_FSL02", "/d/082323_Slate_FSL02", "slate"),
-        ("H slate dive 4", "2023.08.03.FishSense.FSL-01D/H slate dive 4", "slate"),
+        # A board and nothing else: a calibration-only session.
+        ("082323_Slate_FSL02", "/d/082323_Slate_FSL02", "laser_calibration"),
+        (
+            "H slate dive 4",
+            "2023.08.03.FishSense.FSL-01D/H slate dive 4",
+            "laser_calibration",
+        ),
+        # A board beside decoys is normal: most dives carry one.
+        (
+            "2023-08-18 Nathans Pool 04-box-slate",
+            "/d/Nathans Pool/04-box-slate",
+            "known_length",
+        ),
         ("062524_Alligator4_FSL04", "dump/062524_Alligator4_FSL04", "survey"),
         ("Hogfish01_MolHITW_0926_080323", "x/Hogfish01_MolHITW_0926_080323", "survey"),
         ("080123_FSL-01 Photos", "dump/080123_FSL-01 Photos", "survey"),
@@ -132,8 +143,8 @@ def test_purpose_is_inferred_from_the_name(name, path, purpose):
 @pytest.mark.parametrize(
     "name, path",
     [
-        # Two rules match: a box and a slate.
-        ("2023-08-18 Nathans Pool 04-box-slate", "/d/Nathans Pool/04-box-slate"),
+        # Two rules match: a laser calibration and a box.
+        ("LaserCalibration Box", "/d/LaserCalibration Box"),
         # A split made to separate fish frames out of a calibration.
         (
             "2023-08-14 ED-00 FSL-02D LaserCalibration3 fish",

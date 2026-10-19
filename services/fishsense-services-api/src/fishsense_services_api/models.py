@@ -242,7 +242,7 @@ class Mission(Base):
         Index(None, "tenant_id", "deployment_id"),
         CheckConstraint(
             "purpose IN ('survey', 'lens_calibration', 'laser_calibration', "
-            "'slate', 'known_length', 'other')",
+            "'known_length', 'other')",
             name="missions_purpose_check",
         ),
         CheckConstraint(

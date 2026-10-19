@@ -121,10 +121,10 @@ describe("writing", () => {
   it("states and clears a purpose", async () => {
     const fetchMock = stub({ number: 7 });
 
-    await setMissionPurpose("t", "lab", 7, "slate");
+    await setMissionPurpose("t", "lab", 7, "laser_calibration");
     await setMissionPurpose("t", "lab", 7, null);
 
-    expect(await fetchMock.mock.calls[0][0].json()).toEqual({ purpose: "slate" });
+    expect(await fetchMock.mock.calls[0][0].json()).toEqual({ purpose: "laser_calibration" });
     expect(await fetchMock.mock.calls[1][0].json()).toEqual({ purpose: null });
   });
 
@@ -172,6 +172,8 @@ describe("form values", () => {
     expect(parsePurpose("known_length")).toBe("known_length");
     expect(parsePurpose("")).toBeNull();
     expect(() => parsePurpose("fishing")).toThrow(/purpose/);
+    // 0048: a calibration board is not a purpose; nearly every dive has one.
+    expect(() => parsePurpose("slate")).toThrow(/purpose/);
   });
 
   it("accepts only a whole, non-negative mission number", () => {

@@ -40,19 +40,18 @@ __all__ = [
     "strip_port_suffix",
 ]
 
-#: Migration 0047's CHECKs, which are the source of truth.
+#: Migrations 0047 and 0048's CHECKs, which are the source of truth.
 PURPOSES = (
     "survey",
     "lens_calibration",
     "laser_calibration",
-    "slate",
     "known_length",
     "other",
 )
 PORTS = ("corrective_optic", "flat", "dome", "unknown")
 PORT_SOURCES = ("backfill", "device_suffix", "operator", "calibration")
 Purpose = Literal[
-    "survey", "lens_calibration", "laser_calibration", "slate", "known_length", "other"
+    "survey", "lens_calibration", "laser_calibration", "known_length", "other"
 ]
 Port = Literal["corrective_optic", "flat", "dome", "unknown"]
 #: A port someone states: ``unknown`` is the absence of one.
@@ -82,8 +81,10 @@ _PURPOSE_RULES = (
             _word("box", "ginny", "george") + r"|fish\s*models?|angle\s*tests?", re.I
         ),
     ),
-    ("slate", re.compile(r"slate", re.I)),
 )
+#: A calibration board, which nearly every dive carries (0048): it decides
+#: nothing beside another rule, and alone means a calibration-only session.
+_BOARD = re.compile(r"slate", re.I)
 _POOL = re.compile(r"pool", re.I)
 #: Calibration words the rules' exact phrases miss ("Checkerboard", "LaserCal",
 #: "intrinsics", "cal 2"): such a session is not a survey, whatever else it is.
@@ -144,6 +145,8 @@ def infer_purpose(name: str | None, source_path: str) -> tuple[str | None, str]:
         return None, f"the name says both {' and '.join(found)}"
     if found:
         return found[0], f"the name says {found[0].replace('_', ' ')}"
+    if _BOARD.search(said):
+        return "laser_calibration", "the name names only a calibration board"
     if _CALIBRATION.search(said):
         return None, "a calibration no rule names"
     if _POOL.search(said):

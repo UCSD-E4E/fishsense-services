@@ -6,11 +6,14 @@ port is a fact with provenance -- ``unknown`` unless something says otherwise,
 and a known port always says what said so.
 """
 
+import asyncio
 import uuid
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
+
+from test_v1_migration import server  # noqa: F401  (a fixture)
 
 
 async def _one(conn, sql: str, **params):
@@ -126,7 +129,6 @@ async def test_unrecognised_ports_and_sources_are_refused(owner):
         "survey",
         "lens_calibration",
         "laser_calibration",
-        "slate",
         "known_length",
         "other",
     ],
@@ -170,3 +172,49 @@ async def test_a_mission_keeps_its_place_and_raw_metadata(owner):
     ).one()
     assert row.country == "USA" and row.site == "Alligator"
     assert row.source_metadata["device"] == "FSL-10D"
+
+
+async def test_slate_is_not_a_purpose(owner):
+    """0048: nearly every dive has a calibration board in it, so having one says
+    nothing about what a dive is for. The board is the calibration target's
+    business (slate_template_id, calibration_target_id); a session that only
+    calibrates is ``laser_calibration``."""
+    lab = await _tenant(owner, "lab")
+    with pytest.raises(IntegrityError, match="missions_purpose_check"):
+        async with owner.begin_nested():
+            await _mission(owner, lab, "/m/1", purpose="slate")
+
+
+async def test_0048_relabels_a_slate_purpose_as_laser_calibration(server, owner_url):
+    """Production had none (2026-10-19), but a slate row is a session that
+    only calibrates, and 0048 says so rather than failing its CHECK."""
+    from alembic import command
+
+    from fishsense_services_api.migrations import _config, upgrade
+    from test_v1_migration import APP_ROLE, _create, _url
+
+    url = _url(owner_url, _create(server, "purpose"))
+    config = _config(url, APP_ROLE)
+    await asyncio.to_thread(command.upgrade, config, "0047")
+    engine = create_engine(url)
+    try:
+        with engine.begin() as conn:
+            lab = conn.execute(
+                text(
+                    "INSERT INTO tenants (slug, name) VALUES ('lab', 'Lab') RETURNING id"
+                )
+            ).scalar_one()
+            conn.execute(
+                text(
+                    "INSERT INTO missions (tenant_id, source_path, started_at, purpose) "
+                    "VALUES (:t, '/m/1', now(), 'slate')"
+                ),
+                {"t": lab},
+            )
+        await upgrade(url, app_role=APP_ROLE)
+        with engine.connect() as conn:
+            purpose = conn.execute(text("SELECT purpose FROM missions")).scalar_one()
+    finally:
+        engine.dispose()
+
+    assert purpose == "laser_calibration"

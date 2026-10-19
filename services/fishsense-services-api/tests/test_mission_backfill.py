@@ -175,17 +175,19 @@ async def test_purposes_are_inferred_only_where_unstated_and_can_be_overridden(
 ):
     lab = await _tenant(owner_engine, "lab")
     laser = await _mission(owner_engine, lab, "p/LaserCalibration", name="LaserCal")
-    ambiguous = await _mission(owner_engine, lab, "p/04-box-slate", name="04-box-slate")
+    ambiguous = await _mission(
+        owner_engine, lab, "p/LaserCalibration Box", name="LaserCalibration Box"
+    )
     reef = await _mission(owner_engine, lab, "d/Alligator", name="Alligator")
 
     plan = await _plan(
-        app_engine, lab, purpose_overrides={ambiguous: "slate", reef: None}
+        app_engine, lab, purpose_overrides={ambiguous: "laser_calibration", reef: None}
     )
 
     changes = _by_number(plan)
     assert changes[laser].purpose == "laser_calibration"
     assert (changes[ambiguous].purpose, changes[ambiguous].purpose_why) == (
-        "slate",
+        "laser_calibration",
         "set by the operator",
     )
     assert changes[reef].purpose is None
@@ -280,4 +282,4 @@ async def test_an_override_of_a_stated_purpose_is_refused_not_ignored(
     with pytest.raises(
         ValueError, match=rf"already stated for mission {stated} \(survey\)"
     ):
-        await _plan(app_engine, lab, purpose_overrides={stated: "slate"})
+        await _plan(app_engine, lab, purpose_overrides={stated: "known_length"})

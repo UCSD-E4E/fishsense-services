@@ -279,7 +279,7 @@ async def test_an_admin_states_and_clears_a_purpose(client, tenants, owner_engin
 
     stated = await client.put(
         "/tenants/lab/missions/7/purpose",
-        json={"purpose": "slate"},
+        json={"purpose": "laser_calibration"},
         headers=_bearer(ADMIN),
     )
     cleared = await client.put(
@@ -293,7 +293,7 @@ async def test_an_admin_states_and_clears_a_purpose(client, tenants, owner_engin
         headers=_bearer(ADMIN),
     )
 
-    assert stated.json()["purpose"] == "slate"
+    assert stated.json()["purpose"] == "laser_calibration"
     assert cleared.json()["purpose"] is None
     assert refused.status_code == 422
 
@@ -398,3 +398,15 @@ async def test_an_admin_moves_a_mission_into_and_out_of_a_deployment(
     assert left.status_code == 204
     body = (await client.get("/tenants/lab/missions/7", headers=_bearer(ADMIN))).json()
     assert body["deployment_number"] is None
+
+
+async def test_slate_is_not_a_purpose(client, tenants, owner_engine):
+    await _mission(owner_engine, tenants["lab"], 7)
+
+    response = await client.put(
+        "/tenants/lab/missions/7/purpose",
+        json={"purpose": "slate"},
+        headers=_bearer(ADMIN),
+    )
+
+    assert response.status_code == 422
