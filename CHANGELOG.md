@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.11.2...v0.12.0) (2026-10-19)
+
+
+### Features
+
+* dives become missions (Phase 2a: the full rename) ([9a50b45](https://github.com/UCSD-E4E/fishsense-services/commit/9a50b4554b53013a86c898f902e8ced61fec8af0))
+* dives become missions (Phase 2a: the full rename) ([f84ab47](https://github.com/UCSD-E4E/fishsense-services/commit/f84ab474b3a583adac0f82772577fc3b5d3efdb1))
+
 ## [0.11.2](https://github.com/UCSD-E4E/fishsense-services/compare/v0.11.1...v0.11.2) (2026-10-18)
 
 
