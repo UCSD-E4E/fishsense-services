@@ -314,17 +314,23 @@ def test_every_processor_runs_only_in_the_us(kind):
         assert set(rule["values"]) == US_REGIONS
 
 
-def test_the_gpu_keeps_its_compute_capability_floor_beside_the_region():
-    """Ampere and newer, or Turing (7.5): each term still says which."""
+def test_the_gpu_is_ampere_or_newer_for_sam3s_bfloat16():
+    """SAM 3.1 runs in bfloat16, which needs compute capability 8 (Ampere).
+    The manifest also admitted Turing (7.5): 2026-10-19 two GPU pods landed on
+    RTX 2080 Tis, a frame failed `Current CUDA Device does not support
+    bfloat16`, and the pod's CUDA context then died (`unspecified launch
+    failure`) for every frame after it. Every required term is Ampere+."""
     terms = _node_selector_terms(LOADED[manifests.GPU].body)
-    assert [sorted(e["key"] for e in t["matchExpressions"]) for t in terms] == [
-        ["nvidia.com/gpu.compute.major", "topology.kubernetes.io/region"],
-        [
-            "nvidia.com/gpu.compute.major",
-            "nvidia.com/gpu.compute.minor",
-            "topology.kubernetes.io/region",
-        ],
-    ]
+    assert terms
+    for term in terms:
+        majors = [
+            e for e in term["matchExpressions"]
+            if e["key"] == "nvidia.com/gpu.compute.major"
+        ]  # fmt: skip
+        assert len(majors) == 1, "a term with no compute floor"
+        (rule,) = majors
+        assert rule["operator"] == "In"
+        assert rule["values"] and all(int(v) >= 8 for v in rule["values"])
 
 
 @pytest.mark.parametrize("kind", sorted(LOADED))
