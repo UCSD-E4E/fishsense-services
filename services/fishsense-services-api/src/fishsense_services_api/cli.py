@@ -11,6 +11,11 @@ fishsense-services-api add-tenant conservation-angler \\
     --name "Conservation Angler" --org-claim conservation-angler
                                     # a partner's tenant, joined by its org's
                                     # invitees (migration 0037), as the owner
+fishsense-services-api backfill-mission-facts --tenant <id> \\
+    --ingested-before 2026-10-16T00:00:00+00:00 [--purpose 510=slate ...]
+                                    # dry run: ports, deployments and purposes
+                                    # for missions before 0047; --apply <the
+                                    # dry run's fingerprint> writes that plan
 fishsense-services-api dev-seed --frames deploy/local/ui/frames
                                     # LOCAL ONLY: the UI harness's synthetic
                                     # tenant (compose.ui.yml, dev_seed.py)
@@ -22,7 +27,9 @@ import json
 import re
 import sys
 import uuid
+from collections import Counter
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -48,6 +55,13 @@ from fishsense_services_api.automatic_validation_store import (
     validation_frames,
 )
 from fishsense_services_api.db import tenant_transaction
+from fishsense_services_api.mission_backfill import (
+    BackfillPlan,
+    PlanChanged,
+    apply_backfill,
+    plan_backfill,
+)
+from fishsense_services_api.mission_facts import PURPOSES
 from fishsense_services_api.migrations import (
     current_revision,
     head_revision,
@@ -154,6 +168,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="the partner org (Authentik `org` claim) whose accounts join this "
         "tenant as members; left as it is when omitted",
     )
+    backfill = commands.add_parser(
+        "backfill-mission-facts",
+        help="plan (and with --apply, write) the port, deployment and purpose of "
+        "missions ingested before migration 0047; a dry run by default",
+    )
+    backfill.add_argument(
+        "--tenant", required=True, help="the tenant's slug, or its id"
+    )
+    backfill.add_argument(
+        "--ingested-before",
+        required=True,
+        type=_aware_datetime,
+        help="ISO time with offset: missions created before it are the corrective "
+        "optic (the owner's rule, 2026-10-16); later ones need a D-labelled device",
+    )
+    backfill.add_argument(
+        "--purpose",
+        action="append",
+        default=[],
+        metavar="NUMBER=PURPOSE",
+        help="override an inferred purpose (or 'none' to leave it unstated); "
+        "repeatable, and part of the reviewed plan",
+    )
+    backfill.add_argument(
+        "--apply",
+        metavar="FINGERPRINT",
+        help="write the plan whose dry run printed this fingerprint",
+    )
     seed = commands.add_parser(
         "dev-seed",
         help="LOCAL ONLY: seed the UI harness's synthetic tenant (compose.ui.yml); "
@@ -181,9 +223,121 @@ async def main(argv: Sequence[str]) -> int:
         return await _validate_automatic(args)
     if args.command == "add-tenant":
         return await _add_tenant(args)
+    if args.command == "backfill-mission-facts":
+        return await _backfill_mission_facts(args)
     if args.command == "dev-seed":
         return await _dev_seed(args)
     return 2  # unreachable: argparse rejects unknown commands
+
+
+def _aware_datetime(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        raise argparse.ArgumentTypeError(f"{value!r} has no UTC offset")
+    return parsed
+
+
+def _purpose_overrides(values: Sequence[str]) -> dict[int, str | None] | None:
+    overrides: dict[int, str | None] = {}
+    for value in values:
+        number, _, purpose = value.partition("=")
+        if not number.isdigit() or purpose not in (*PURPOSES, "none"):
+            print(
+                f"--purpose {value!r}: want NUMBER=PURPOSE, PURPOSE one of "
+                f"{', '.join(PURPOSES)} or none",
+                file=sys.stderr,
+            )
+            return None
+        overrides[int(number)] = None if purpose == "none" else purpose
+    return overrides
+
+
+def format_backfill_plan(plan: BackfillPlan) -> str:
+    """The dry run's report: totals first, then every mission it would change."""
+    sources = Counter(m.port_source for m in plan.missions if m.port)
+    purposes = Counter(m.purpose for m in plan.missions if m.purpose)
+    lines = [
+        f"ports: {sum(sources.values())} to corrective_optic ("
+        + ", ".join(f"{k} {v}" for k, v in sorted(sources.items()))
+        + f"); {len(plan.left_unknown)} left unknown",
+        "purposes: "
+        + (", ".join(f"{k} {v}" for k, v in sorted(purposes.items())) or "none"),
+        f"deployments: {len(plan.deployments)}",
+    ]
+    for trip in plan.deployments:
+        state = "exists" if trip.exists else f"new, {trip.started_on}..{trip.ended_on}"
+        lines.append(f"  {trip.name}  ({trip.missions} missions; {state})")
+        lines.append(f"    {trip.source_path}")
+    if plan.left_unknown:
+        lines.append(
+            "left unknown (no rule decides): " + ", ".join(map(str, plan.left_unknown))
+        )
+    lines.append("")
+    lines.append(
+        f"{'mission':>7}  {'port source':<13}  {'purpose':<17}  why / deployment / name"
+    )
+    for m in plan.missions:
+        lines.append(
+            f"{m.number:>7}  {m.port_source or '-':<13}  {m.purpose or '-':<17}  "
+            f"{m.purpose_why or '-'} / {m.deployment or '-'} / {m.name}"
+        )
+    return "\n".join(lines)
+
+
+async def _backfill_mission_facts(args: argparse.Namespace) -> int:
+    """Dry run unless --apply names the fingerprint of the plan reviewed."""
+    overrides = _purpose_overrides(args.purpose)
+    if overrides is None:
+        return 2
+    settings = _settings(AuditSettings)
+    if settings is None:
+        return 2
+    engine = create_async_engine(settings.database_url.get_secret_value())
+    try:
+        tenant_id = await _tenant_id(engine, args.tenant)
+        if tenant_id is None:
+            print(f"unknown tenant {args.tenant!r}", file=sys.stderr)
+            return 1
+        if args.apply:
+            try:
+                async with tenant_transaction(engine, tenant_id) as conn:
+                    applied = await apply_backfill(
+                        conn,
+                        tenant_id,
+                        ingested_before=args.ingested_before,
+                        expect=args.apply,
+                        purpose_overrides=overrides,
+                    )
+            except (PlanChanged, ValueError) as error:
+                print(f"nothing written: {error}", file=sys.stderr)
+                return 1
+            print(
+                f"applied {args.apply}: {applied.missions} missions, "
+                f"{applied.deployments} new deployments"
+            )
+            return 0
+        try:
+            async with tenant_transaction(engine, tenant_id) as conn:
+                plan = await plan_backfill(
+                    conn,
+                    tenant_id,
+                    ingested_before=args.ingested_before,
+                    purpose_overrides=overrides,
+                )
+        except ValueError as error:
+            print(str(error), file=sys.stderr)
+            return 2
+        print("DRY RUN: nothing written")
+        print(format_backfill_plan(plan))
+        again = " ".join(f"--purpose {v}" for v in args.purpose)
+        print(
+            f"\nto write exactly this plan: backfill-mission-facts --tenant "
+            f"{args.tenant} --ingested-before {args.ingested_before.isoformat()} "
+            f"{again + ' ' if again else ''}--apply {plan.fingerprint}"
+        )
+        return 0
+    finally:
+        await engine.dispose()
 
 
 async def _add_tenant(args: argparse.Namespace) -> int:

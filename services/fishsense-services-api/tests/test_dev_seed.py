@@ -202,6 +202,35 @@ class TestSeed:
         assert sorted(r.head_x for r in rows) == sorted(f.head[0] for f in FRAMES)
         assert all(0.25 < r.length_m < 0.40 for r in rows)
 
+    async def test_missions_show_a_trip_a_known_port_and_an_unknown_one(
+        self, dev_engine, stores
+    ):
+        """0047, for the mission pages: the decoy dive is on a deployment, its
+        D-labelled device makes its port known, and a pool session beside it
+        has no port anyone has stated."""
+        await _seed(dev_engine, stores)
+
+        async with dev_engine.connect() as conn:
+            rows = {
+                r.name: r
+                for r in await conn.execute(
+                    text(
+                        "SELECT m.name, m.purpose, m.port, m.port_source, m.site, "
+                        "d.name AS deployment FROM missions m "
+                        "LEFT JOIN deployments d ON d.id = m.deployment_id"
+                    )
+                )
+            }
+        decoy = rows["FSL-10D Ginny (dev seed)"]
+        assert (decoy.purpose, decoy.port, decoy.port_source) == (
+            "known_length",
+            "corrective_optic",
+            "device_suffix",
+        )
+        assert decoy.deployment == dev_seed.DEPLOYMENT
+        pool = rows[dev_seed.UNKNOWN_PORT_MISSION]
+        assert (pool.port, pool.port_source, pool.purpose) == ("unknown", None, None)
+
     async def test_mobile_captures_are_listed_and_their_files_are_in_garage(
         self, dev_engine, app_engine, stores
     ):

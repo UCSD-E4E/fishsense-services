@@ -95,6 +95,10 @@ DECOY_FRAMES = 3
 MISSION_PREFIX = "dev-seed/"
 MISSION_PATH = MISSION_PREFIX + "2025.01.17.FishSense.San Diego/ED-00/FSL-10D/Ginny"
 T0 = datetime(2025, 1, 18, 1, 0, tzinfo=UTC)
+#: The decoy dive's field trip, and a pool session beside it whose port
+#: nobody has stated (0047), so the mission pages show both.
+DEPLOYMENT = "2025.01.17.FishSense.San Diego"
+UNKNOWN_PORT_MISSION = "Pool test, port unrecorded (dev seed)"
 #: A pinhole camera for a 1600x1200 frame (the TG-6's ~2970 px focal length
 #: at 4000 px wide, scaled).
 FX = 1188.0
@@ -353,10 +357,29 @@ async def _lite(
         d=device,
         k=json.dumps(CAMERA_MATRIX),
     )
+    deployment = await one(
+        "INSERT INTO deployments (tenant_id, name, source_path, started_on, ended_on) "
+        "VALUES (:t, :n, :p, '2025-01-17', '2025-01-19') RETURNING id",
+        n=DEPLOYMENT,
+        p=MISSION_PREFIX + DEPLOYMENT,
+    )
     mission = await one(
-        "INSERT INTO missions (tenant_id, source_path, name, started_at, priority, device_id) "
-        "VALUES (:t, :p, 'FSL-10D Ginny (dev seed)', :at, 'high', :d) RETURNING id",
+        "INSERT INTO missions (tenant_id, source_path, name, started_at, priority, "
+        "device_id, deployment_id, purpose, port, port_source, port_note, country, "
+        "region, site) VALUES (:t, :p, 'FSL-10D Ginny (dev seed)', :at, 'high', :d, "
+        ":dep, 'known_length', 'corrective_optic', 'device_suffix', "
+        "'device labelled FSL-10D on the mission''s path', 'USA', 'San Diego', "
+        "'Pool') RETURNING id",
         p=MISSION_PATH,
+        at=T0,
+        d=device,
+        dep=deployment,
+    )
+    await one(
+        "INSERT INTO missions (tenant_id, source_path, name, started_at, priority, "
+        "device_id) VALUES (:t, :p, :n, :at, 'low', :d) RETURNING id",
+        p=MISSION_PREFIX + "lab/2024-06-02 pool test",
+        n=UNKNOWN_PORT_MISSION,
         at=T0,
         d=device,
     )

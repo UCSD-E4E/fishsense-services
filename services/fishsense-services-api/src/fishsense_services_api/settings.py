@@ -161,7 +161,9 @@ class DevSeedSettings(BaseSettings):
 
 
 class AuditSettings(BaseSettings):
-    """For the read-only audit commands (``audit-range-trend``) only.
+    """For the operator commands that run as one role under a tenant's RLS
+    scope: the read-only audits (``audit-range-trend``) and the dry-run-first
+    ``backfill-mission-facts``.
 
     Just the database: an audit runs as the app role under a tenant's RLS
     scope, and needs none of the API's OIDC configuration.

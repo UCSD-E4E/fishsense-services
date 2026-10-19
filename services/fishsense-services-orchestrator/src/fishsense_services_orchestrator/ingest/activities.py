@@ -24,6 +24,14 @@ from synology_filestation import FileStationError
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+from fishsense_services_api.mission_store import PortIsRuled
+from fishsense_services_api.mission_facts import (
+    RULED,
+    device_label_in_path,
+    infer_purpose,
+    strip_port_suffix,
+)
+
 from fishsense_services_orchestrator.ingest.catalog import Catalog, ResolvedDevice
 from fishsense_services_orchestrator.ingest.contracts import (
     DuplicateOverlap,
@@ -308,6 +316,24 @@ class IngestActivities:
                 "they exist."
             )
 
+        port, port_source, port_note = _resolve_port(
+            request, listing.folder_path, errors, warnings
+        )
+        if tenant_id is not None and port != "unknown":
+            await _check_ruled_port(
+                catalog, tenant_id, request.mission_path, port, errors
+            )
+        if request.purpose is None:
+            suggested, why = infer_purpose(
+                request.mission_name or leaf_name(request.mission_path),
+                request.mission_path,
+            )
+            warnings.append(
+                "No purpose stated"
+                + (f"; the name suggests {suggested} ({why})." if suggested else ".")
+                + " State one with `purpose` to record it."
+            )
+
         # Layer 1 duplicate detection: leaf-name collision. Catches the real prod
         # case -- dives 64 and 66 are both `082929_FishModels_FSL07`. Content-based
         # containment needs checksums, so it runs after the scan.
@@ -349,6 +375,10 @@ class IngestActivities:
             subfolders=list(listing.subfolders),
             resolved_device_id=device.device_id if device else None,
             resolved_device_name=device.name if device else None,
+            resolved_port=port,
+            resolved_port_source=port_source,
+            resolved_port_note=port_note,
+            resolved_purpose=request.purpose,
             total_bytes=sum(e.size for e in listing.files),
             errors=errors,
             warnings=warnings,
@@ -384,7 +414,19 @@ class IngestActivities:
                 non_retryable=True,
             )
 
-        mission_id = await self._catalog.create_mission(
+        try:
+            mission_id = await self._create_mission(request, preflight, stamps)
+        except PortIsRuled as error:
+            raise ApplicationError(str(error), non_retryable=True) from None
+        activity.logger.info(
+            "created dive id=%s path=%s at low (commit flag closed)",
+            mission_id,
+            request.mission_path,
+        )
+        return mission_id
+
+    async def _create_mission(self, request, preflight, stamps) -> uuid.UUID:
+        return await self._catalog.create_mission(
             preflight.tenant_id,
             source_path=request.mission_path,
             name=request.mission_name or leaf_name(request.mission_path),
@@ -395,13 +437,11 @@ class IngestActivities:
             # would be a lie the resolver happens to ignore (own wins).
             calibration_source_mission_id=preflight.resolved_calibration_source_mission_id,
             flip_mission_slate=request.flip_mission_slate,
+            port=preflight.resolved_port,
+            port_source=preflight.resolved_port_source,
+            port_note=preflight.resolved_port_note,
+            purpose=preflight.resolved_purpose,
         )
-        activity.logger.info(
-            "created dive id=%s path=%s at low (commit flag closed)",
-            mission_id,
-            request.mission_path,
-        )
-        return mission_id
 
     @activity.defn(name="finalize_dive")
     async def finalize_mission(
@@ -659,6 +699,65 @@ def _check_calibration_intent(request: IngestMissionRequest) -> List[str]:
     return []
 
 
+def _resolve_port(
+    request: IngestMissionRequest,
+    folder_path: str,
+    errors: list[str],
+    warnings: list[str],
+) -> tuple[str, str | None, str | None]:
+    """(port, source, note): a ``D`` label, else the operator's statement,
+    else ``unknown`` -- the owner's rules, 2026-10-16 (PLAN.md §4.9).
+
+    Only file names are trusted for the ``D`` (the owner, 2026-10-18): the
+    folder path, never the EXIF Artist, which is free text typed into the
+    camera and is only a cross-check on the device's name."""
+    label = device_label_in_path(folder_path)
+    where = "on the folder path"
+    if label is not None:
+        if request.port not in (None, "corrective_optic"):
+            errors.append(
+                f"The port is stated as {request.port}, but the device is labelled "
+                f"{label} {where}: a D suffix is the corrective optic. Fix the "
+                "statement or the label."
+            )
+        return (
+            "corrective_optic",
+            "device_suffix",
+            f"device labelled {label} {where} (the owner's rule, 2026-10-16: a "
+            "D suffix is the corrective optic)",
+        )
+    if request.port is not None:
+        return request.port, "operator", request.port_note
+    warnings.append(
+        "The camera port is unknown: no D-labelled device on the path or in the "
+        "frames, and none stated. A missing D does not mean flat. Stages that "
+        "measure will refuse this mission until its port is stated (`port`)."
+    )
+    return "unknown", None, None
+
+
+async def _check_ruled_port(
+    catalog: Catalog,
+    tenant_id: uuid.UUID,
+    path: str,
+    port: str,
+    errors: list[str],
+) -> None:
+    """A re-ingest may not state another port than the owner's rule fixed for
+    the mission already at this path: create would refuse it, so say so here,
+    with every other problem."""
+    existing = await catalog.mission_port(tenant_id, path)
+    if existing is None:
+        return
+    existing_port, existing_source = existing
+    if existing_source in RULED and existing_port != port:
+        errors.append(
+            f"The mission already at {path} is {existing_port} by the owner's rule "
+            f"({existing_source}); this ingest says {port}. A ruled port is not "
+            "changed by ingest."
+        )
+
+
 async def _resolve_device(
     catalog: Catalog,
     tenant_id: uuid.UUID,
@@ -699,7 +798,12 @@ async def _resolve_device(
         return None
     # The serial is authoritative; a disagreeing Artist means a mislabelled
     # device name or a re-housed body. Nothing else would ever notice.
-    for artist in sorted(a for a in artists if a and a != match.name):
+    # FSL-10D is the body named FSL-10: the suffix is its port (§4.9).
+    for artist in sorted(
+        a
+        for a in artists
+        if a and strip_port_suffix(a) != strip_port_suffix(match.name)
+    ):
         warnings.append(
             f"EXIF Artist {artist!r} disagrees with the resolved device's name "
             f"{match.name!r} (serial {serial})."

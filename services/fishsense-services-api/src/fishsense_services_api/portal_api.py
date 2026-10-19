@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.memberships import Membership
+from fishsense_services_api.mission_facts import Port, PortSource, Purpose
 from fishsense_services_api.portal_store import (
     CalibrationTargetNotFound,
     DiveNotFound,
@@ -70,6 +71,12 @@ class Mission(BaseModel):
     slate_template_number: int | None
     calibration_target_number: int | None
     calibration_source_number: int | None
+    purpose: Purpose | None
+    port: Port
+    port_source: PortSource | None
+    site: str | None
+    deployment_number: int | None
+    deployment_name: str | None
 
 
 # A dive's number: v1's id for a migrated dive. Non-negative, as v1's web
@@ -77,13 +84,11 @@ class Mission(BaseModel):
 MissionNumber = Annotated[int, Path(ge=0)]
 
 
-def add_portal_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
-    """Register the portal's routes. ``membership`` is the app's dependency that
-    authenticates the caller and resolves their membership in ``{slug}``."""
+def admin_of(membership):
+    """The dependency that admits only the tenant's admins, given the app's
+    ``membership`` dependency (shared with ``missions_api``)."""
 
-    Member = Annotated[Membership, Depends(membership)]
-
-    def admin(member: Member) -> Membership:
+    def admin(member: Annotated[Membership, Depends(membership)]) -> Membership:
         # Membership first (a non-member gets the same 404 as everywhere),
         # then the role -- before any dive is looked up, so a non-admin
         # learns nothing about which dives exist.
@@ -93,7 +98,15 @@ def add_portal_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
             )
         return member
 
-    Admin = Annotated[Membership, Depends(admin)]
+    return admin
+
+
+def add_portal_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
+    """Register the portal's routes. ``membership`` is the app's dependency that
+    authenticates the caller and resolves their membership in ``{slug}``."""
+
+    Member = Annotated[Membership, Depends(membership)]
+    Admin = Annotated[Membership, Depends(admin_of(membership))]
 
     @app.get(
         "/tenants/{slug}/membership",

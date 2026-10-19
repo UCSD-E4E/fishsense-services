@@ -24,6 +24,7 @@ import uuid
 from datetime import datetime
 from typing import List, Literal, Annotated
 
+from fishsense_services_api.mission_facts import Purpose, StatedPort
 from pydantic import BaseModel, ConfigDict
 from fishsense_services_contracts.renamed import renamed_from
 
@@ -77,6 +78,20 @@ class IngestMissionRequest(BaseModel):
     flip_mission_slate: Annotated[
         bool, renamed_from("flip_dive_slate", "flip_mission_slate")
     ] = False
+
+    #: The camera port, when the operator knows it; recorded as theirs
+    #: (``operator``, with ``port_note``). A device labelled with the ``D``
+    #: suffix (``FSL-10D``) in the folder path is the corrective optic
+    #: without being told -- file names only, never the EXIF Artist (the
+    #: owner, 2026-10-18) -- and a statement contradicting it
+    #: fails preflight. Otherwise the port is ``unknown`` -- a missing ``D``
+    #: is not evidence of a flat port (the owner's rules, 2026-10-16) -- and
+    #: the stages that measure refuse it (PLAN.md §4.9).
+    port: StatedPort | None = None
+    port_note: str | None = None
+    #: What the mission is for. Stored only when stated; preflight suggests
+    #: one from the name otherwise.
+    purpose: Purpose | None = None
 
     #: Preflight only: list, read EXIF headers, validate, write nothing.
     dry_run: bool = False
@@ -148,6 +163,13 @@ class IngestPreflight(BaseModel):
     #: v2: the tenant's device the frames resolve to.
     resolved_device_id: uuid.UUID | None = None
     resolved_device_name: str | None = None
+    #: The mission's port and what said so (0047): ``device_suffix`` from a
+    #: ``D`` label, ``operator`` from the request, else ``unknown``.
+    resolved_port: str = "unknown"
+    resolved_port_source: str | None = None
+    resolved_port_note: str | None = None
+    #: The request's purpose; never an inferred one.
+    resolved_purpose: str | None = None
     total_bytes: int = 0
     #: Every problem at once -- one round trip for the operator, not a sequence.
     errors: List[str] = []

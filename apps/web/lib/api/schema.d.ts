@@ -24,6 +24,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{slug}/deployments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Deployments */
+        get: operations["list_deployments"];
+        put?: never;
+        /** Post Deployment */
+        post: operations["create_deployment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/deployments/{number}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get One Deployment */
+        get: operations["get_deployment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{slug}/devices": {
         parameters: {
             query?: never;
@@ -88,6 +123,23 @@ export interface paths {
         };
         /** Get Missions */
         get: operations["list_missions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/missions/{number}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Mission */
+        get: operations["get_mission"];
         put?: never;
         post?: never;
         delete?: never;
@@ -205,6 +257,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{slug}/missions/{number}/deployment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Mission Deployment */
+        delete: operations["clear_mission_deployment"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/missions/{number}/deployment/{deployment_number}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put Mission Deployment */
+        put: operations["set_mission_deployment"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{slug}/missions/{number}/labels/{kind}/needs-reprocess": {
         parameters: {
             query?: never;
@@ -227,6 +313,44 @@ export interface paths {
          *     0 when none was asked for).
          */
         delete: operations["clear_needs_reprocess"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/missions/{number}/port": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Mission Port
+         * @description State the mission's camera port as an operator (``unknown``
+         *     withdraws it). 409 where the owner's rules already say otherwise.
+         */
+        put: operations["set_mission_port"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/missions/{number}/purpose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set Mission Purpose */
+        put: operations["set_mission_purpose"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -485,6 +609,42 @@ export interface components {
             /** Size */
             size: number;
         };
+        /** Deployment */
+        Deployment: {
+            /** Ended On */
+            ended_on: string | null;
+            /** Missions */
+            missions: number;
+            /** Name */
+            name: string;
+            /** Notes */
+            notes: string | null;
+            /** Number */
+            number: number;
+            /** Source Path */
+            source_path: string | null;
+            /** Started On */
+            started_on: string | null;
+        };
+        /** DeploymentDetail */
+        DeploymentDetail: {
+            /** Ended On */
+            ended_on: string | null;
+            /** Missions */
+            missions: components["schemas"]["Mission"][];
+            /** Name */
+            name: string;
+            /** Notes */
+            notes: string | null;
+            /** Number */
+            number: number;
+            /** Readme */
+            readme: string | null;
+            /** Source Path */
+            source_path: string | null;
+            /** Started On */
+            started_on: string | null;
+        };
         /** DepthGeometry */
         DepthGeometry: {
             /** Height */
@@ -665,17 +825,84 @@ export interface components {
             calibration_source_number: number | null;
             /** Calibration Target Number */
             calibration_target_number: number | null;
+            /** Deployment Name */
+            deployment_name: string | null;
+            /** Deployment Number */
+            deployment_number: number | null;
             /** Name */
             name: string | null;
             /** Number */
             number: number;
             /**
+             * Port
+             * @enum {string}
+             */
+            port: "corrective_optic" | "flat" | "dome" | "unknown";
+            /** Port Source */
+            port_source: ("backfill" | "device_suffix" | "operator" | "calibration") | null;
+            /**
              * Priority
              * @enum {string}
              */
             priority: "low" | "high" | "none";
+            /** Purpose */
+            purpose: ("survey" | "lens_calibration" | "laser_calibration" | "slate" | "known_length" | "other") | null;
+            /** Site */
+            site: string | null;
             /** Slate Template Number */
             slate_template_number: number | null;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+        };
+        /** MissionDetail */
+        MissionDetail: {
+            /** Calibration Source Number */
+            calibration_source_number: number | null;
+            /** Calibration Target Number */
+            calibration_target_number: number | null;
+            /** Captures */
+            captures: number;
+            /** Country */
+            country: string | null;
+            /** Deployment Name */
+            deployment_name: string | null;
+            /** Deployment Number */
+            deployment_number: number | null;
+            /** Device Name */
+            device_name: string | null;
+            /** Name */
+            name: string | null;
+            /** Notes */
+            notes: string | null;
+            /** Number */
+            number: number;
+            /**
+             * Port
+             * @enum {string}
+             */
+            port: "corrective_optic" | "flat" | "dome" | "unknown";
+            /** Port Note */
+            port_note: string | null;
+            /** Port Source */
+            port_source: ("backfill" | "device_suffix" | "operator" | "calibration") | null;
+            /**
+             * Priority
+             * @enum {string}
+             */
+            priority: "low" | "high" | "none";
+            /** Purpose */
+            purpose: ("survey" | "lens_calibration" | "laser_calibration" | "slate" | "known_length" | "other") | null;
+            /** Region */
+            region: string | null;
+            /** Site */
+            site: string | null;
+            /** Slate Template Number */
+            slate_template_number: number | null;
+            /** Source Path */
+            source_path: string;
             /**
              * Started At
              * Format: date-time
@@ -706,6 +933,17 @@ export interface components {
             role: string;
             /** Slug */
             slug: string;
+        };
+        /** NewDeployment */
+        NewDeployment: {
+            /** Ended On */
+            ended_on?: string | null;
+            /** Name */
+            name: string;
+            /** Notes */
+            notes?: string | null;
+            /** Started On */
+            started_on?: string | null;
         };
         /** ObservationDetailView */
         ObservationDetailView: {
@@ -772,6 +1010,21 @@ export interface components {
             x: number;
             /** Y */
             y: number;
+        };
+        /** PortStatement */
+        PortStatement: {
+            /** Note */
+            note?: string | null;
+            /**
+             * Port
+             * @enum {string}
+             */
+            port: "corrective_optic" | "flat" | "dome" | "unknown";
+        };
+        /** PurposeStatement */
+        PurposeStatement: {
+            /** Purpose */
+            purpose: ("survey" | "lens_calibration" | "laser_calibration" | "slate" | "known_length" | "other") | null;
         };
         /** SpeciesView */
         SpeciesView: {
@@ -850,6 +1103,104 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MyTenant"][];
+                };
+            };
+        };
+    };
+    list_deployments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Deployment"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_deployment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewDeployment"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Deployment"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_deployment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                number: number;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -1005,6 +1356,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Mission"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_mission: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                number: number;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionDetail"];
                 };
             };
             /** @description Validation Error */
@@ -1177,6 +1560,69 @@ export interface operations {
             };
         };
     };
+    clear_mission_deployment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                number: number;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_mission_deployment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                number: number;
+                deployment_number: number;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     raise_needs_reprocess: {
         parameters: {
             query?: {
@@ -1232,6 +1678,78 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Cleared"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_mission_port: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                number: number;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortStatement"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_mission_purpose: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                number: number;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PurposeStatement"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionDetail"];
                 };
             };
             /** @description Validation Error */

@@ -32,7 +32,7 @@ v2 changes:
 """
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import datetime
 from typing import Literal, get_args
 
@@ -50,6 +50,7 @@ from fishsense_services_api import (
 __all__ = [
     "CalibrationTargetNotFound",
     "DiveNotFound",
+    "MissionDetail",
     "MissionSummary",
     "GateNotApplicable",
     "LabelKind",
@@ -59,6 +60,8 @@ __all__ = [
     "clear_calibration_target",
     "label_studio_project_ids",
     "list_missions",
+    "mission_detail",
+    "mission_summary",
     "set_calibration_source",
     "set_calibration_target",
     "set_needs_reprocess",
@@ -118,6 +121,14 @@ class MissionSummary:
     slate_template_number: int | None
     calibration_target_number: int | None
     calibration_source_number: int | None
+    #: What the mission is for, its camera port and what said so, and its
+    #: field trip (0047).
+    purpose: str | None
+    port: str
+    port_source: str | None
+    site: str | None
+    deployment_number: int | None
+    deployment_name: str | None
 
 
 def _gate_scan(*, judged: bool) -> str:
@@ -189,28 +200,98 @@ async def label_studio_project_ids(
     return list(rows.scalars())
 
 
-_MISSION_SUMMARY = """
-    SELECT d.number, d.name, d.started_at, d.priority,
-           t.number AS slate_template_number,
-           g.number AS calibration_target_number,
-           s.number AS calibration_source_number
-    FROM missions d
+_MISSION_COLUMNS = """
+    d.number, d.name, d.started_at, d.priority,
+    t.number AS slate_template_number,
+    g.number AS calibration_target_number,
+    s.number AS calibration_source_number,
+    d.purpose, d.port, d.port_source, d.site,
+    p.number AS deployment_number, p.name AS deployment_name
+"""
+_MISSION_JOINS = """
     LEFT JOIN slate_templates t ON t.id = d.slate_template_id
     LEFT JOIN calibration_targets g ON g.id = d.calibration_target_id
     LEFT JOIN missions s
       ON s.tenant_id = d.tenant_id AND s.id = d.calibration_source_mission_id
+    LEFT JOIN deployments p
+      ON p.tenant_id = d.tenant_id AND p.id = d.deployment_id
+"""
+_MISSION_SUMMARY = f"""
+    SELECT {_MISSION_COLUMNS} FROM missions d {_MISSION_JOINS}
     WHERE d.tenant_id = :tenant_id
+"""
+#: One mission's page: the summary and the rest of the row, in one query.
+_MISSION_DETAIL = f"""
+    SELECT {_MISSION_COLUMNS},
+           d.source_path, d.notes, d.port_note, d.country, d.region,
+           v.name AS device_name,
+           (SELECT count(*) FROM captures c
+            WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id) AS captures
+    FROM missions d {_MISSION_JOINS}
+    LEFT JOIN devices v ON v.tenant_id = d.tenant_id AND v.id = d.device_id
+    WHERE d.tenant_id = :tenant_id AND d.number = :n
 """
 
 
 async def list_missions(
-    conn: AsyncConnection, tenant_id: uuid.UUID
+    conn: AsyncConnection,
+    tenant_id: uuid.UUID,
+    *,
+    deployment_number: int | None = None,
 ) -> list[MissionSummary]:
-    """Every dive in the tenant, by number (v1: every dive, unordered)."""
+    """Every dive in the tenant, by number (v1: every dive, unordered); only
+    those of one deployment when ``deployment_number`` is given."""
+    where = "" if deployment_number is None else " AND p.number = :deployment"
     rows = await conn.execute(
-        text(_MISSION_SUMMARY + " ORDER BY d.number"), {"tenant_id": tenant_id}
+        text(_MISSION_SUMMARY + where + " ORDER BY d.number"),
+        {"tenant_id": tenant_id, "deployment": deployment_number},
     )
     return [MissionSummary(**row._mapping) for row in rows]
+
+
+async def mission_summary(
+    conn: AsyncConnection, tenant_id: uuid.UUID, number: int
+) -> MissionSummary:
+    """Mission ``number`` as the portal shows it; `DiveNotFound` if missing."""
+    row = (
+        await conn.execute(
+            text(_MISSION_SUMMARY + " AND d.number = :n"),
+            {"tenant_id": tenant_id, "n": number},
+        )
+    ).one_or_none()
+    if row is None:
+        raise DiveNotFound("mission", number)
+    return MissionSummary(**row._mapping)
+
+
+@dataclass(frozen=True)
+class MissionDetail:
+    """A mission's page: its summary and the rest of the row (0047)."""
+
+    summary: MissionSummary
+    source_path: str
+    notes: str | None
+    port_note: str | None
+    country: str | None
+    region: str | None
+    device_name: str | None
+    captures: int
+
+
+async def mission_detail(
+    conn: AsyncConnection, tenant_id: uuid.UUID, number: int
+) -> MissionDetail:
+    """Mission ``number``'s page, in one query; `DiveNotFound` if missing."""
+    row = (
+        await conn.execute(text(_MISSION_DETAIL), {"tenant_id": tenant_id, "n": number})
+    ).one_or_none()
+    if row is None:
+        raise DiveNotFound("mission", number)
+    values = dict(row._mapping)
+    summary = MissionSummary(
+        **{f.name: values.pop(f.name) for f in fields(MissionSummary)}
+    )
+    return MissionDetail(summary=summary, **values)
 
 
 async def _mission_id(
@@ -228,18 +309,6 @@ async def _mission_id(
     if found is None:
         raise DiveNotFound(which, number)
     return found
-
-
-async def _summary(
-    conn: AsyncConnection, tenant_id: uuid.UUID, number: int
-) -> MissionSummary:
-    row = (
-        await conn.execute(
-            text(_MISSION_SUMMARY + " AND d.number = :n"),
-            {"tenant_id": tenant_id, "n": number},
-        )
-    ).one()
-    return MissionSummary(**row._mapping)
 
 
 async def set_calibration_source(
@@ -266,7 +335,7 @@ async def set_calibration_source(
         ),
         {"tenant_id": tenant_id, "mission": mission, "source": source},
     )
-    return await _summary(conn, tenant_id, number)
+    return await mission_summary(conn, tenant_id, number)
 
 
 async def clear_calibration_source(
@@ -304,7 +373,7 @@ async def set_calibration_target(
     if target is None:
         raise CalibrationTargetNotFound(target_number)
     await species_store.set_mission_calibration_target(conn, tenant_id, mission, target)
-    return await _summary(conn, tenant_id, number)
+    return await mission_summary(conn, tenant_id, number)
 
 
 async def clear_calibration_target(

@@ -59,12 +59,15 @@ def _settings(root: str = ROOT) -> NasSettings:
 class FakeCatalog:
     """What preflight asks the database, answered from memory."""
 
-    def __init__(self, devices=None, missions=None, slates=None, tenants=None):
+    def __init__(
+        self, devices=None, missions=None, slates=None, tenants=None, ports=None
+    ):
         default = {SERIAL: ResolvedDevice(DEVICE, "FSL-07", True)}
         self.devices = default if devices is None else devices
         self.missions = missions or {}  # path -> id
         self.slates = {"H-Slate": SLATE} if slates is None else slates
         self.tenants = {"lab": TENANT} if tenants is None else tenants
+        self.ports = ports or {}  # path -> (port, port_source)
 
     async def resolve_tenant(self, slug):
         return self.tenants.get(slug)
@@ -79,6 +82,9 @@ class FakeCatalog:
         return [
             (i, p) for p, i in self.missions.items() if p.rsplit("/", 1)[-1] == leaf
         ]
+
+    async def mission_port(self, tenant_id, path):
+        return self.ports.get(path)
 
     async def slate_template(self, name):
         return self.slates.get(name)
@@ -419,8 +425,11 @@ async def test_re_ingesting_the_same_path_says_the_mission_will_drop_to_low():
     catalog = FakeCatalog(
         missions={"2024.06.20.REEF/082929_FishModels_FSL07": existing}
     )
+    # Port and purpose stated, so their own warnings (test_preflight_port)
+    # stay out of the way.
+    request = _request(port="corrective_optic", purpose="known_length")
 
-    preflight = await _run(_request(), _listing(), catalog=catalog)
+    preflight = await _run(request, _listing(), catalog=catalog)
 
     assert preflight.errors == []
     (warning,) = preflight.warnings
