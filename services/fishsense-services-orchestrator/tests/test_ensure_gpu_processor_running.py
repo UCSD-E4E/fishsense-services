@@ -32,6 +32,8 @@ from fishsense_services_orchestrator.nrp.gpu_fallback import (
     MODE_UNAVAILABLE,
 )
 
+from fishsense_services_contracts import PROCESSOR_GPU_TASK_QUEUE
+
 from ._nrp import (
     FALLBACK,
     LEAF,
@@ -236,3 +238,74 @@ async def test_whichever_deployment_stands_carries_the_current_leaf():
     modes = [await _run(activities) for _ in range(4)]
     assert MODE_CPU_FALLBACK in modes
     assert cluster.template_annotations(FALLBACK)[LEAF] == "sha-of-the-current-leaf"
+
+
+async def test_a_cuda_worker_already_polling_is_the_gpu_and_nrp_is_left_alone():
+    """Off-NRP GPU workers (lab machines, 2026-10-19) poll the GPU queue like
+    the NRP pod. With one live, the GPU is up: no NRP stand-up, no wait -- and
+    the rule holds, a GPU we have is used before another is requested."""
+    asked = []
+
+    async def cuda_pollers(task_queue):
+        asked.append(task_queue)
+        return 2
+
+    def _must_not(_path):
+        pytest.fail("must not touch NRP while a CUDA worker is polling")
+
+    activities = NrpActivities(
+        config=config(), kubernetes=_must_not, cuda_pollers=cuda_pollers,
+        poll_interval_seconds=0,
+    )  # fmt: skip
+    assert await _run(activities) == MODE_GPU
+    assert asked == [PROCESSOR_GPU_TASK_QUEUE]
+
+
+async def test_no_cuda_worker_polling_stands_nrp_up_as_before():
+    cluster = FakeCluster()
+    cluster.stand_up(GPU, replicas=1, ready=1)
+
+    async def none_polling(task_queue):
+        return 0
+
+    activities = NrpActivities(config=config(), kubernetes=cluster.kubernetes,
+                               cuda_pollers=none_polling, poll_interval_seconds=0)  # fmt: skip
+    assert await _run(activities) == MODE_GPU
+    assert cluster.replicas(GPU) == 1
+
+
+@pytest.mark.integration
+async def test_cuda_pollers_counts_a_live_cuda_worker_on_a_real_server():
+    """Against a real Temporal (the dev server): a worker polling as
+    `.../gpu/cuda` counts; one polling as the CPU fallback does not."""
+    import asyncio
+    import uuid as _uuid
+
+    from temporalio import activity as _activity
+    from temporalio.testing import WorkflowEnvironment
+    from temporalio.worker import Worker
+
+    from fishsense_services_orchestrator.nrp.activities import cuda_pollers
+
+    @_activity.defn(name="noop")
+    async def noop() -> None:
+        return None
+
+    queue = f"gpu-{_uuid.uuid4()}"
+    async with await WorkflowEnvironment.start_local() as env:
+        cuda = Worker(env.client, task_queue=queue, activities=[noop],
+                      identity="1@lab/gpu/cuda")  # fmt: skip
+        from temporalio.client import Client
+
+        other = await Client.connect(
+            env.client.service_client.config.target_host,
+            namespace=env.client.namespace,
+        )  # one worker per queue per client: the fallback is another process
+        cpu = Worker(other, task_queue=queue, activities=[noop],
+                     identity="2@fallback/gpu/cpu")  # fmt: skip
+        async with cuda, cpu:
+            for _ in range(50):
+                if await cuda_pollers(env.client, queue):
+                    break
+                await asyncio.sleep(0.2)
+            assert await cuda_pollers(env.client, queue) == 1

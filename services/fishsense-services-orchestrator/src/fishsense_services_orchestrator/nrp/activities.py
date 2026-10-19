@@ -32,6 +32,12 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 
 from temporalio import activity
+from temporalio.api.enums.v1 import TaskQueueType
+from temporalio.api.taskqueue.v1 import TaskQueue
+from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
+
+from fishsense_services_contracts import PROCESSOR_GPU_TASK_QUEUE
+from fishsense_services_contracts.workers import is_cuda_worker
 from temporalio.client import Client, WorkflowExecutionStatus
 from temporalio.service import RPCError, RPCStatusCode
 
@@ -68,6 +74,40 @@ BusyCheck = Callable[[int, str], Awaitable[bool]]
 UsedSinceCheck = Callable[[str, datetime], Awaitable[bool]]
 #: (workflow id, run id) -> is that parent run still Running?
 WakerRunningCheck = Callable[[str, str], Awaitable[bool]]
+#: (task queue) -> how many CUDA workers polled it lately.
+CudaPollersCheck = Callable[[str], Awaitable[int]]
+
+#: A poller seen this recently is live: Temporal's long poll renews it at
+#: least every minute while the worker waits.
+LIVE_POLLER = timedelta(minutes=2)
+
+
+async def cuda_pollers(client: Client, task_queue: str) -> int:
+    """How many CUDA GPU workers (`contracts.workers`) polled `task_queue`'s
+    activities within `LIVE_POLLER`: on NRP or off it (lab machines,
+    2026-10-19), a GPU is a GPU."""
+    response = await client.workflow_service.describe_task_queue(
+        DescribeTaskQueueRequest(
+            namespace=client.namespace,
+            task_queue=TaskQueue(name=task_queue),
+            task_queue_type=TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY,
+        )
+    )
+    now = datetime.now(timezone.utc)
+    return sum(
+        1
+        for poller in response.pollers
+        if is_cuda_worker(poller.identity)
+        and now - poller.last_access_time.ToDatetime(tzinfo=timezone.utc) < LIVE_POLLER
+    )
+
+
+async def _cuda_pollers_through_the_worker_client(task_queue: str) -> int:
+    try:
+        client = activity.client()
+    except RuntimeError:  # no worker client (a bare test environment)
+        return 0
+    return await cuda_pollers(client, task_queue)
 
 
 def build_busy_query(cooldown_minutes: int, task_queue: str) -> str:
@@ -157,6 +197,7 @@ class NrpActivities:
         task_queue_busy: BusyCheck = _busy_through_the_worker_client,
         queue_used_since: UsedSinceCheck = _used_through_the_worker_client,
         waker_running: WakerRunningCheck = _waker_running_through_the_worker_client,
+        cuda_pollers: CudaPollersCheck = _cuda_pollers_through_the_worker_client,
         poll_interval_seconds: float = 10,
     ) -> None:
         #: None when scaling is off: every activity no-ops.
@@ -165,6 +206,7 @@ class NrpActivities:
         self._task_queue_busy = task_queue_busy
         self._queue_used_since = queue_used_since
         self._waker_running = waker_running
+        self._cuda_pollers = cuda_pollers
         #: How often the GPU wake re-reads a Deployment while waiting for a
         #: pod to go Ready. Tests set it to 0.
         self._poll_interval_seconds = poll_interval_seconds
@@ -327,6 +369,16 @@ class NrpActivities:
         if config is None:
             activity.logger.info(
                 "NRP scaling not configured; assuming the GPU processor is up"
+            )
+            return MODE_GPU
+
+        # A CUDA worker already on the queue -- an NRP pod, or a lab machine
+        # deployed by hand (2026-10-19) -- is the GPU: use it, and request
+        # no other until it is fully used.
+        live = await self._cuda_pollers(PROCESSOR_GPU_TASK_QUEUE)
+        if live:
+            activity.logger.info(
+                "GPU capacity: %d CUDA worker(s) polling; not standing NRP up", live
             )
             return MODE_GPU
 
