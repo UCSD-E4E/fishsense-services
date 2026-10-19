@@ -76,3 +76,21 @@ def test_the_images_user_has_a_home():
     useradd = next(line for line in runtime.splitlines() if "useradd" in line)
     assert "--uid 10001" in useradd
     assert "--create-home" in useradd and "--no-create-home" not in useradd
+
+
+def test_the_gpu_image_can_compile_triton_kernels():
+    """Triton builds its kernel launchers with a C compiler at run time. SAM
+    3.1's NMS, connected components and distance transform are Triton kernels
+    on CUDA (sam3/perflib/triton/, sam3/model/edt.py), so every frame with
+    more than one detection failed `RuntimeError: Failed to find C compiler`
+    on the slim image (2026-10-19, dive 87). The GPU image installs one, and
+    its build check fails if it is missing."""
+    dockerfile = (LOCK.parent / "Dockerfile").read_text()
+    stage = dockerfile.split("FROM runtime AS processor-gpu", 1)[1].split("\nFROM ", 1)[
+        0
+    ]
+    before_user = stage[: stage.index("USER app")]
+    assert "apt-get install" in before_user
+    assert " gcc" in before_user and "libc6-dev" in before_user
+    check = stage[stage.index("USER app") :]
+    assert "shutil.which('gcc')" in check
