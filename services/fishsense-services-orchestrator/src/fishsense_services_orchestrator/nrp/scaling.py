@@ -116,7 +116,10 @@ class NrpSettings(BaseSettings):
     wake_grace_minutes: int = 90
     gpu_active_replicas: int = 1
     gpu_fallback_replicas: int = 1
-    gpu_start_timeout_seconds: int = 600
+    #: A cold start: a new release's 3.7 GB GPU image pulled in ~4 min, then
+    #: the node's container create timed out once and retried; Ready at ~11
+    #: min (2026-10-19), past the old 600 s.
+    gpu_start_timeout_seconds: int = 1200
     gpu_wedge_grace_minutes: int = 5
     gpu_max_start_failures: int = 3
     gpu_fallback_minutes: int = 180
@@ -136,7 +139,7 @@ class GpuScalingConfig:
     # How long to wait for a pod before calling a start attempt failed. This is
     # what separates "no GPU is available" from "the pod is still pulling its
     # image".
-    start_timeout_seconds: int = 600
+    start_timeout_seconds: int = 1200
     policy: FallbackPolicy = field(default_factory=FallbackPolicy)
 
 

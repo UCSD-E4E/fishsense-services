@@ -314,17 +314,23 @@ def test_every_processor_runs_only_in_the_us(kind):
         assert set(rule["values"]) == US_REGIONS
 
 
-def test_the_gpu_keeps_its_compute_capability_floor_beside_the_region():
-    """Ampere and newer, or Turing (7.5): each term still says which."""
+def test_the_gpu_is_ampere_or_newer_for_sam3s_bfloat16():
+    """SAM 3.1 runs in bfloat16, which needs compute capability 8 (Ampere).
+    The manifest also admitted Turing (7.5): 2026-10-19 two GPU pods landed on
+    RTX 2080 Tis, a frame failed `Current CUDA Device does not support
+    bfloat16`, and the pod's CUDA context then died (`unspecified launch
+    failure`) for every frame after it. Every required term is Ampere+."""
     terms = _node_selector_terms(LOADED[manifests.GPU].body)
-    assert [sorted(e["key"] for e in t["matchExpressions"]) for t in terms] == [
-        ["nvidia.com/gpu.compute.major", "topology.kubernetes.io/region"],
-        [
-            "nvidia.com/gpu.compute.major",
-            "nvidia.com/gpu.compute.minor",
-            "topology.kubernetes.io/region",
-        ],
-    ]
+    assert terms
+    for term in terms:
+        majors = [
+            e for e in term["matchExpressions"]
+            if e["key"] == "nvidia.com/gpu.compute.major"
+        ]  # fmt: skip
+        assert len(majors) == 1, "a term with no compute floor"
+        (rule,) = majors
+        assert rule["operator"] == "In"
+        assert rule["values"] and all(int(v) >= 8 for v in rule["values"])
 
 
 @pytest.mark.parametrize("kind", sorted(LOADED))
@@ -338,3 +344,28 @@ def test_every_processor_runs_as_the_images_user_with_its_home(kind):
     security = body["spec"]["template"]["spec"]["securityContext"]
     assert security["runAsUser"] == 10001
     assert "HOME" not in _env(body)
+
+
+def test_the_gpu_pod_prefers_a_card_with_room_for_two_frames():
+    """2026-10-19: the GPU pod kept landing on 10.6 GiB cards (an RTX 2080
+    Ti), where the worker runs one SAM 3.1 frame at a time. NRP labels GPU
+    memory in MiB (nvidia.com/gpu.memory: 11264 ... 97887): the pod prefers
+    -- never requires, so a small card still serves when no big one is free
+    -- a card at the worker's two-at-once line, in the allowed US regions."""
+    from fishsense_services_processor.registry import GPU_TWO_ACTIVITIES_BYTES
+
+    affinity = LOADED[manifests.GPU].body["spec"]["template"]["spec"]["affinity"]
+    (preferred,) = affinity["nodeAffinity"][
+        "preferredDuringSchedulingIgnoredDuringExecution"
+    ]
+    exprs = {e["key"]: e for e in preferred["preference"]["matchExpressions"]}
+    memory = exprs["nvidia.com/gpu.memory"]
+    assert memory["operator"] == "Gt"
+    assert int(memory["values"][0]) == GPU_TWO_ACTIVITIES_BYTES // 2**20 - 1
+    assert set(exprs["topology.kubernetes.io/region"]["values"]) == {
+        "us-west",
+        "us-central",
+        "us-east",
+        "us-mountain",
+    }
+    assert preferred["weight"] == 100

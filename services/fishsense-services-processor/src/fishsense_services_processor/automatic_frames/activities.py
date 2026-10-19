@@ -27,6 +27,7 @@ CPU fallback at all. A raw frame missing from scratch is an abstention
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 import tempfile
 from collections.abc import Awaitable, Callable
@@ -78,6 +79,11 @@ class AutomaticFramesActivities:  # pylint: disable=too-few-public-methods
         self._predict_dot = predict_dot
         self._render_jpeg = render_jpeg
         self._segmenter = segmenter
+        #: Called after a CUDA failure has been reported: the process's CUDA
+        #: context is unusable from then on (2026-10-19, one launch failure
+        #: failed every frame after it on the pod), so the worker exits and
+        #: Kubernetes restarts it clean.
+        self._on_cuda_failure: Callable[[], None] = _exit_soon
 
     def _object_store(self) -> Any:
         if self._store is None:
@@ -147,18 +153,29 @@ class AutomaticFramesActivities:  # pylint: disable=too-few-public-methods
         path, model_id = await self._sam3_checkpoint()
         segmenter = await asyncio.to_thread(self._segmenter, str(path))
         _reset_gpu_peak()
-        result = await asyncio.to_thread(
-            lambda: automatic_frame_result(
-                capture_id=frame.capture_id,
-                dot=dot,
-                jpeg_bytes=jpeg,
-                segmenter=segmenter,
-                checkpoint=model_id,
-                core_version=version("fishsense-core"),
-                is_slate=frame.is_slate,
-                slate_probability=frame.slate_probability,
+        try:
+            result = await asyncio.to_thread(
+                lambda: automatic_frame_result(
+                    capture_id=frame.capture_id,
+                    dot=dot,
+                    jpeg_bytes=jpeg,
+                    segmenter=segmenter,
+                    checkpoint=model_id,
+                    core_version=version("fishsense-core"),
+                    is_slate=frame.is_slate,
+                    slate_probability=frame.slate_probability,
+                )
             )
-        )
+        except RuntimeError as exc:
+            if "CUDA error" in str(exc):
+                activity.logger.error(
+                    "capture=%s: CUDA failed (%s); restarting the worker for a "
+                    "clean context",
+                    frame.capture_id,
+                    str(exc).splitlines()[0],
+                )
+                self._on_cuda_failure()
+            raise
         peak = _gpu_peak_bytes()
         activity.logger.info(
             "automatic frame capture=%s status=%s sam_score=%s peak_gpu_gib=%s",
@@ -168,6 +185,13 @@ class AutomaticFramesActivities:  # pylint: disable=too-few-public-methods
             "-" if peak is None else f"{peak / 2**30:.2f}",
         )
         return result
+
+
+def _exit_soon(delay_s: float = 5.0) -> None:
+    """Exit the process shortly, once the worker has reported the failure.
+    A plain exit: a graceful shutdown would wait on work that cannot succeed
+    on this CUDA context."""
+    asyncio.get_running_loop().call_later(delay_s, os._exit, 70)
 
 
 def _cuda():

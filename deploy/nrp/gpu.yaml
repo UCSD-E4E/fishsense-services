@@ -51,12 +51,15 @@ spec:
       # GPU compute-capability floor. The torch build (cu13x / cuDNN 9.2)
       # dropped GPUs with SM < 7.5: a conv2d on an older card dies with "cuDNN
       # version 92000 is not compatible with devices with SM < 7.5", observed
-      # live when NRP scheduled v1 onto a GTX 1080 Ti (SM 6.1). Require
-      # Turing (7.5) or Ampere and newer (major >= 8). Labels come from NVIDIA
-      # GPU Feature Discovery; the two terms are OR'd. Also the single biggest
-      # reason this Deployment can be unschedulable, which is what the CPU
-      # fallback is for.
-      # And US nodes only, in both terms: the NAS -- and Garage on it, the raw scratch and the
+      # live when NRP scheduled v1 onto a GTX 1080 Ti (SM 6.1). And SAM 3.1
+      # runs in bfloat16, which needs Ampere (major >= 8): Turing (7.5) was
+      # admitted until 2026-10-19, when two pods landed on RTX 2080 Tis, a
+      # frame failed "Current CUDA Device does not support bfloat16" and the
+      # CUDA context then died for every frame after it. Ampere and newer
+      # only. Labels come from NVIDIA GPU Feature Discovery. Also the single
+      # biggest reason this Deployment can be unschedulable, which is what the
+      # CPU fallback is for.
+      # And US nodes only: the NAS -- and Garage on it, the raw scratch and the
       # model weights -- accepts only US addresses. 2026-10-14 a pod landed on
       # fiona-prg1.cesnet.cz (Prague) and every Garage connection timed out.
       # An allow-list, so an unlabelled or new non-US site never fits.
@@ -71,13 +74,18 @@ spec:
                   - key: topology.kubernetes.io/region
                     operator: In
                     values: [us-west, us-central, us-east, us-mountain]
-              - matchExpressions:
-                  - key: nvidia.com/gpu.compute.major
-                    operator: In
-                    values: ["7"]
-                  - key: nvidia.com/gpu.compute.minor
-                    operator: In
-                    values: ["5"]
+          # Prefer -- never require -- a card with room for two SAM 3.1 frames
+          # at once (the worker's GPU_TWO_ACTIVITIES_BYTES, 22 GiB; NRP labels
+          # GPU memory in MiB). 2026-10-19 the pod kept landing on 10.6 GiB
+          # RTX 2080 Tis, one frame at a time; a small card still serves when
+          # no big one is free.
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: nvidia.com/gpu.memory
+                    operator: Gt
+                    values: ["22527"]
                   - key: topology.kubernetes.io/region
                     operator: In
                     values: [us-west, us-central, us-east, us-mountain]

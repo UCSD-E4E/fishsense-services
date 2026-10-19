@@ -429,3 +429,35 @@ async def test_each_frame_logs_its_peak_gpu_memory(monkeypatch, caplog):
             _activities(_Store()).predict_automatic_frame, _payload()
         )
     assert any("peak_gpu_gib=5.00" in r.getMessage() for r in caplog.records)
+
+
+class _CudaDies:
+    def segment_scored(self, image):
+        raise RuntimeError("CUDA error: unspecified launch failure")
+
+
+class _SomethingElse:
+    def segment_scored(self, image):
+        raise RuntimeError("shapes do not match")
+
+
+async def test_a_cuda_failure_restarts_the_worker_and_still_reports_the_frame():
+    """A CUDA launch failure leaves the process's context unusable: on
+    2026-10-19 one fault made every frame after it fail on the same pod. The
+    frame's failure is still reported (it retries), and the worker is told to
+    exit, so Kubernetes restarts it with a clean context."""
+    exits = []
+    acts = _activities(_Store(), segmenter=_CudaDies())
+    acts._on_cuda_failure = lambda: exits.append(1)
+    with pytest.raises(RuntimeError, match="CUDA error"):
+        await ActivityEnvironment().run(acts.predict_automatic_frame, _payload())
+    assert exits == [1]
+
+
+async def test_any_other_failure_leaves_the_worker_running():
+    exits = []
+    acts = _activities(_Store(), segmenter=_SomethingElse())
+    acts._on_cuda_failure = lambda: exits.append(1)
+    with pytest.raises(RuntimeError, match="shapes"):
+        await ActivityEnvironment().run(acts.predict_automatic_frame, _payload())
+    assert exits == []
