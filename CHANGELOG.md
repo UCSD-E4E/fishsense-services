@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.13.0...v0.13.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **nrp:** Ampere-only GPUs for SAM 3.1's bfloat16, and restart on a CUDA failure ([665b5bb](https://github.com/UCSD-E4E/fishsense-services/commit/665b5bbc7d4e279b3fa8d041bb974c85f2e42db8))
+* **nrp:** Ampere-only GPUs for SAM 3.1's bfloat16, and restart on a CUDA failure ([f987f46](https://github.com/UCSD-E4E/fishsense-services/commit/f987f460b9da9bfbfe4560a5d23f268f8afe36f9))
+
 ## [0.13.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.12.1...v0.13.0) (2026-10-19)
 
 
