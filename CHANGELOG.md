@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.14.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.13.1...v0.14.0) (2026-10-19)
+
+
+### Features
+
+* deployments, mission purpose and the camera port with its provenance ([c832a86](https://github.com/UCSD-E4E/fishsense-services/commit/c832a86367a73bdb35cd8b38c69aec826f9d40a2))
+* **workers:** first-class processor workers off NRP, every role ([b406613](https://github.com/UCSD-E4E/fishsense-services/commit/b406613ab0a74695fb62c89a399a0ca236166680))
+* **workers:** first-class processor workers off NRP, every role ([b788797](https://github.com/UCSD-E4E/fishsense-services/commit/b78879713fa6c91ea21685be57c6c365342a59ff))
+
 ## [0.13.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.13.0...v0.13.1) (2026-10-19)
 
 
