@@ -33,7 +33,9 @@ except ImportError:
 
 import asyncio
 import logging
+import os
 import signal
+import socket
 from collections.abc import Iterable
 from datetime import timedelta
 from typing import Any, Literal
@@ -44,6 +46,7 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from fishsense_services_contracts.temporal import TemporalConnection, connect_options
+from fishsense_services_contracts.workers import CPU, CUDA, worker_identity
 from fishsense_services_processor.registry import (
     ROLE_GPU,
     Stage,
@@ -96,13 +99,21 @@ def detect_gpu_memory_bytes() -> int | None:
     return int(torch.cuda.get_device_properties(0).total_memory)
 
 
-def _role_cap(role: str, default: int, gpu_bytes: Any) -> int:
+def _role_cap(role: str, default: int, total: int | None) -> int:
     if role != ROLE_GPU:
         return default
-    total = detect_gpu_memory_bytes() if gpu_bytes is _DETECT else gpu_bytes
     cap = gpu_activity_cap(total)
     log.info("GPU memory %s bytes: %d activities at once", total, cap)
     return cap
+
+
+def _identity(role: str, total: int | None) -> str:
+    """``pid@host/role/device`` (`contracts.workers`): the orchestrator's GPU
+    wake counts a CUDA worker on the GPU queue, wherever it runs."""
+    device = CUDA if role == ROLE_GPU and total is not None else CPU
+    return worker_identity(
+        pid=os.getpid(), host=socket.gethostname(), role=role, device=device
+    )
 
 
 def build_worker(
@@ -120,13 +131,19 @@ def build_worker(
         raise ValueError(
             f"the {role!r} role has nothing registered: no ported stage declares it"
         )
+    total = (
+        (detect_gpu_memory_bytes() if gpu_memory_bytes is _DETECT else gpu_memory_bytes)
+        if role == ROLE_GPU
+        else None
+    )
     return Worker(
         client,
         task_queue=registration.task_queue,
         workflows=list(registration.workflows),
         activities=list(registration.activities),
         max_concurrent_activities=max_concurrent_activities
-        or _role_cap(role, registration.max_concurrent_activities, gpu_memory_bytes),
+        or _role_cap(role, registration.max_concurrent_activities, total),
+        identity=_identity(role, total),
         graceful_shutdown_timeout=GRACEFUL_SHUTDOWN_TIMEOUT,
     )
 

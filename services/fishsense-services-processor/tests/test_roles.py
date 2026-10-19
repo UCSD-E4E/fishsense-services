@@ -246,3 +246,23 @@ async def test_a_role_with_nothing_registered_fails_loudly():
     async with await WorkflowEnvironment.start_time_skipping() as env:
         with pytest.raises(ValueError, match="nothing registered"):
             build_worker(env.client, role=registry.ROLE_GPU, stages=[])
+
+
+@pytest.mark.parametrize(
+    ("role", "memory", "device"),
+    [
+        (registry.ROLE_GPU, int(24 * 2**30), "cuda"),
+        (registry.ROLE_GPU, None, "cpu"),  # the CPU fallback
+        (registry.ROLE_PER_IMAGE, None, "cpu"),
+        (registry.ROLE_LIGHT, None, "cpu"),
+    ],
+)
+async def test_a_worker_names_its_role_and_device(role, memory, device):
+    """Off-NRP workers (2026-10-19) take work by polling like any other; the
+    orchestrator's GPU wake tells a CUDA worker from the CPU fallback by the
+    identity (`contracts.workers`)."""
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        worker = build_worker(env.client, role=role, stages=[_stage(role)],
+                              gpu_memory_bytes=memory)  # fmt: skip
+        identity = worker.config()["identity"]
+    assert identity.endswith(f"/{role}/{device}")
