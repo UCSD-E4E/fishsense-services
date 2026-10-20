@@ -116,8 +116,8 @@ class _ProcessorStore:
         self.jpeg = jpeg
         self.read = []
 
-    async def download_processed_jpeg(self, ref):
-        self.read.append(ref)
+    async def download_image(self, ref=None, url=None):
+        self.read.append(ref if url is None else url)
         return self.jpeg
 
 

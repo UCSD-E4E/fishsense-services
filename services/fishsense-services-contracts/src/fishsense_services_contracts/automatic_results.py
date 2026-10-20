@@ -63,11 +63,12 @@ from __future__ import annotations
 from typing import List, Optional, Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, field_validator, ConfigDict
+from pydantic import BaseModel, field_validator, ConfigDict, model_validator
 
-from fishsense_services_contracts._boxes import check_box
+from fishsense_services_contracts._boxes import check_box, check_one_image
 from fishsense_services_contracts.object_store import ObjectRef
 from fishsense_services_contracts.renamed import renamed_from
+from fishsense_services_contracts.renders import RENDER_VERSION
 
 __all__ = [
     "AUTOMATIC_CALIBRATION_VERSION",
@@ -92,7 +93,8 @@ __all__ = [
 
 #: See the module docstring.
 AUTOMATIC_HEADTAIL_PREDICTOR_VERSION = 3
-AUTOMATIC_JPEG_RENDER_VERSION = 1
+#: The one render every step reads (`renders.RENDER_VERSION`).
+AUTOMATIC_JPEG_RENDER_VERSION = RENDER_VERSION
 AUTOMATIC_CALIBRATION_VERSION = "2"
 AUTOMATIC_MEASUREMENT_VERSION = "1"
 
@@ -130,13 +132,18 @@ class AutomaticFrame(BaseModel):
 
     capture_id: UUID
     raw: ObjectRef
-    jpeg: ObjectRef
+    #: Contracts 7-8: where the frames stage wrote its own render. From
+    #: contract 9 the render stage writes it, and this is None.
+    jpeg: Optional[ObjectRef] = None
     #: Contract 7's: write the render to `jpeg` only if set. Read only for a
     #: payload with no `jpeg_render_version` (resolved before contract 8).
     write_jpeg: bool = False
-    #: The render `jpeg` is for: the processor writes it there, refusing if it
-    #: renders another or `jpeg` is not that render's key.
+    #: The render the dot and mask are found against (contract 8: written to
+    #: `jpeg`; contract 9: read from `render_url`).
     jpeg_render_version: Optional[int] = None
+    #: Contract 9: a presigned GET of the capture's render in its tenant's
+    #: bucket (`renders.render_key`), which SAM segments.
+    render_url: Optional[str] = None
     #: The slate-presence detector's score (None: no detector). A slate frame
     #: keeps its dot for the calibration and is never measured as a fish.
     slate_probability: Optional[float] = None
@@ -210,12 +217,20 @@ class AutomaticFrameResult(BaseModel):
 
 
 class AutomaticCalibrationFrame(BaseModel):
-    """A slate frame with its automatic dot, and its rectified JPEG."""
+    """A slate frame with its automatic dot, and its render: by presigned URL
+    (`jpeg_url`, the capture's render in its tenant's bucket), or -- before
+    renders -- a stage's JPEG by reference (`jpeg`)."""
 
     capture_id: UUID
-    jpeg: ObjectRef
+    jpeg: Optional[ObjectRef] = None
+    jpeg_url: Optional[str] = None
     x: float
     y: float
+
+    @model_validator(mode="after")
+    def _one_image(self) -> "AutomaticCalibrationFrame":
+        check_one_image(self.jpeg, self.jpeg_url)
+        return self
 
 
 class FitAutomaticCalibrationInput(BaseModel):

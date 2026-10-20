@@ -32,6 +32,10 @@ from fishsense_services_contracts.task_queues import (
     PROCESSOR_TASK_QUEUE,
 )
 
+#: v9 (2026-10-19): renders -- every capture's raw rectified to a JPEG once, in
+#: its tenant's bucket (`renders`); readers take it by presigned URL
+#: (`jpeg_url`, `AutomaticFrame.render_url`), and the frames stage stops
+#: writing (`AutomaticFrame.jpeg` optional). New fields optional, v8 parses.
 #: v8 (2026-10-19): the automatic frames carry their render's version and camera
 #: (`AutomaticFrame.jpeg_render_version`, `PredictAutomaticFrame(s)Input.
 #: camera_calibration_id`, `AutomaticFrameResult.jpeg_render_version` and
@@ -40,7 +44,7 @@ from fishsense_services_contracts.task_queues import (
 #: JSON is unchanged -- each renamed field keeps its old name on the wire
 #: (`renamed.py`) -- so a v6 processor and a v7 orchestrator interoperate; only
 #: the published schema's model names differ.
-CONTRACT_VERSION = 8
+CONTRACT_VERSION = 9
 
 
 def _discover_models() -> tuple[type[BaseModel], ...]:

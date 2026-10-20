@@ -80,8 +80,8 @@ class _Store:
     def __init__(self, jpegs):
         self.jpegs = jpegs
 
-    async def download_processed_jpeg(self, ref):
-        return self.jpegs[ref.key]
+    async def download_image(self, ref=None, url=None):
+        return self.jpegs[ref.key if url is None else url]
 
 
 def _calibration_input(zs, *, line_dots=None):
@@ -93,7 +93,7 @@ def _calibration_input(zs, *, line_dots=None):
         jpegs[key] = _frame(texture, dot, 1.5 / z)
         frames.append(
             AutomaticCalibrationFrame(capture_id=uuid.uuid4(),
-                                      jpeg=ObjectRef(bucket="b", key=key),
+                                      jpeg_url=key,
                                       x=float(dot[0]), y=float(dot[1]))  # fmt: skip
         )
     payload = FitAutomaticCalibrationInput(
@@ -162,7 +162,7 @@ def _off_line(payload, store, zs, offset_px):
         store.jpegs[key] = _frame(texture, dot, size)
         extra.append(
             AutomaticCalibrationFrame(capture_id=uuid.uuid4(),
-                                      jpeg=ObjectRef(bucket="b", key=key),
+                                      jpeg_url=key,
                                       x=float(dot[0]), y=float(dot[1]))  # fmt: skip
         )
     return payload.model_copy(update={"frames": [*payload.frames, *extra]}), extra

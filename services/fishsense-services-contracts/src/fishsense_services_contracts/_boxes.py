@@ -20,3 +20,10 @@ def check_box(box: Optional[List[int]]) -> Optional[List[int]]:
     if min(x_min, y_min) < 0 or x_max <= x_min or y_max <= y_min:
         raise ValueError(f"not a non-empty box in frame pixels: {box}")
     return box
+
+
+def check_one_image(jpeg, jpeg_url) -> None:
+    """A reader is given one image: the render by presigned URL (`jpeg_url`,
+    from 2026-10-19), or a stage's JPEG by reference (`jpeg`)."""
+    if (jpeg is None) == (jpeg_url is None):
+        raise ValueError("give the image by `jpeg` or by `jpeg_url`, one of them")

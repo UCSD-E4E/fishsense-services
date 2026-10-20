@@ -45,6 +45,8 @@ RAW_SCRATCH_READERS = (
     "detect-slate",
     # Automatic results (new in v2): the GPU frames step reads every raw.
     "automatic-frames",
+    # Renders (new in v2, 2026-10-19): every capture's raw, rectified.
+    "render-captures",
 )
 
 

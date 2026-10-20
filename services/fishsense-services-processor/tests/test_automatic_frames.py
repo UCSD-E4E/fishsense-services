@@ -195,6 +195,7 @@ class _Store:
     def __init__(self, *, missing=False):
         self.missing = missing
         self.uploaded = {}
+        self.read = []
 
     async def download_raw(self, ref, directory: Path) -> Path:
         if self.missing:
@@ -205,6 +206,10 @@ class _Store:
 
     async def upload_processed_jpeg(self, ref, data):
         self.uploaded[ref.key] = data
+
+    async def download_image(self, ref=None, url=None):
+        self.read.append(url)
+        return _jpeg()
 
 
 def _corrupt_raw(*args):
@@ -258,6 +263,38 @@ async def test_the_activity_chains_dot_mask_and_head_tail():
     r = await ActivityEnvironment().run(acts.predict_automatic_frame, _payload())
     assert r.status == "predicted" and r.sam_score == pytest.approx(0.8)
     assert list(store.uploaded.values()) == [_jpeg()]
+
+
+URL = "https://garage/fishsense-tenant-lab/renders/k.JPG?sig"
+
+
+def _rendered(**frame) -> PredictAutomaticFrameInput:
+    """Contract 9: the capture's render is in its tenant's bucket, by URL."""
+    return _payload(jpeg=None, render_url=URL, **frame)
+
+
+async def test_sam_segments_the_captures_render_read_by_url():
+    """The render stage made the image (2026-10-19): the frames stage reads
+    it, renders nothing and writes nothing, and names the render it read."""
+    store = _Store()
+    rendered = []
+    acts = _activities(store, render=lambda *a: rendered.append(a) or _jpeg())
+
+    r = await ActivityEnvironment().run(acts.predict_automatic_frame, _rendered())
+
+    assert store.read == [URL] and rendered == [] and store.uploaded == {}
+    assert r.status == "predicted" and r.sam_score == pytest.approx(0.8)
+    assert (r.jpeg_render_version, r.jpeg_camera_calibration_id) == (
+        AUTOMATIC_JPEG_RENDER_VERSION,
+        CAMERA,
+    )
+
+
+async def test_a_render_read_by_url_still_needs_the_raw_for_the_dot():
+    r = await ActivityEnvironment().run(
+        _activities(_Store(missing=True)).predict_automatic_frame, _rendered()
+    )
+    assert r.status == "raw_unavailable"
 
 
 async def test_the_render_is_written_and_named_by_version_and_camera():

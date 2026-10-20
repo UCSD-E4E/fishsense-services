@@ -231,6 +231,7 @@ class TestReaderIds:
             f"verify-checkerboard-lattice-{MISSION}",
             f"detect-slate-{MISSION}",
             f"automatic-frames-{MISSION}",
+            f"render-captures-{MISSION}",
         ]
 
     def test_a_parent_builds_its_childs_id_from_the_same_list(self):

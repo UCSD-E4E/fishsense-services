@@ -53,8 +53,9 @@ from fishsense_services_contracts.laser_region import LASER_REGION_POLYGON
 from fishsense_services_contracts.object_store import (
     HEADTAIL_JPEG_FOLDER,
     ObjectRef,
-    automatic_jpeg_folder,
 )
+from fishsense_services_contracts.renders import render_key
+from fishsense_services_api.renders_store import RenderAt
 from fishsense_services_contracts.species_prediction import SpeciesPredictionResult
 from fishsense_services_orchestrator.automatic_results.activities import (
     AutomaticResultsActivities,
@@ -119,12 +120,45 @@ class _Store:
 
 
 CAMERA = uuid.uuid4()
-RENDER = automatic_jpeg_folder(AUTOMATIC_JPEG_RENDER_VERSION, CAMERA)
 
 
-def _acts(catalog, store=None, **settings):
+class _Renders:
+    """The captures' renders by version and camera (`renders_store.renders_at`),
+    and presigned GETs of them in the tenant's bucket."""
+
+    def __init__(self, *rows):
+        self.rows = rows
+        self.presigners = 0
+
+    async def at(self, tenant_id, capture_ids, *, render_version,
+                 camera_calibration_id):  # fmt: skip
+        return {r.capture_id: r for r in self.rows
+                if r.capture_id in capture_ids
+                and (r.render_version, r.camera_calibration_id)
+                == (render_version, camera_calibration_id)}  # fmt: skip
+
+    async def presigner(self, tenant_id):
+        self.presigners += 1
+        return lambda key: f"https://garage/fishsense-tenant-lab/{key}?sig"
+
+
+def _render(capture_id, checksum, *, camera=CAMERA, version=AUTOMATIC_JPEG_RENDER_VERSION,
+            status="rendered", settled=True):  # fmt: skip
+    key = render_key(version, camera, checksum) if status == "rendered" else None
+    bucket = "fishsense-tenant-lab" if key else None
+    return RenderAt(capture_id, status, settled, bucket, key, version, camera)
+
+
+def _url(checksum, *, camera=CAMERA, version=AUTOMATIC_JPEG_RENDER_VERSION):
+    return f"https://garage/fishsense-tenant-lab/{render_key(version, camera, checksum)}?sig"
+
+
+def _acts(catalog, store=None, renders=None, **settings):
     return AutomaticResultsActivities(
-        catalog=catalog, store=store or _Store(), **settings
+        catalog=catalog,
+        store=store or _Store(),
+        renders=renders or _Renders(),
+        **settings,
     )
 
 
@@ -183,32 +217,74 @@ async def test_no_backlog_is_none():
 # -- frames -------------------------------------------------------------------------
 
 
-async def test_every_frame_writes_its_own_render_of_the_raw():
-    """The automatic track's JPEG is rectified from the raw by the frames stage,
-    for every frame, under its own key -- never v1's head/tail JPEG, which is
-    what human labels were drawn on and is never overwritten from here."""
-    have, new = "aa" * 16, "bb" * 16
+async def test_frames_read_their_captures_render_by_url():
+    """SAM segments the capture's render -- rectified from the raw by the
+    render stage, in the tenant's bucket -- given by presigned GET: the one at
+    this version under the mission's current camera, not the newest render
+    whatever its camera (review of #144). A frame with none, or one owed again
+    (a raw missing from scratch, not yet settled), gets no URL; the workflow
+    renders it first. The frames stage writes nothing."""
+    have, old, new, retry = (uuid.uuid4() for _ in range(4))
     frames = [
-        AutomaticFrame(uuid.uuid4(), have, True, 0.9),
-        AutomaticFrame(uuid.uuid4(), new, False, None),
+        AutomaticFrame(have, "aa" * 16, True, 0.9),
+        AutomaticFrame(old, "bb" * 16, False, None),
+        AutomaticFrame(new, "cc" * 16, False, None),
+        AutomaticFrame(retry, "dd" * 16, False, None),
     ]
     catalog = _Catalog(
         automatic_frames_inputs=AutomaticFramesInputs(K, [0.1] * 5, frames, CAMERA)
     )
+    renders = _Renders(
+        _render(have, "aa" * 16), _render(old, "bb" * 16, camera=uuid.uuid4()),
+        _render(retry, "dd" * 16, status="raw_unavailable", settled=False),
+    )  # fmt: skip
 
-    got = await _run(
-        _acts(catalog, _Store([have])).resolve_automatic_frames_inputs, TARGET
-    )
+    got = await _run(_acts(catalog, renders=renders).resolve_automatic_frames_inputs,
+                     TARGET)  # fmt: skip
 
-    a, b = got.frames
-    for f, checksum in ((a, have), (b, new)):
-        assert f.raw.key.endswith(f"{checksum}.ORF") and f.write_jpeg
-        assert f.jpeg.key == f"tenants/{TENANT_A}/{RENDER}/{checksum}.JPG"
+    a, b, c, d = got.frames
+    assert a.render_url == _url("aa" * 16)
+    assert b.render_url is None and c.render_url is None and d.render_url is None
+    for f in got.frames:
+        assert f.jpeg is None and not f.write_jpeg
         assert f.jpeg_render_version == AUTOMATIC_JPEG_RENDER_VERSION
     assert a.is_slate and a.slate_probability == 0.9
-    assert not b.is_slate
     assert got.laser_region == [list(v) for v in LASER_REGION_POLYGON]
     assert got.camera_matrix == K and got.camera_calibration_id == CAMERA
+    assert renders.presigners == 1  # one bucket lookup, not one per frame
+
+
+async def test_a_frame_whose_render_settled_as_an_abstention_is_one():
+    """A raw that would not decode -- or was missing from scratch every time --
+    has no render and never will: its frame is recorded as the same
+    abstention, so it stops holding its mission (review of #144: it held
+    calibration and lengths for good)."""
+    bad, gone, fine = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    frames = [AutomaticFrame(c, f"{i:032x}", False, None)
+              for i, c in enumerate((bad, gone, fine))]  # fmt: skip
+    catalog = _Catalog(
+        automatic_frames_inputs=AutomaticFramesInputs(K, [0.1] * 5, frames, CAMERA),
+        persist_automatic_head_tails=lambda t, d, rows: len(rows),
+    )
+    renders = _Renders(
+        _render(bad, f"{0:032x}", status="decode_failed"),
+        _render(gone, f"{1:032x}", status="raw_unavailable", settled=True),
+        _render(fine, f"{2:032x}"),
+    )  # fmt: skip
+
+    got = await _run(_acts(catalog, renders=renders).resolve_automatic_frames_inputs,
+                     TARGET)  # fmt: skip
+
+    assert [f.capture_id for f in got.frames] == [fine]
+    ((_, (_, _, rows), _),) = [c for c in catalog.calls
+                               if c[0] == "persist_automatic_head_tails"]  # fmt: skip
+    assert {(r.capture_id, r.status) for r in rows} == {
+        (bad, "decode_failed"),
+        (gone, "raw_unavailable"),
+    }
+    assert all(
+        r.predictor_version == AUTOMATIC_HEADTAIL_PREDICTOR_VERSION for r in rows
+    )
 
 
 def _frame_result(status="predicted", **extra):
@@ -299,40 +375,48 @@ async def test_a_store_refusal_is_final():
 
 async def test_species_are_cropped_by_the_automatic_mask_from_its_render():
     """The mask box is in the pixels of the render it was found in -- the
-    version and camera its row records, not today's -- so the crop is from
-    that render."""
+    version and camera its row records, not today's -- read by URL."""
     ht = uuid.uuid4()
-    have, older = "cc" * 16, "ee" * 16
+    a, b = uuid.uuid4(), uuid.uuid4()
     old_camera = uuid.uuid4()
     catalog = _Catalog(automatic_species_captures=[
-        AutomaticSpeciesCapture(uuid.uuid4(), have, True, ht, [1, 2, 30, 40], False,
+        AutomaticSpeciesCapture(a, "cc" * 16, True, ht, [1, 2, 30, 40], False,
                                 AUTOMATIC_JPEG_RENDER_VERSION, CAMERA),
-        AutomaticSpeciesCapture(uuid.uuid4(), older, True, uuid.uuid4(), [1, 2, 3, 4],
+        AutomaticSpeciesCapture(b, "ee" * 16, True, uuid.uuid4(), [1, 2, 3, 4],
                                 False, 7, old_camera),
     ])  # fmt: skip
-    store = _Store(automatic=[(RENDER, have),
-                              (automatic_jpeg_folder(7, old_camera), older)])  # fmt: skip
+    renders = _Renders(_render(a, "cc" * 16),
+                       _render(b, "ee" * 16, camera=old_camera, version=7))  # fmt: skip
 
-    got = await _run(_acts(catalog, store).resolve_automatic_species_inputs, TARGET)
+    got = await _run(_acts(catalog, renders=renders).resolve_automatic_species_inputs,
+                     TARGET)  # fmt: skip
 
-    a, b = got.images
-    assert a.headtail_prediction_id == ht and a.mask_bbox == [1, 2, 30, 40]
-    assert a.jpeg.key == f"tenants/{TENANT_A}/{RENDER}/{have}.JPG"
-    assert b.jpeg.key == (
-        f"tenants/{TENANT_A}/{automatic_jpeg_folder(7, old_camera)}/{older}.JPG"
-    )
+    x, y = got.images
+    assert x.headtail_prediction_id == ht and x.mask_bbox == [1, 2, 30, 40]
+    assert (x.jpeg, x.jpeg_url) == (None, _url("cc" * 16))
+    assert y.jpeg_url == _url("ee" * 16, camera=old_camera, version=7)
     assert got.candidates  # the species labeling config's target species
 
 
-async def test_a_recorded_render_missing_from_garage_fails_the_species_step():
-    """Not deferred: a row names a render nobody can read, which would hold its
-    mission in the cohort for good. Failed, it is a strike, and visible."""
+@pytest.mark.parametrize("recorded", ["none", "another-camera"])
+async def test_a_capture_whose_named_render_is_not_recorded_fails_the_species_step(
+    recorded,
+):
+    """Not deferred: its row names a render nobody recorded -- none at all, or
+    only one under another camera (review of #144: that presigned a key that
+    did not exist) -- which would hold its mission in the cohort for good.
+    Failed, it is a strike, and visible."""
+    c = uuid.uuid4()
     catalog = _Catalog(automatic_species_captures=[
-        AutomaticSpeciesCapture(uuid.uuid4(), "cc" * 16, True, uuid.uuid4(),
-                                [1, 2, 30, 40], False, 1, CAMERA),
+        AutomaticSpeciesCapture(c, "cc" * 16, True, uuid.uuid4(), [1, 2, 30, 40],
+                                False, 1, CAMERA),
     ])  # fmt: skip
+    renders = _Renders(*(
+        [] if recorded == "none" else [_render(c, "cc" * 16, camera=uuid.uuid4())]
+    ))  # fmt: skip
     with pytest.raises(ApplicationError) as error:
-        await _run(_acts(catalog).resolve_automatic_species_inputs, TARGET)
+        await _run(_acts(catalog, renders=renders).resolve_automatic_species_inputs,
+                   TARGET)  # fmt: skip
     assert error.value.type == "AutomaticRenderMissing" and error.value.non_retryable
 
 
@@ -354,18 +438,17 @@ async def test_a_species_outside_the_candidates_is_refused():
 async def test_calibration_frames_are_slate_frames_rendered_with_the_fits_camera(
     caplog,
 ):
-    """Features are taken from the render the dot was found against, and the
-    fit reads them through the mission's current camera: a frame with no
-    render, or rendered under another camera, is left out, and the log says
-    how many (review of #136)."""
-    have, unrendered, stale = "ee" * 16, "ff" * 16, "dd" * 16
+    """Features are taken from the render the dot was found against, read by
+    URL, and the fit reads them through the mission's current camera: a frame
+    with no render, or rendered under another camera, is left out, and the log
+    says how many (review of #136)."""
     a = AutomaticCalibrationCandidate(
-        uuid.uuid4(), have, True, 10.0, 20.0, AUTOMATIC_JPEG_RENDER_VERSION, CAMERA
+        uuid.uuid4(), "ee" * 16, True, 10.0, 20.0, AUTOMATIC_JPEG_RENDER_VERSION, CAMERA
     )
-    b = AutomaticCalibrationCandidate(uuid.uuid4(), unrendered, True, 11.0, 21.0)
+    b = AutomaticCalibrationCandidate(uuid.uuid4(), "ff" * 16, True, 11.0, 21.0)
     c = AutomaticCalibrationCandidate(
         uuid.uuid4(),
-        stale,
+        "dd" * 16,
         True,
         12.0,
         22.0,
@@ -377,21 +460,21 @@ async def test_calibration_frames_are_slate_frames_rendered_with_the_fits_camera
             CAMERA, K, [a, b, c], [[10.0, 20.0], [11.0, 21.0], [500.0, 600.0]]
         )
     )
-    store = _Store(automatic=[(RENDER, have)])  # fmt: skip
+    renders = _Renders(_render(a.capture_id, "ee" * 16))  # fmt: skip
 
     with caplog.at_level("WARNING"):
-        got = await _run(_acts(catalog, store).resolve_automatic_calibration_inputs,
-                         TARGET)  # fmt: skip
+        got = await _run(_acts(catalog, renders=renders)
+                         .resolve_automatic_calibration_inputs, TARGET)  # fmt: skip
 
     frames = got.payload.frames
     assert [(f.capture_id, f.x, f.y) for f in frames] == [(a.capture_id, 10.0, 20.0)]
-    assert frames[0].jpeg.key == f"tenants/{TENANT_A}/{RENDER}/{have}.JPG"
+    assert (frames[0].jpeg, frames[0].jpeg_url) == (None, _url("ee" * 16))
     assert len(got.payload.line_dots) == 3
     assert got.camera_calibration_id == CAMERA
     assert "1 with no render" in caplog.text and "1 rendered under" in caplog.text
 
 
-async def test_a_recorded_render_missing_from_garage_fails_the_calibration_step():
+async def test_a_capture_with_no_render_recorded_fails_the_calibration_step():
     a = AutomaticCalibrationCandidate(
         uuid.uuid4(), "ee" * 16, True, 10.0, 20.0, AUTOMATIC_JPEG_RENDER_VERSION, CAMERA
     )

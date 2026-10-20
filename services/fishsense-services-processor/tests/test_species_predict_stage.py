@@ -234,8 +234,8 @@ class _FakeStore:
         self.jpeg = jpeg
         self.read: list[ObjectRef] = []
 
-    async def download_processed_jpeg(self, ref):
-        self.read.append(ref)
+    async def download_image(self, ref=None, url=None):
+        self.read.append(ref if url is None else url)
         return self.jpeg
 
 
@@ -292,6 +292,15 @@ def _activities(store, *, fetches=None, encoders=None, loads=None):
 
 async def _run(activities, payload):
     return await ActivityEnvironment().run(activities.predict_species_image, payload)
+
+
+async def test_an_automatic_render_is_read_by_its_presigned_url():
+    """The automatic track's fish are cropped from the capture's render, in
+    its tenant's bucket, given by URL (2026-10-19)."""
+    store = _FakeStore(_jpeg())
+    url = "https://garage/fishsense-tenant-lab/renders/k.JPG?sig"
+    result = await _run(_activities(store), _payload(jpeg=None, jpeg_url=url))
+    assert store.read == [url] and result.status == "predicted"
 
 
 async def test_the_primary_model_classifies_the_crop():

@@ -18,6 +18,7 @@ from temporalio.client import ScheduleOverlapPolicy
 
 from fishsense_services_api.automatic_results_store import AutomaticResultsCatalog
 from fishsense_services_api.slate_presence_store import slate_frames
+from fishsense_services_api.renders_store import RendersCatalog
 from fishsense_services_contracts.object_store import ObjectStoreConnection
 from fishsense_services_orchestrator.automatic_results.activities import (
     AutomaticResultsActivities,
@@ -37,6 +38,9 @@ from fishsense_services_orchestrator.object_store.store import (
     OrchestratorObjectStore,
 )
 from fishsense_services_orchestrator.registry import Deps, ScheduledWorkflow, Stage
+from fishsense_services_orchestrator.renders.settings import RenderSettings
+from fishsense_services_orchestrator.renders.stage import tenant_stores
+from fishsense_services_orchestrator.renders.urls import TenantRenderUrls
 
 __all__ = ["STAGE", "automatic_results_schedules"]
 
@@ -69,6 +73,11 @@ def _activities(deps: Deps):
             deps.engine, sub=deps.sub, slate_frames=slate_frames
         ),
         store=OrchestratorObjectStore.from_settings(ObjectStoreConnection()),
+        # The captures' renders, in each tenant's own bucket (renders stage).
+        renders=TenantRenderUrls(
+            catalog=RendersCatalog(deps.engine, sub=deps.sub),
+            stores=tenant_stores(RenderSettings(), ObjectStoreConnection()),
+        ),
     )
     return [
         activities.select_next_mission_for_automatic_results,

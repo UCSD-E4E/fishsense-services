@@ -8,21 +8,21 @@ rules:
 * the target is (tenant, dive); the selector takes the oldest backlog dive
   across every tenant the orchestrator serves;
 * **the orchestrator issues the keys** (PLAN.md §9.11): a frame's staged raw,
-  and its automatic render's (`object_store.automatic_jpeg_folder`: the render
-  version and the camera, under the tenant);
-* **one image per frame, rectified from the raw** (2026-10-19): the frames
-  stage renders it from the raw with the camera's own matrix and distortion
-  -- the dot's pixel space -- finds the mask against it and writes it, for
-  every frame, under its render version (`AUTOMATIC_JPEG_RENDER_VERSION`,
-  recorded on the frame's row); species and calibration read the render the
-  row records, and a frame with none recorded waits. They used to read the
-  head/tail JPEG, which for a migrated frame is v1's render: not the image the
-  dot and mask were found in. That JPEG is the one human labels were drawn on,
-  so this track never writes it;
+  and a presigned GET of its render in the tenant's own bucket;
+* **one image per frame, rectified from the raw** (2026-10-19): the render
+  stage (`renders`) rectifies every capture's raw with its camera's matrix and
+  distortion -- the dot's pixel space -- into the tenant's bucket. SAM finds
+  the mask in it, species crops it, and the calibration takes its features
+  from it, each by presigned GET of the render its row records (version and
+  camera). A frame with no render at the current version under the mission's
+  camera gets none (the workflow renders it first); a row naming a render
+  nobody recorded fails its step. These steps used to read the head/tail
+  JPEG, which for a migrated frame is v1's render, the image human labels were
+  drawn on: this track never writes it;
 * species reuse the species stage's processor contract unchanged, cropped by
   the automatic mask's box, with the automatic head/tail's id in the
   `headtail_prediction_id` slot (it is echoed back, and the write checks it is
-  the capture's own); a JPEG not yet in Garage defers the fish;
+  the capture's own);
 * a length is written with the calibration it was computed under, carried
   from the resolve (`AutomaticMeasurePlan`); a newer calibration then makes it
   stale by itself (`current_automatic_measurements`);
@@ -68,7 +68,7 @@ from fishsense_services_contracts.automatic_results import (
     PredictAutomaticFramesInput,
 )
 from fishsense_services_contracts.laser_region import LASER_REGION_POLYGON
-from fishsense_services_contracts.object_store import ObjectRef, automatic_jpeg_folder
+from fishsense_services_contracts.renders import render_key
 from fishsense_services_contracts.species_prediction import (
     SPECIES_PREDICTOR_VERSION,
     SPECIES_STATUSES,
@@ -184,44 +184,51 @@ class AutomaticResultsActivities:
         *,
         catalog: AutomaticResultsCatalog,
         store: Any,
+        renders: Any,
         species_enabled: bool = True,
     ) -> None:
         self._catalog = catalog
         self._store = store
+        #: The captures' renders, read by presigned GET (`renders.urls`).
+        self._renders = renders
         #: Species' own switch (2026-10-15): off, no species images, and the
         #: cohort holds no dive for species work.
         self._species_enabled = species_enabled
 
-    def _automatic_jpeg_key(
-        self, target: AutomaticTarget, checksum: str, camera: uuid.UUID
-    ):
-        return self._store.layout.processed_jpeg(
-            target.tenant_id,
-            automatic_jpeg_folder(AUTOMATIC_JPEG_RENDER_VERSION, camera),
-            checksum,
-        )
-
-    async def _recorded_render(self, target: AutomaticTarget, row) -> ObjectRef:
-        """The render `row` records (its version, under its camera). Missing
-        from Garage, the step fails: a row names an image nobody can read,
-        and deferring would hold its mission in the cohort for good."""
-        ref = await self._store.locate_processed_jpeg(
-            target.tenant_id,
-            automatic_jpeg_folder(
-                row.jpeg_render_version, row.jpeg_camera_calibration_id
-            ),
-            row.checksum,
-            from_v1=False,
-        )
-        if ref is None:
-            raise ApplicationError(
-                f"dive {target.mission_id}: capture {row.capture_id}'s render "
-                f"r{row.jpeg_render_version} under camera "
-                f"{row.jpeg_camera_calibration_id} is not in Garage",
-                type="AutomaticRenderMissing",
-                non_retryable=True,
+    async def _recorded_renders(self, target: AutomaticTarget, rows) -> list[str]:
+        """Presigned GETs of the render each of `rows` records -- its version,
+        under its camera. One not recorded there fails the step: its row names
+        an image nobody can read, and deferring would hold its mission in the
+        cohort for good (review of #144: the newest render under any camera
+        presigned a key that did not exist)."""
+        by_render: dict[tuple, list] = {}
+        for row in rows:
+            render = (row.jpeg_render_version, row.jpeg_camera_calibration_id)
+            by_render.setdefault(render, []).append(row)
+        recorded = {}
+        for (version, camera), group in by_render.items():
+            recorded.update(
+                await self._renders.at(
+                    target.tenant_id,
+                    [row.capture_id for row in group],
+                    render_version=version,
+                    camera_calibration_id=camera,
+                )
             )
-        return ref
+        presign = await self._renders.presigner(target.tenant_id) if rows else None
+        urls = []
+        for row in rows:
+            render = recorded.get(row.capture_id)
+            if render is None or render.status != "rendered":
+                raise ApplicationError(
+                    f"dive {target.mission_id}: capture {row.capture_id} has no "
+                    f"render recorded at r{row.jpeg_render_version} under camera "
+                    f"{row.jpeg_camera_calibration_id}",
+                    type="AutomaticRenderMissing",
+                    non_retryable=True,
+                )
+            urls.append(presign(render.key))
+        return urls
 
     async def _write(self, target: AutomaticTarget, fn, *args, **kwargs):
         try:
@@ -323,16 +330,53 @@ class AutomaticResultsActivities:
             headtail_version=AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
         )
         frames = []
+        renders = (
+            await self._renders.at(
+                target.tenant_id,
+                [f.capture_id for f in inputs.frames],
+                render_version=AUTOMATIC_JPEG_RENDER_VERSION,
+                camera_calibration_id=inputs.camera_calibration_id,
+            )
+            if inputs.frames
+            else {}
+        )
+        presign = await self._renders.presigner(target.tenant_id) if renders else None
+        # A frame whose render settled as an abstention has none and never
+        # will: it is that abstention, recorded here, so it stops holding its
+        # mission (review of #144).
+        settled = [
+            AutomaticHeadTailRow(
+                capture_id=f.capture_id,
+                status=renders[f.capture_id].status,
+                predictor_version=AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
+                slate_probability=f.slate_probability,
+            )
+            for f in inputs.frames
+            if f.capture_id in renders
+            and renders[f.capture_id].status != "rendered"
+            and renders[f.capture_id].settled
+        ]
+        if settled:
+            await self._write(
+                target, self._catalog.persist_automatic_head_tails, settled
+            )
+            activity.logger.info(
+                "dive=%s: %d frames have no render and never will (abstentions)",
+                target.mission_id,
+                len(settled),
+            )
+        done = {r.capture_id for r in settled}
         for f in inputs.frames:
+            if f.capture_id in done:
+                continue
+            render = renders.get(f.capture_id)
+            rendered = render is not None and render.status == "rendered"
             frames.append(
                 AutomaticFrame(
                     capture_id=f.capture_id,
                     raw=self._store.layout.raw(target.tenant_id, f.checksum),
-                    jpeg=self._automatic_jpeg_key(
-                        target, f.checksum, inputs.camera_calibration_id
-                    ),
-                    write_jpeg=True,
                     jpeg_render_version=AUTOMATIC_JPEG_RENDER_VERSION,
+                    render_url=presign(render.key) if rendered else None,
                     slate_probability=f.slate_probability,
                     is_slate=f.is_slate,
                 )
@@ -420,14 +464,14 @@ class AutomaticResultsActivities:
             species_version=SPECIES_PREDICTOR_VERSION,
         )
         images = []
-        for c in captures:
-            # Every capture here has a render recorded (the store selects them).
-            jpeg = await self._recorded_render(target, c)
+        # Every capture here has a render named (the store selects them).
+        urls = await self._recorded_renders(target, captures)
+        for c, url in zip(captures, urls):
             images.append(
                 PredictSpeciesImage(
                     capture_id=c.capture_id,
                     headtail_prediction_id=c.automatic_head_tail_prediction_id,
-                    jpeg=jpeg,
+                    jpeg_url=url,
                     mask_bbox=c.mask_bbox,
                     has_existing_prediction=c.has_existing_prediction,
                 )
@@ -499,12 +543,10 @@ class AutomaticResultsActivities:
                 len(other_camera),
             )
         skip = {c.capture_id for c in (*unrendered, *other_camera)}
-        for c in inputs.candidates:
-            if c.capture_id in skip:
-                continue
-            jpeg = await self._recorded_render(target, c)
+        kept = [c for c in inputs.candidates if c.capture_id not in skip]
+        for c, url in zip(kept, await self._recorded_renders(target, kept)):
             frames.append(
-                AutomaticCalibrationFrame(capture_id=c.capture_id, jpeg=jpeg,
+                AutomaticCalibrationFrame(capture_id=c.capture_id, jpeg_url=url,
                                           x=c.x, y=c.y)  # fmt: skip
             )
         return AutomaticCalibrationPlan(

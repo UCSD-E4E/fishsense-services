@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -43,6 +44,9 @@ logger = logging.getLogger(__name__)
 
 #: How long a presigned upload or read stays valid.
 DEFAULT_EXPIRES_SECONDS = 3600
+#: A render's presigned PUT or GET rides in a processor payload, which can wait
+#: in a queue for hours: a week, SigV4's longest (2026-10-19).
+RENDER_EXPIRES_SECONDS = 7 * 24 * 3600
 
 
 class NoTenantStore(LookupError):
@@ -69,6 +73,9 @@ class StoredObject:
     size: int
     #: Base64 SHA-256, as S3 reports it; None if stored without one.
     sha256: str | None
+    #: Hex MD5 -- the ETag of an object PUT in one part (a render); None for
+    #: a multipart ETag, which is not one.
+    md5: str | None = field(default=None, compare=False)
 
 
 class TenantObjects:
@@ -109,6 +116,19 @@ class TenantObjects:
         }
         return PresignedUpload(url=url, headers=headers)
 
+    def presign_render_put(
+        self, key: str, *, expires_seconds: int = RENDER_EXPIRES_SECONDS
+    ) -> PresignedUpload:
+        """A PUT of a render: its bytes are not known yet, so no checksum or
+        size is signed -- the uploader reports the MD5, checked with `head`
+        (2026-10-19)."""
+        url = self._public.generate_presigned_url(
+            "put_object",
+            Params={"Bucket": self.bucket, "Key": key, "ContentType": "image/jpeg"},
+            ExpiresIn=expires_seconds,
+        )
+        return PresignedUpload(url=url, headers={"Content-Type": "image/jpeg"})
+
     def presign_get(
         self, key: str, *, expires_seconds: int = DEFAULT_EXPIRES_SECONDS
     ) -> str:
@@ -128,8 +148,11 @@ class TenantObjects:
             if error.response.get("Error", {}).get("Code") in {"404", "NoSuchKey"}:
                 return None
             raise
+        etag = found.get("ETag", "").strip('"')
         return StoredObject(
-            size=found["ContentLength"], sha256=found.get("ChecksumSHA256")
+            size=found["ContentLength"],
+            sha256=found.get("ChecksumSHA256"),
+            md5=etag if re.fullmatch(r"[0-9a-f]{32}", etag) else None,
         )
 
 
