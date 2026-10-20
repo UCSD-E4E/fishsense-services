@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.17.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.16.0...v0.17.0) (2026-10-20)
+
+
+### Features
+
+* Lite fish show their photo on /fish ([f5ab667](https://github.com/UCSD-E4E/fishsense-services/commit/f5ab667eebf1969039797dc05bf3dc8d6ddc9474))
+* Lite fish show their photo on /fish ([92a3330](https://github.com/UCSD-E4E/fishsense-services/commit/92a333089a9b44bf2b6253684009b44b4a3790a5))
+
+
+### Bug Fixes
+
+* **api:** the seed's render key is repeated, not imported from the contracts ([adca785](https://github.com/UCSD-E4E/fishsense-services/commit/adca785a8bc903fb5070d5f24a4f27c8e65f18a9))
+* review findings on Lite photos ([#151](https://github.com/UCSD-E4E/fishsense-services/issues/151)) ([f7e99cb](https://github.com/UCSD-E4E/fishsense-services/commit/f7e99cb371498f71ec469ed069f0aa85684d6bc9))
+* the renders catalog passes the bucket to current_renders (review of the stack) ([311a647](https://github.com/UCSD-E4E/fishsense-services/commit/311a647bc08a8c249998b6d834eed72c29cd38b6))
+
 ## [0.16.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.15.1...v0.16.0) (2026-10-20)
 
 
