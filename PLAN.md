@@ -676,7 +676,12 @@ display.
   (`YYYY.MM.DD.PROJECT.LOCATION`, with README and manifest). It holds missions across
   expedition days. It is the natural home for whatever a trip shares: water conditions,
   and calibrations borrowed between dives on the same trip.
-  - Nullable for legacy dives. Grouping them afterwards is a dry-run tool.
+  - Nullable for legacy dives. Grouping them afterwards is a dry-run tool:
+    `infer-deployments` (`deployment_inference`, the owner's rules 2026-10-20) reads
+    each mission's nearest dated and placed folders, treats copies across NAS dumps
+    as one session, and makes one deployment per place on dates at most 2 days
+    apart. On production's rows (2026-10-20) it plans 37 trips: 32 new, 466
+    missions to write.
   - **Naming rule:** a NRP/Kubernetes object is always a "processor Deployment"
     (`k8s_deployment` in code), and bare "deployment" means the field concept. This goes
     into CLAUDE.md with the first migration. §4.8's title predates the rule.

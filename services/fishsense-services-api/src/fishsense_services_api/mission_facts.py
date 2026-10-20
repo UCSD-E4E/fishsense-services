@@ -32,6 +32,7 @@ __all__ = [
     "StatedPort",
     "Purpose",
     "RULED",
+    "is_dataset_name",
     "dataset_date",
     "dataset_of",
     "device_label_in_path",
@@ -131,11 +132,16 @@ def dataset_date(name: str) -> date:
     return date(*(int(part) for part in name.split(".")[:3]))
 
 
+def is_dataset_name(part: str) -> bool:
+    """Whether a folder is named like an e4edm dataset (``YYYY.MM.DD.P.LOCATION``)."""
+    return bool(_DATASET.match(part))
+
+
 def dataset_of(source_path: str) -> tuple[str, str] | None:
     """The e4edm dataset a mission's folder sits in, as (name, path), or None."""
     parts = source_path.split("/")
     for i, part in enumerate(parts[:-1]):
-        if _DATASET.match(part):
+        if is_dataset_name(part):
             return part, "/".join(parts[: i + 1])
     return None
 

@@ -56,6 +56,7 @@ __all__ = [
     "PlannedDeployment",
     "apply_backfill",
     "plan_backfill",
+    "plan_fingerprint",
 ]
 
 RULE = "the owner's rule, 2026-10-16"
@@ -138,14 +139,20 @@ def _purpose(row, overrides: Mapping[int, str | None]) -> tuple[str | None, str 
     return infer_purpose(row.name, row.source_path)
 
 
-def _fingerprint(ingested_before, missions, deployments) -> str:
-    body = {
-        "ingested_before": ingested_before.isoformat(),
-        "missions": [asdict(m) for m in missions],
-        "deployments": [asdict(d) for d in deployments],
-    }
+def plan_fingerprint(body: Mapping) -> str:
+    """What a reviewed plan is known by: everything it would write, hashed."""
     encoded = json.dumps(body, sort_keys=True, default=str).encode()
     return hashlib.sha256(encoded).hexdigest()[:16]
+
+
+def _fingerprint(ingested_before, missions, deployments) -> str:
+    return plan_fingerprint(
+        {
+            "ingested_before": ingested_before.isoformat(),
+            "missions": [asdict(m) for m in missions],
+            "deployments": [asdict(d) for d in deployments],
+        }
+    )
 
 
 async def plan_backfill(
