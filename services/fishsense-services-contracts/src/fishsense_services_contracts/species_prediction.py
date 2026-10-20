@@ -33,9 +33,9 @@ from __future__ import annotations
 from typing import List, Optional, Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, field_validator, ConfigDict
+from pydantic import BaseModel, field_validator, ConfigDict, model_validator
 
-from fishsense_services_contracts._boxes import check_box
+from fishsense_services_contracts._boxes import check_box, check_one_image
 from fishsense_services_contracts.object_store import ObjectRef
 from fishsense_services_contracts.renamed import renamed_from
 
@@ -127,7 +127,10 @@ class PredictSpeciesImage(BaseModel):
     #: The head/tail prediction the box is from. A newer one makes the species
     #: row stale.
     headtail_prediction_id: UUID
-    jpeg: ObjectRef
+    #: The image: a stage's JPEG by reference, or the capture's render by
+    #: presigned URL (the automatic track, 2026-10-19). One of them.
+    jpeg: Optional[ObjectRef] = None
+    jpeg_url: Optional[str] = None
     #: ``[x_min, y_min, x_max, y_max)`` in the JPEG's pixels.
     mask_bbox: List[int]
     #: A species row already exists. Only the activity knows whether it is
@@ -138,6 +141,11 @@ class PredictSpeciesImage(BaseModel):
     @classmethod
     def _box(cls, value: List[int]) -> List[int]:
         return check_box(value)
+
+    @model_validator(mode="after")
+    def _one_image(self) -> "PredictSpeciesImage":
+        check_one_image(self.jpeg, self.jpeg_url)
+        return self
 
 
 def _candidates(value: List[SpeciesCandidate]) -> List[SpeciesCandidate]:

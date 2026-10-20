@@ -180,7 +180,7 @@ class SpeciesPredictActivities:
                 predictor_version=SPECIES_FALLBACK_PREDICTOR_VERSION,
             )
 
-        jpeg = await self._object_store().download_processed_jpeg(image.jpeg)
+        jpeg = await self._object_store().download_image(image.jpeg, image.jpeg_url)
         try:
             result = await asyncio.to_thread(
                 predict_species, jpeg, image, payload.candidates, classifier

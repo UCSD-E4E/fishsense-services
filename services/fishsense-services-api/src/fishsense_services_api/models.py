@@ -1360,6 +1360,39 @@ class AutomaticMeasurement(Base):
     created_at: Mapped[datetime] = _created_at()
 
 
+class CaptureRender(Base):
+    """A capture's raw rectified to a JPEG in its tenant's bucket, or why not
+    (0050); append-only, current = latest ``seq`` per capture."""
+
+    __tablename__ = "capture_renders"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        _fk(("tenant_id", "capture_id"), "captures"),
+        _fk(("tenant_id", "camera_calibration_id"), "camera_calibrations"),
+        _capture_seq_index("capture_renders"),
+        Index(
+            "capture_renders_rendered_once_idx",
+            "tenant_id", "capture_id", "render_version", "camera_calibration_id",
+            unique=True, postgresql_where=text("status = 'rendered'"),
+        ),  # fmt: skip
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    status: Mapped[str] = mapped_column(Text)
+    render_version: Mapped[int] = mapped_column(Integer)
+    camera_calibration_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    bucket: Mapped[str | None] = mapped_column(Text)
+    key: Mapped[str | None] = mapped_column(Text)
+    bytes: Mapped[int | None] = mapped_column(BigInteger)
+    md5: Mapped[str | None] = mapped_column(Text)
+    width: Mapped[int | None] = mapped_column(Integer)
+    height: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = _created_at()
+
+
 class MobileCapture(Base):
     """The mobile CaptureExtension (0038): what the phone recorded with a
     capture, and the commit request as received. Append-only."""

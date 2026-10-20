@@ -327,3 +327,31 @@ async def test_anything_else_is_refused(s3, key):
     """The review of foundation/object-store: any tenants/<x>/.../*.JPG passed."""
     with pytest.raises(sut.RefusedWrite):
         await _store(s3).upload_processed_jpeg(ObjectRef(bucket=LABELS, key=key), b"J")
+
+
+# -- a render, by presigned URL (2026-10-19) ----------------------------------------
+
+
+async def test_an_image_by_url_is_fetched_from_the_url(s3, monkeypatch):
+    """A render is in its tenant's bucket, which the processor holds no key
+    for: it is read through the presigned GET the orchestrator issued."""
+    fetched = []
+    monkeypatch.setattr(sut, "http_get", lambda url: fetched.append(url) or b"R")
+
+    got = await _store(s3).download_image(url="https://garage/t/renders/k?sig")
+
+    assert got == b"R" and fetched == ["https://garage/t/renders/k?sig"]
+
+
+async def test_an_image_by_ref_is_the_stored_jpeg(s3):
+    s3.put_object(Bucket=LABELS, Key=f"tenants/{TENANT}/preprocess_jpeg/{SUM}.JPG",
+                  Body=b"J")  # fmt: skip
+    ref = ObjectRef(bucket=LABELS, key=f"tenants/{TENANT}/preprocess_jpeg/{SUM}.JPG")
+    assert await _store(s3).download_image(ref=ref) == b"J"
+
+
+async def test_an_image_needs_one_of_a_ref_and_a_url(s3):
+    with pytest.raises(ValueError):
+        await _store(s3).download_image()
+    with pytest.raises(ValueError):
+        await _store(s3).download_image(ref=ObjectRef(bucket="b", key="k"), url="u")

@@ -259,6 +259,13 @@ services:
       # model-weights/slate-detector/q1/ and fishsense-processor-secrets pins
       # them (FISHSENSE_SLATE_DETECTOR_SHA256/_SIZE; slate_detect/settings.py).
       FISHSENSE_SLATE_DETECTION_ENABLED: "true"
+      # Renders: every capture's raw rectified to a JPEG in its tenant's own
+      # bucket (renders/stage.py). The orchestrator presigns each render's PUT
+      # with the tenant stores the API reads, for the public endpoint the
+      # processor reaches. The hourly backlog is off until enabled here.
+      FISHSENSE_TENANT_STORES_FILE: /run/tenant/object-stores/stores.json
+      FISHSENSE_OBJECT_STORE_PUBLIC_URL: https://s3.e4e.ucsd.edu
+      FISHSENSE_RENDERS_ENABLED: "false"
     # FISHSENSE_DATABASE_URL (app role), the NAS, Label Studio and Garage keys.
     env_file:
       - /run/tenant/secrets/orchestrator.env
@@ -268,6 +275,8 @@ services:
       - /run/tenant/temporal:/run/tenant/temporal:ro
       # NRP kubeconfig (vault-agent SOFT render — secrets.nix).
       - /run/tenant/nrp:/run/tenant/nrp:ro
+      # Each tenant's own bucket and key, as the API reads them (renders).
+      - /run/tenant/object-stores:/run/tenant/object-stores:ro
     depends_on:
       migrate:
         condition: service_completed_successfully

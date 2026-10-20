@@ -70,6 +70,16 @@ from fishsense_services_orchestrator.automatic_results.workflow import (
     AutomaticResultsParentWorkflow,
     AutomaticRunReport,
 )
+from fishsense_services_contracts.renders import (
+    RENDER_VERSION,
+    RenderCapturesInput,
+    RenderFrame,
+    RenderResult,
+)
+from fishsense_services_orchestrator.renders.activities import (
+    RenderPersistReport,
+    RenderTarget,
+)
 from fishsense_services_orchestrator.object_store.contracts import (
     CleanupRawBytesResult,
     StageRawBytesResult,
@@ -78,6 +88,7 @@ from fishsense_services_orchestrator.object_store.contracts import (
 
 TENANT, MISSION = uuid.uuid4(), uuid.uuid4()
 TARGET = AutomaticTarget(TENANT, MISSION)
+CAMERA = uuid.uuid4()
 QUEUE = "test-automatic-results"
 K = [[1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0]]
 REF = ObjectRef(bucket="b", key="k")
@@ -86,12 +97,24 @@ EVENTS: list[tuple] = []
 SELECTS: list[tuple] = []
 
 
-def _frames_input(n):
+def _frames_input(n, *, rendered=True):
+    """Frames with their render's URL, or -- not rendered yet -- none."""
+    url = "https://garage/fishsense-tenant-lab/renders/k.JPG?sig" if rendered else None
     return PredictAutomaticFramesInput(
         tenant_id=TENANT, mission_id=MISSION, camera_matrix=K,
-        distortion_coefficients=[0.0] * 5,
-        frames=[AutomaticFrame(capture_id=uuid.uuid4(), raw=REF, jpeg=REF)
+        distortion_coefficients=[0.0] * 5, camera_calibration_id=CAMERA,
+        frames=[AutomaticFrame(capture_id=uuid.uuid4(), raw=REF, render_url=url)
                 for _ in range(n)],
+    )  # fmt: skip
+
+
+def _render_input(n):
+    return RenderCapturesInput(
+        tenant_id=TENANT, mission_id=MISSION, render_version=RENDER_VERSION,
+        camera_calibration_id=CAMERA, camera_matrix=K,
+        distortion_coefficients=[0.0] * 5,
+        frames=[RenderFrame(capture_id=uuid.uuid4(), raw=REF, key="renders/k.JPG",
+                            put_url="https://garage/put?sig") for _ in range(n)],
     )  # fmt: skip
 
 
@@ -131,9 +154,13 @@ def _measure_plan(n):
     )  # fmt: skip
 
 
-def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET):
+def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET,
+           renders="all"):  # fmt: skip
     """`selected` is the cohort's answer every time, or a list of answers in
-    turn (None once it runs out)."""
+    turn (None once it runs out). `renders`: the frames are ``all`` rendered
+    already, rendered ``after`` the render step, or the tenant has
+    ``no-bucket``."""
+    rendered = [renders == "all"]
     cohort = list(selected) if isinstance(selected, list) else None
 
     @activity.defn(name="select_next_dive_for_automatic_results")
@@ -156,7 +183,19 @@ def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET)
 
     @activity.defn(name="resolve_automatic_frames_inputs")
     async def frames_in(t: AutomaticTarget) -> PredictAutomaticFramesInput:
-        return _frames_input(frames)
+        return _frames_input(frames, rendered=rendered[0])
+
+    @activity.defn(name="resolve_render_inputs")
+    async def render_in(t: RenderTarget) -> Optional[RenderCapturesInput]:
+        EVENTS.append(("resolve renders",))
+        return None if renders == "no-bucket" else _render_input(frames)
+
+    @activity.defn(name="persist_renders")
+    async def render_out(t: RenderTarget, p: RenderCapturesInput,
+                         r: List[RenderResult]) -> RenderPersistReport:  # fmt: skip
+        EVENTS.append(("persist renders", len(r)))
+        rendered[0] = True
+        return RenderPersistReport(written=len(r), rendered=len(r))
 
     @activity.defn(name="persist_automatic_frames")
     async def frames_out(t: AutomaticTarget, r: List[AutomaticFrameResult]) -> int:
@@ -217,7 +256,7 @@ def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET)
 
     return [select, failed, frames_failed, frames_in, frames_out, species_in, species_out, cal_in,
             cal_out, measure_in, measure_out, wake_gpu, wake_per_image, wake_light,
-            stage, cleanup]  # fmt: skip
+            stage, cleanup, render_in, render_out]  # fmt: skip
 
 
 @activity.defn(name="_record")
@@ -313,6 +352,19 @@ class _FailingSpecies:  # pylint: disable=too-few-public-methods
         )
 
 
+@workflow.defn(name="RenderCapturesWorkflow")
+class _Render:  # pylint: disable=too-few-public-methods
+    @workflow.run
+    async def run(self, payload: dict) -> list:
+        await _record_child()
+        return [RenderResult(capture_id=f["capture_id"], status="rendered",
+                             render_version=payload["render_version"],
+                             camera_calibration_id=payload["camera_calibration_id"],
+                             bytes=1,
+                             md5="0" * 32).model_dump(mode="json")
+                for f in payload["frames"]]  # fmt: skip
+
+
 @workflow.defn(name="FitAutomaticCalibrationWorkflow")
 class _Calibration:  # pylint: disable=too-few-public-methods
     @workflow.run
@@ -348,7 +400,7 @@ async def _run(
                               else _PartialFrames if frames_partial else _Frames,
                               _FailingSpecies if species_fails else _Species]),
             Worker(env.client, task_queue=PROCESSOR_TASK_QUEUE, activities=[_record],
-                   workflows=[_Calibration]),
+                   workflows=[_Calibration, _Render]),
             Worker(env.client, task_queue=PROCESSOR_LIGHT_TASK_QUEUE,
                    activities=[_record],
                    workflows=[_Measure]),
@@ -377,6 +429,37 @@ async def test_one_mission_every_step_in_order():
         ("child", f"automatic-species-{MISSION}"),
         ("persist species", ["decode_failed"]),
     ]
+
+
+async def test_frames_without_a_render_are_rendered_first_on_the_same_staging():
+    """SAM segments each frame's render (2026-10-19): the captures owing one
+    are rendered by the render stage's own steps on the raws this run staged
+    (one NAS pass), then the frames are read back with their URLs."""
+    await _run(AutomaticResultsForMissionWorkflow, TARGET, renders="after")
+
+    assert EVENTS[:8] == [
+        ("wake gpu",),
+        ("stage",),
+        ("resolve renders",),
+        ("wake per-image",),
+        ("child", f"render-captures-{MISSION}"),
+        ("persist renders", 2),
+        ("child", f"automatic-frames-{MISSION}"),
+        ("persist frames", 2),
+    ]
+    assert EVENTS[8] == ("cleanup",)
+
+
+async def test_with_no_bucket_for_renders_the_frames_wait_and_say_so():
+    report = await _run(AutomaticResultsForMissionWorkflow, TARGET, renders="no-bucket")
+
+    assert "frames: the tenant has no bucket for renders" in report.skipped
+    assert (
+        "calibration, lengths, species: 2 frames have no render yet" in report.skipped
+    )
+    kinds = [e[0] for e in EVENTS]
+    assert "persist frames" not in kinds and "persist calibration" not in kinds
+    assert ("cleanup",) in EVENTS
 
 
 async def test_a_species_failure_costs_the_mission_nothing():

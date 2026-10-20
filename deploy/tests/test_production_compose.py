@@ -421,6 +421,27 @@ def test_a_half_seeded_mobile_client_renders_nothing():
     assert "{{ if and .Data.data.issuer_url .Data.data.client_id }}" in mobile.contents
 
 
+def test_the_orchestrator_presigns_renders_in_each_tenants_own_store():
+    """Renders live in the tenant's bucket (2026-10-19), and only the API and
+    the orchestrator hold the tenant stores: the orchestrator presigns each
+    render's PUT for the processor and checks what was stored. The same file
+    as the API's, mounted the same way; presigned for the public endpoint the
+    processor reaches."""
+    orchestrator = services()["orchestrator"]
+    env = service_env(orchestrator)
+
+    assert (f"{TENANT_RUN}/object-stores", f"{TENANT_RUN}/object-stores") in volumes(
+        orchestrator
+    )
+    assert (
+        env["FISHSENSE_TENANT_STORES_FILE"] == f"{TENANT_RUN}/object-stores/stores.json"
+    )
+    assert env["FISHSENSE_OBJECT_STORE_PUBLIC_URL"] == "https://s3.e4e.ucsd.edu"
+    assert "0" in [str(g) for g in orchestrator.get("group_add", [])]
+    # Renders run on demand until enabled: a reviewed diff here.
+    assert env["FISHSENSE_RENDERS_ENABLED"] == "false"
+
+
 def test_the_api_reads_each_tenants_own_store():
     """Bucket-per-tenant (PLAN.md §9.11): the API presigns each tenant's
     uploads with that tenant's key, from the stores krg-infra provisions. The

@@ -59,5 +59,6 @@ def test_the_workers_and_clients_use_this_converter():
 
 def test_the_version_is_pinned():
     """Bumped on purpose, here too. v7 was the rename alone (the wire did not
-    change); v8 (2026-10-19) added optional fields for the automatic render."""
-    assert CONTRACT_VERSION == 8
+    change); v8 (2026-10-19) added optional fields for the automatic render;
+    v9 (2026-10-19) renders in the tenant's bucket, read by URL."""
+    assert CONTRACT_VERSION == 9

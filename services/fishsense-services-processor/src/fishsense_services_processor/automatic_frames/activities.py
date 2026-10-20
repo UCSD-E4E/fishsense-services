@@ -9,18 +9,14 @@ owns it in production:
 * the dot: the laser stage's kernel (`laser_predict.activities.
   _predict_from_raw`: `LinearRawImage`, rectified output, the verified
   detector) and its expected-laser region gate;
-* the rectified JPEG: the head/tail stage-5.1 rendering
-  (`headtail_preprocess.activities.rectify_and_encode_jpeg`), written where
-  the orchestrator says, so the species and calibration steps read the very
-  frame SAM saw. It is render `AUTOMATIC_JPEG_RENDER_VERSION` under the
-  payload's camera calibration, keyed by both
-  (`object_store.automatic_jpeg_folder`): a frame asking for another render,
-  or whose key is not that render's, is refused and retried
-  (`RenderVersionMismatch`), so a worker at another version -- a lab worker
-  deployed by hand -- never writes its render where another is expected; the
-  result names the render and camera it wrote (2026-10-19). A contract-7
-  frame (no render named; in flight across the deploy) runs as it did --
-  written only if `write_jpeg` -- and names none;
+* the rectified JPEG: the capture's render, made by the render stage
+  (`renders`) in its tenant's bucket and read through the presigned GET the
+  orchestrator issues (`render_url`, contract 9, 2026-10-19); this stage
+  renders and writes nothing, and the result names the render it read.
+  Before renders (contracts 7-8) it rendered the frame itself
+  (`headtail_preprocess.activities.rectify_and_encode_jpeg`) and wrote it
+  where told, refusing a render version not its own
+  (`RenderVersionMismatch`); such a payload in flight still runs so;
 * the mask and head/tail: `automatic_results.frames` (the head/tail kernel
   behind SAM's own score gate), with SAM 3.1's verified checkpoint
   (`headtail_predict.weights`).
@@ -109,12 +105,14 @@ class AutomaticFramesActivities:  # pylint: disable=too-few-public-methods
         if not self._cuda_available():
             raise _no_gpu()
         frame = payload.frame
-        # Contract 8 names the render; contract 7 (in flight across the
-        # deploy) does not, and runs as it did, naming none.
+        # Contract 9: the render stage made the render, read by URL. Contract
+        # 8 named the render this stage wrote; contract 7 (in flight across
+        # that deploy) did not, and runs as it did, naming none.
+        by_url = frame.render_url is not None
         versioned = frame.jpeg_render_version is not None
-        if versioned:
+        if versioned and not by_url:
             _check_render(payload)
-        write = versioned or frame.write_jpeg
+        write = not by_url and (versioned or frame.write_jpeg)
         store = self._object_store()
         with tempfile.TemporaryDirectory() as tmpdir:
             try:
@@ -138,13 +136,16 @@ class AutomaticFramesActivities:  # pylint: disable=too-few-public-methods
                     payload.camera_matrix,
                     payload.distortion_coefficients,
                 )
-                raw_bytes = await asyncio.to_thread(raw_path.read_bytes)
-                jpeg = await asyncio.to_thread(
-                    self._render_jpeg,
-                    raw_bytes,
-                    payload.camera_matrix,
-                    payload.distortion_coefficients,
-                )
+                if by_url:
+                    jpeg = await store.download_image(url=frame.render_url)
+                else:
+                    raw_bytes = await asyncio.to_thread(raw_path.read_bytes)
+                    jpeg = await asyncio.to_thread(
+                        self._render_jpeg,
+                        raw_bytes,
+                        payload.camera_matrix,
+                        payload.distortion_coefficients,
+                    )
             except DECODE_ERRORS as exc:
                 # Recorded, not raised: raised, it retries to the child's
                 # timeout and the dive is re-selected every hour, stalling the

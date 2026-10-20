@@ -136,6 +136,21 @@ def test_a_presigned_read_returns_the_object(stores):
     assert _get(lab.presign_get("mobile/e/rgb.jpg", expires_seconds=60)) == BODY
 
 
+def test_a_render_upload_is_stored_and_its_md5_read_back(stores):
+    """A render's bytes are not known when the orchestrator presigns, so its
+    PUT signs no checksum; the processor reports the MD5 it wrote and the
+    orchestrator checks it against the stored object (2026-10-19). Valid for
+    a week: a render waits in a queue."""
+    lab = stores.for_tenant("lab")
+    upload = lab.presign_render_put("renders/r1_ab/c.JPG")
+
+    assert "X-Amz-Expires=604800" in upload.url
+    assert _put(upload, BODY) == 200
+    stored = lab.head("renders/r1_ab/c.JPG")
+    assert stored.size == len(BODY)
+    assert stored.md5 == hashlib.md5(BODY).hexdigest()
+
+
 def test_urls_are_signed_for_the_public_endpoint(garage):
     """Phones and browsers reach Garage at its public address; the API's own
     checks use the internal one. A signature covers the host, so presigning

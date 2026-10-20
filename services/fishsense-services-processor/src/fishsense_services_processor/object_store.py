@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import urllib.request
 from pathlib import Path
 
 import boto3
@@ -75,6 +76,12 @@ def build_s3_client(settings: ObjectStoreConnection):
     )
 
 
+def http_get(url: str) -> bytes:
+    """GET a presigned URL's object. Blocking."""
+    with urllib.request.urlopen(url, timeout=300) as response:  # noqa: S310
+        return response.read()
+
+
 class ProcessorObjectStore:
     """Read scratch, write a tenant's JPEGs. Never delete."""
 
@@ -101,6 +108,18 @@ class ProcessorObjectStore:
         resolved it. Head/tail predict reads the stage-5.1 JPEG because it is
         the exact frame the labeler is shown (v1)."""
         return await self._get(ref)
+
+    async def download_image(
+        self, ref: ObjectRef | None = None, url: str | None = None
+    ) -> bytes:
+        """An image a step reads: a capture's render through the presigned GET
+        the orchestrator issued (its tenant's bucket, which this processor
+        holds no key for; 2026-10-19), or a stage's JPEG by reference."""
+        if (ref is None) == (url is None):
+            raise ValueError("read an image by `ref` or by `url`, one of them")
+        if url is not None:
+            return await asyncio.to_thread(http_get, url)
+        return await self.download_processed_jpeg(ref)
 
     # -- writes --------------------------------------------------------------
 

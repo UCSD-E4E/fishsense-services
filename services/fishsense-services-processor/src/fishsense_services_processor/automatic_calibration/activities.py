@@ -235,7 +235,7 @@ class AutomaticCalibrationActivities:  # pylint: disable=too-few-public-methods
         features, kept = [], []
         for frame in chosen:
             try:
-                jpeg = await store.download_processed_jpeg(frame.jpeg)
+                jpeg = await store.download_image(frame.jpeg, frame.jpeg_url)
                 features.append(
                     await asyncio.to_thread(_features, jpeg, (frame.x, frame.y))
                 )
