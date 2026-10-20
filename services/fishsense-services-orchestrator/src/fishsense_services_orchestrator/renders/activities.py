@@ -235,6 +235,22 @@ class RenderActivities:
                 raise _refuse(target, f"capture {r.capture_id}: a render not owed")
             if r.raw_status is not None and not frame.owes_raw:
                 raise _refuse(target, f"capture {r.capture_id}: a raw copy not owed")
+            # Review of the stack: what a frame owes must be answered, or the
+            # capture stays owed while the run looks clean.
+            if r.status == "not_asked" and frame.owes_render:
+                raise _refuse(
+                    target, f"capture {r.capture_id}: a render owed, not made"
+                )
+            if (
+                frame.owes_raw
+                and r.raw_status is None
+                and r.status != "raw_unavailable"
+            ):
+                raise _refuse(
+                    target,
+                    f"capture {r.capture_id}: its raw copy was owed and not answered "
+                    "-- a processor older than contract 10?",
+                )
             if r.raw_status == "copied":
                 raw = await self._checked_raw(target, objects, frame, r, report)
                 if raw is not None:

@@ -11,8 +11,12 @@ checksum. Append-only; one copy per capture per bucket.
 **Renders settle per bucket** (review of #151). 0051's ``rendered_once`` was
 one render per (capture, version, camera), whatever the bucket, so a tenant
 whose bucket moved could never be rendered into the new one: its photos were
-gone for good. The index now includes the bucket. Production had one bucket
-per tenant when this ran, so no existing row is affected.
+gone for good. This adds ``rendered_once_per_bucket``, which the new code's
+``ON CONFLICT`` names. The old index stays for now: the render backlog was
+running in production when this deployed, and the orchestrator from before
+it names the old index's columns in its ``ON CONFLICT`` until it restarts
+(review of the stack). 0054 drops it once this release's orchestrator runs;
+until then a render into a second bucket is refused by the old index.
 
 Revision ID: 0052
 Revises: 0051
@@ -32,7 +36,7 @@ down_revision = "0051"
 TABLE = "capture_raws"
 ACTIVE_TENANT = "NULLIF(current_setting('app.tenant_id', true), '')::uuid"
 _LAB = "tenant_id = (SELECT public.research_tenant_id())"
-RENDERED_ONCE = "capture_renders_rendered_once_idx"
+PER_BUCKET = "capture_renders_rendered_once_per_bucket_idx"
 
 
 def _app_role() -> str:
@@ -78,9 +82,8 @@ def upgrade() -> None:
     )
     op.execute(f"GRANT SELECT ON {TABLE} TO {RESEARCH_ROLE}")
 
-    op.execute(f"DROP INDEX {RENDERED_ONCE}")
     op.execute(f"""
-        CREATE UNIQUE INDEX {RENDERED_ONCE}
+        CREATE UNIQUE INDEX {PER_BUCKET}
             ON capture_renders (tenant_id, capture_id, render_version,
                                 camera_calibration_id, bucket)
             WHERE status = 'rendered'
@@ -88,13 +91,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute(f"DROP INDEX {RENDERED_ONCE}")
-    op.execute(f"""
-        CREATE UNIQUE INDEX {RENDERED_ONCE}
-            ON capture_renders (tenant_id, capture_id, render_version,
-                                camera_calibration_id)
-            WHERE status = 'rendered'
-        """)
+    op.execute(f"DROP INDEX {PER_BUCKET}")
     op.execute(f"DROP POLICY {RESEARCH_LAB_BINDING} ON public.{TABLE}")
     op.execute(f"DROP POLICY {RESEARCH_LAB_READ} ON public.{TABLE}")
     op.execute(f"DROP TABLE {TABLE}")

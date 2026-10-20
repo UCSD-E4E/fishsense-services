@@ -1373,6 +1373,11 @@ class CaptureRender(Base):
         Index(
             "capture_renders_rendered_once_idx",
             "tenant_id", "capture_id", "render_version", "camera_calibration_id",
+            unique=True, postgresql_where=text("status = 'rendered'"),
+        ),  # fmt: skip
+        Index(
+            "capture_renders_rendered_once_per_bucket_idx",
+            "tenant_id", "capture_id", "render_version", "camera_calibration_id",
             "bucket", unique=True, postgresql_where=text("status = 'rendered'"),
         ),  # fmt: skip
     )
