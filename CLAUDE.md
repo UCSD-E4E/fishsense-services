@@ -169,6 +169,9 @@ Q() { docker exec fishsense-postgres-1 psql -U postgres -d fishsense_services -A
   which is free text typed into the camera. Nothing else counts: a missing
   `D` does not mean flat, and lab notes are not evidence. Never write a port without its
   `port_source`.
+- **A mission's purpose is what it was for, never whether it calibrates**
+  (0048). Nearly every dive has a calibration board in it. Never select laser
+  calibration by purpose; find the board in the frames.
 
 Calibration, accuracy and validation claims follow the user's rigour rules:
 - every estimator gets a control with a known answer;

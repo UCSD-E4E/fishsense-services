@@ -9,6 +9,7 @@
 //  * a missing mission or deployment is `null`, not an error page;
 //  * the API's refusal of a port the owner's rules fix comes back as its words;
 //  * a port is shown with what said so, and an unknown one says it is unknown.
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./api/client";
 import {
@@ -17,6 +18,8 @@ import {
   getDeployments,
   getMission,
   getTenantMissions,
+  PORTS,
+  PURPOSES,
   parseMissionNumber,
   parsePort,
   parsePurpose,
@@ -121,10 +124,10 @@ describe("writing", () => {
   it("states and clears a purpose", async () => {
     const fetchMock = stub({ number: 7 });
 
-    await setMissionPurpose("t", "lab", 7, "slate");
+    await setMissionPurpose("t", "lab", 7, "laser_calibration");
     await setMissionPurpose("t", "lab", 7, null);
 
-    expect(await fetchMock.mock.calls[0][0].json()).toEqual({ purpose: "slate" });
+    expect(await fetchMock.mock.calls[0][0].json()).toEqual({ purpose: "laser_calibration" });
     expect(await fetchMock.mock.calls[1][0].json()).toEqual({ purpose: null });
   });
 
@@ -172,6 +175,8 @@ describe("form values", () => {
     expect(parsePurpose("known_length")).toBe("known_length");
     expect(parsePurpose("")).toBeNull();
     expect(() => parsePurpose("fishing")).toThrow(/purpose/);
+    // 0048: a calibration board is not a purpose; nearly every dive has one.
+    expect(() => parsePurpose("slate")).toThrow(/purpose/);
   });
 
   it("accepts only a whole, non-negative mission number", () => {
@@ -198,5 +203,20 @@ describe("labels", () => {
     expect(purposeLabel("known_length")).toBe("Known length");
     expect(purposeLabel("laser_calibration")).toBe("Laser calibration");
     expect(purposeLabel(null)).toBe("Not stated");
+  });
+});
+
+describe("the lists", () => {
+  // The API builds its enums from mission_facts, which the database's CHECKs
+  // pin; these lists are the web's copies, so they must say the same.
+  const spec = JSON.parse(readFileSync(new URL("../openapi.json", import.meta.url), "utf8"));
+  const enumOf = (field: string): string[] =>
+    spec.components.schemas.Mission.properties[field].anyOf?.find(
+      (option: { enum?: string[] }) => option.enum,
+    )?.enum ?? spec.components.schemas.Mission.properties[field].enum;
+
+  it("has the API's purposes and ports", () => {
+    expect([...PURPOSES].sort()).toEqual([...enumOf("purpose")].sort());
+    expect([...PORTS].sort()).toEqual([...enumOf("port")].sort());
   });
 });

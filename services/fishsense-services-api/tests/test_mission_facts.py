@@ -118,11 +118,27 @@ def test_other_folders_name_no_deployment(path):
         ("082929_FishModels_FSL04", "/d/082929_FishModels_FSL04", "known_length"),
         ("083123_Fish Deg Angle Tests_FSL06", "/d/x", "known_length"),
         ("083123_Fish Degree Angle Test_FSL-01", "/d/x", "known_length"),
-        ("082323_Slate_FSL02", "/d/082323_Slate_FSL02", "slate"),
-        ("H slate dive 4", "2023.08.03.FishSense.FSL-01D/H slate dive 4", "slate"),
+        # A board and nothing else: a calibration-only session.
+        ("082323_Slate_FSL02", "/d/082323_Slate_FSL02", "laser_calibration"),
+        (
+            "H slate dive 4",
+            "2023.08.03.FishSense.FSL-01D/H slate dive 4",
+            "laser_calibration",
+        ),
+        # A board beside decoys is normal: most dives carry one.
+        (
+            "2023-08-18 Nathans Pool 04-box-slate",
+            "/d/Nathans Pool/04-box-slate",
+            "known_length",
+        ),
         ("062524_Alligator4_FSL04", "dump/062524_Alligator4_FSL04", "survey"),
         ("Hogfish01_MolHITW_0926_080323", "x/Hogfish01_MolHITW_0926_080323", "survey"),
         ("080123_FSL-01 Photos", "dump/080123_FSL-01 Photos", "survey"),
+        # A board beside a site is a survey that carried one, as most do.
+        ("Alligator slate", "dump/Alligator slate", "survey"),
+        # A word that only contains "slate" is not the board.
+        ("Slater Reef", "dump/Slater Reef", "survey"),
+        ("translate test reef", "dump/translate reef", "survey"),
     ],
 )
 def test_purpose_is_inferred_from_the_name(name, path, purpose):
@@ -132,8 +148,8 @@ def test_purpose_is_inferred_from_the_name(name, path, purpose):
 @pytest.mark.parametrize(
     "name, path",
     [
-        # Two rules match: a box and a slate.
-        ("2023-08-18 Nathans Pool 04-box-slate", "/d/Nathans Pool/04-box-slate"),
+        # Two rules match: a laser calibration and a box.
+        ("LaserCalibration Box", "/d/LaserCalibration Box"),
         # A split made to separate fish frames out of a calibration.
         (
             "2023-08-14 ED-00 FSL-02D LaserCalibration3 fish",
@@ -145,6 +161,10 @@ def test_purpose_is_inferred_from_the_name(name, path, purpose):
         ("Calibration", "/d/Calibration"),
         ("intrinsics", "/d/intrinsics"),
         ("FSL-05 cal 2", "/d/FSL-05 cal 2"),
+        # A board word does not override a calibration or pool name.
+        ("Slate Checkerboard", "/d/Slate Checkerboard"),
+        ("slate intrinsics", "/d/slate intrinsics"),
+        ("Nathans Pool slate", "/d/Nathans Pool slate"),
         # A pool session no rule names.
         ("2023-08-18 Nathans Pool 04", "/d/2023.08.18.FishSense.Nathans Pool/04"),
         ("2023-08-18 Nathans Pool 08_18_Pool_Test_FSL-02", "/d/Pool_Test_FSL-02"),

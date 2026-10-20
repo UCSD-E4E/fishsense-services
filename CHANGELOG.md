@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.15.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.14.0...v0.15.0) (2026-10-20)
+
+
+### Features
+
+* a mission's purpose is what it was for, and a calibration board is not one ([7f64a09](https://github.com/UCSD-E4E/fishsense-services/commit/7f64a09c6806afc1842ada5606eb13aac7bcdd53))
+* a mission's purpose is what it was for, and a calibration board is not one ([bcdecdf](https://github.com/UCSD-E4E/fishsense-services/commit/bcdecdf840ea4368d5e4f0a19db2bcb5db58abc5))
+
+
+### Bug Fixes
+
+* review findings on purpose without slate ([#135](https://github.com/UCSD-E4E/fishsense-services/issues/135)) ([623bdb1](https://github.com/UCSD-E4E/fishsense-services/commit/623bdb119eae7f3092dd2622bab7133761c362fb))
+
 ## [0.14.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.13.1...v0.14.0) (2026-10-19)
 
 

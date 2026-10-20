@@ -29,7 +29,6 @@ export const PURPOSES: readonly Purpose[] = [
   "survey",
   "lens_calibration",
   "laser_calibration",
-  "slate",
   "known_length",
   "other",
 ];

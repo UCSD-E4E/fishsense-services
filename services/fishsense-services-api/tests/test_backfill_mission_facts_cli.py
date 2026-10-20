@@ -28,7 +28,7 @@ async def _seed(owner_engine) -> str:
         ).scalar_one()
         for path, name in (
             (f"{SAN_DIEGO}/ED-00/FSL-10D/Box", "ED-00 FSL-10D Box"),
-            ("dump/04-box-slate", "04-box-slate"),
+            ("dump/LaserCalibration Box", "LaserCalibration Box"),
         ):
             await conn.execute(
                 text("""
@@ -79,7 +79,7 @@ async def test_a_dry_run_prints_the_plan_and_writes_nothing(
     assert "DRY RUN" in out
     assert "2025.01.17.FishSense.San Diego" in out
     assert "device_suffix" in out
-    assert "the name says both known_length and slate" in out
+    assert "the name says both laser_calibration and known_length" in out
     assert re.search(r"--apply [0-9a-f]{16}", out)
     assert {(r.port, r.purpose) for r in await _facts(owner_engine)} == {
         ("unknown", None)
@@ -94,10 +94,10 @@ async def test_apply_writes_the_reviewed_plan(
     async with owner_engine.connect() as conn:
         ambiguous = (
             await conn.execute(
-                text("SELECT number FROM missions WHERE name = '04-box-slate'")
+                text("SELECT number FROM missions WHERE name = 'LaserCalibration Box'")
             )
         ).scalar_one()
-    override = f"{ambiguous}=slate"
+    override = f"{ambiguous}=laser_calibration"
     await main(_args(lab, "--purpose", override))
     fingerprint = re.search(r"--apply ([0-9a-f]{16})", capsys.readouterr().out)[1]
 
@@ -105,7 +105,7 @@ async def test_apply_writes_the_reviewed_plan(
 
     assert [(r.port, r.purpose) for r in await _facts(owner_engine)] == [
         ("corrective_optic", "known_length"),
-        ("corrective_optic", "slate"),
+        ("corrective_optic", "laser_calibration"),
     ]
     assert "applied" in capsys.readouterr().out
 
@@ -126,5 +126,5 @@ async def test_a_bad_override_is_refused_before_anything_runs(monkeypatch, capsy
     monkeypatch.setenv("FISHSENSE_DATABASE_URL", "postgresql+asyncpg://nowhere/x")
 
     assert await main(_args("lab", "--purpose", "2=fishing")) == 2
-    assert await main(_args("lab", "--purpose", "two=slate")) == 2
+    assert await main(_args("lab", "--purpose", "two=known_length")) == 2
     assert "--purpose" in capsys.readouterr().err
