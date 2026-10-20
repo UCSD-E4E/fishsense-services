@@ -32,7 +32,9 @@ from depth_measure_seed import (  # noqa: F401  (forget_identities: a fixture)
 from fishsense_services_api.automatic_results_store import ForeignCapture
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.renders_store import (
+    RENDER_MAX_UNAVAILABLE,
     RendersCatalog,
+    renders_at,
     RenderRow,
     current_renders,
     persist_renders,
@@ -108,6 +110,86 @@ async def test_a_render_or_an_abstention_settles_a_capture(owner_engine, app_eng
     assert [x.capture_id for x in later.captures] == [a, b, c]
 
 
+async def test_a_raw_missing_from_scratch_is_retried_until_its_third_time(
+    owner_engine, app_engine
+):
+    """A raw not in scratch may come back -- a moved file repaired, scratch
+    evicted mid-run -- so it stays owed; the third time it settles, and stops
+    holding its mission (review of #144)."""
+    lab = await tenant(owner_engine)
+    mission_id = await _plain_mission(owner_engine, lab)
+    a = await capture(owner_engine, lab, mission_id)
+    camera = (await _in(app_engine, lab, render_inputs, mission_id,
+                        render_version=V)).camera_calibration_id  # fmt: skip
+    missing = RenderRow(capture_id=a, status="raw_unavailable", render_version=V,
+                        camera_calibration_id=camera)  # fmt: skip
+
+    owed = []
+    for _ in range(3):
+        await _in(app_engine, lab, persist_renders, mission_id, [missing])
+        inputs = await _in(app_engine, lab, render_inputs, mission_id, render_version=V)
+        owed.append([x.capture_id for x in inputs.captures])
+    at = await _in(app_engine, lab, renders_at, [a], render_version=V,
+                   camera_calibration_id=camera)  # fmt: skip
+
+    assert owed == [[a], [a], []]  # still owed after one miss, and two
+    assert RENDER_MAX_UNAVAILABLE == 3
+    assert (at[a].status, at[a].settled) == ("raw_unavailable", True)
+
+
+async def test_owed_captures_come_a_page_at_a_time_in_capture_order(
+    owner_engine, app_engine
+):
+    """A large mission's presigned URLs would not fit one Temporal payload
+    (review of #144): it is rendered a page at a time."""
+    lab = await tenant(owner_engine)
+    mission_id = await _plain_mission(owner_engine, lab)
+    caps = [await capture(owner_engine, lab, mission_id) for _ in range(5)]
+
+    first = await _in(app_engine, lab, render_inputs, mission_id,
+                      render_version=V, limit=2)  # fmt: skip
+    rest = await _in(app_engine, lab, render_inputs, mission_id, render_version=V,
+                     after_number=first.captures[-1].number, limit=10)  # fmt: skip
+
+    assert [c.capture_id for c in first.captures] == caps[:2]
+    assert [c.capture_id for c in rest.captures] == caps[2:]
+
+
+async def test_a_render_is_looked_up_at_its_version_and_camera(
+    owner_engine, app_engine
+):
+    """Not the newest render whatever its camera: a reader asks for the one
+    its row names, or the mission's current camera (review of #144)."""
+    lab = await tenant(owner_engine)
+    device_id = await device(owner_engine, lab)
+    mission_id = await mission(owner_engine, lab, device_id=device_id)
+    a = await capture(owner_engine, lab, mission_id)
+    b = await capture(owner_engine, lab, mission_id)
+    first = (await _in(app_engine, lab, render_inputs, mission_id,
+                       render_version=V)).camera_calibration_id  # fmt: skip
+    await _in(app_engine, lab, persist_renders, mission_id, [
+        _rendered(a, first), RenderRow(capture_id=b, status="decode_failed",
+                                       render_version=V, camera_calibration_id=first),
+    ])  # fmt: skip
+    second = await camera_calibration(owner_engine, lab, device_id,
+                                      [[3100.0, 0, 2000], [0, 3100.0, 1500], [0, 0, 1]],
+                                      model="pinhole")  # fmt: skip
+    await _in(app_engine, lab, persist_renders, mission_id, [_rendered(a, second)])
+
+    at_first = await _in(app_engine, lab, renders_at, [a, b], render_version=V,
+                         camera_calibration_id=first)  # fmt: skip
+    at_second = await _in(app_engine, lab, renders_at, [a, b], render_version=V,
+                          camera_calibration_id=second)  # fmt: skip
+
+    assert at_first[a].key == f"renders/r{V}_{first.hex}/{'c' * 32}.JPG"
+    assert (at_first[b].status, at_first[b].settled, at_first[b].key) == (
+        "decode_failed",
+        True,
+        None,
+    )
+    assert at_second[a].camera_calibration_id == second and b not in at_second
+
+
 async def test_a_corrected_camera_owes_every_capture_a_new_render(
     owner_engine, app_engine
 ):
@@ -147,6 +229,7 @@ async def test_missions_with_a_human_measurement_come_first(owner_engine, app_en
 
     assert [m.mission_id for m in got] == [measured, older]
     assert [(m.owed, m.human_measured) for m in got] == [(1, True), (1, False)]
+    assert all(m.created_at is not None for m in got)
 
 
 # -- what was rendered -------------------------------------------------------------------

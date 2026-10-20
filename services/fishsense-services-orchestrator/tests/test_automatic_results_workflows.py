@@ -77,6 +77,7 @@ from fishsense_services_contracts.renders import (
     RenderResult,
 )
 from fishsense_services_orchestrator.renders.activities import (
+    RenderPage,
     RenderPersistReport,
     RenderTarget,
 )
@@ -186,9 +187,14 @@ def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET,
         return _frames_input(frames, rendered=rendered[0])
 
     @activity.defn(name="resolve_render_inputs")
-    async def render_in(t: RenderTarget) -> Optional[RenderCapturesInput]:
+    async def render_in(t: RenderTarget, after: Optional[int] = None,
+                        limit: int = 500) -> RenderPage:  # fmt: skip
         EVENTS.append(("resolve renders",))
-        return None if renders == "no-bucket" else _render_input(frames)
+        if renders == "no-bucket":
+            return RenderPage(payload=None, last_number=None, no_bucket=True)
+        if after is not None:  # one page
+            return RenderPage(payload=_render_input(0), last_number=None)
+        return RenderPage(payload=_render_input(frames), last_number=frames)
 
     @activity.defn(name="persist_renders")
     async def render_out(t: RenderTarget, p: RenderCapturesInput,
@@ -437,17 +443,33 @@ async def test_frames_without_a_render_are_rendered_first_on_the_same_staging():
     (one NAS pass), then the frames are read back with their URLs."""
     await _run(AutomaticResultsForMissionWorkflow, TARGET, renders="after")
 
-    assert EVENTS[:8] == [
-        ("wake gpu",),
+    assert EVENTS[:10] == [
         ("stage",),
         ("resolve renders",),
         ("wake per-image",),
         ("child", f"render-captures-{MISSION}"),
         ("persist renders", 2),
+        ("resolve renders",),
+        # The GPU is woken only once there are rendered frames for it, not
+        # to idle through the renders (review of #144).
+        ("wake gpu",),
         ("child", f"automatic-frames-{MISSION}"),
         ("persist frames", 2),
+        ("cleanup",),
     ]
-    assert EVENTS[8] == ("cleanup",)
+
+
+async def test_a_large_mission_goes_to_sam_a_child_at_a_time():
+    """Each frame carries its render's URL: a whole large mission would pass
+    Temporal's payload limit (review of #144)."""
+    n = sut.FRAMES_PER_CHILD + 1
+    await _run(AutomaticResultsForMissionWorkflow, TARGET, frames=n)
+
+    assert EVENTS.count(("child", f"automatic-frames-{MISSION}")) == 2
+    assert [e for e in EVENTS if e[0] == "persist frames"] == [
+        ("persist frames", sut.FRAMES_PER_CHILD),
+        ("persist frames", 1),
+    ]
 
 
 async def test_with_no_bucket_for_renders_the_frames_wait_and_say_so():

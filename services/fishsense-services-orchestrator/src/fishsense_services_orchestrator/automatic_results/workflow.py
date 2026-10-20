@@ -4,10 +4,10 @@ New in v2. One backlog dive per run, every step of cscw-fishsense2027@96a8da07
 PAPER.md §6's chain, each on the processor role that owns it:
 
 1. **frames** (GPU): stage the raw frames; render the captures owing one
-   (the render stage's steps, per-image, on this staging); then per frame the
-   detector's dot, the SAM 3.1 mask at it (score >= 0.5) in the frame's render
-   and its head/tail; persist; clean up. A frame still without a render is
-   left owed;
+   (the render stage's steps, per-image, on this staging) before waking the
+   GPU; then per frame the detector's dot, the SAM 3.1 mask at it (score >=
+   0.5) in the frame's render and its head/tail, `FRAMES_PER_CHILD` frames a
+   child; persist; clean up. A frame still without a render is left owed;
 2. **calibration** (per-image): the label-free size-constancy fit on the
    dive's slate frames; with none, the refusal is written without a processor;
 3. **lengths** (light): at the automatic dot's depth, under the calibration
@@ -103,18 +103,9 @@ with workflow.unsafe.imports_passed_through():
         wake_light_processor,
         wake_per_image_processor,
     )
-    from fishsense_services_contracts.renders import (
-        RenderCapturesInput,
-        RenderResult,
-    )
     from fishsense_services_orchestrator.object_store.contracts import StagingTarget
-    from fishsense_services_orchestrator.renders.activities import (
-        RenderPersistReport,
-        RenderTarget,
-    )
-    from fishsense_services_orchestrator.renders.workflow import (
-        render_child_timeout,
-    )
+    from fishsense_services_orchestrator.renders.activities import RenderTarget
+    from fishsense_services_orchestrator.renders.workflow import render_pages
     from fishsense_services_orchestrator.object_store.readers import (
         raw_scratch_reader_id,
     )
@@ -270,6 +261,11 @@ def _skip_for_gpu(step: str, gpu: _Gpu, report: AutomaticMissionReport) -> None:
 _AFTER_FRAMES = "calibration, lengths, species"
 
 
+#: Frames per GPU child: each carries its render's presigned GET, and a whole
+#: large mission's would pass Temporal's 2 MB payload limit (review of #144).
+FRAMES_PER_CHILD = 400
+
+
 async def _frames(
     target: AutomaticTarget, gpu: _Gpu, report: AutomaticMissionReport
 ) -> bool:
@@ -281,19 +277,23 @@ async def _frames(
     )
     if not inputs.frames:
         return True
-    if not await gpu.ready():
-        _skip_for_gpu("frames", gpu, report)
-        return False
     staging = StagingTarget(target.tenant_id, target.mission_id)
     # The scratch is this firing's to clean up, whatever happens -- unless
     # the child is running under another firing, which owns it.
-    owns_scratch = True
+    staged, owns_scratch = False, True
     try:
-        await stage_raw(staging)
         if any(f.render_url is None for f in inputs.frames):
             # SAM segments each frame's render: make the missing ones first,
-            # on this staging (one NAS pass), then read them back by URL.
-            await _render_owed(target, report)
+            # on the per-image role and on this staging (one NAS pass), before
+            # the GPU is woken -- it would sit idle through them (review of
+            # #144) -- then read them back by URL.
+            staged = True
+            await stage_raw(staging)
+            rendered = await render_pages(
+                RenderTarget(target.tenant_id, target.mission_id)
+            )
+            if rendered.no_bucket:
+                report.skipped.append("frames: the tenant has no bucket for renders")
             inputs = await _db(
                 "resolve_automatic_frames_inputs",
                 target,
@@ -307,30 +307,38 @@ async def _frames(
             )
         if not ready:
             return False
-        inputs = inputs.model_copy(update={"frames": ready})
-        ran, results = await _child(
-            "PredictAutomaticFramesWorkflow",
-            inputs,
-            child_id=raw_scratch_reader_id("automatic-frames", target.mission_id),
-            task_queue=PROCESSOR_GPU_TASK_QUEUE,
-            timeout=gpu_child_timeout(len(inputs.frames)),
-            result_type=List[AutomaticFrameResult],
-        )
-        if not ran:
-            owns_scratch = False
-            report.skipped.append(
-                f"{_AFTER_FRAMES}: frames running under another firing"
-            )
+        if not await gpu.ready():
+            _skip_for_gpu("frames", gpu, report)
             return False
-        if results:
-            await _db("persist_automatic_frames", target, results, result_type=int)
+        if not staged:
+            staged = True
+            await stage_raw(staging)
+        missing: List[uuid.UUID] = []
+        for start in range(0, len(ready), FRAMES_PER_CHILD):
+            chunk = ready[start : start + FRAMES_PER_CHILD]
+            ran, results = await _child(
+                "PredictAutomaticFramesWorkflow",
+                inputs.model_copy(update={"frames": chunk}),
+                child_id=raw_scratch_reader_id("automatic-frames", target.mission_id),
+                task_queue=PROCESSOR_GPU_TASK_QUEUE,
+                timeout=gpu_child_timeout(len(chunk)),
+                result_type=List[AutomaticFrameResult],
+            )
+            if not ran:
+                owns_scratch = False
+                report.skipped.append(
+                    f"{_AFTER_FRAMES}: frames running under another firing"
+                )
+                return False
+            if results:
+                await _db("persist_automatic_frames", target, results, result_type=int)
+            returned = {r.capture_id for r in results or []}
+            missing += [f.capture_id for f in chunk if f.capture_id not in returned]
         # The processor leaves out a frame that failed every try, so one bad
         # frame no longer costs the dive the rest (2026-10-15). What was left
         # out is recorded against each *frame*, never as one of the dive's
         # strikes, which a transient fault would spend; at three runs the
         # store makes it a terminal abstention (review of #85).
-        returned = {r.capture_id for r in results or []}
-        missing = [f.capture_id for f in inputs.frames if f.capture_id not in returned]
         if missing:
             given_up = await _db(
                 "record_automatic_frame_failures",
@@ -342,7 +350,7 @@ async def _frames(
             owed = len(missing) - len(given_up)
             workflow.logger.warning(
                 "automatic frames for dive=%s: %d of %d left out, %d given up",
-                target.mission_id, len(missing), len(inputs.frames), len(given_up),
+                target.mission_id, len(missing), len(ready), len(given_up),
             )  # fmt: skip
             if owed:
                 plural = "frame" if owed == 1 else "frames"
@@ -350,41 +358,8 @@ async def _frames(
                 return False
         return not unrendered
     finally:
-        if owns_scratch:
+        if staged and owns_scratch:
             await cleanup_raw(staging)
-
-
-async def _render_owed(target: AutomaticTarget, report: AutomaticMissionReport) -> None:
-    """Render the mission's captures owing one (the render stage's own steps),
-    on raws the caller staged."""
-    render_target = RenderTarget(target.tenant_id, target.mission_id)
-    payload: Optional[RenderCapturesInput] = await _db(
-        "resolve_render_inputs",
-        render_target,
-        result_type=Optional[RenderCapturesInput],
-    )
-    if payload is None:
-        report.skipped.append("frames: the tenant has no bucket for renders")
-        return
-    if not payload.frames:
-        return
-    await wake_per_image_processor()
-    ran, results = await _child(
-        "RenderCapturesWorkflow",
-        payload,
-        child_id=raw_scratch_reader_id("render-captures", target.mission_id),
-        task_queue=PROCESSOR_TASK_QUEUE,
-        timeout=render_child_timeout(len(payload.frames)),
-        result_type=List[RenderResult],
-    )
-    if ran:
-        await _db(
-            "persist_renders",
-            render_target,
-            payload,
-            results,
-            result_type=RenderPersistReport,
-        )
 
 
 async def _species(

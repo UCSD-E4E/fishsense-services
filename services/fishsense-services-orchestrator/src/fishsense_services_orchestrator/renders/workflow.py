@@ -1,16 +1,20 @@
 """The render workflows: a mission's captures rendered, and the backlog.
 
-New in v2 (2026-10-19). Per mission (`RenderMissionWorkflow`): resolve the
-owed captures and their presigned PUTs; wake the per-image processor; stage
-the mission's raws; the processor's `RenderCapturesWorkflow` renders each
-(named as a raw-scratch reader, so another stage's cleanup waits); record the
-renders the stored objects confirm; clean the scratch up. A tenant with no
-bucket is skipped, and the report says so.
+New in v2 (2026-10-19). Per mission (`RenderMissionWorkflow`): stage the
+mission's raws once, then a page of owed captures at a time (`RENDER_PAGE`:
+their presigned PUTs would not fit one payload, review of #144): the
+processor's `RenderCapturesWorkflow` renders each (named as a raw-scratch
+reader, so another stage's cleanup waits), and the renders the stored objects
+confirm are recorded; clean the scratch up. A tenant with no bucket is
+skipped, and the report says so. The automatic frames step renders its
+mission's owed captures the same way (`render_pages`), on its own staging.
 
 The backlog (`RenderBacklogWorkflow`) takes every mission owing renders, those
-with a human measurement first, `concurrency` at a time; what one run leaves
-owed (a capture that kept failing, an unverified render) the next renders.
-Hourly when enabled (`RenderSettings.renders_enabled`), on demand otherwise::
+with a human measurement first, `concurrency` at a time -- the next starting
+as each finishes -- and a mission that fails is reported, not fatal to the
+rest (review of #144); what one run leaves owed (a capture that kept failing,
+an unverified render, a raw missing from scratch) the next renders. Hourly
+when enabled (`RenderSettings.renders_enabled`), on demand otherwise::
 
     temporal workflow start --task-queue fishsense_orchestrator \\
         --type RenderBacklogWorkflow --workflow-id render-backlog-<date> \\
@@ -26,17 +30,14 @@ from typing import List, Optional
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
-from temporalio.exceptions import WorkflowAlreadyStartedError
+from temporalio.exceptions import ChildWorkflowError, WorkflowAlreadyStartedError
 
 with workflow.unsafe.imports_passed_through():
     import annotated_types  # noqa: F401  pylint: disable=unused-import
     import pydantic  # noqa: F401  pylint: disable=unused-import
 
     from fishsense_services_contracts import PROCESSOR_TASK_QUEUE
-    from fishsense_services_contracts.renders import (
-        RenderCapturesInput,
-        RenderResult,
-    )
+    from fishsense_services_contracts.renders import RenderResult
     from fishsense_services_orchestrator.nrp.workflow import (
         wake_per_image_processor,
     )
@@ -49,6 +50,8 @@ with workflow.unsafe.imports_passed_through():
         stage_raw,
     )
     from fishsense_services_orchestrator.renders.activities import (
+        RENDER_PAGE,
+        RenderPage,
         RenderPersistReport,
         RenderTarget,
     )
@@ -57,9 +60,11 @@ __all__ = [
     "RenderBacklogInput",
     "RenderBacklogReport",
     "RenderBacklogWorkflow",
+    "RenderMissionFailure",
     "RenderMissionReport",
     "RenderMissionWorkflow",
     "render_child_timeout",
+    "render_pages",
 ]
 
 _DB_RETRY = RetryPolicy(
@@ -71,8 +76,8 @@ _DB_TIMEOUT = timedelta(minutes=15)
 
 
 def render_child_timeout(n: int) -> timedelta:
-    """A mission's render child: 30 min, plus 10 s a capture (a render is a
-    few seconds on the per-image pod), at most 12 h."""
+    """A page's render child: 30 min, plus 10 s a capture (a render is a few
+    seconds on the per-image pod), at most 12 h."""
     return min(timedelta(minutes=30) + n * timedelta(seconds=10), timedelta(hours=12))
 
 
@@ -99,8 +104,16 @@ class RenderBacklogInput:
 
 
 @dataclass
+class RenderMissionFailure:
+    tenant_id: str
+    mission_id: str
+    error: str
+
+
+@dataclass
 class RenderBacklogReport:
     missions: List[RenderMissionReport] = field(default_factory=list)
+    failed: List[RenderMissionFailure] = field(default_factory=list)
 
 
 async def _db(name: str, *args, result_type=None):
@@ -113,54 +126,79 @@ async def _db(name: str, *args, result_type=None):
     )
 
 
+async def _page(target: RenderTarget, after: Optional[int]) -> RenderPage:
+    return await _db(
+        "resolve_render_inputs", target, after, RENDER_PAGE, result_type=RenderPage
+    )
+
+
+async def render_pages(
+    target: RenderTarget, first: Optional[RenderPage] = None
+) -> RenderMissionReport:
+    """Render the mission's owed captures a page at a time, on raws the caller
+    staged, recording what the stored objects confirm. `first` is the first
+    page, if the caller has it."""
+    report = RenderMissionReport(str(target.tenant_id), str(target.mission_id))
+    page = first if first is not None else await _page(target, None)
+    woke = False
+    while True:
+        if page.no_bucket:
+            report.no_bucket = True
+            return report
+        if page.payload is None or not page.payload.frames:
+            return report
+        if not woke:
+            await wake_per_image_processor()
+            woke = True
+        frames = page.payload.frames
+        report.owed += len(frames)
+        try:
+            results = await workflow.execute_child_workflow(
+                "RenderCapturesWorkflow",
+                page.payload,
+                id=raw_scratch_reader_id("render-captures", target.mission_id),
+                task_queue=PROCESSOR_TASK_QUEUE,
+                execution_timeout=render_child_timeout(len(frames)),
+                id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
+                result_type=List[RenderResult],
+            )
+        except WorkflowAlreadyStartedError:
+            report.running_elsewhere = True
+            return report
+        persisted: RenderPersistReport = await _db(
+            "persist_renders",
+            target,
+            page.payload,
+            results,
+            result_type=RenderPersistReport,
+        )
+        report.rendered += persisted.rendered
+        report.abstained += persisted.abstained
+        report.unverified += len(persisted.unverified)
+        report.left_out += len(frames) - len(results)
+        page = await _page(target, page.last_number)
+
+
 @workflow.defn(name="RenderMissionWorkflow")
 class RenderMissionWorkflow:
     # pylint: disable=too-few-public-methods
     @workflow.run
     async def run(self, target: RenderTarget) -> RenderMissionReport:
-        report = RenderMissionReport(str(target.tenant_id), str(target.mission_id))
-        payload: Optional[RenderCapturesInput] = await _db(
-            "resolve_render_inputs", target, result_type=Optional[RenderCapturesInput]
-        )
-        if payload is None:
-            report.no_bucket = True
+        first = await _page(target, None)
+        if first.no_bucket or first.payload is None or not first.payload.frames:
+            report = RenderMissionReport(str(target.tenant_id), str(target.mission_id))
+            report.no_bucket = first.no_bucket
             return report
-        report.owed = len(payload.frames)
-        if not payload.frames:
-            return report
-        await wake_per_image_processor()
         staging = StagingTarget(target.tenant_id, target.mission_id)
-        owns_scratch = True
+        report: Optional[RenderMissionReport] = None
         try:
             await stage_raw(staging)
-            try:
-                results = await workflow.execute_child_workflow(
-                    "RenderCapturesWorkflow",
-                    payload,
-                    id=raw_scratch_reader_id("render-captures", target.mission_id),
-                    task_queue=PROCESSOR_TASK_QUEUE,
-                    execution_timeout=render_child_timeout(len(payload.frames)),
-                    id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
-                    result_type=List[RenderResult],
-                )
-            except WorkflowAlreadyStartedError:
-                owns_scratch = False
-                report.running_elsewhere = True
-                return report
-            persisted: RenderPersistReport = await _db(
-                "persist_renders",
-                target,
-                payload,
-                results,
-                result_type=RenderPersistReport,
-            )
-            report.rendered = persisted.rendered
-            report.abstained = persisted.abstained
-            report.unverified = len(persisted.unverified)
-            report.left_out = len(payload.frames) - len(results)
+            report = await render_pages(target, first)
             return report
         finally:
-            if owns_scratch:
+            # The scratch is this run's to clean up -- unless its render child
+            # was running under another firing, which owns it.
+            if report is None or not report.running_elsewhere:
                 await cleanup_raw(staging)
 
 
@@ -176,22 +214,37 @@ class RenderBacklogWorkflow:
             "select_render_missions", args.limit, result_type=List[RenderTarget]
         )
         workflow.logger.info("renders: %d missions owe renders", len(targets))
-        report = RenderBacklogReport()
-        step = max(1, args.concurrency)
-        for i in range(0, len(targets), step):
-            batch = targets[i : i + step]
-            report.missions.extend(
-                await asyncio.gather(
-                    *[
-                        workflow.execute_child_workflow(
-                            RenderMissionWorkflow.run,
-                            t,
-                            id=f"render-mission-{t.mission_id}",
-                            id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
-                            result_type=RenderMissionReport,
-                        )
-                        for t in batch
-                    ]
+        # A sliding window: the next mission starts as each finishes (review of
+        # #144: fixed batches waited on their slowest).
+        slots = asyncio.Semaphore(max(1, args.concurrency))
+
+        async def one(target: RenderTarget) -> RenderMissionReport:
+            async with slots:
+                return await workflow.execute_child_workflow(
+                    RenderMissionWorkflow.run,
+                    target,
+                    id=f"render-mission-{target.mission_id}",
+                    id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
+                    result_type=RenderMissionReport,
                 )
-            )
+
+        outcomes = await asyncio.gather(
+            *[one(t) for t in targets], return_exceptions=True
+        )
+        report = RenderBacklogReport()
+        for target, outcome in zip(targets, outcomes):
+            if isinstance(outcome, (ChildWorkflowError, WorkflowAlreadyStartedError)):
+                cause = getattr(outcome, "cause", None) or outcome
+                workflow.logger.warning(
+                    "renders for mission=%s failed: %s", target.mission_id, cause
+                )
+                report.failed.append(
+                    RenderMissionFailure(
+                        str(target.tenant_id), str(target.mission_id), str(cause)
+                    )
+                )
+            elif isinstance(outcome, BaseException):
+                raise outcome  # cancellation, or a bug: not a mission's failure
+            else:
+                report.missions.append(outcome)
         return report

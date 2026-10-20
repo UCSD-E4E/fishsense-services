@@ -195,23 +195,40 @@ class AutomaticResultsActivities:
         #: cohort holds no dive for species work.
         self._species_enabled = species_enabled
 
-    async def _recorded_render(self, target: AutomaticTarget, row, recorded) -> str:
-        """A presigned GET of the render `row` records (its version, under its
-        camera). A capture with no render recorded fails the step: its row
-        names an image nobody can read, and deferring would hold its mission
-        in the cohort for good."""
-        if row.capture_id not in recorded:
-            raise ApplicationError(
-                f"dive {target.mission_id}: capture {row.capture_id} has no render "
-                f"recorded (its row names r{row.jpeg_render_version} under camera "
-                f"{row.jpeg_camera_calibration_id})",
-                type="AutomaticRenderMissing",
-                non_retryable=True,
+    async def _recorded_renders(self, target: AutomaticTarget, rows) -> list[str]:
+        """Presigned GETs of the render each of `rows` records -- its version,
+        under its camera. One not recorded there fails the step: its row names
+        an image nobody can read, and deferring would hold its mission in the
+        cohort for good (review of #144: the newest render under any camera
+        presigned a key that did not exist)."""
+        by_render: dict[tuple, list] = {}
+        for row in rows:
+            render = (row.jpeg_render_version, row.jpeg_camera_calibration_id)
+            by_render.setdefault(render, []).append(row)
+        recorded = {}
+        for (version, camera), group in by_render.items():
+            recorded.update(
+                await self._renders.at(
+                    target.tenant_id,
+                    [row.capture_id for row in group],
+                    render_version=version,
+                    camera_calibration_id=camera,
+                )
             )
-        key = render_key(
-            row.jpeg_render_version, row.jpeg_camera_calibration_id, row.checksum
-        )
-        return await self._renders.get_url(target.tenant_id, key)
+        presign = await self._renders.presigner(target.tenant_id) if rows else None
+        urls = []
+        for row in rows:
+            render = recorded.get(row.capture_id)
+            if render is None or render.status != "rendered":
+                raise ApplicationError(
+                    f"dive {target.mission_id}: capture {row.capture_id} has no "
+                    f"render recorded at r{row.jpeg_render_version} under camera "
+                    f"{row.jpeg_camera_calibration_id}",
+                    type="AutomaticRenderMissing",
+                    non_retryable=True,
+                )
+            urls.append(presign(render.key))
+        return urls
 
     async def _write(self, target: AutomaticTarget, fn, *args, **kwargs):
         try:
@@ -313,25 +330,53 @@ class AutomaticResultsActivities:
             headtail_version=AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
         )
         frames = []
-        recorded = await self._renders.current(
-            target.tenant_id, [f.capture_id for f in inputs.frames]
+        renders = (
+            await self._renders.at(
+                target.tenant_id,
+                [f.capture_id for f in inputs.frames],
+                render_version=AUTOMATIC_JPEG_RENDER_VERSION,
+                camera_calibration_id=inputs.camera_calibration_id,
+            )
+            if inputs.frames
+            else {}
         )
+        presign = await self._renders.presigner(target.tenant_id) if renders else None
+        # A frame whose render settled as an abstention has none and never
+        # will: it is that abstention, recorded here, so it stops holding its
+        # mission (review of #144).
+        settled = [
+            AutomaticHeadTailRow(
+                capture_id=f.capture_id,
+                status=renders[f.capture_id].status,
+                predictor_version=AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
+                slate_probability=f.slate_probability,
+            )
+            for f in inputs.frames
+            if f.capture_id in renders
+            and renders[f.capture_id].status != "rendered"
+            and renders[f.capture_id].settled
+        ]
+        if settled:
+            await self._write(
+                target, self._catalog.persist_automatic_head_tails, settled
+            )
+            activity.logger.info(
+                "dive=%s: %d frames have no render and never will (abstentions)",
+                target.mission_id,
+                len(settled),
+            )
+        done = {r.capture_id for r in settled}
         for f in inputs.frames:
-            render = recorded.get(f.capture_id)
-            current = render is not None and (
-                render.render_version,
-                render.camera_calibration_id,
-            ) == (AUTOMATIC_JPEG_RENDER_VERSION, inputs.camera_calibration_id)
+            if f.capture_id in done:
+                continue
+            render = renders.get(f.capture_id)
+            rendered = render is not None and render.status == "rendered"
             frames.append(
                 AutomaticFrame(
                     capture_id=f.capture_id,
                     raw=self._store.layout.raw(target.tenant_id, f.checksum),
                     jpeg_render_version=AUTOMATIC_JPEG_RENDER_VERSION,
-                    render_url=(
-                        await self._renders.get_url(target.tenant_id, render.key)
-                        if current
-                        else None
-                    ),
+                    render_url=presign(render.key) if rendered else None,
                     slate_probability=f.slate_probability,
                     is_slate=f.is_slate,
                 )
@@ -419,12 +464,9 @@ class AutomaticResultsActivities:
             species_version=SPECIES_PREDICTOR_VERSION,
         )
         images = []
-        recorded = await self._renders.current(
-            target.tenant_id, [c.capture_id for c in captures]
-        )
-        for c in captures:
-            # Every capture here has a render named (the store selects them).
-            url = await self._recorded_render(target, c, recorded)
+        # Every capture here has a render named (the store selects them).
+        urls = await self._recorded_renders(target, captures)
+        for c, url in zip(captures, urls):
             images.append(
                 PredictSpeciesImage(
                     capture_id=c.capture_id,
@@ -501,14 +543,8 @@ class AutomaticResultsActivities:
                 len(other_camera),
             )
         skip = {c.capture_id for c in (*unrendered, *other_camera)}
-        recorded = await self._renders.current(
-            target.tenant_id,
-            [c.capture_id for c in inputs.candidates if c.capture_id not in skip],
-        )
-        for c in inputs.candidates:
-            if c.capture_id in skip:
-                continue
-            url = await self._recorded_render(target, c, recorded)
+        kept = [c for c in inputs.candidates if c.capture_id not in skip]
+        for c, url in zip(kept, await self._recorded_renders(target, kept)):
             frames.append(
                 AutomaticCalibrationFrame(capture_id=c.capture_id, jpeg_url=url,
                                           x=c.x, y=c.y)  # fmt: skip

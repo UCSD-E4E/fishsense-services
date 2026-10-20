@@ -1,9 +1,11 @@
 """Every capture's render (0050): what is owed, and what was rendered where.
 
 New in v2 (2026-10-19). A capture is owed a render at a render version until
-it has a row -- a render or an abstention -- at that version under its
-device's current pinhole camera calibration: a corrected camera owes every
-capture a new one, since the pixels change. Missions with a human
+it is settled at that version under its device's current pinhole camera
+calibration -- a corrected camera owes every capture a new one, since the
+pixels change. Settled: rendered, or a raw that would not decode, or a raw
+missing from scratch `RENDER_MAX_UNAVAILABLE` times (it may come back: a moved
+file repaired, scratch evicted mid-run; review of #144). Missions with a human
 measurement come first (their fish are on /fish with no photo until then),
 then the oldest. A mission whose device has no pinhole calibration cannot be
 rectified, and owes nothing here.
@@ -13,6 +15,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import asdict, dataclass
+from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -25,7 +28,9 @@ from fishsense_services_api.automatic_results_store import (
 from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
+    "RENDER_MAX_UNAVAILABLE",
     "CurrentRender",
+    "RenderAt",
     "RenderCapture",
     "RenderInputs",
     "RenderMission",
@@ -35,16 +40,36 @@ __all__ = [
     "persist_renders",
     "render_inputs",
     "render_missions",
+    "renders_at",
 ]
 
-#: A capture of mission `d` with no row at render `:rv` under camera `cc`.
-_OWED = """
-    c.tenant_id = d.tenant_id AND c.mission_id = d.id AND c.is_canonical
-    AND NOT EXISTS (
-        SELECT 1 FROM capture_renders r
-        WHERE r.tenant_id = c.tenant_id AND r.capture_id = c.id
-          AND r.render_version = :rv AND r.camera_calibration_id = cc.id
+#: How many times a capture's raw may be missing from scratch before its
+#: render is settled as `raw_unavailable`.
+RENDER_MAX_UNAVAILABLE = 3
+
+
+def _settled(cam: str) -> str:
+    """Capture `c` is settled at render `:rv` under camera `cam`."""
+    return f"""(
+        EXISTS (
+            SELECT 1 FROM capture_renders r
+            WHERE r.tenant_id = c.tenant_id AND r.capture_id = c.id
+              AND r.render_version = :rv AND r.camera_calibration_id = {cam}
+              AND r.status IN ('rendered', 'decode_failed')
+        )
+        OR (
+            SELECT count(*) FROM capture_renders r
+            WHERE r.tenant_id = c.tenant_id AND r.capture_id = c.id
+              AND r.render_version = :rv AND r.camera_calibration_id = {cam}
+              AND r.status = 'raw_unavailable'
+        ) >= {RENDER_MAX_UNAVAILABLE}
     )"""
+
+
+#: A canonical capture of mission `d` not settled at render `:rv` under `cc`.
+_OWED = f"""
+    c.tenant_id = d.tenant_id AND c.mission_id = d.id AND c.is_canonical
+    AND NOT {_settled("cc.id")}"""
 
 #: Mission `d`'s device's current pinhole calibration, `cc`.
 _CAMERA = """
@@ -60,12 +85,16 @@ class RenderMission:
     owed: int
     #: A human measurement exists on one of its captures.
     human_measured: bool
+    #: To order missions across tenants as within one.
+    created_at: datetime | None = None
 
 
 @dataclass(frozen=True)
 class RenderCapture:
     capture_id: uuid.UUID
     checksum: str
+    #: Its place in the mission: the page cursor (`render_inputs`).
+    number: int = 0
 
 
 @dataclass(frozen=True)
@@ -93,6 +122,20 @@ class RenderRow:
 
 
 @dataclass(frozen=True)
+class RenderAt:
+    """A capture's newest row at one render version under one camera."""
+
+    capture_id: uuid.UUID
+    status: str
+    #: No longer owed (`_settled`): rendered, or an abstention that stands.
+    settled: bool
+    bucket: str | None
+    key: str | None
+    render_version: int
+    camera_calibration_id: uuid.UUID
+
+
+@dataclass(frozen=True)
 class CurrentRender:
     capture_id: uuid.UUID
     bucket: str
@@ -111,7 +154,7 @@ async def render_missions(
     """The tenant's missions owing renders: human-measured first, then oldest."""
     rows = await conn.execute(
         text(f"""
-            SELECT d.id, owed.n,
+            SELECT d.id, d.created_at, owed.n,
                    EXISTS (SELECT 1 FROM measurements m
                            JOIN captures mc ON mc.tenant_id = m.tenant_id
                                            AND mc.id = m.capture_id
@@ -128,7 +171,7 @@ async def render_missions(
             """),
         {"t": tenant_id, "rv": render_version, "limit": limit},
     )
-    return [RenderMission(r.id, r.n, r.human_measured) for r in rows]
+    return [RenderMission(r.id, r.n, r.human_measured, r.created_at) for r in rows]
 
 
 async def render_inputs(
@@ -137,25 +180,32 @@ async def render_inputs(
     mission_id: uuid.UUID,
     *,
     render_version: int,
+    after_number: int | None = None,
+    limit: int | None = None,
 ) -> RenderInputs:
-    """The mission's camera, and its captures owed a render, in capture order."""
+    """The mission's camera, and its captures owed a render, in capture order:
+    those after `after_number`, at most `limit` -- a page, since a large
+    mission's presigned URLs would not fit one payload (review of #144)."""
     camera = await _pinhole_camera(conn, tenant_id, mission_id)
     rows = await conn.execute(
         text(f"""
-            SELECT c.id, c.checksum
+            SELECT c.id, c.checksum, c.number
             FROM missions d
             {_CAMERA}
             JOIN captures c ON {_OWED}
             WHERE d.tenant_id = :t AND d.id = :d
+              AND (CAST(:after AS integer) IS NULL OR c.number > :after)
             ORDER BY c.number, c.id
+            LIMIT :limit
             """),
-        {"t": tenant_id, "d": mission_id, "rv": render_version},
-    )
+        {"t": tenant_id, "d": mission_id, "rv": render_version,
+         "after": after_number, "limit": limit},
+    )  # fmt: skip
     return RenderInputs(
         camera_calibration_id=camera.id,
         camera_matrix=[[float(x) for x in r] for r in camera.camera_matrix],
         distortion_coefficients=_flat(camera.distortion_coefficients),
-        captures=[RenderCapture(r.id, r.checksum) for r in rows],
+        captures=[RenderCapture(r.id, r.checksum, r.number) for r in rows],
     )
 
 
@@ -188,6 +238,39 @@ async def persist_renders(
         )
         written += result.rowcount
     return written
+
+
+async def renders_at(
+    conn: AsyncConnection,
+    tenant_id: uuid.UUID,
+    capture_ids: list[uuid.UUID],
+    *,
+    render_version: int,
+    camera_calibration_id: uuid.UUID,
+) -> dict[uuid.UUID, RenderAt]:
+    """Each capture's row at this render version under this camera -- its
+    render where it has one, else its newest abstention -- and whether it is
+    settled (review of #144: the newest render whatever its camera was
+    another image)."""
+    rows = await conn.execute(
+        text(f"""
+            SELECT DISTINCT ON (c.id) c.id AS capture_id, r.status, r.bucket,
+                   r.key, {_settled(":cam")} AS settled
+            FROM captures c
+            JOIN capture_renders r
+              ON r.tenant_id = c.tenant_id AND r.capture_id = c.id
+             AND r.render_version = :rv AND r.camera_calibration_id = :cam
+            WHERE c.tenant_id = :t AND c.id = ANY(:ids)
+            ORDER BY c.id, (r.status = 'rendered') DESC, r.seq DESC
+            """),
+        {"t": tenant_id, "ids": list(capture_ids), "rv": render_version,
+         "cam": camera_calibration_id},
+    )  # fmt: skip
+    return {
+        r.capture_id: RenderAt(r.capture_id, r.status, r.settled, r.bucket, r.key,
+                               render_version, camera_calibration_id)  # fmt: skip
+        for r in rows
+    }
 
 
 async def current_renders(
@@ -236,12 +319,16 @@ class RendersCatalog(ServicePrincipal):
             )
 
     async def render_inputs(
-        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, render_version: int
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, **kwargs
     ) -> RenderInputs:
         async with self._tenant(tenant_id) as conn:
-            return await render_inputs(
-                conn, tenant_id, mission_id, render_version=render_version
-            )
+            return await render_inputs(conn, tenant_id, mission_id, **kwargs)
+
+    async def renders_at(
+        self, tenant_id: uuid.UUID, capture_ids: list[uuid.UUID], **kwargs
+    ) -> dict[uuid.UUID, RenderAt]:
+        async with self._tenant(tenant_id) as conn:
+            return await renders_at(conn, tenant_id, capture_ids, **kwargs)
 
     async def persist_renders(
         self, tenant_id: uuid.UUID, mission_id: uuid.UUID, rows: list[RenderRow]

@@ -35,10 +35,19 @@ from fishsense_services_contracts.renders import (
 )
 
 __all__ = [
+    "RENDER_PAGE",
     "RenderActivities",
+    "RenderPage",
     "RenderPersistReport",
     "RenderTarget",
 ]
+
+
+#: Owed captures per page: each carries a presigned PUT of ~600 characters, and
+#: a page rides as an activity result, a child's input and the record's
+#: argument -- a whole large mission at once would pass Temporal's 2 MB
+#: payload limit (review of #144).
+RENDER_PAGE = 500
 
 
 @dataclass(frozen=True)
@@ -50,12 +59,33 @@ class RenderTarget:
 
 
 @dataclass
+class RenderPage:
+    """A page of a mission's owed captures, and the cursor to the next."""
+
+    payload: Optional[RenderCapturesInput]
+    #: The last capture's number: the next page starts after it.
+    last_number: Optional[int]
+    no_bucket: bool = False
+
+
+@dataclass
 class RenderPersistReport:
     written: int = 0
     rendered: int = 0
     abstained: int = 0
     #: Rendered, but the stored object did not match what was reported.
     unverified: List[uuid.UUID] = field(default_factory=list)
+
+
+def _first(mission) -> tuple:
+    """Human-measured missions first, then the oldest; then by id, stably."""
+    created = mission.created_at
+    return (
+        not mission.human_measured,
+        created is None,
+        created.timestamp() if created is not None else 0.0,
+        str(mission.mission_id),
+    )
 
 
 def _refuse(target: RenderTarget, why: str) -> ApplicationError:
@@ -90,28 +120,39 @@ class RenderActivities:
         self, limit: Optional[int] = None
     ) -> List[RenderTarget]:
         """Missions owing renders, of every tenant with a bucket: those with a
-        human measurement first, then the oldest."""
-        found: List[RenderTarget] = []
+        human measurement first, then the oldest -- across tenants as within
+        one (review of #144)."""
+        found = []
         for tenant_id in await self._catalog.member_tenants():
             if await self._objects(tenant_id) is None:
                 continue
             for m in await self._catalog.render_missions(
                 tenant_id, render_version=RENDER_VERSION, limit=limit
             ):
-                found.append(RenderTarget(tenant_id, m.mission_id))
-        return found if limit is None else found[:limit]
+                found.append((tenant_id, m))
+        found.sort(key=lambda tm: _first(tm[1]))
+        chosen = found if limit is None else found[:limit]
+        return [RenderTarget(t, m.mission_id) for t, m in chosen]
 
     @activity.defn(name="resolve_render_inputs")
     async def resolve_render_inputs(
-        self, target: RenderTarget
-    ) -> Optional[RenderCapturesInput]:
-        """The mission's owed captures, each with its staged raw and a
-        presigned PUT for its render; None when the tenant has no bucket."""
+        self,
+        target: RenderTarget,
+        after_number: Optional[int] = None,
+        limit: int = RENDER_PAGE,
+    ) -> RenderPage:
+        """A page of the mission's owed captures -- those after
+        `after_number` -- each with its staged raw and a presigned PUT for its
+        render."""
         objects = await self._objects(target.tenant_id)
         if objects is None:
-            return None
+            return RenderPage(payload=None, last_number=None, no_bucket=True)
         inputs = await self._catalog.render_inputs(
-            target.tenant_id, target.mission_id, render_version=RENDER_VERSION
+            target.tenant_id,
+            target.mission_id,
+            render_version=RENDER_VERSION,
+            after_number=after_number,
+            limit=limit,
         )
         frames = []
         for c in inputs.captures:
@@ -125,7 +166,7 @@ class RenderActivities:
                 )
             )
             activity.heartbeat()
-        return RenderCapturesInput(
+        payload = RenderCapturesInput(
             tenant_id=target.tenant_id,
             mission_id=target.mission_id,
             render_version=RENDER_VERSION,
@@ -134,6 +175,8 @@ class RenderActivities:
             distortion_coefficients=inputs.distortion_coefficients,
             frames=frames,
         )
+        last = inputs.captures[-1].number if inputs.captures else None
+        return RenderPage(payload=payload, last_number=last)
 
     @activity.defn(name="persist_renders")
     async def persist_renders(
