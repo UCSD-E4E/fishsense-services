@@ -334,6 +334,9 @@ async def test_an_operator_puts_a_mission_with_another(owner_engine, app_engine)
 
     assert before[misfiled] == "2024.08.20.FishSense.Islamorada"
     assert after[misfiled] == after[july] == "2024.07.09.FishSense"
+    # One trip, not two of the same name: it follows the other's camera too.
+    moved = await _plan(app_engine, lab, together={misfiled: july})
+    assert [set(t.missions) for t in moved.trips] == [{july, misfiled}]
     with pytest.raises(ValueError, match="no such mission"):
         await _plan(app_engine, lab, together={misfiled: 999999})
     # The review sees why it moved, not the folder date it no longer uses.
@@ -551,3 +554,133 @@ async def test_the_operators_choices_are_part_of_the_fingerprint(
     assert _trip_of(same) == _trip_of(plain) and same.fingerprint != plain.fingerprint
     with pytest.raises(PlanChanged):
         await _apply(app_engine, lab, plain.fingerprint, together={b: a})
+
+
+# -- review of #164, round 2 ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path, expected",
+    [
+        # The first code in a folder's name decides, whichever form it takes.
+        ("6.20.2024_Molasses_FSL05_082329", date(2024, 6, 20)),
+        # A counter that is no date is not a code.
+        (f"{SMILE}/070924_Dive1_10023", date(2024, 7, 9)),
+        (f"{SMILE}/Dive_10023_070924", date(2024, 7, 9)),
+        # Five digits read one way only are that date.
+        (f"{SMILE}/13123_FSL-05_Photos", date(2023, 1, 31)),
+    ],
+)
+def test_the_first_date_code_in_a_folder_decides(path, expected):
+    assert folder_date(path, latest=date(2026, 10, 20)) == expected
+
+
+async def test_unplaced_sessions_on_two_cameras_are_two_trips(owner_engine, app_engine):
+    lab = await _tenant(owner_engine, "lab")
+    three = await _device(owner_engine, lab, "FSL-03")
+    seven = await _device(owner_engine, lab, "FSL-07")
+    pool = await _mission(owner_engine, lab, f"{SMILE}/061924_Test_FSL03",
+                          device=three, at=_utc(2024, 6, 19, 15))  # fmt: skip
+    dive = await _mission(owner_engine, lab, f"{SMILE}/062024_Dive_FSL07",
+                          device=seven, at=_utc(2024, 6, 20, 15))  # fmt: skip
+    again = await _mission(owner_engine, lab, f"{SMILE}/062024_Dive2_FSL03",
+                           device=three, at=_utc(2024, 6, 20, 18))  # fmt: skip
+
+    trips = _trip_of(await _plan(app_engine, lab))
+
+    assert trips[pool] == trips[again] == "2024.06.19.FishSense"
+    assert trips[dive] == "2024.06.20.FishSense"
+
+
+async def test_two_trips_that_would_share_a_name_are_left_alone(
+    owner_engine, app_engine
+):
+    lab = await _tenant(owner_engine, "lab")
+    three = await _device(owner_engine, lab, "FSL-03")
+    seven = await _device(owner_engine, lab, "FSL-07")
+    for device, serial in ((three, "FSL03"), (seven, "FSL07")):
+        await _mission(owner_engine, lab, f"{SMILE}/061924_Test_{serial}",
+                       device=device, at=_utc(2024, 6, 19, 15))  # fmt: skip
+
+    trips = (await _plan(app_engine, lab)).trips
+
+    assert len(trips) == 2
+    assert all(t.conflict and t.to_write == () for t in trips)
+    assert all(any("two trips" in f.note for f in t.flags) for t in trips)
+
+
+async def test_copies_whose_folders_disagree_stay_together_and_are_said(
+    owner_engine, app_engine
+):
+    lab = await _tenant(owner_engine, "lab")
+    five = await _device(owner_engine, lab, "FSL-05")
+    at = _utc(2023, 8, 22, 15)
+    a = await _mission(owner_engine, lab, f"{DUMP}/082223_Molasses_FSL05",
+                       device=five, at=at)  # fmt: skip
+    b = await _mission(owner_engine, lab, "drive-download-x/090523_Alligator_FSL05",
+                       device=five, at=at)  # fmt: skip
+
+    plan = await _plan(app_engine, lab)
+
+    (trip,) = plan.trips
+    assert set(trip.missions) == {a, b}
+    assert (trip.started_on, trip.place) == (date(2023, 8, 22), None)
+    notes = [f.note for f in trip.flags]
+    assert any("Islamorada, Key Largo" in n for n in notes)
+    assert any("2023-08-22, 2023-09-05; the captures decide" in n for n in notes)
+    assert not any("no readable folder date" in n for n in notes)
+
+
+async def test_a_chain_through_a_copy_is_refused(owner_engine, app_engine):
+    lab = await _tenant(owner_engine, "lab")
+    one = await _device(owner_engine, lab, "FSL-01")
+    five = await _device(owner_engine, lab, "FSL-05")
+    target = await _mission(owner_engine, lab, f"{SMILE}/070924_Dive1_FSL01",
+                            device=one, at=_utc(2024, 7, 9, 21))  # fmt: skip
+    other = await _mission(owner_engine, lab, f"{SMILE}/072324_Dive1_FSL01",
+                           device=one, at=_utc(2024, 7, 23, 21))  # fmt: skip
+    at = _utc(2024, 7, 9, 21)
+    moved = await _mission(owner_engine, lab, f"{SMILE}/082024_Dive1_FSL05",
+                           device=five, at=at)  # fmt: skip
+    copy = await _mission(owner_engine, lab, f"{REEF}/082024_Dive1_FSL05",
+                          device=five, at=at)  # fmt: skip
+    follower = await _mission(owner_engine, lab, f"{SMILE}/080124_Dive_FSL01",
+                              device=one, at=_utc(2024, 8, 1, 21))  # fmt: skip
+
+    with pytest.raises(ValueError, match="chain"):
+        await _plan(app_engine, lab, together={moved: target, follower: copy})
+    with pytest.raises(ValueError, match="copies"):
+        await _plan(app_engine, lab, together={moved: target, copy: other})
+
+
+async def test_a_grouped_mission_keeps_its_own_trip_not_its_cameras(
+    owner_engine, app_engine
+):
+    lab = await _tenant(owner_engine, "lab")
+    one = await _device(owner_engine, lab, "FSL-01")
+    reef = await _deployment(owner_engine, lab, "2024.06.20.FishSense.REEF",
+                             date(2024, 6, 20))  # fmt: skip
+    await _mission(owner_engine, lab, "2024.06.20.FishSense.REEF/ED-00/FSL-01D/Reef",
+                   device=one, at=_utc(2024, 6, 20, 15), deployment=reef)  # fmt: skip
+    legacy = await _mission(owner_engine, lab, f"{SMILE}/062024_Molasses_FSL01",
+                            device=one, at=_utc(2024, 6, 20, 18))  # fmt: skip
+
+    plan = await _plan(app_engine, lab)
+
+    assert _trip_of(plan)[legacy] == "2024.06.20.FishSense.Key Largo"
+    (trip,) = [t for t in plan.trips if legacy in t.missions]
+    assert trip.to_write == (legacy,)
+
+
+async def test_a_trip_longer_than_a_week_is_said(owner_engine, app_engine):
+    """Dives two days apart chain: the review is told how long the trip is."""
+    lab = await _tenant(owner_engine, "lab")
+    one = await _device(owner_engine, lab, "FSL-01")
+    for day in range(1, 12, 2):
+        await _mission(owner_engine, lab, f"{SMILE}/06{day:02d}24_Molasses_FSL01",
+                       device=one, at=_utc(2024, 6, day, 15))  # fmt: skip
+
+    (trip,) = (await _plan(app_engine, lab)).trips
+
+    assert (trip.started_on, trip.ended_on) == (date(2024, 6, 1), date(2024, 6, 11))
+    assert any("11 days" in f.note for f in trip.flags)

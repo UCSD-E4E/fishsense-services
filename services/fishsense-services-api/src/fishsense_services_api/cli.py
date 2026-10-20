@@ -64,9 +64,6 @@ from fishsense_services_api.deployment_inference import (
     apply_inference,
     plan_inference,
 )
-from fishsense_services_api.deployment_inference import (
-    PlanChanged as InferenceChanged,
-)
 from fishsense_services_api.mission_backfill import (
     BackfillPlan,
     PlanChanged,
@@ -391,7 +388,7 @@ async def _infer_deployments(args: argparse.Namespace) -> int:
                         gap_days=args.gap_days,
                         together=together,
                     )
-            except (InferenceChanged, ValueError, DBAPIError) as error:
+            except (PlanChanged, ValueError, DBAPIError) as error:
                 print(f"nothing written: {error}", file=sys.stderr)
                 return 1
             print(

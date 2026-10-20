@@ -680,7 +680,7 @@ display.
     `infer-deployments` (`deployment_inference`, the owner's rules 2026-10-20) reads
     each mission's nearest dated and placed folders, treats copies across NAS dumps
     as one session, and makes one deployment per place on dates at most 2 days
-    apart. On production's rows (2026-10-20) it plans 35 trips: 31 new, 466
+    apart. On production's rows (2026-10-20) it plans 37 trips: 32 new, 466
     missions to write.
   - **Naming rule:** a NRP/Kubernetes object is always a "processor Deployment"
     (`k8s_deployment` in code), and bare "deployment" means the field concept. This goes
