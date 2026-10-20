@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.20.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.19.0...v0.20.0) (2026-10-20)
+
+
+### Features
+
+* **missions:** infer deployments for legacy missions from folders and dates ([2f87ed6](https://github.com/UCSD-E4E/fishsense-services/commit/2f87ed629ba3d5aa77ac97872ea4349a3a7b8aef))
+* **missions:** infer deployments for legacy missions from folders and dates ([2043aac](https://github.com/UCSD-E4E/fishsense-services/commit/2043aac9d583e08a3dbb086819428bea3ca51694))
+
+
+### Bug Fixes
+
+* **missions:** address the review of deployment inference ([c866a1a](https://github.com/UCSD-E4E/fishsense-services/commit/c866a1a35d89fa839e3fe9f458061563e323c4ab))
+* **missions:** second review of deployment inference ([36cfa51](https://github.com/UCSD-E4E/fishsense-services/commit/36cfa51b256c6b558b305a8c6dd83aab9a1d5714))
+
 ## [0.19.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.18.0...v0.19.0) (2026-10-20)
 
 
