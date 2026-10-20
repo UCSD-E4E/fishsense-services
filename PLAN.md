@@ -740,6 +740,8 @@ display.
   - LiDAR: depth map, mask, snout/fork versions.
   - It is the home of the per-tenant dashboards, replacing Superset. The app can later
     read the same endpoint to show a user's fish across devices.
+  - How the portal and the app look and are organised (Fish and Data, tenants in the
+    path, the public page): `docs/design/README.md`, agreed 2026-10-20.
 
 **From wuwnet** (`wuwnet-fishsense2026@5532b99`, newer than the `440c6a4` snapshot in §2.7)
 - **Into fishsense-core, not here** (§9.21's lean):
