@@ -1322,10 +1322,15 @@ the UI as it lands (decided 2026-10-17)*
    - ***2b-2, built 2026-10-20:*** only `corrective_optic` is processed (the owner: flat is
      axial, and a dome's centring is unchecked). `camera_sql.RECTIFIABLE_MISSION` carries
      the port, so laser, head/tail, species, slate presence, slate preprocessing, both
-     calibrations and the automatic track admit nothing else. Laser depth and measurement
-     add `ADMITTED_PORT`, because they read a calibration that may be borrowed.
-     Clustering, species prediction and laser auto-accept only act on what those stages
-     produce. The frozen `dive_pipeline_status` (0029, Superset) does not know the port.
+     calibrations and the automatic track admit nothing else.
+     - Laser depth and measurement use `ADMITTED_PORT`: their own port, and the port of
+       any mission they borrow a calibration from. They use it in the selector, the
+       resolver and the persist check.
+     - Clustering, species prediction and laser auto-accept use `CORRECTIVE_OPTIC`.
+     - The automatic validation harness scores only admitted missions.
+     - Migration 0050 recreates `dive_pipeline_status`'s function with the same terms.
+     - The API returns `processable` from those predicates, so the web doesn't restate
+       the rule.
 3. Direct e4edm ingest (the never-ingested Canyonview / Scripps Pier / Sealab / NIWC
    datasets are the first users).
 4. **Lite photo upload** (the owner's direction, 2026-10-18). Lite photos are uploaded into

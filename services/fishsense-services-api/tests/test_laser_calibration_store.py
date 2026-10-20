@@ -49,6 +49,8 @@ import uuid
 import pytest
 from sqlalchemy import text
 
+from depth_measure_seed import restate_port
+
 from _slate_calibration_seed import (
     BAD_POSITION,
     DISTORTION,
@@ -1468,19 +1470,6 @@ async def test_a_refusal_recorded_after_the_link_write_stands(owner_engine, app_
     assert await _board(app_engine, lab) is None
 
 
-async def _set_port(owner_engine, mission_id, port):
-    """Restate the mission's port (2b-2)."""
-    async with owner_engine.begin() as conn:
-        await conn.execute(
-            text(
-                "UPDATE missions SET port = :p, port_source = "
-                "CASE WHEN :p = 'unknown' THEN NULL ELSE 'operator' END "
-                "WHERE id = :m"
-            ),
-            {"p": port, "m": mission_id},
-        )
-
-
 @pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
 async def test_a_mission_not_behind_the_corrective_optic_is_not_calibrated(
     owner_engine, app_engine, port
@@ -1495,7 +1484,7 @@ async def test_a_mission_not_behind_the_corrective_optic_is_not_calibrated(
     assert await _board(app_engine, lab) == board
 
     for mission_id in (slate, board):
-        await _set_port(owner_engine, mission_id, port)
+        await restate_port(owner_engine, mission_id, port)
 
     assert await _stage13(app_engine, lab) is None
     assert await _board(app_engine, lab) is None

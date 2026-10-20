@@ -79,9 +79,14 @@ __all__ = [
 #: selector adds: the dive has a row of migration 0026's `measurement_work`.
 #: Named so `dive_pipeline_status` reads the same predicate (migration
 #: 0029).
-MEASUREMENT_COHORT = """EXISTS (
+MEASUREMENT_COHORT = f"""{ADMITTED_PORT} AND EXISTS (
     SELECT 1 FROM measurement_work w
     WHERE w.tenant_id = d.tenant_id AND w.mission_id = d.id
+)"""
+#: The resolver's and the persist check's form of the same port term (2b-2).
+_ADMITTED = f"""EXISTS (
+    SELECT 1 FROM missions d
+    WHERE d.tenant_id = :tenant AND d.id = :mission AND {ADMITTED_PORT}
 )"""
 
 #: `content_of_image` -> (common name, scientific name), or None.
@@ -192,7 +197,7 @@ async def next_mission_for_measurement(
             text(f"""
                 SELECT d.id, d.created_at, d.number FROM missions d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
-                  AND {MEASUREMENT_COHORT} AND {ADMITTED_PORT}
+                  AND {MEASUREMENT_COHORT}
                 ORDER BY d.created_at, d.number
                 LIMIT 1
                 """),
@@ -214,7 +219,7 @@ async def measurement_work(
     rows = await conn.execute(
         text(f"""
             SELECT {_WORK_COLUMNS} FROM measurement_work
-            WHERE tenant_id = :tenant AND mission_id = :mission
+            WHERE tenant_id = :tenant AND mission_id = :mission AND {_ADMITTED}
             ORDER BY capture_number
             """),
         {"tenant": tenant_id, "mission": mission_id},
@@ -298,7 +303,7 @@ async def _open_work(
             text(f"""
                 SELECT {_WORK_COLUMNS} FROM measurement_work
                 WHERE tenant_id = :tenant AND mission_id = :mission
-                  AND capture_id = :capture
+                  AND capture_id = :capture AND {_ADMITTED}
                 """),
             {"tenant": tenant_id, "mission": mission_id, "capture": record.capture_id},
         )

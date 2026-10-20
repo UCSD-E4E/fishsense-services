@@ -270,12 +270,14 @@ async def test_a_member_lists_missions_by_number(client, tenants, owner_engine):
          "priority": "low", "slate_template_number": None,
          "calibration_target_number": None, "calibration_source_number": None,
          "purpose": None, "port": "unknown", "port_source": None, "site": None,
-         "deployment_number": None, "deployment_name": None},
+         "deployment_number": None, "deployment_name": None,
+         "processable": False},
         {"number": 2, "name": "dive 2", "started_at": "2025-01-01T00:00:00Z",
          "priority": "low", "slate_template_number": None,
          "calibration_target_number": None, "calibration_source_number": 1,
          "purpose": None, "port": "unknown", "port_source": None, "site": None,
-         "deployment_number": None, "deployment_name": None},
+         "deployment_number": None, "deployment_name": None,
+         "processable": False},
     ]  # fmt: skip
 
 

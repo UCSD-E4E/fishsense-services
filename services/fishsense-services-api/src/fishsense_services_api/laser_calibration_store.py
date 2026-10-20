@@ -250,10 +250,6 @@ _EFFECTIVE_TARGET = """
      WHERE t.id = d.calibration_target_id)
 """
 
-#: The dive's device has a current camera calibration -- without one both
-#: resolvers refuse (`_require_camera`) -- and a pinhole one behind the
-#: corrective optic, the only camera the fits' maths holds for (2b-2).
-_HAS_CAMERA = RECTIFIABLE_MISSION
 
 #: The dive's slate template can scale a fit: a dpi and reference points,
 #: which `slate_calibration_inputs` refuses without.
@@ -323,11 +319,11 @@ def _cohort(where: str) -> str:
 #: `dive_pipeline_status` reads the same predicates (migration
 #: 0029).
 LASER_CALIBRATION_COHORT = _cohort(
-    f"{_STAGE_13_CAN_CALIBRATE} AND {_HAS_CAMERA} AND {_TEMPLATE_CAN_SCALE}"
+    f"{_STAGE_13_CAN_CALIBRATE} AND {RECTIFIABLE_MISSION} AND {_TEMPLATE_CAN_SCALE}"
 )
 CHECKERBOARD_CALIBRATION_COHORT = _cohort(f"""
     d.calibration_target_id IS NOT NULL
-    AND {_HAS_CAMERA}
+    AND {RECTIFIABLE_MISSION}
     AND NOT {_STAGE_13_CAN_CALIBRATE}
     AND (SELECT count(*) FROM captures c
          WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id

@@ -5,7 +5,6 @@ import { isSlug } from "@/lib/ids";
 import {
   getDeployments,
   getMission,
-  isProcessedPort,
   purposeLabel,
   type Deployment,
 } from "@/lib/mission-facts";
@@ -53,9 +52,11 @@ export default async function MissionPage({ params }: Props) {
             Nothing says which port this camera was behind. A missing D does not mean flat.
           </span>
         )}
-        {!isProcessedPort(mission.port) && (
+        {!mission.processable && (
           <span className="block text-xs text-amber-700 dark:text-amber-400">
-            Not processed: the pipeline measures only missions behind the corrective optic.
+            The pipeline won&apos;t process this mission: it needs the corrective optic and a
+            pinhole camera calibration, and a borrowed calibration from a mission that has
+            them too.
           </span>
         )}
       </span>,

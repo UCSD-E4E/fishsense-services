@@ -845,6 +845,8 @@ export interface components {
              * @enum {string}
              */
             priority: "low" | "high" | "none";
+            /** Processable */
+            processable: boolean;
             /** Purpose */
             purpose: ("survey" | "lens_calibration" | "laser_calibration" | "known_length" | "other") | null;
             /** Site */
@@ -893,6 +895,8 @@ export interface components {
              * @enum {string}
              */
             priority: "low" | "high" | "none";
+            /** Processable */
+            processable: boolean;
             /** Purpose */
             purpose: ("survey" | "lens_calibration" | "laser_calibration" | "known_length" | "other") | null;
             /** Region */

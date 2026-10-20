@@ -44,6 +44,8 @@ import uuid
 import pytest
 from sqlalchemy import text
 
+from depth_measure_seed import restate_port
+
 from depth_measure_seed import (  # noqa: F401  (forget_identities: a fixture)
     REAL_FISH,
     T0,
@@ -1240,19 +1242,6 @@ async def test_the_catalog_acts_only_in_tenants_it_is_a_member_of(
         await catalog.next_mission_for_measurement(other)
 
 
-async def _set_port(owner_engine, mission_id, port):
-    """Restate the mission's port (2b-2)."""
-    async with owner_engine.begin() as conn:
-        await conn.execute(
-            text(
-                "UPDATE missions SET port = :p, port_source = "
-                "CASE WHEN :p = 'unknown' THEN NULL ELSE 'operator' END "
-                "WHERE id = :m"
-            ),
-            {"p": port, "m": mission_id},
-        )
-
-
 @pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
 async def test_a_mission_not_behind_the_corrective_optic_is_not_measured(
     owner_engine, app_engine, port
@@ -1265,6 +1254,50 @@ async def test_a_mission_not_behind_the_corrective_optic_is_not_measured(
     await measurable_capture(owner_engine, lab, mission_id)
     assert await _next(app_engine, lab) == mission_id
 
-    await _set_port(owner_engine, mission_id, port)
+    await restate_port(owner_engine, mission_id, port)
 
     assert await _next(app_engine, lab) is None
+
+
+@pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
+async def test_a_mission_off_the_corrective_optic_has_no_measurement_to_write(
+    owner_engine, app_engine, port
+):
+    """The cohort, the resolver and the persist check read one predicate, so
+    they cannot disagree: a workflow already holding the dive's work, or one
+    started by id, writes nothing once the port is restated (2b-2)."""
+    lab = await tenant(owner_engine)
+    mission_id, calibration = await calibrated_dive(owner_engine, lab)
+    await measurable_capture(owner_engine, lab, mission_id)
+    (item,) = (await _work(app_engine, lab, mission_id)).captures
+
+    await restate_port(owner_engine, mission_id, port)
+
+    assert (await _work(app_engine, lab, mission_id)).captures == []
+    persisted = await _persist(
+        app_engine, lab, mission_id, calibration, [_length(item, 0.3)]
+    )
+    assert persisted.measured == 0
+
+
+@pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
+async def test_a_calibration_borrowed_from_another_port_does_not_measure(
+    owner_engine, app_engine, port
+):
+    """A fish dive borrowing its laser calibration measures through the
+    source's fit, so the source must be behind the corrective optic too."""
+    lab = await tenant(owner_engine)
+    slate_mission, _ = await calibrated_dive(owner_engine, lab)
+    fish_mission = await mission(
+        owner_engine,
+        lab,
+        device_id=await device(owner_engine, lab),
+        source_mission=slate_mission,
+    )
+    await measurable_capture(owner_engine, lab, fish_mission)
+    assert await _next(app_engine, lab) == fish_mission
+
+    await restate_port(owner_engine, slate_mission, port)
+
+    assert await _next(app_engine, lab) is None
+    assert (await _work(app_engine, lab, fish_mission)).captures == []

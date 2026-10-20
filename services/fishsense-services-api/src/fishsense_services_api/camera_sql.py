@@ -16,10 +16,15 @@ port is not yet any of them. So a dive is rectifiable only when its port is
 the corrective optic, and every stage built on this predicate inherits it. A
 mission whose port is stated otherwise is recorded and shown, but not
 processed until the pipeline supports its camera.
+
+Every selector reads one of the three predicates below, and the stages that
+also resolve and persist work (laser depth, measurement) read the same one
+there, so the cohort, the resolver and the persist check cannot disagree.
 """
 
 __all__ = [
     "ADMITTED_PORT",
+    "CORRECTIVE_OPTIC",
     "RECTIFIABLE_CAMERA_MODEL",
     "RECTIFIABLE_MISSION",
     "RECTIFIABLE_PORT",
@@ -30,14 +35,27 @@ RECTIFIABLE_CAMERA_MODEL = "pinhole"
 #: The one port behind which that model holds.
 RECTIFIABLE_PORT = "corrective_optic"
 
-#: Dive `d` is behind the corrective optic. Alone, for the stages that project
-#: rather than rectify (laser depth, measurement): they read a calibration that
-#: may be borrowed, so the dive's own port is what admits it.
-ADMITTED_PORT = f"d.port = '{RECTIFIABLE_PORT}'"
+#: Dive `d` is behind the corrective optic. Alone, for the stages that act on
+#: what the rectifying stages produced (clustering, laser auto-accept, species
+#: prediction): a dive restated off the corrective optic after its frames were
+#: processed must not keep generating data the page calls "not processed".
+CORRECTIVE_OPTIC = f"d.port = '{RECTIFIABLE_PORT}'"
+
+#: Dive `d`, and the dive it borrows its laser calibration from, are behind
+#: the corrective optic: for the stages that project through a calibration
+#: (laser depth, measurement). A borrowed fit was made through the source's
+#: port, so the source's port admits it too. A link is kept even when the dive
+#: fits its own, so a restated source refuses the borrower either way: the
+#: strict reading, since which fit is effective can change under it.
+ADMITTED_PORT = f"""({CORRECTIVE_OPTIC} AND NOT EXISTS (
+    SELECT 1 FROM missions src
+    WHERE src.tenant_id = d.tenant_id AND src.id = d.calibration_source_mission_id
+      AND src.port <> '{RECTIFIABLE_PORT}'
+))"""
 
 #: Dive `d` is behind the corrective optic, and its device has a current
 #: pinhole calibration.
-RECTIFIABLE_MISSION = f"""({ADMITTED_PORT} AND EXISTS (
+RECTIFIABLE_MISSION = f"""({CORRECTIVE_OPTIC} AND EXISTS (
     SELECT 1 FROM current_camera_calibrations cc
     WHERE cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
       AND cc.camera_model = '{RECTIFIABLE_CAMERA_MODEL}'

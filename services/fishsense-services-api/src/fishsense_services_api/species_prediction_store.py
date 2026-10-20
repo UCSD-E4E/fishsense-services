@@ -31,6 +31,7 @@ from typing import Any, Sequence
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api.camera_sql import CORRECTIVE_OPTIC
 from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
@@ -92,8 +93,9 @@ def _work(version: str, *, never_predicted: bool = False) -> str:
 def species_prediction_cohort(version: str) -> str:
     """The species-prediction cohort over dive `d`, but for the tenant and
     priority terms the selector adds; `version` is SQL for the stage's current
-    version (a bind parameter, or a literal in a view)."""
-    return _work(version)
+    version (a bind parameter, or a literal in a view). Only behind the
+    corrective optic (2b-2)."""
+    return f"{CORRECTIVE_OPTIC} AND {_work(version)}"
 
 
 class InvalidSpeciesPredictions(ValueError):

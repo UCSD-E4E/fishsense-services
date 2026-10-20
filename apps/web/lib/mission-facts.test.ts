@@ -20,7 +20,6 @@ import {
   getTenantMissions,
   PORTS,
   PURPOSES,
-  isProcessedPort,
   parseMissionNumber,
   parsePort,
   parsePurpose,
@@ -219,14 +218,5 @@ describe("the lists", () => {
   it("has the API's purposes and ports", () => {
     expect([...PURPOSES].sort()).toEqual([...enumOf("purpose")].sort());
     expect([...PORTS].sort()).toEqual([...enumOf("port")].sort());
-  });
-});
-
-describe("processing", () => {
-  it("is only behind the corrective optic (2b-2)", () => {
-    expect(isProcessedPort("corrective_optic")).toBe(true);
-    expect(isProcessedPort("flat")).toBe(false);
-    expect(isProcessedPort("dome")).toBe(false);
-    expect(isProcessedPort("unknown")).toBe(false);
   });
 });

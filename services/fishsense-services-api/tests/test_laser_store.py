@@ -40,6 +40,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import text
 
+from depth_measure_seed import restate_port
+
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.laser_store import (
     ForeignRows,
@@ -418,21 +420,44 @@ async def test_a_mission_on_an_axial_camera_is_never_selected(
     assert await _next(app_engine, lab, selector) is None
 
 
-@pytest.mark.parametrize(
-    "selector",
-    [next_mission_for_laser_preprocessing, next_mission_for_laser_prediction],
-)
 @pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
-async def test_a_mission_not_behind_the_corrective_optic_is_never_selected(
-    lab, app_engine, selector, port
+async def test_laser_preprocessing_admits_only_the_corrective_optic(
+    lab, app_engine, port
 ):
-    """2b-2 (the owner, 2026-10-20): the pipeline rectifies with pinhole maths,
-    which is right only for the corrective optic. A flat port is axial, a
-    dome's centring is unchecked, and an unknown port is nothing yet."""
-    behind = await lab.mission(port=port)
-    await lab.capture(behind)
+    """2b-2: the control first (the mission is work), then only its port."""
+    mission = await lab.mission()
+    await lab.label(await lab.capture(mission), project=None)
+    assert await _next(app_engine, lab, next_mission_for_laser_preprocessing) == mission
 
-    assert await _next(app_engine, lab, selector) is None
+    await restate_port(lab.owner, mission, port)
+
+    assert await _next(app_engine, lab, next_mission_for_laser_preprocessing) is None
+
+
+@pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
+async def test_laser_prediction_admits_only_the_corrective_optic(lab, app_engine, port):
+    """2b-2: the control first (the mission is work), then only its port."""
+    mission = await lab.mission()
+    await lab.capture(mission)
+    assert await _next(app_engine, lab, next_mission_for_laser_prediction) == mission
+
+    await restate_port(lab.owner, mission, port)
+
+    assert await _next(app_engine, lab, next_mission_for_laser_prediction) is None
+
+
+@pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
+async def test_laser_auto_accept_admits_only_the_corrective_optic(
+    lab, app_engine, port
+):
+    """2b-2: the control first (the mission is work), then only its port."""
+    mission = await lab.mission()
+    await lab.prediction(await lab.capture(mission))
+    assert await _next(app_engine, lab, next_mission_for_laser_auto_accept) == mission
+
+    await restate_port(lab.owner, mission, port)
+
+    assert await _next(app_engine, lab, next_mission_for_laser_auto_accept) is None
 
 
 async def test_an_axial_camera_is_not_a_mission_camera(lab, app_engine):

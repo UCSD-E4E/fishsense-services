@@ -35,6 +35,7 @@ from typing import Any, Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api.camera_sql import ADMITTED_PORT
 from fishsense_services_api.automatic_validation import (
     SessionCalibration,
     ValidationFrame,
@@ -94,7 +95,7 @@ _FRAMES = text(f"""
     ) lf ON true
     LEFT JOIN current_automatic_head_tail_predictions a
       ON a.tenant_id = c.tenant_id AND a.capture_id = c.id
-    WHERE d.tenant_id = :t AND d.number = ANY(:missions)
+    WHERE d.tenant_id = :t AND d.number = ANY(:missions) AND {ADMITTED_PORT}
     ORDER BY d.number, c.number
     """)
 
@@ -198,7 +199,7 @@ async def validation_frames(
     return frames
 
 
-_SESSIONS = text("""
+_SESSIONS = text(f"""
     SELECT d.number AS mission_number, cc.camera_matrix, g.laser_axis AS stored_axis,
            lf.vanishing_px, lf.line_direction
     FROM missions d
@@ -208,7 +209,7 @@ _SESSIONS = text("""
     LEFT JOIN mission_laser_geometry g ON g.tenant_id = d.tenant_id AND g.mission_id = d.id
     LEFT JOIN current_automatic_laser_calibrations lf
       ON lf.tenant_id = d.tenant_id AND lf.mission_id = d.id AND lf.outcome = 'accepted'
-    WHERE d.tenant_id = :t AND d.number = ANY(:missions)
+    WHERE d.tenant_id = :t AND d.number = ANY(:missions) AND {ADMITTED_PORT}
     ORDER BY d.number
     """)
 

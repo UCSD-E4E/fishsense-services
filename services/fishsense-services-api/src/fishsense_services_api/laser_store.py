@@ -52,6 +52,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from fishsense_services_api.camera_sql import (
+    CORRECTIVE_OPTIC,
     RECTIFIABLE_CAMERA_MODEL,
     RECTIFIABLE_MISSION,
 )
@@ -263,10 +264,6 @@ _CANONICAL = "c.tenant_id = d.tenant_id AND c.mission_id = d.id AND c.is_canonic
 
 _ORDER = "ORDER BY d.created_at, d.number"
 
-#: Dive `d` can be rectified, which the preprocess and predict resolvers need
-#: (`mission_camera`). v2 only; see `camera_sql`.
-_HAS_CAMERA = RECTIFIABLE_MISSION
-
 
 async def _lock_mission(
     conn: AsyncConnection, what: str, mission_id: uuid.UUID
@@ -345,7 +342,7 @@ NEEDS_LASER_JPEG = """(
 LASER_PREPROCESS_WORK = (
     f"EXISTS (SELECT 1 FROM captures c WHERE {_CANONICAL} AND {NEEDS_LASER_JPEG})"
 )
-LASER_PREPROCESS_COHORT = f"{LASER_PREPROCESS_WORK} AND {_HAS_CAMERA}"
+LASER_PREPROCESS_COHORT = f"{LASER_PREPROCESS_WORK} AND {RECTIFIABLE_MISSION}"
 
 
 async def next_mission_for_laser_preprocessing(
@@ -501,7 +498,7 @@ def laser_prediction_cohort(version: str) -> str:
           AND {_CURRENT_PREDICTION} IS DISTINCT FROM {version}
           AND NOT {_HAS_LIVE_COMPLETED_LABEL}
     )"""
-    return f"({unpredicted} OR ({being_labeled} AND {stale})) AND {_HAS_CAMERA}"
+    return f"({unpredicted} OR ({being_labeled} AND {stale})) AND {RECTIFIABLE_MISSION}"
 
 
 async def next_mission_for_laser_prediction(
@@ -614,7 +611,7 @@ async def next_mission_for_laser_auto_accept(
     found = await _candidates(
         conn,
         tenant_id,
-        f"""EXISTS (
+        f"""{CORRECTIVE_OPTIC} AND EXISTS (
             SELECT 1 FROM captures c
             JOIN current_laser_predictions_gated p
               ON p.tenant_id = c.tenant_id AND p.capture_id = c.id

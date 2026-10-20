@@ -410,3 +410,86 @@ async def test_slate_is_not_a_purpose(client, tenants, owner_engine):
     )
 
     assert response.status_code == 422
+
+
+async def _pinhole_device(owner_engine, tenant):
+    async with owner_engine.begin() as conn:
+        device = (
+            await conn.execute(
+                text(
+                    "INSERT INTO devices (tenant_id, kind, serial) "
+                    "VALUES (:t, 'lite', :s) RETURNING id"
+                ),
+                {"t": tenant, "s": f"S{tenant.hex[:8]}"},
+            )
+        ).scalar_one()
+        await conn.execute(
+            text(
+                "INSERT INTO camera_calibrations (tenant_id, device_id, camera_model, "
+                "camera_matrix, distortion_coefficients) VALUES (:t, :d, 'pinhole', "
+                "'[[1,0,0],[0,1,0],[0,0,1]]', '[0,0,0,0,0]')"
+            ),
+            {"t": tenant, "d": device},
+        )
+    return device
+
+
+@pytest.mark.parametrize(
+    "port, source, device, processable",
+    [
+        ("corrective_optic", "backfill", True, True),
+        ("flat", "operator", True, False),
+        ("unknown", None, True, False),
+        ("corrective_optic", "backfill", False, False),
+    ],
+)
+async def test_a_mission_says_whether_the_pipeline_will_process_it(
+    client, tenants, owner_engine, port, source, device, processable
+):
+    """The stages' own predicates (camera_sql), computed by the API, so the
+    page never restates the rule (2b-2): the corrective optic and a pinhole
+    camera calibration."""
+    lab = tenants["lab"]
+    await _mission(
+        owner_engine,
+        lab,
+        7,
+        port=port,
+        port_source=source,
+        device_id=await _pinhole_device(owner_engine, lab) if device else None,
+    )
+
+    listed = (await client.get("/tenants/lab/missions", headers=_bearer(MEMBER))).json()
+    detail = (
+        await client.get("/tenants/lab/missions/7", headers=_bearer(MEMBER))
+    ).json()
+
+    assert listed[0]["processable"] is processable
+    assert detail["processable"] is processable
+
+
+async def test_a_borrowed_calibration_from_another_port_is_not_processable(
+    client, tenants, owner_engine
+):
+    lab = tenants["lab"]
+    device = await _pinhole_device(owner_engine, lab)
+    await _mission(owner_engine, lab, 6, port="flat", port_source="operator")
+    async with owner_engine.connect() as conn:
+        source = (
+            await conn.execute(text("SELECT id FROM missions WHERE number = 6"))
+        ).scalar_one()
+    await _mission(
+        owner_engine,
+        lab,
+        7,
+        port="corrective_optic",
+        port_source="backfill",
+        device_id=device,
+        calibration_source_mission_id=source,
+    )
+
+    detail = (
+        await client.get("/tenants/lab/missions/7", headers=_bearer(MEMBER))
+    ).json()
+
+    assert detail["processable"] is False

@@ -413,3 +413,14 @@ async def measurable_capture(
             owner_engine, tenant_id, mission_id, [capture_id], fish_id=cluster_fish
         )
     return capture_id
+
+
+async def restate_port(owner_engine, mission_id, port: str) -> None:
+    """Restate a mission's port, as an operator would (2b-2)."""
+    await exec_(
+        owner_engine,
+        "UPDATE missions SET port = :p, port_source = "
+        "CASE WHEN :p = 'unknown' THEN NULL ELSE 'operator' END WHERE id = :m",
+        p=port,
+        m=mission_id,
+    )

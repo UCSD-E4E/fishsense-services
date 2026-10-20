@@ -38,6 +38,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import text
 
+from depth_measure_seed import restate_port
+
 from fishsense_services_api.clustering_store import ForeignCapture, InvalidClusters
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.ingest_store import (
@@ -1253,3 +1255,21 @@ async def test_the_catalog_acts_only_in_tenants_it_serves(
     ] == [mission]
     with pytest.raises(PermissionError):
         await catalog.next_mission_for_species_preprocessing(reef)
+
+
+@pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
+async def test_species_preprocessing_admits_only_the_corrective_optic(
+    owner_engine, app_engine, port
+):
+    """2b-2: the control first (the mission is work), then only its port."""
+    lab = await _tenant(owner_engine)
+    mission = await _dive(app_engine, lab, "d1")
+    capture = await _capture(app_engine, lab, mission, "a")
+    await _cluster(owner_engine, lab, mission, "prediction", [capture])
+    await _laser(owner_engine, lab, capture)
+    await _species(owner_engine, lab, capture, project=None)
+    assert await _next(app_engine, lab) == mission
+
+    await restate_port(owner_engine, mission, port)
+
+    assert await _next(app_engine, lab) is None
