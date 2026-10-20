@@ -21,11 +21,14 @@
   --color-snout: var(--fs-overlay-snout);
   --color-fork: var(--fs-overlay-fork);
   --color-laser: var(--fs-overlay-laser);
+  --color-mask: var(--fs-overlay-mask);
+  --color-mask-edge: var(--fs-overlay-mask-edge);
   --font-sans: var(--font-inter), system-ui, sans-serif;
   --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
   --radius-card: var(--fs-radius-card);
   --radius-sheet: var(--fs-radius-sheet);
   --radius-control: var(--fs-radius-control);
+  --radius-chip: var(--fs-radius-chip);
 }
 
 /* v4 scopes `hover:` to `@media (hover: hover)`, which drops the tap feedback

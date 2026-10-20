@@ -26,7 +26,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
+  :root {
     --fs-ground: #0B0F12;
     --fs-surface: #141A1F;
     --fs-raised: #1C242B;
@@ -41,20 +41,4 @@
     --fs-warn: #F2B544;
     --fs-error: #FF7A6E;
   }
-}
-
-:root[data-theme="dark"] {
-  --fs-ground: #0B0F12;
-  --fs-surface: #141A1F;
-  --fs-raised: #1C242B;
-  --fs-line: #2A343C;
-  --fs-text: #E8EEF1;
-  --fs-text2: #9AA8B1;
-  --fs-text3: #84939D;
-  --fs-teal: #00AAA5;
-  --fs-teal-text: #2CCBC5;
-  --fs-teal-tint: #0E2B2A;
-  --fs-on-teal: #001A19;
-  --fs-warn: #F2B544;
-  --fs-error: #FF7A6E;
 }

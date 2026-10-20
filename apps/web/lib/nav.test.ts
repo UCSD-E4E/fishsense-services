@@ -31,6 +31,9 @@ describe("the main navigation (docs/design/README.md, Navigation)", () => {
     // Data holds deployments and missions until they share one route.
     expect(active("/deployments/lab/4")).toEqual(["Data"]);
     expect(active("/missions")).toEqual(["Data"]);
+    // Mobile captures stay reachable under Data until missions hold them.
+    expect(active("/captures")).toEqual(["Data"]);
+    expect(active("/captures/lab/c")).toEqual(["Data"]);
     expect(active("/portal/triage")).toEqual(["Labelling"]);
     // A prefix that is not a path segment is not the section.
     expect(active("/fishing")).toEqual([]);

@@ -1,8 +1,9 @@
 /**
  * The Deep water design tokens (docs/design/README.md, agreed 2026-10-20) as
- * CSS variables: `--fs-<name>` per colour, light by default, dark when the
- * system is dark, and either when a page pins `data-theme` on `<html>`.
- * globals.css maps them onto Tailwind's theme (`bg-surface`, `text-fg-2`, …).
+ * CSS variables: `--fs-<name>` per colour, light by default and dark when the
+ * system is dark. globals.css maps them onto Tailwind's theme (`bg-surface`,
+ * `text-fg-2`, …). There is no per-page theme pin yet: pages still carry
+ * `dark:` variants keyed to the system, and a pin would split a page in two.
  *
  * The JSON in docs/design is the one source; the image builds from apps/web
  * alone, so `app/tokens.css` is committed and design-tokens.test.ts holds it
@@ -16,7 +17,7 @@ export type DesignTokens = {
   radius: Record<string, number>;
 };
 
-function kebab(name: string): string {
+export function kebab(name: string): string {
   return name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
 }
 
@@ -41,13 +42,9 @@ export function tokensToCss(tokens: DesignTokens): string {
     "}",
     "",
     "@media (prefers-color-scheme: dark) {",
-    '  :root:not([data-theme="light"]) {',
+    "  :root {",
     variables(dark).replace(/^/gm, "  "),
     "  }",
-    "}",
-    "",
-    ':root[data-theme="dark"] {',
-    variables(dark),
     "}",
     "",
   ].join("\n");
