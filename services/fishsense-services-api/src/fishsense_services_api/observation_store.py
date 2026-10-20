@@ -128,14 +128,17 @@ _RENDER = f"""LEFT JOIN LATERAL (
     {newest_render("o.capture_id", "o.tenant_id", "r.bucket = :photo_bucket")}
 ) r ON true"""
 
-#: The render's thumbnail (0053), made, at the cards' width, in the same
-#: bucket: what the list shows. Never the full render (review of #151).
+#: The card: the thumbnail (0053) of the capture's newest render that has one
+#: made at the cards' width, in the same bucket -- so a re-render waiting for
+#: its thumbnail does not blank the card (review of the stack). Never the full
+#: render (review of #151).
 _THUMBNAIL = f"""LEFT JOIN LATERAL (
     SELECT h.key FROM capture_thumbnails h
-    WHERE h.tenant_id = o.tenant_id AND h.render_id = r.id
+    JOIN capture_renders rr ON rr.tenant_id = h.tenant_id AND rr.id = h.render_id
+    WHERE h.tenant_id = o.tenant_id AND h.capture_id = o.capture_id
       AND h.status = 'made' AND h.target_width = {THUMBNAIL_WIDTH}
       AND h.bucket = :photo_bucket
-    ORDER BY h.seq DESC LIMIT 1
+    ORDER BY rr.seq DESC LIMIT 1
 ) h ON true"""
 
 #: The name the server derived from the capture's coordinates (0041).

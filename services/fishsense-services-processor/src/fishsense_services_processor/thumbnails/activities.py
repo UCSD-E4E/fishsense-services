@@ -31,12 +31,15 @@ QUALITY = 82
 
 
 def http_get(url: str) -> bytes | None:
-    """GET a presigned URL; None when nothing is there."""
+    """GET a presigned URL; None when nothing is there (404). Anything else --
+    a 403 from a signature, a clock or a key's permission -- raises, so the
+    try is retried rather than the render recorded missing for good (review
+    of the stack)."""
     try:
         with urllib.request.urlopen(url, timeout=300) as response:
             return response.read()
     except urllib.error.HTTPError as error:
-        if error.code in (403, 404):
+        if error.code == 404:
             return None
         raise
 

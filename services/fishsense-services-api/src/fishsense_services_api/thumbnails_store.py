@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
+    "THUMBNAIL_MAX_FAILURES",
     "THUMBNAIL_WIDTH",
     "InvalidThumbnails",
     "OwedThumbnail",
@@ -34,6 +35,9 @@ __all__ = [
 #: because the API image does not install the contracts;
 #: tests/test_thumbnails_store.py pins them together.
 THUMBNAIL_WIDTH = 640
+#: Failed tries (left out after the processor's own, or stored wrong) before
+#: a render is no longer offered (review of the stack).
+THUMBNAIL_MAX_FAILURES = 3
 
 
 def thumbnail_key(render_key: str, width: int = THUMBNAIL_WIDTH) -> str:
@@ -77,22 +81,29 @@ async def owed_thumbnails(
     width: int,
     limit: int | None = None,
 ) -> list[OwedThumbnail]:
-    """The tenant's renders in `bucket` with no thumbnail row at `width`,
-    oldest first."""
+    """The tenant's renders in `bucket` with no settled thumbnail row at
+    `width` and fewer than `THUMBNAIL_MAX_FAILURES` failed tries: those never
+    tried first, then the fewest failures, then the oldest."""
     rows = await conn.execute(
         text("""
-            SELECT r.id, r.capture_id, r.key
+            SELECT r.id, r.capture_id, r.key, tries.failed
             FROM capture_renders r
+            CROSS JOIN LATERAL (
+                SELECT count(*) FILTER (WHERE h.status = 'failed') AS failed,
+                       bool_or(h.status <> 'failed') AS settled
+                FROM capture_thumbnails h
+                WHERE h.tenant_id = r.tenant_id AND h.render_id = r.id
+                  AND h.target_width = :w
+            ) tries
             WHERE r.tenant_id = :t AND r.status = 'rendered' AND r.bucket = :bucket
-              AND NOT EXISTS (
-                  SELECT 1 FROM capture_thumbnails h
-                  WHERE h.tenant_id = r.tenant_id AND h.render_id = r.id
-                    AND h.target_width = :w)
-            ORDER BY r.seq
+              AND NOT coalesce(tries.settled, false)
+              AND tries.failed < :max_failures
+            ORDER BY tries.failed, r.seq
             LIMIT :limit
             """),
-        {"t": tenant_id, "bucket": bucket, "w": width, "limit": limit},
-    )
+        {"t": tenant_id, "bucket": bucket, "w": width, "limit": limit,
+         "max_failures": THUMBNAIL_MAX_FAILURES},
+    )  # fmt: skip
     return [OwedThumbnail(r.id, r.capture_id, r.key) for r in rows]
 
 
@@ -127,7 +138,8 @@ async def persist_thumbnails(
         result = await conn.execute(
             text(f"""
                 INSERT INTO capture_thumbnails ({columns}) VALUES ({params})
-                ON CONFLICT (tenant_id, render_id, target_width) DO NOTHING
+                ON CONFLICT (tenant_id, render_id, target_width)
+                    WHERE status IN ('made', 'render_unavailable') DO NOTHING
                 """),
             {"tenant_id": tenant_id, **values},
         )

@@ -117,3 +117,22 @@ async def test_the_workflow_thumbnails_each_render():
 def test_the_thumbnail_stage_runs_on_the_per_image_role():
     (stage,) = [s for s in registry.stages() if s.name == "thumbnails"]
     assert stage.role == registry.ROLE_PER_IMAGE
+
+
+@pytest.mark.parametrize("code, missing", [(404, True), (403, False), (500, False)])
+def test_only_a_404_is_a_render_not_there(monkeypatch, code, missing):
+    """Review of the stack: a 403 (a signature, a clock, a key's permission)
+    is not the render missing, and must not be recorded as it for good."""
+    import urllib.error
+
+    from fishsense_services_processor.thumbnails import activities
+
+    def refuse(url, timeout):
+        raise urllib.error.HTTPError(url, code, "no", {}, None)
+
+    monkeypatch.setattr(activities.urllib.request, "urlopen", refuse)
+    if missing:
+        assert activities.http_get("https://g/r") is None
+    else:
+        with pytest.raises(urllib.error.HTTPError):
+            activities.http_get("https://g/r")

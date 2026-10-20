@@ -179,7 +179,11 @@ async def test_only_a_thumbnail_the_stored_object_confirms_is_recorded():
                         results)  # fmt: skip
 
     assert (report.made, report.missing, report.unverified) == (1, 1, [wrong.render_id])
-    made, missing = catalog.persisted
+    by_status = {r.status: r for r in catalog.persisted}
+    made, missing, failed = (by_status[s] for s in ("made", "render_unavailable",
+                                                     "failed"))  # fmt: skip
+    # The unverified one is a failed try (review of the stack).
+    assert (failed.render_id, failed.key) == (wrong.render_id, None)
     assert (made.render_id, made.capture_id, made.bucket, made.key, made.target_width,
             made.width, made.height) == (good.render_id, good.capture_id, BUCKET,
                                          good.key, THUMBNAIL_WIDTH, 640, 481)  # fmt: skip
@@ -227,17 +231,24 @@ def _stubs(*, pages, record=True):
     return [select, resolve, wake, persist]
 
 
+FAIL: list = []
+
+
 @workflow.defn(name="MakeThumbnailsWorkflow")
 class _ProcessorThumbnails:
     @workflow.run
     async def run(self, payload: ThumbnailsInput) -> List[ThumbnailResult]:
         EVENTS.append(("thumbnails", len(payload.frames)))
+        if payload.tenant_id in FAIL:
+            raise ApplicationError("no processor came up", non_retryable=True)
         return [_made(f.render_id) for f in payload.frames]
 
 
-def _page(n):
+def _page(n, tenant_id=LAB):
     catalog = _Catalog(owed=n)
-    return ThumbnailPage(payload=_payload(catalog))
+    return ThumbnailPage(
+        payload=_payload(catalog).model_copy(update={"tenant_id": tenant_id})
+    )
 
 
 async def _execute(pages, record=True):
@@ -282,3 +293,32 @@ def test_off_by_default():
     assert thumbnail_schedules(RenderSettings()) == []
     (s,) = thumbnail_schedules(RenderSettings(thumbnails_enabled=True))
     assert s.schedule_id == "thumbnail-backlog"
+
+
+async def test_a_render_left_out_after_its_tries_is_a_failed_try():
+    catalog = _Catalog(owed=2)
+    payload = _payload(catalog)
+    made, left_out = payload.frames
+    objects = _Objects({made.key: StoredObject(size=40_000, sha256=None, md5=MD5)})
+
+    report = await _run(_acts(catalog, objects).persist_thumbnails, LAB, payload,
+                        [_made(made.render_id)])  # fmt: skip
+
+    assert (report.made, report.failed) == (1, 1)
+    statuses = {r.render_id: r.status for r in catalog.persisted}
+    assert statuses == {made.render_id: "made", left_out.render_id: "failed"}
+
+
+async def test_one_tenants_failing_child_does_not_end_the_run():
+    """Review of the stack: a child failing (a processor that never came up,
+    a payload that would not decode) ended the backlog, and every tenant after
+    it waited an hour."""
+    FAIL[:] = [LAB]
+    other = uuid.uuid4()
+    try:
+        report = await _execute({LAB: [_page(2)], other: [_page(3, other)]})
+    finally:
+        FAIL[:] = []
+
+    assert report.made == 3
+    assert report.failed_tenants == [str(LAB)]

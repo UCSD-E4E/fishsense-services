@@ -20,8 +20,11 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import List, Optional
 
+from dataclasses import field
+
 from temporalio import workflow
 from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
+from temporalio.exceptions import ChildWorkflowError
 
 with workflow.unsafe.imports_passed_through():
     import annotated_types  # noqa: F401  pylint: disable=unused-import
@@ -54,6 +57,8 @@ class ThumbnailBacklogReport:
     made: int = 0
     missing: int = 0
     unverified: int = 0
+    #: Tenants whose page's child failed; the run went on to the next.
+    failed_tenants: List[str] = field(default_factory=list)
 
 
 async def _db(name: str, *args, result_type=None):
@@ -90,15 +95,26 @@ class ThumbnailBacklogWorkflow:
                     await wake_per_image_processor()
                     woke = True
                 report.pages += 1
-                results = await workflow.execute_child_workflow(
-                    "MakeThumbnailsWorkflow",
-                    page.payload,
-                    id=f"{workflow.info().workflow_id}-{tenant_id}-{report.pages}",
-                    task_queue=PROCESSOR_TASK_QUEUE,
-                    execution_timeout=timedelta(hours=2),
-                    id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
-                    result_type=List[ThumbnailResult],
-                )
+                try:
+                    results = await workflow.execute_child_workflow(
+                        "MakeThumbnailsWorkflow",
+                        page.payload,
+                        id=f"{workflow.info().workflow_id}-{tenant_id}-{report.pages}",
+                        task_queue=PROCESSOR_TASK_QUEUE,
+                        execution_timeout=timedelta(hours=2),
+                        id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
+                        result_type=List[ThumbnailResult],
+                    )
+                except ChildWorkflowError as error:
+                    # One tenant's failure is not the run's (review of the
+                    # stack): the next tenant still gets its thumbnails.
+                    workflow.logger.warning(
+                        "thumbnails: tenant=%s failed: %s",
+                        tenant_id,
+                        error.cause or error,
+                    )
+                    report.failed_tenants.append(str(tenant_id))
+                    break
                 persisted: ThumbnailPersistReport = await _db(
                     "persist_thumbnails",
                     tenant_id,
@@ -109,7 +125,7 @@ class ThumbnailBacklogWorkflow:
                 report.made += persisted.made
                 report.missing += persisted.missing
                 report.unverified += len(persisted.unverified)
-                if persisted.made + persisted.missing == 0:
+                if persisted.made + persisted.missing == 0 and not persisted.failed:
                     workflow.logger.warning(
                         "thumbnails: tenant=%s page recorded nothing; next run",
                         tenant_id,

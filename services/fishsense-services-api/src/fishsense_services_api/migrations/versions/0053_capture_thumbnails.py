@@ -5,9 +5,14 @@ would download ~300 MB. So each render gets a thumbnail, made from the stored
 render -- never the NAS -- and recorded here once the orchestrator has checked
 the stored object against the size and MD5 the processor reported
 (`contracts.thumbnails`). A render that was not there to read is recorded too
-(``render_unavailable``), so it is not tried every hour.
+(``render_unavailable``), so it is not tried every hour; so is each failed
+try (``failed``: left out after the processor's tries, or the stored object
+disagreeing). Renders that failed go after the rest, and the third failure
+settles one (review of the stack: renders failing every try sat at the head
+of the queue and stalled their tenant).
 
-One row per render per target width (``target_width``; the key carries it);
+One settled row (``made`` or ``render_unavailable``) per render per target
+width (``target_width``; the key carries it), any number of ``failed``;
 ``width``/``height`` are the thumbnail's own pixels. Append-only, tenant RLS;
 the research role reads the lab's rows, as for renders.
 
@@ -47,7 +52,7 @@ def upgrade() -> None:
             capture_id uuid NOT NULL,
             status text NOT NULL
                 CONSTRAINT {TABLE}_status_check
-                CHECK (status IN ('made', 'render_unavailable')),
+                CHECK (status IN ('made', 'render_unavailable', 'failed')),
             target_width integer NOT NULL
                 CONSTRAINT {TABLE}_target_width_check CHECK (target_width > 0),
             bucket text,
@@ -58,7 +63,6 @@ def upgrade() -> None:
             height integer,
             created_at timestamptz NOT NULL DEFAULT now(),
             UNIQUE (tenant_id, id),
-            UNIQUE (tenant_id, render_id, target_width),
             FOREIGN KEY (tenant_id, render_id) REFERENCES capture_renders (tenant_id, id),
             FOREIGN KEY (tenant_id, capture_id) REFERENCES captures (tenant_id, id),
             CONSTRAINT {TABLE}_object_check CHECK (
@@ -71,6 +75,18 @@ def upgrade() -> None:
                 status = 'made' OR (bucket IS NULL AND key IS NULL
                                     AND bytes IS NULL AND md5 IS NULL))
         )
+        """)
+    op.execute(f"""
+        CREATE UNIQUE INDEX {TABLE}_settled_once_idx
+            ON {TABLE} (tenant_id, render_id, target_width)
+            WHERE status IN ('made', 'render_unavailable')
+        """)
+    op.execute(f"""
+        CREATE INDEX {TABLE}_tenant_id_render_id_idx ON {TABLE} (tenant_id, render_id)
+        """)
+    # /fish's cards look a capture's thumbnails up (observation_store).
+    op.execute(f"""
+        CREATE INDEX {TABLE}_tenant_id_capture_id_idx ON {TABLE} (tenant_id, capture_id)
         """)
     op.execute(f"ALTER TABLE {TABLE} ENABLE ROW LEVEL SECURITY")
     op.execute(f"ALTER TABLE {TABLE} FORCE ROW LEVEL SECURITY")

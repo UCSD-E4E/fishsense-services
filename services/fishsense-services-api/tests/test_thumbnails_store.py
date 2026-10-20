@@ -148,3 +148,26 @@ def test_the_api_side_width_and_key_are_the_contracts():
     assert thumbnails_store.THUMBNAIL_WIDTH == thumbnails.THUMBNAIL_WIDTH
     key = "renders/r1_ab/" + "c" * 32 + ".JPG"
     assert thumbnails_store.thumbnail_key(key) == thumbnails.thumbnail_key(key)
+
+
+async def test_a_render_that_keeps_failing_goes_last_and_stops_at_its_third(
+    owner_engine, app_engine
+):
+    """Review of the stack: renders that fail every try (a corrupt JPEG, a PUT
+    refused) stayed at the head of the queue, so each page re-tried them first
+    and enough of them stalled the tenant. A failure is recorded; renders that
+    failed go after the rest, and three failures settle one."""
+    lab = await tenant(owner_engine)
+    _, c1, failing, _ = await _rendered(owner_engine, lab)
+    _, c2, fine, _ = await _rendered(owner_engine, lab)
+    failed = ThumbnailRow(render_id=failing, capture_id=c1, status="failed",
+                          target_width=W)  # fmt: skip
+
+    await _in(app_engine, lab, persist_thumbnails, [failed])
+    once = await _in(app_engine, lab, owed_thumbnails, bucket=BUCKET, width=W)
+    await _in(app_engine, lab, persist_thumbnails, [failed])
+    await _in(app_engine, lab, persist_thumbnails, [failed])
+    thrice = await _in(app_engine, lab, owed_thumbnails, bucket=BUCKET, width=W)
+
+    assert [o.render_id for o in once] == [fine, failing]
+    assert [o.render_id for o in thrice] == [fine]

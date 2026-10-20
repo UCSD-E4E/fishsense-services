@@ -473,10 +473,15 @@ async def test_a_bucket_that_changed_owes_its_render_and_its_raw_again(
     moved = await _in(app_engine, lab, render_inputs, mission_id,
                       bucket="new-bucket", render_version=V)  # fmt: skip
 
+    await _in(app_engine, lab, persist_renders, mission_id,
+              [_rendered(a, camera, bucket="new-bucket")])  # fmt: skip
+
     assert _render_owed(moved) == [a]
     assert _raw_owed(moved) == [a, b]
-    # Recording the new bucket's render waits for 0054, which drops 0051's
-    # bucket-blind index (kept through this deploy, review of the stack).
+    # Recorded in the new bucket too, now 0054 dropped 0051's bucket-blind index.
+    rows = await _rows(owner_engine, "SELECT bucket FROM capture_renders "
+                       "WHERE status = 'rendered' ORDER BY seq")  # fmt: skip
+    assert [r["bucket"] for r in rows] == [BUCKET, "new-bucket"]
 
 
 async def test_a_raw_missing_three_times_is_not_owed_a_copy_either(
@@ -540,32 +545,3 @@ async def test_the_catalog_passes_the_bucket_to_current_renders(
     got = await catalog.current_renders(lab, [c], bucket="lab-bucket")
 
     assert got[c].key == "renders/here.JPG"
-
-
-async def test_the_orchestrator_from_before_0052_still_records_its_renders(
-    owner_engine, app_engine
-):
-    """The render backlog ran in production across 0052's deploy: until it
-    restarts, the old orchestrator names 0051's index columns in ON CONFLICT,
-    which needs that index to still be there (review of the stack)."""
-    lab = await tenant(owner_engine)
-    mission_id = await _plain_mission(owner_engine, lab)
-    a = await capture(owner_engine, lab, mission_id)
-    camera = (await _in(app_engine, lab, render_inputs, mission_id, bucket=BUCKET,
-                        render_version=V)).camera_calibration_id  # fmt: skip
-    old_insert = text("""
-        INSERT INTO capture_renders (tenant_id, capture_id, status, render_version,
-            camera_calibration_id, bucket, key, bytes, md5)
-        VALUES (:t, :c, 'rendered', :v, :cam, :b, :k, 1, :md5)
-        ON CONFLICT (tenant_id, capture_id, render_version, camera_calibration_id)
-            WHERE status = 'rendered' DO NOTHING
-        """)
-
-    async with tenant_transaction(app_engine, lab) as conn:
-        for _ in range(2):
-            await conn.execute(old_insert, {"t": lab, "c": a, "v": V, "cam": camera,
-                                            "b": BUCKET, "k": "renders/a.JPG",
-                                            "md5": MD5})  # fmt: skip
-
-    rows = await _rows(owner_engine, "SELECT count(*) AS n FROM capture_renders")
-    assert rows == [{"n": 1}]

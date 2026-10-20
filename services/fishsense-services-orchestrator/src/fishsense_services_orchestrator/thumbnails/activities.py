@@ -56,6 +56,14 @@ class ThumbnailPersistReport:
     missing: int = 0
     #: Made, but the stored object did not match what was reported.
     unverified: List[uuid.UUID] = field(default_factory=list)
+    #: Failed tries recorded: left out after the processor's tries, or
+    #: unverified (review of the stack).
+    failed: int = 0
+
+
+def _failed(frame: ThumbnailFrame, width: int) -> ThumbnailRow:
+    return ThumbnailRow(render_id=frame.render_id, capture_id=frame.capture_id,
+                        status="failed", target_width=width)  # fmt: skip
 
 
 def _refuse(tenant_id: uuid.UUID, why: str) -> ApplicationError:
@@ -156,10 +164,11 @@ class ThumbnailActivities:
             if stored is None or stored.size != r.bytes or stored.md5 != r.md5:
                 activity.logger.warning(
                     "tenant=%s render=%s: stored thumbnail %s does not match the "
-                    "processor's (%s bytes, md5 %s); left owed",
+                    "processor's (%s bytes, md5 %s); a failed try",
                     tenant_id, r.render_id, stored, r.bytes, r.md5,
                 )  # fmt: skip
                 report.unverified.append(r.render_id)
+                rows.append(_failed(frame, payload.width))
                 continue
             report.made += 1
             rows.append(
@@ -170,9 +179,17 @@ class ThumbnailActivities:
                     width=r.width, height=r.height,
                 )  # fmt: skip
             )
+        answered = {r.render_id for r in results}
+        for frame in payload.frames:
+            if frame.render_id not in answered:
+                # Left out after the processor's tries: a failed try, so a
+                # render failing every try goes last, then stops being offered.
+                rows.append(_failed(frame, payload.width))
+        report.failed = sum(1 for row in rows if row.status == "failed")
         await self._catalog.persist_thumbnails(tenant_id, rows)
         activity.logger.info(
-            "tenant=%s thumbnails made=%d missing=%d unverified=%d",
+            "tenant=%s thumbnails made=%d missing=%d unverified=%d failed=%d",
             tenant_id, report.made, report.missing, len(report.unverified),
+            report.failed,
         )  # fmt: skip
         return report

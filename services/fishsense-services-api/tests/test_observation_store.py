@@ -144,6 +144,22 @@ class TestList:
         assert before.photo_key is None
         assert after.photo_key == thumb
 
+    async def test_a_newer_render_without_its_thumbnail_keeps_the_older_one(
+        self, owner_engine, app_engine, tenants
+    ):
+        """Review of the stack: re-rendered (a new version, camera or bucket),
+        a capture's card went blank until the next thumbnail run. The card is
+        the newest render that has a thumbnail."""
+        lab = tenants["lab"]
+        capture_id, _ = await _lite(owner_engine, lab)
+        old = await render(owner_engine, lab, capture_id, key="renders/r1/a.JPG")
+        old_thumb = await thumbnail(owner_engine, lab, old)
+        await render(owner_engine, lab, capture_id, version=2, key="renders/r2/a.JPG")
+
+        [found] = await _list(app_engine, lab, photo_bucket=BUCKET)
+
+        assert found.photo_key == old_thumb
+
     async def test_a_mobile_capture_is_an_observation_by_lidar(
         self, owner_engine, app_engine, tenants
     ):
