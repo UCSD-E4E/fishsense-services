@@ -176,7 +176,7 @@ Q() { docker exec fishsense-postgres-1 psql -U postgres -d fishsense_services -A
   - `CORRECTIVE_OPTIC`: it only acts on what those stages produced.
 
   A change to these terms needs a migration that recreates
-  `dive_pipeline_status`'s function (see 0050).
+  `dive_pipeline_status`'s function (see 0051).
 - **A mission's purpose is what it was for, never whether it calibrates**
   (0048). Nearly every dive has a calibration board in it. Never select laser
   calibration by purpose; find the board in the frames.

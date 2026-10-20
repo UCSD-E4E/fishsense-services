@@ -8,7 +8,8 @@ missing from scratch `RENDER_MAX_UNAVAILABLE` times (it may come back: a moved
 file repaired, scratch evicted mid-run; review of #144). Missions with a human
 measurement come first (their fish are on /fish with no photo until then),
 then the oldest. A mission whose device has no pinhole calibration cannot be
-rectified, and owes nothing here.
+rectified, and owes nothing here; nor does one off the corrective optic, where
+pinhole maths does not hold (`camera_sql.RECTIFIABLE_MISSION`, 2b-2).
 """
 
 from __future__ import annotations
@@ -19,6 +20,8 @@ from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
+
+from fishsense_services_api.camera_sql import RECTIFIABLE_MISSION
 
 from fishsense_services_api.automatic_results_store import (
     _check_captures,
@@ -165,7 +168,7 @@ async def render_missions(
             CROSS JOIN LATERAL (
                 SELECT count(*) AS n FROM captures c WHERE {_OWED}
             ) owed
-            WHERE d.tenant_id = :t AND owed.n > 0
+            WHERE d.tenant_id = :t AND owed.n > 0 AND {RECTIFIABLE_MISSION}
             ORDER BY human_measured DESC, d.created_at, d.id
             LIMIT :limit
             """),
@@ -193,7 +196,7 @@ async def render_inputs(
             FROM missions d
             {_CAMERA}
             JOIN captures c ON {_OWED}
-            WHERE d.tenant_id = :t AND d.id = :d
+            WHERE d.tenant_id = :t AND d.id = :d AND {RECTIFIABLE_MISSION}
               AND (CAST(:after AS integer) IS NULL OR c.number > :after)
             ORDER BY c.number, c.id
             LIMIT :limit
