@@ -138,3 +138,13 @@ async def test_the_catalog_serves_only_member_tenants(app_engine, seed_membershi
     catalog = ThumbnailsCatalog(app_engine, sub="service:fishsense-orchestrator")
 
     assert await catalog.member_tenants() == [tenants["lab"]]
+
+
+def test_the_api_side_width_and_key_are_the_contracts():
+    """Repeated in the API (its image lacks the contracts); pinned here."""
+    from fishsense_services_api import thumbnails_store
+    from fishsense_services_contracts import thumbnails
+
+    assert thumbnails_store.THUMBNAIL_WIDTH == thumbnails.THUMBNAIL_WIDTH
+    key = "renders/r1_ab/" + "c" * 32 + ".JPG"
+    assert thumbnails_store.thumbnail_key(key) == thumbnails.thumbnail_key(key)

@@ -314,6 +314,14 @@ class TestSeed:
             with urllib.request.urlopen(objects.presign_get(t["key"])):
                 pass
 
+    def test_the_seeds_render_is_the_contracts(self):
+        """Repeated in the API (its image lacks the contracts); pinned here."""
+        camera = uuid.uuid4()
+        assert dev_seed.RENDER_VERSION == RENDER_VERSION
+        assert dev_seed.render_key(1, camera, "c" * 32) == render_key(
+            1, camera, "c" * 32
+        )
+
     def test_a_jpegs_size_is_read_from_its_header(self):
         assert dev_seed.jpeg_size(_jpeg(0, width=4014, height=3016)) == (4014, 3016)
         with pytest.raises(ValueError):

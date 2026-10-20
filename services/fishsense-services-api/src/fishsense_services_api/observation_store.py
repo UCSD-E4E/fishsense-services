@@ -31,7 +31,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from fishsense_services_api.renders_store import newest_render
-from fishsense_services_contracts.thumbnails import THUMBNAIL_WIDTH
+from fishsense_services_api.thumbnails_store import THUMBNAIL_WIDTH
 
 __all__ = [
     "DEVICE_GROUPS",

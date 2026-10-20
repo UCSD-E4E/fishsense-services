@@ -20,13 +20,24 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
+    "THUMBNAIL_WIDTH",
     "InvalidThumbnails",
     "OwedThumbnail",
     "ThumbnailRow",
     "ThumbnailsCatalog",
     "owed_thumbnails",
     "persist_thumbnails",
+    "thumbnail_key",
 ]
+
+#: The cards' width and the thumbnail's key: `contracts.thumbnails`, repeated
+#: because the API image does not install the contracts;
+#: tests/test_thumbnails_store.py pins them together.
+THUMBNAIL_WIDTH = 640
+
+
+def thumbnail_key(render_key: str, width: int = THUMBNAIL_WIDTH) -> str:
+    return f"thumbnails/w{width}/{render_key}"
 
 
 class InvalidThumbnails(ValueError):
