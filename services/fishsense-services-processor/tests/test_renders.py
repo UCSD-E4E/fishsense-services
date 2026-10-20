@@ -24,6 +24,7 @@ from fishsense_services_contracts.renders import (
     RenderCapturesInput,
     RenderFrame,
     RenderResult,
+    raw_key,
     render_key,
 )
 from fishsense_services_contracts.temporal import DATA_CONVERTER
@@ -177,3 +178,86 @@ def test_the_render_stage_runs_on_the_per_image_role():
     """Decoding a raw needs the per-image role's memory, not a GPU."""
     (stage,) = [s for s in registry.stages() if s.name == "renders"]
     assert stage.role == registry.ROLE_PER_IMAGE
+
+
+# -- the raw, copied into the tenant's bucket in the same pass (2026-10-20) ---------
+
+RAW = b"raw"
+RAW_MD5 = hashlib.md5(RAW).hexdigest()
+
+
+def _owing(*, render=True, raw=True) -> RenderCaptureInput:
+    owed = {}
+    if render:
+        owed.update(key=render_key(RENDER_VERSION, CAMERA, SUM),
+                    put_url="https://garage.example/lab/renders/x?sig=1")  # fmt: skip
+    if raw:
+        owed.update(checksum=RAW_MD5, raw_key=raw_key(RAW_MD5),
+                    raw_put_url="https://garage.example/lab/raws/x?sig=2")  # fmt: skip
+    return RenderCaptureInput(
+        frame=RenderFrame(capture_id=uuid.uuid4(),
+                          raw=ObjectRef(bucket="scratch", key=f"raw/{SUM}.ORF"),
+                          **owed),
+        render_version=RENDER_VERSION, camera_calibration_id=CAMERA,
+        camera_matrix=K, distortion_coefficients=[0.0] * 5,
+    )  # fmt: skip
+
+
+async def test_the_raw_is_copied_with_the_render_from_the_one_download():
+    put = _Put()
+    payload = _owing()
+
+    r = await _run(_activities(put=put), payload)
+
+    by_url = {url: (headers, data) for url, headers, data in put.calls}
+    assert by_url[payload.frame.raw_put_url] == (
+        {"Content-Type": "application/octet-stream"},
+        RAW,
+    )
+    assert payload.frame.put_url in by_url
+    assert (r.status, r.raw_status, r.raw_bytes, r.raw_md5) == (
+        "rendered",
+        "copied",
+        len(RAW),
+        RAW_MD5,
+    )
+
+
+async def test_a_capture_owing_only_its_raw_is_not_rendered():
+    """Rendered before raws were copied: its stored render must keep matching
+    its recorded MD5, so it is not rendered again."""
+    rendered = []
+    put = _Put()
+
+    r = await _run(
+        _activities(put=put, render=lambda *a: rendered.append(a) or _jpeg()),
+        _owing(render=False),
+    )
+
+    assert rendered == [] and len(put.calls) == 1
+    assert (r.status, r.raw_status, r.bytes) == ("not_asked", "copied", None)
+
+
+async def test_a_raw_that_will_not_decode_is_still_copied():
+    """The raw is the data; that it will not decode is the render's problem."""
+
+    def corrupt(*args):
+        raise rawpy.LibRawError("Input data is corrupted")
+
+    put = _Put()
+    r = await _run(_activities(put=put, render=corrupt), _owing())
+
+    assert (r.status, r.raw_status) == ("decode_failed", "copied")
+    assert [url for url, _, _ in put.calls] == [_owing().frame.raw_put_url]
+
+
+async def test_a_raw_missing_from_scratch_is_neither_rendered_nor_copied():
+    put = _Put()
+    r = await _run(_activities(store=_Store(missing=True), put=put), _owing())
+    assert (r.status, r.raw_status) == ("raw_unavailable", "raw_unavailable")
+    assert put.calls == []
+
+
+async def test_a_refused_raw_put_fails_the_try():
+    with pytest.raises(RuntimeError, match="raw"):
+        await _run(_activities(put=_Put(status=403)), _owing(render=False))

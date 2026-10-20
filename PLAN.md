@@ -1340,10 +1340,13 @@ the UI as it lands (decided 2026-10-17)*
      were placed on v1's JPEG. Photos fill in as the render backlog runs (started by hand
      on 2026-10-20; human-measured missions first). A frame that is never rendered (a
      raw that won't decode, a mission off the corrective optic) has no photo.
+   - ***Built 2026-10-20 (0052):*** each raw is copied into the tenant's bucket
+     (`raws/{checksum}.ORF`) in the render stage's NAS pass (the owner: consistent with
+     Mobile, whose raws are already there). A copy is recorded only when the stored
+     object matches the processor's report and the capture's checksum. What a capture
+     owes is judged in the tenant's current bucket, so a bucket move re-renders.
+     Captures rendered before this owe only their copy, and aren't rendered again.
    - *Next:* thumbnails for the cards, made from each render without reading the NAS.
-     Each raw is also copied into the tenant's bucket in the same NAS pass (the owner,
-     2026-10-20: for consistency with Mobile, whose raws are already there). Captures
-     rendered before that get theirs on a catch-up pass.
    - *Later:* uploading new Lite photos straight into the tenant's bucket, as Mobile
      does. The API is never given the shared labels bucket.
 5. Species for mobile captures.

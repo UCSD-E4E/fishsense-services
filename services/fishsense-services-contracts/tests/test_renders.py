@@ -17,6 +17,7 @@ from fishsense_services_contracts.renders import (
     RenderCaptureInput,
     RenderFrame,
     RenderResult,
+    raw_key,
     render_key,
 )
 from fishsense_services_contracts.species_prediction import PredictSpeciesImage
@@ -95,3 +96,66 @@ def test_a_reader_takes_the_render_by_url_or_a_jpeg_by_ref_but_one(model, extra)
         model(capture_id=uuid.uuid4(), **extra)
     with pytest.raises(ValidationError):
         model(capture_id=uuid.uuid4(), jpeg=ref, jpeg_url=url, **extra)
+
+
+# -- the raw copied to the tenant's bucket in the same pass (2026-10-20) ----------
+
+
+def test_the_raw_key_names_the_raw_by_its_checksum():
+    assert raw_key(SUM) == f"raws/{SUM}.ORF"
+    with pytest.raises(ValueError):
+        raw_key("../x")
+
+
+def _raw_only():
+    return RenderFrame(capture_id=uuid.uuid4(),
+                       raw=ObjectRef(bucket="scratch", key=f"raw/{SUM}.ORF"),
+                       checksum=SUM, raw_key=raw_key(SUM),
+                       raw_put_url="https://s3.example.com/b/r?X-Amz-Signature=x")  # fmt: skip
+
+
+def test_a_frame_may_owe_only_its_raw_copy():
+    """A capture rendered before raws were copied is owed only the copy: it is
+    not rendered again (its stored render matches its recorded MD5)."""
+    frame = _raw_only()
+    assert frame.key is None and frame.put_url is None
+    assert frame.owes_render is False and frame.owes_raw is True
+
+
+def test_a_frame_from_contract_9_owes_its_render_and_no_raw():
+    old = RenderFrame.model_validate(
+        {"capture_id": str(uuid.uuid4()), "raw": {"bucket": "s", "key": f"raw/{SUM}.ORF"},
+         "key": render_key(RENDER_VERSION, CAMERA, SUM), "put_url": "https://s/p"}
+    )  # fmt: skip
+    assert old.owes_render is True and old.owes_raw is False
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [{}, {"key": "renders/x.JPG"}, {"raw_key": f"raws/{SUM}.ORF"}],
+)
+def test_a_frame_owes_something_whole(fields):
+    """A render needs its key and its PUT; a raw copy its key, its PUT and the
+    checksum it must match; and a frame owes at least one."""
+    with pytest.raises(ValidationError):
+        RenderFrame(capture_id=uuid.uuid4(), checksum=SUM,
+                    raw=ObjectRef(bucket="scratch", key=f"raw/{SUM}.ORF"), **fields)  # fmt: skip
+
+
+def test_a_raw_only_result_names_the_bytes_copied():
+    result = RenderResult(capture_id=uuid.uuid4(), status="not_asked",
+                          render_version=RENDER_VERSION, camera_calibration_id=CAMERA,
+                          raw_status="copied", raw_bytes=15_000_000, raw_md5=SUM)  # fmt: skip
+    assert result.raw_md5 == SUM
+    with pytest.raises(ValidationError):
+        RenderResult(capture_id=uuid.uuid4(), status="not_asked",
+                     render_version=RENDER_VERSION, camera_calibration_id=CAMERA,
+                     raw_status="copied")  # fmt: skip
+    with pytest.raises(ValidationError):
+        RenderResult(capture_id=uuid.uuid4(), status="not_asked",
+                     render_version=RENDER_VERSION, camera_calibration_id=CAMERA,
+                     raw_status="raw_unavailable", raw_bytes=1, raw_md5=SUM)  # fmt: skip
+
+
+def test_not_asked_is_a_result_but_never_a_recorded_render():
+    assert "not_asked" not in RENDER_STATUSES

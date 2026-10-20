@@ -129,6 +129,20 @@ class TenantObjects:
         )
         return PresignedUpload(url=url, headers={"Content-Type": "image/jpeg"})
 
+    def presign_raw_put(
+        self, key: str, *, expires_seconds: int = RENDER_EXPIRES_SECONDS
+    ) -> PresignedUpload:
+        """A PUT of a capture's raw, copied by the render stage (2026-10-20):
+        unsigned bytes, as a render's, checked after with `head` against the
+        MD5 the uploader reports and the capture's checksum."""
+        content_type = "application/octet-stream"
+        url = self._public.generate_presigned_url(
+            "put_object",
+            Params={"Bucket": self.bucket, "Key": key, "ContentType": content_type},
+            ExpiresIn=expires_seconds,
+        )
+        return PresignedUpload(url=url, headers={"Content-Type": content_type})
+
     def presign_get(
         self, key: str, *, expires_seconds: int = DEFAULT_EXPIRES_SECONDS
     ) -> str:

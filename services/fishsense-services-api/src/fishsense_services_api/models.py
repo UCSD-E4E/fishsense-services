@@ -1373,7 +1373,7 @@ class CaptureRender(Base):
         Index(
             "capture_renders_rendered_once_idx",
             "tenant_id", "capture_id", "render_version", "camera_calibration_id",
-            unique=True, postgresql_where=text("status = 'rendered'"),
+            "bucket", unique=True, postgresql_where=text("status = 'rendered'"),
         ),  # fmt: skip
     )
 
@@ -1390,6 +1390,30 @@ class CaptureRender(Base):
     md5: Mapped[str | None] = mapped_column(Text)
     width: Mapped[int | None] = mapped_column(Integer)
     height: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class CaptureRaw(Base):
+    """A capture's raw copied into its tenant's bucket by the render stage,
+    checked against the capture's checksum (0052); append-only."""
+
+    __tablename__ = "capture_raws"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        UniqueConstraint("tenant_id", "capture_id", "bucket"),
+        _fk(("tenant_id", "capture_id"), "captures"),
+        CheckConstraint("bytes > 0", name="capture_raws_bytes_check"),
+        CheckConstraint("md5 ~ '^[0-9a-f]{32}$'", name="capture_raws_md5_check"),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    bucket: Mapped[str] = mapped_column(Text)
+    key: Mapped[str] = mapped_column(Text)
+    bytes: Mapped[int] = mapped_column(BigInteger)
+    md5: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
 
 
