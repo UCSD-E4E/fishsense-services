@@ -216,3 +216,16 @@ async def render(
         h=3016 if rendered else None,
     )
     return key
+
+
+async def recalibrate_camera(owner_engine, tenant_id, capture_id):
+    """A new current calibration for the capture's device (a corrected camera)."""
+    await exec_(
+        owner_engine,
+        "INSERT INTO camera_calibrations (tenant_id, device_id, camera_model, "
+        "camera_matrix, distortion_coefficients) SELECT :t, c.device_id, 'pinhole', "
+        "'[[3100,0,2048],[0,3100,1536],[0,0,1]]', '[0,0,0,0,0]' FROM captures c "
+        "WHERE c.id = :c",
+        t=tenant_id,
+        c=capture_id,
+    )

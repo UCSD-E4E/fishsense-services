@@ -136,6 +136,9 @@ class TestList:
         (the tenant moved buckets since) would be a link to nothing."""
         capture_id, _ = await lite(owner_engine, tenants["lab"])
         await render(owner_engine, tenants["lab"], capture_id, bucket="old-lab-bucket")
+        await render(
+            owner_engine, tenants["lab"], capture_id, version=2, bucket="other-bucket"
+        )
 
         [listed] = (await _get(client, "/tenants/lab/observations")).json()[
             "observations"

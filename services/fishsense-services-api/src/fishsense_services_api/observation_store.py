@@ -16,8 +16,9 @@ app layer's own line of defence (as every store does).
 capture's is its render -- the raw rectified to a JPEG, in the tenant's own
 bucket (0051) -- the newest one rendered, whatever its version or camera: an
 abstention after it (a raw gone from scratch on a later version) leaves it
-standing. The render row names its bucket, so the API signs it only for that
-bucket. A Lite frame not yet rendered has no photo.
+standing. Only a render in the tenant's current bucket counts (the caller
+names it): a presign for another bucket is a link to nothing. A Lite frame
+not rendered there has no photo.
 """
 
 from __future__ import annotations
@@ -28,6 +29,8 @@ from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
+
+from fishsense_services_api.renders_store import newest_render
 
 __all__ = [
     "DEVICE_GROUPS",
@@ -72,11 +75,8 @@ class Observation:
     #: A mobile capture's own uuid (its page is ``/captures``).
     client_capture_uuid: uuid.UUID | None
     #: The capture's image in its tenant's bucket: a phone's own, else the
-    #: capture's newest render (0051).
+    #: capture's newest render there (0051).
     photo_key: str | None
-    #: The bucket a render was written to; None for a phone's own image,
-    #: which is always in the tenant's current bucket.
-    photo_bucket: str | None = None
 
     @property
     def cursor(self) -> tuple[datetime, uuid.UUID, uuid.UUID]:
@@ -119,15 +119,12 @@ _COLUMNS = """o.capture_id, o.fish_id, o.method, o.length_m, o.captured_at,
     o.device_kind, o.device_name, o.mission_number, o.mission_name,
     o.scientific_name, o.common_name, o.fish_model, o.known_length_m,
     o.latitude, o.longitude, o.place_name, pn.place_name AS derived_place_name,
-    o.client_capture_uuid, coalesce(o.photo_key, r.key) AS photo_key,
-    CASE WHEN o.photo_key IS NULL THEN r.bucket END AS photo_bucket"""
+    o.client_capture_uuid, coalesce(o.photo_key, r.key) AS photo_key"""
 
-#: The capture's newest render (0051), for a frame with no image of its own.
-_RENDER = """LEFT JOIN LATERAL (
-    SELECT bucket, key FROM capture_renders
-    WHERE tenant_id = o.tenant_id AND capture_id = o.capture_id
-      AND status = 'rendered'
-    ORDER BY seq DESC LIMIT 1
+#: The capture's newest render (0051) in the tenant's current bucket, for a
+#: frame with no image of its own: `renders_store.newest_render`'s rule.
+_RENDER = f"""LEFT JOIN LATERAL (
+    {newest_render("o.capture_id", "o.tenant_id", "r.bucket = :photo_bucket")}
 ) r ON true"""
 
 #: The name the server derived from the capture's coordinates (0041).
@@ -145,28 +142,35 @@ async def list_observations(
     limit: int,
     before: tuple[datetime, uuid.UUID, uuid.UUID] | None = None,
     device: str | None = None,
+    photo_bucket: str | None = None,
 ) -> list[Observation]:
     """Newest first; ``before`` is the previous page's last ``cursor``;
-    ``device`` keeps one of :data:`DEVICE_GROUPS` or ``other`` (None: all)."""
+    ``device`` keeps one of :data:`DEVICE_GROUPS` or ``other`` (None: all);
+    ``photo_bucket`` is the tenant's current bucket (None: no Lite photos)."""
     if device is not None and device != "other" and device not in DEVICE_GROUPS:
         raise ValueError(f"no device group {device!r}")
+    # The page first, then its place names and renders: a lateral before
+    # the LIMIT would probe every observation in the tenant (review of #151).
     rows = await conn.execute(
         text(f"""
             SELECT {_COLUMNS}
-            FROM observations o
+            FROM (
+                SELECT * FROM observations o
+                WHERE o.tenant_id = :tenant_id
+                  AND (CAST(:device AS text) IS NULL
+                       OR (:device = 'other'
+                           AND (o.device_kind IS NULL
+                                OR o.device_kind <> ALL(CAST(:named AS text[]))))
+                       OR o.device_kind = ANY(CAST(:kinds AS text[])))
+                  AND (CAST(:before_at AS timestamptz) IS NULL
+                       OR (o.captured_at, o.capture_id, o.fish_id)
+                          < (:before_at, :before_capture, :before_fish))
+                ORDER BY o.captured_at DESC, o.capture_id DESC, o.fish_id DESC
+                LIMIT :limit
+            ) o
             {_DERIVED_PLACE_NAME}
             {_RENDER}
-            WHERE o.tenant_id = :tenant_id
-              AND (CAST(:device AS text) IS NULL
-                   OR (:device = 'other'
-                       AND (o.device_kind IS NULL
-                            OR o.device_kind <> ALL(CAST(:named AS text[]))))
-                   OR o.device_kind = ANY(CAST(:kinds AS text[])))
-              AND (CAST(:before_at AS timestamptz) IS NULL
-                   OR (o.captured_at, o.capture_id, o.fish_id)
-                      < (:before_at, :before_capture, :before_fish))
             ORDER BY o.captured_at DESC, o.capture_id DESC, o.fish_id DESC
-            LIMIT :limit
             """),
         {
             "tenant_id": tenant_id,
@@ -177,6 +181,7 @@ async def list_observations(
             "before_capture": before[1] if before else None,
             "before_fish": before[2] if before else None,
             "limit": limit,
+            "photo_bucket": photo_bucket,
         },
     )
     return [_observation(row) for row in rows]
@@ -187,6 +192,8 @@ async def observation(
     tenant_id: uuid.UUID,
     capture_id: uuid.UUID,
     fish_id: uuid.UUID,
+    *,
+    photo_bucket: str | None = None,
 ) -> ObservationDetail | None:
     """One fish in one capture, with its evidence; None if there is no
     current measurement of it in this tenant."""
@@ -232,7 +239,12 @@ async def observation(
                 WHERE o.tenant_id = :tenant_id
                   AND o.capture_id = :capture_id AND o.fish_id = :fish_id
                 """),
-            {"tenant_id": tenant_id, "capture_id": capture_id, "fish_id": fish_id},
+            {
+                "tenant_id": tenant_id,
+                "capture_id": capture_id,
+                "fish_id": fish_id,
+                "photo_bucket": photo_bucket,
+            },
         )
     ).first()
     if row is None:
@@ -291,5 +303,4 @@ def _observation(row) -> Observation:
         derived_place_name=row.derived_place_name,
         client_capture_uuid=row.client_capture_uuid,
         photo_key=row.photo_key,
-        photo_bucket=row.photo_bucket,
     )

@@ -28,16 +28,31 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from fishsense_services_api import dev_seed
+from fishsense_services_contracts.renders import RENDER_VERSION, render_key
 from fishsense_services_api.cli import main
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.mobile_capture_store import list_mobile_captures
 from fishsense_services_api.tenant_stores import TenantStore, TenantStores
 from garage import ADMIN_TOKEN, REGION, Garage
 
+
+def _jpeg(n: int, width: int = 1600, height: int = 1200) -> bytes:
+    """Not an image, but a JPEG's headers as far as its size: SOI, an APP0,
+    and a baseline start-of-frame (SOF0) giving ``width`` x ``height``."""
+    app0 = b"\xff\xe0\x00\x04" + bytes([n, n])
+    sof0 = (
+        b"\xff\xc0\x00\x11\x08"
+        + height.to_bytes(2, "big")
+        + width.to_bytes(2, "big")
+        + b"\x03\x01\x22\x00\x02\x11\x01\x03\x11\x01"
+    )
+    return b"\xff\xd8" + app0 + sof0 + b"\xff\xd9"
+
+
 FRAMES = [
     dev_seed.Frame(
         name=f"P117{n:04d}",
-        jpeg=b"\xff\xd8\xff\xe0 not really a jpeg " + bytes([n]),
+        jpeg=_jpeg(n, width=1600 + n),
         head=(640.0 + n, 450.0),
         tail=(880.0 + n, 545.0),
         dot=(770.0 + n, 525.0),
@@ -264,17 +279,30 @@ class TestSeed:
 
         rows = await _rows(
             dev_engine,
-            "SELECT r.key, r.bucket, c.checksum FROM capture_renders r "
+            "SELECT r.key, r.bucket, r.render_version, r.camera_calibration_id, "
+            "r.width, r.height, c.checksum FROM capture_renders r "
             "JOIN captures c ON c.id = r.capture_id WHERE r.status = 'rendered'",
         )
         assert len(rows) == len(FRAMES)
         objects = stores.for_tenant("lab")
-        jpegs = {f.jpeg for f in FRAMES}
+        by_checksum = {hashlib.md5(f.jpeg).hexdigest(): f.jpeg for f in FRAMES}
         for row in rows:
-            assert row["key"].startswith("renders/r1_")
+            # As the render stage writes it: its key, version and size.
+            assert row["render_version"] == RENDER_VERSION
+            assert row["key"] == render_key(
+                RENDER_VERSION, row["camera_calibration_id"], row["checksum"]
+            )
             assert row["bucket"] == objects.bucket
+            assert (row["width"], row["height"]) == dev_seed.jpeg_size(
+                by_checksum[row["checksum"]]
+            )
             with urllib.request.urlopen(objects.presign_get(row["key"])) as got:
-                assert got.read() in jpegs
+                assert got.read() == by_checksum[row["checksum"]]
+
+    def test_a_jpegs_size_is_read_from_its_header(self):
+        assert dev_seed.jpeg_size(_jpeg(0, width=4014, height=3016)) == (4014, 3016)
+        with pytest.raises(ValueError):
+            dev_seed.jpeg_size(b"not a jpeg")
 
     async def test_seeding_twice_changes_nothing(self, dev_engine, stores):
         await _seed(dev_engine, stores)

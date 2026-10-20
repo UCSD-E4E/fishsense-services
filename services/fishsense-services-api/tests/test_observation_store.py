@@ -23,7 +23,15 @@ from fishsense_services_api.observation_store import (
     list_observations,
     observation,
 )
-from observation_seed import ALICE, lite as _lite, mobile as _mobile, render
+from observation_seed import (
+    ALICE,
+    lite as _lite,
+    mobile as _mobile,
+    recalibrate_camera,
+    render,
+)
+
+BUCKET = "fishsense-tenant-lab"
 
 
 @pytest.fixture
@@ -61,25 +69,53 @@ class TestList:
         assert found.length_m == pytest.approx(0.305)
         assert found.photo_key is None
 
-    async def test_a_lite_fishs_photo_is_its_captures_render(
+    async def test_a_lite_fishs_photo_is_its_captures_newest_render(
         self, owner_engine, app_engine, tenants
     ):
         """Phase 4: a Lite frame's photo is its raw rectified to a JPEG, in
-        the tenant's own bucket (0051). The newest rendered row is shown; an
-        abstention after it (a raw gone from scratch on a later version) does
-        not take the photo away."""
+        the tenant's own bucket (0051): the newest rendered row by when it was
+        written -- not by version number -- whatever its camera. An abstention
+        after it does not take the photo away."""
         lab = tenants["lab"]
         capture_id, _ = await _lite(owner_engine, lab)
-        await render(owner_engine, lab, capture_id, version=1, key="renders/r1/a.JPG")
         await render(owner_engine, lab, capture_id, version=2, key="renders/r2/a.JPG")
+        await render(owner_engine, lab, capture_id, version=1, key="renders/r1/a.JPG")
         await render(owner_engine, lab, capture_id, version=3, status="raw_unavailable")
 
-        [found] = await _list(app_engine, lab)
+        [found] = await _list(app_engine, lab, photo_bucket=BUCKET)
 
-        assert (found.photo_key, found.photo_bucket) == (
-            "renders/r2/a.JPG",
-            "fishsense-tenant-lab",
-        )
+        assert found.photo_key == "renders/r1/a.JPG"
+
+    async def test_a_render_under_a_newer_camera_is_shown(
+        self, owner_engine, app_engine, tenants
+    ):
+        lab = tenants["lab"]
+        capture_id, _ = await _lite(owner_engine, lab)
+        await render(owner_engine, lab, capture_id, key="renders/old-camera.JPG")
+        await recalibrate_camera(owner_engine, lab, capture_id)
+        await render(owner_engine, lab, capture_id, key="renders/new-camera.JPG")
+
+        [found] = await _list(app_engine, lab, photo_bucket=BUCKET)
+
+        assert found.photo_key == "renders/new-camera.JPG"
+
+    async def test_the_photo_is_the_newest_render_in_the_tenants_bucket(
+        self, owner_engine, app_engine, tenants
+    ):
+        """A presign names the tenant's current bucket; a render in another
+        would be a link to nothing, so the newest render *there* is shown --
+        and with no bucket, none is."""
+        lab = tenants["lab"]
+        capture_id, _ = await _lite(owner_engine, lab)
+        await render(owner_engine, lab, capture_id, key="renders/here.JPG")
+        await render(owner_engine, lab, capture_id, version=2, bucket="old-bucket",
+                     key="renders/there.JPG")  # fmt: skip
+
+        [here] = await _list(app_engine, lab, photo_bucket=BUCKET)
+        [none] = await _list(app_engine, lab, photo_bucket=None)
+
+        assert here.photo_key == "renders/here.JPG"
+        assert none.photo_key is None
 
     async def test_a_mobile_capture_is_an_observation_by_lidar(
         self, owner_engine, app_engine, tenants
@@ -98,7 +134,6 @@ class TestList:
         assert (found.latitude, found.longitude) == (32.8665, -117.2546)
         assert found.length_m == pytest.approx(0.42)
         assert found.photo_key == f"mobile/captures/{client_uuid}/rgb_jpeg"
-        assert found.photo_bucket is None
         assert found.mission_number is None
 
     async def test_both_are_listed_together_newest_first_and_filter_by_device(

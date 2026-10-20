@@ -34,6 +34,7 @@ without knowing a sensor size.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -52,6 +53,7 @@ import numpy as np
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from fishsense_services_api.camera_sql import RECTIFIABLE_MISSION
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.mobile_api import ROLES
 from fishsense_services_api.mobile_capture_store import (
@@ -60,7 +62,9 @@ from fishsense_services_api.mobile_capture_store import (
     MobileCapture,
     commit_capture,
 )
+from fishsense_services_api.renders_store import RenderRow, persist_renders
 from fishsense_services_api.tenant_stores import TenantStore, TenantStores
+from fishsense_services_contracts.renders import RENDER_VERSION, render_key
 
 __all__ = [
     "Frame",
@@ -222,8 +226,7 @@ async def seed(
             for sub, role in USERS.items()
         }
         lite = await _lite(conn, tenant_id, frames)
-    async with owner_engine.begin() as conn:
-        await _lite_renders(conn, tenant_id, stores, frames)
+    await _lite_renders(owner_engine, tenant_id, stores, frames)
 
     mobile = 0
     for i in range(MOBILE_CAPTURES):
@@ -491,65 +494,99 @@ async def _lite(
     return len(frames)
 
 
+def jpeg_size(jpeg: bytes) -> tuple[int, int]:
+    """(width, height) from a JPEG's start-of-frame header."""
+    if jpeg[:2] != b"\xff\xd8":
+        raise ValueError("not a JPEG")
+    i = 2
+    while i + 9 < len(jpeg):
+        if jpeg[i] != 0xFF:
+            i += 1
+            continue
+        marker = jpeg[i + 1]
+        if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+            i += 2
+            continue
+        length = int.from_bytes(jpeg[i + 2 : i + 4], "big")
+        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            height = int.from_bytes(jpeg[i + 5 : i + 7], "big")
+            width = int.from_bytes(jpeg[i + 7 : i + 9], "big")
+            return width, height
+        i += 2 + length
+    raise ValueError("no start-of-frame in the JPEG")
+
+
+def _put(url: str, body: bytes, headers: Mapping[str, str]) -> None:
+    request = urllib.request.Request(url, data=body, method="PUT", headers=headers)
+    with urllib.request.urlopen(request):
+        pass
+
+
 async def _lite_renders(
-    conn: AsyncConnection,
+    owner_engine: AsyncEngine,
     tenant_id: uuid.UUID,
     stores: TenantStores,
     frames: Sequence[Frame],
 ) -> None:
-    """Each Lite frame's render (0051), so /fish shows its photo (Phase 4).
-    The harness has no raws, so the frame's JPEG stands in for the raw
-    rectified, stored and recorded as the render stage would. Frames already
-    rendered are left alone."""
-    by_checksum = {hashlib.md5(f.jpeg).hexdigest(): f for f in frames}
-    rows = (
-        await conn.execute(
-            text("""
-                SELECT c.id, c.checksum, cc.id AS camera
-                FROM captures c
-                JOIN missions m ON m.id = c.mission_id
-                JOIN current_camera_calibrations cc
-                  ON cc.tenant_id = c.tenant_id AND cc.device_id = c.device_id
-                WHERE c.tenant_id = :t AND m.source_path LIKE :p
-                  AND NOT EXISTS (SELECT 1 FROM capture_renders r
-                                  WHERE r.capture_id = c.id)
-                """),
-            {"t": tenant_id, "p": MISSION_PREFIX + "%"},
-        )
-    ).all()
+    """Each Lite frame's render (0051), so /fish shows its photo (Phase 4),
+    as the render stage writes it: only the captures it would render (canonical,
+    on a mission it can rectify), under its key and version, recorded through
+    its store. The harness has no raws, so the frame's JPEG stands in for the
+    raw rectified. The uploads run off the event loop and outside any
+    transaction. Frames already rendered are left alone."""
     objects = stores.for_tenant(TENANT)
+    async with owner_engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                text(f"""
+                    SELECT c.id, c.checksum, c.mission_id, cc.id AS camera
+                    FROM captures c
+                    JOIN missions d ON d.tenant_id = c.tenant_id AND d.id = c.mission_id
+                    JOIN current_camera_calibrations cc
+                      ON cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
+                     AND cc.camera_model = 'pinhole'
+                    WHERE c.tenant_id = :t AND c.is_canonical
+                      AND d.source_path LIKE :p AND {RECTIFIABLE_MISSION}
+                      AND NOT EXISTS (
+                          SELECT 1 FROM capture_renders r
+                          WHERE r.tenant_id = c.tenant_id AND r.capture_id = c.id
+                            AND r.status = 'rendered' AND r.bucket = :b)
+                    """),
+                {"t": tenant_id, "p": MISSION_PREFIX + "%", "b": objects.bucket},
+            )
+        ).all()
+    by_checksum = {hashlib.md5(f.jpeg).hexdigest(): f for f in frames}
+    renders: dict[uuid.UUID, list[RenderRow]] = {}
     for row in rows:
         frame = by_checksum.get(row.checksum)
         if frame is None:
             continue
-        key = f"renders/r1_{row.camera.hex}/{row.checksum}.JPG"
+        key = render_key(RENDER_VERSION, row.camera, row.checksum)
         upload = objects.presign_put(
             key,
             sha256=base64.b64encode(hashlib.sha256(frame.jpeg).digest()).decode(),
             size=len(frame.jpeg),
             content_type="image/jpeg",
         )
-        request = urllib.request.Request(
-            upload.url, data=frame.jpeg, method="PUT", headers=upload.headers
+        await asyncio.to_thread(_put, upload.url, frame.jpeg, upload.headers)
+        width, height = jpeg_size(frame.jpeg)
+        renders.setdefault(row.mission_id, []).append(
+            RenderRow(
+                capture_id=row.id,
+                status="rendered",
+                render_version=RENDER_VERSION,
+                camera_calibration_id=row.camera,
+                bucket=objects.bucket,
+                key=key,
+                bytes=len(frame.jpeg),
+                md5=hashlib.md5(frame.jpeg).hexdigest(),
+                width=width,
+                height=height,
+            )
         )
-        with urllib.request.urlopen(request):
-            pass
-        await conn.execute(
-            text("""
-                INSERT INTO capture_renders (tenant_id, capture_id, status,
-                    render_version, camera_calibration_id, bucket, key, bytes, md5)
-                VALUES (:t, :c, 'rendered', 1, :cam, :b, :k, :n, :md5)
-                """),
-            {
-                "t": tenant_id,
-                "c": row.id,
-                "cam": row.camera,
-                "b": objects.bucket,
-                "k": key,
-                "n": len(frame.jpeg),
-                "md5": row.checksum,
-            },
-        )
+    async with owner_engine.begin() as conn:
+        for mission_id, mission_renders in renders.items():
+            await persist_renders(conn, tenant_id, mission_id, mission_renders)
 
 
 async def _mobile(

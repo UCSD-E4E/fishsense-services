@@ -129,17 +129,20 @@ def add_observation_routes(
 
     Member = Annotated[Membership, Depends(membership)]
 
+    def bucket(slug: str) -> str | None:
+        """The tenant's current bucket: a Lite photo is a render there."""
+        try:
+            return stores.for_tenant(slug).bucket
+        except NoTenantStore:
+            return None
+
     def photo_url(slug: str, found: Observation) -> str | None:
         if found.photo_key is None:
             return None
         try:
-            store = stores.for_tenant(slug)
+            return stores.for_tenant(slug).presign_get(found.photo_key)
         except NoTenantStore:
             return None
-        # A render names its bucket; signing it for another is a dead link.
-        if found.photo_bucket is not None and found.photo_bucket != store.bucket:
-            return None
-        return store.presign_get(found.photo_key)
 
     def view(slug: str, found: Observation) -> ObservationView:
         return ObservationView(
@@ -199,6 +202,7 @@ def add_observation_routes(
                 limit=limit + 1,
                 before=cursor,
                 device=device,
+                photo_bucket=bucket(slug),
             )
         page, more = found[:limit], len(found) > limit
         return ObservationPage(
@@ -215,7 +219,9 @@ def add_observation_routes(
         slug: str, capture_id: uuid.UUID, fish_id: uuid.UUID, member: Member
     ) -> ObservationDetailView:
         async with tenant_transaction(engine, member.tenant_id) as conn:
-            found = await observation(conn, member.tenant_id, capture_id, fish_id)
+            found = await observation(
+                conn, member.tenant_id, capture_id, fish_id, photo_bucket=bucket(slug)
+            )
         if found is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND)
         laser = found.laser
