@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.18.0...v0.19.0) (2026-10-20)
+
+
+### Features
+
+* **renders:** thumbnails for /fish's cards ([25dab0f](https://github.com/UCSD-E4E/fishsense-services/commit/25dab0f66d71fd15ad155c9720eb278d03fe7837))
+
 ## [0.18.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.17.0...v0.18.0) (2026-10-20)
 
 
