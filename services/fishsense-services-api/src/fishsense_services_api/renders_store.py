@@ -358,7 +358,11 @@ class RendersCatalog(ServicePrincipal):
             return await persist_renders(conn, tenant_id, mission_id, rows)
 
     async def current_renders(
-        self, tenant_id: uuid.UUID, capture_ids: list[uuid.UUID]
+        self,
+        tenant_id: uuid.UUID,
+        capture_ids: list[uuid.UUID],
+        *,
+        bucket: str | None = None,
     ) -> dict[uuid.UUID, CurrentRender]:
         async with self._tenant(tenant_id) as conn:
-            return await current_renders(conn, tenant_id, capture_ids)
+            return await current_renders(conn, tenant_id, capture_ids, bucket=bucket)
