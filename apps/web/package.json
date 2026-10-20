@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.config.integration.ts",
     "api:generate": "openapi-typescript openapi.json --output lib/api/schema.d.ts",
-    "api:check": "openapi-typescript openapi.json --output lib/api/schema.d.ts --check"
+    "api:check": "openapi-typescript openapi.json --output lib/api/schema.d.ts --check",
+    "tokens:generate": "node --experimental-strip-types scripts/write-tokens.mts"
   },
   "dependencies": {
     "next": "15.5.27",

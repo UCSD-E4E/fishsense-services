@@ -1,6 +1,4 @@
 // Ported from fishsense-lite@77e8f8e5 apps/fishsense-lite-web/app/page.tsx.
-import Link from "next/link";
-import Image from "next/image";
 import { getActiveProjects } from "@/lib/active-projects";
 import { buildSections, type Section, type SectionLink } from "@/lib/sections";
 import { ADMIN_LINKS, RESULTS_LINKS } from "@/lib/static-links";
@@ -18,67 +16,7 @@ export default async function HomePage() {
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-12">
-      <header className="mb-10 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          {/*
-            Dark-mode contrast: bg-slate-950 makes the as-authored black
-            fish outline nearly invisible. invert turns black->white
-            (good) and the brand-critical red laser dot ->cyan (bad);
-            the chained 180deg hue-rotate brings cyan back to red while
-            leaving white unchanged (white has no chroma to rotate).
-            Net effect: outline flips for contrast, red stays red.
-
-            Width/height come from the source viewBox (207.5 x 123,
-            ratio ~1.69:1). h-12 (48px) renders ~81px wide; sized via
-            the ratio so next/image can reserve the exact box and avoid
-            CLS.
-          */}
-          <Image
-            src="/logo.svg"
-            alt=""
-            aria-hidden
-            width={81}
-            height={48}
-            priority
-            // next/image's default loader 400s on SVGs (XSS-safe default
-            // — see Next.js docs on dangerouslyAllowSVG). The asset is
-            // a hand-extracted vector with no scripts; nothing to
-            // optimize either way, so bypass the loader and serve the
-            // file from /public/ as-is.
-            unoptimized
-            className="h-12 w-auto dark:invert dark:hue-rotate-180"
-          />
-          <h1 className="text-4xl font-semibold tracking-tight">
-            E4E FishSense
-          </h1>
-        </div>
-        <div className="flex items-center gap-3">
-          <Link
-            href="/fish"
-            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium shadow-xs transition hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
-          >
-            Fish
-          </Link>
-          <Link
-            href="/missions"
-            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium shadow-xs transition hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
-          >
-            Missions
-          </Link>
-          <Link
-            href="/captures"
-            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium shadow-xs transition hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
-          >
-            Mobile captures
-          </Link>
-          <a
-            href="/portal"
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-xs transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
-          >
-            Sign in
-          </a>
-        </div>
-      </header>
+      <h1 className="mb-8 text-3xl font-bold tracking-tight">FishSense</h1>
       {active.unavailable.length > 0 && <UnavailableNotice />}
       {active.degraded > 0 && <DegradedNotice count={active.degraded} />}
       <div className="space-y-10">
@@ -103,7 +41,7 @@ function DegradedNotice({ count }: { count: number }) {
   return (
     <div
       role="status"
-      className="mb-8 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-200"
+      className="mb-8 rounded-card border border-warn/50 bg-warn/10 p-4 text-sm text-warn"
     >
       <span className="font-medium">Some projects could not be loaded.</span>{" "}
       Label Studio did not answer for {count} labeling{" "}
@@ -125,7 +63,7 @@ function UnavailableNotice() {
   return (
     <div
       role="status"
-      className="mb-8 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-200"
+      className="mb-8 rounded-card border border-warn/50 bg-warn/10 p-4 text-sm text-warn"
     >
       <span className="font-medium">Labeling work could not be listed.</span>{" "}
       FishSense did not answer, so some labeling sections are missing below.
@@ -137,7 +75,7 @@ function UnavailableNotice() {
 function SectionView({ section }: { section: Section }) {
   return (
     <section>
-      <h2 className="mb-4 text-xl font-medium text-slate-700 dark:text-slate-300">
+      <h2 className="mb-4 text-xl font-semibold">
         {section.title}
       </h2>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -155,10 +93,10 @@ function LinkCard({ link }: { link: SectionLink }) {
       href={link.href}
       target="_blank"
       rel="noreferrer"
-      className="block rounded-lg border border-slate-200 bg-white p-5 shadow-xs transition hover:border-slate-300 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700"
+      className="block rounded-card border border-line bg-surface p-5 transition hover:border-fg-3"
     >
       <div className="text-base font-medium">{link.title}</div>
-      <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+      <div className="mt-1 text-sm text-fg-2">
         {link.description}
       </div>
     </a>

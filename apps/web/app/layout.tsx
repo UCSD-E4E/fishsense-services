@@ -1,10 +1,21 @@
 // Ported from fishsense-lite@77e8f8e5 apps/fishsense-lite-web/app/layout.tsx.
 import type { Metadata } from "next";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import pkg from "../package.json";
+import { AppHeader } from "./shell/app-header";
 import "./globals.css";
 
+// The design's two families (docs/design/README.md): Inter for what a person
+// reads, JetBrains Mono for what they copy. Self-hosted by next/font at build.
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
+const mono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-jetbrains-mono",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
-  title: "E4E FishSense",
+  title: "FishSense",
   description: "FishSense dashboard",
   // SVG first (modern browsers prefer the vector); 64x64 PNG fallback
   // for clients that don't render SVG favicons (older Safari + niche
@@ -20,11 +31,12 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body className="flex min-h-screen flex-col bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100">
+    <html lang="en" className={`${inter.variable} ${mono.variable}`}>
+      <body className="flex min-h-screen flex-col bg-ground font-sans text-fg antialiased">
+        <AppHeader />
         <div className="flex-1">{children}</div>
-        <footer className="border-t border-slate-200 px-6 py-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
-          fishsense-web v{pkg.version}
+        <footer className="border-t border-line px-6 py-3 text-xs text-fg-2">
+          Engineers for Exploration, UC San Diego · fishsense-web v{pkg.version}
         </footer>
       </body>
     </html>
