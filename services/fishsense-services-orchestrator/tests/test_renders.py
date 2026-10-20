@@ -335,7 +335,8 @@ def _stubs(*, payload, results=None, page=None, fail=None):
     async def persist(target: RenderTarget, p: RenderCapturesInput,
                       r: List[RenderResult]) -> RenderPersistReport:  # fmt: skip
         EVENTS.append(("persist", len(r)))
-        return RenderPersistReport(written=len(r), rendered=len(r))
+        return RenderPersistReport(written=len(r), rendered=len(r), raws=len(r),
+                                   raws_unverified=[uuid.uuid4()])  # fmt: skip
 
     @activity.defn(name="select_render_missions")
     async def select(limit: Optional[int]) -> List[RenderTarget]:
@@ -381,6 +382,8 @@ async def test_a_mission_is_staged_once_rendered_a_page_at_a_time_and_cleaned_up
     assert ("render", f"render-captures-{MISSION}", 2) in EVENTS
     # each page's child leaves its last capture out (the stub): 5 owed, 2 rendered
     assert (report.owed, report.rendered, report.left_out) == (5, 2, 3)
+    # The raws copied, and not, are in the mission's result (review of the stack).
+    assert (report.raws, report.raws_unverified) == (2, 3)
 
 
 async def test_a_tenant_with_no_bucket_stages_nothing():
@@ -530,3 +533,31 @@ async def test_a_copy_reported_for_a_frame_owing_none_is_refused():
                    [_rendered(frame.capture_id, raw_status="copied", raw_bytes=1,
                               raw_md5=MD5)])  # fmt: skip
     assert error.value.type == "InvalidRenders"
+
+
+async def test_a_render_owed_but_not_made_is_refused():
+    """Review of the stack: ``not_asked`` for a frame that owes its render was
+    skipped silently -- the capture stayed owed and the run looked clean."""
+    catalog = _Catalog(captures=1)
+    payload = _payload(catalog)  # owes its render
+    frame = payload.frames[0]
+    with pytest.raises(ApplicationError) as error:
+        await _run(_acts(catalog).persist_renders, RenderTarget(LAB, MISSION), payload,
+                   [RenderResult(capture_id=frame.capture_id, status="not_asked",
+                                 render_version=RENDER_VERSION,
+                                 camera_calibration_id=CAMERA)])  # fmt: skip
+    assert error.value.type == "InvalidRenders" and "owed" in str(error.value)
+
+
+async def test_a_raw_owed_but_not_answered_is_refused_as_an_older_processor():
+    """A processor older than contract 10 renders and says nothing of the raw
+    it was asked to copy: refused, loudly, rather than left owed forever."""
+    catalog = _Catalog(captures=1)
+    payload = _raw_payload(catalog, render=True)  # owes both
+    frame = payload.frames[0]
+    with pytest.raises(ApplicationError) as error:
+        await _run(_acts(catalog).persist_renders, RenderTarget(LAB, MISSION), payload,
+                   [_rendered(frame.capture_id)])  # fmt: skip
+    assert error.value.type == "InvalidRenders"
+    assert "contract 10" in str(error.value)
+    assert catalog.persisted == [] and catalog.raws == []
