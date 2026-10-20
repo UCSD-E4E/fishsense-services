@@ -32,6 +32,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, declared_attr, mapped_column
 
+from fishsense_services_api.mission_facts import PORT_SOURCES, PORTS, PURPOSES
+
 NAMING_CONVENTION = {
     "pk": "%(table_name)s_pkey",
     "uq": "%(table_name)s_%(column_0_N_name)s_key",
@@ -42,6 +44,10 @@ NAMING_CONVENTION = {
 
 class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
+
+
+def _listed(values) -> str:
+    return ", ".join(f"'{v}'" for v in values)
 
 
 def _id() -> Mapped[uuid.UUID]:
@@ -240,19 +246,16 @@ class Mission(Base):
             ["deployments.tenant_id", "deployments.id"],
         ),
         Index(None, "tenant_id", "deployment_id"),
+        # From mission_facts, which test_the_databases_purposes_are_mission_facts
+        # pins to the migrated CHECKs.
         CheckConstraint(
-            "purpose IN ('survey', 'lens_calibration', 'laser_calibration', "
-            "'known_length', 'other')",
-            name="missions_purpose_check",
+            f"purpose IN ({_listed(PURPOSES)})", name="missions_purpose_check"
         ),
-        CheckConstraint(
-            "port IN ('corrective_optic', 'flat', 'dome', 'unknown')",
-            name="missions_port_check",
-        ),
+        CheckConstraint(f"port IN ({_listed(PORTS)})", name="missions_port_check"),
         CheckConstraint(
             "CASE WHEN port = 'unknown' THEN port_source IS NULL "
-            "ELSE port_source IS NOT NULL AND port_source IN "
-            "('backfill', 'device_suffix', 'operator', 'calibration') END",
+            f"ELSE port_source IS NOT NULL AND port_source IN ({_listed(PORT_SOURCES)}) "
+            "END",
             name="missions_port_source_check",
         ),
     )

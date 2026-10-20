@@ -134,6 +134,11 @@ def test_other_folders_name_no_deployment(path):
         ("062524_Alligator4_FSL04", "dump/062524_Alligator4_FSL04", "survey"),
         ("Hogfish01_MolHITW_0926_080323", "x/Hogfish01_MolHITW_0926_080323", "survey"),
         ("080123_FSL-01 Photos", "dump/080123_FSL-01 Photos", "survey"),
+        # A board beside a site is a survey that carried one, as most do.
+        ("Alligator slate", "dump/Alligator slate", "survey"),
+        # A word that only contains "slate" is not the board.
+        ("Slater Reef", "dump/Slater Reef", "survey"),
+        ("translate test reef", "dump/translate reef", "survey"),
     ],
 )
 def test_purpose_is_inferred_from_the_name(name, path, purpose):
@@ -156,6 +161,10 @@ def test_purpose_is_inferred_from_the_name(name, path, purpose):
         ("Calibration", "/d/Calibration"),
         ("intrinsics", "/d/intrinsics"),
         ("FSL-05 cal 2", "/d/FSL-05 cal 2"),
+        # A board word does not override a calibration or pool name.
+        ("Slate Checkerboard", "/d/Slate Checkerboard"),
+        ("slate intrinsics", "/d/slate intrinsics"),
+        ("Nathans Pool slate", "/d/Nathans Pool slate"),
         # A pool session no rule names.
         ("2023-08-18 Nathans Pool 04", "/d/2023.08.18.FishSense.Nathans Pool/04"),
         ("2023-08-18 Nathans Pool 08_18_Pool_Test_FSL-02", "/d/Pool_Test_FSL-02"),

@@ -82,9 +82,17 @@ _PURPOSE_RULES = (
         ),
     ),
 )
-#: A calibration board, which nearly every dive carries (0048): it decides
-#: nothing beside another rule, and alone means a calibration-only session.
-_BOARD = re.compile(r"slate", re.I)
+#: A calibration board, which nearly every dive carries (0048). It decides a
+#: purpose only when the name is nothing but the board -- a date, the rig, a
+#: number, "dive" around it (082323_Slate_FSL02, H slate dive 4) -- and then
+#: means a calibration-only session. Beside a site or anything else it decides
+#: nothing: that is a dive that carried a board, as most do.
+_BOARD = re.compile(_word("slates?"), re.I)
+_BOARD_ONLY_FILLER = re.compile(
+    r"\d{4}-\d{2}-\d{2}|FSL-?\d+D?|(?<![a-z])(?:dive|session)(?![a-z])|\d+"
+    r"|(?<![a-z])[a-z](?![a-z])|[\s_\-/.]+",
+    re.I,
+)
 _POOL = re.compile(r"pool", re.I)
 #: Calibration words the rules' exact phrases miss ("Checkerboard", "LaserCal",
 #: "intrinsics", "cal 2"): such a session is not a survey, whatever else it is.
@@ -145,13 +153,20 @@ def infer_purpose(name: str | None, source_path: str) -> tuple[str | None, str]:
         return None, f"the name says both {' and '.join(found)}"
     if found:
         return found[0], f"the name says {found[0].replace('_', ' ')}"
-    if _BOARD.search(said):
-        return "laser_calibration", "the name names only a calibration board"
     if _CALIBRATION.search(said):
         return None, "a calibration no rule names"
     if _POOL.search(said):
         return None, "a pool session no rule names"
+    if _board_only(name) and _board_only(leaf):
+        return "laser_calibration", "the name names only a calibration board"
     return "survey", "no calibration or known-length word in the name"
+
+
+def _board_only(text: str) -> bool:
+    """The text is the board and filler (a date, the rig, a number, "dive")."""
+    if not _BOARD.search(text):
+        return False
+    return _BOARD_ONLY_FILLER.sub("", _BOARD.sub("", text)) == ""
 
 
 assert get_args(Purpose) == PURPOSES

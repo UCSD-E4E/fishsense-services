@@ -19,6 +19,14 @@ Production has no purpose set yet (the 0047 backfill had not been applied,
 2026-10-19), so nothing is relabelled; a ``slate`` row, were there one, would
 become ``laser_calibration``.
 
+**The downgrade does not undo that relabel.** It restores 0047's CHECK, but a
+mission relabelled here stays ``laser_calibration``: nothing records which
+were ``slate``, and on production there were none to record.
+
+The purpose lists below are this migration's own, frozen as it ran; the live
+list is ``mission_facts.PURPOSES``, pinned to the database's CHECK by
+``test_the_databases_purposes_are_mission_facts``.
+
 Revision ID: 0048
 Revises: 0047
 """
@@ -56,5 +64,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Missions relabelled by upgrade() stay laser_calibration (see above).
     op.execute("ALTER TABLE missions DROP CONSTRAINT missions_purpose_check")
     op.execute(_check(OLD_PURPOSES))

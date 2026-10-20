@@ -7,6 +7,7 @@ and a known port always says what said so.
 """
 
 import asyncio
+import re
 import uuid
 
 import pytest
@@ -193,7 +194,8 @@ async def test_0048_relabels_a_slate_purpose_as_laser_calibration(server, owner_
     from fishsense_services_api.migrations import _config, upgrade
     from test_v1_migration import APP_ROLE, _create, _url
 
-    url = _url(owner_url, _create(server, "purpose"))
+    name = _create(server, "purpose")
+    url = _url(owner_url, name)
     config = _config(url, APP_ROLE)
     await asyncio.to_thread(command.upgrade, config, "0047")
     engine = create_engine(url)
@@ -216,5 +218,26 @@ async def test_0048_relabels_a_slate_purpose_as_laser_calibration(server, owner_
             purpose = conn.execute(text("SELECT purpose FROM missions")).scalar_one()
     finally:
         engine.dispose()
+        # One database, so dropping it is cheap (test_v1_migration keeps its
+        # many for the container to discard).
+        with server.connect() as conn:
+            conn.execute(text(f"DROP DATABASE {name} WITH (FORCE)"))
 
     assert purpose == "laser_calibration"
+
+
+async def test_the_databases_purposes_are_mission_facts(owner):
+    """mission_facts.PURPOSES is what the API, the ingest contract and the web
+    are built from; it must be exactly what the database's CHECK allows."""
+    from fishsense_services_api.mission_facts import PORTS, PURPOSES
+
+    async def allowed(name):
+        definition = await _one(
+            owner,
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = :n",
+            n=name,
+        )
+        return set(re.findall(r"'([a-z_]+)'", definition))
+
+    assert await allowed("missions_purpose_check") == set(PURPOSES)
+    assert await allowed("missions_port_check") == set(PORTS)

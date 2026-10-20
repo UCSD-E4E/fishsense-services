@@ -25,7 +25,7 @@ from datetime import datetime
 from typing import List, Literal, Annotated
 
 from fishsense_services_api.mission_facts import Purpose, StatedPort
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, BeforeValidator, ConfigDict
 from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = [
@@ -38,6 +38,13 @@ __all__ = [
     "RejectedImage",
     "SubfolderReport",
 ]
+
+
+def _purpose_since_0048(value):
+    """v0.14.0 accepted ``slate`` as a purpose; 0048 made it laser_calibration
+    (a session with only a calibration board). An ingest started before that,
+    or its preflight result in history, still decodes and replays."""
+    return "laser_calibration" if value == "slate" else value
 
 
 class IngestMissionRequest(BaseModel):
@@ -91,7 +98,7 @@ class IngestMissionRequest(BaseModel):
     port_note: str | None = None
     #: What the mission is for. Stored only when stated; preflight suggests
     #: one from the name otherwise.
-    purpose: Purpose | None = None
+    purpose: Annotated[Purpose | None, BeforeValidator(_purpose_since_0048)] = None
 
     #: Preflight only: list, read EXIF headers, validate, write nothing.
     dry_run: bool = False
@@ -169,7 +176,7 @@ class IngestPreflight(BaseModel):
     resolved_port_source: str | None = None
     resolved_port_note: str | None = None
     #: The request's purpose; never an inferred one.
-    resolved_purpose: str | None = None
+    resolved_purpose: Annotated[str | None, BeforeValidator(_purpose_since_0048)] = None
     total_bytes: int = 0
     #: Every problem at once -- one round trip for the operator, not a sequence.
     errors: List[str] = []

@@ -1312,8 +1312,10 @@ the UI as it lands (decided 2026-10-17)*
      owner's rules haven't already set it. `backfill-mission-facts` is a dry
      run by default, and applies only the fingerprint of a reviewed plan.
      Nothing gates on the port yet.
-   - ***Built 2026-10-19 (0048):*** `slate` dropped as a purpose (above). The board alone
-     in a name means `laser_calibration`; beside another rule it decides nothing.
+   - ***Built 2026-10-19 (0048):*** `slate` dropped as a purpose (above). A name that is
+     nothing but the board (with a date, the rig, a number or "dive") means
+     `laser_calibration`. Beside anything else (a site, a box, a pool, a calibration
+     word) the board decides nothing.
    - 2b-2: run the backfill in production (dry run reviewed first), then
      stages refuse `port = 'unknown'`.
 3. Direct e4edm ingest (the never-ingested Canyonview / Scripps Pier / Sealab / NIWC
