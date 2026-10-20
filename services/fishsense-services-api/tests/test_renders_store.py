@@ -1,4 +1,4 @@
-"""Every capture's render (0050): which captures are owed one, which missions
+"""Every capture's render (0051): which captures are owed one, which missions
 first, and the append-only record of what was rendered where.
 
 New in v2 (2026-10-19). A render is a capture's raw rectified to a JPEG,

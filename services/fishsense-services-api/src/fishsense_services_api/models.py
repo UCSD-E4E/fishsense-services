@@ -1362,7 +1362,7 @@ class AutomaticMeasurement(Base):
 
 class CaptureRender(Base):
     """A capture's raw rectified to a JPEG in its tenant's bucket, or why not
-    (0050); append-only, current = latest ``seq`` per capture."""
+    (0051); append-only, current = latest ``seq`` per capture."""
 
     __tablename__ = "capture_renders"
     __table_args__ = (
