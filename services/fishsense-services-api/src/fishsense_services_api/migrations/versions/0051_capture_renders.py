@@ -13,8 +13,8 @@ Append-only, as every results table: a rendered capture is recorded once per
 is each capture's newest row. Tenant-isolated by RLS; the research role reads
 the lab's rows, as 0036's automatic tables.
 
-Revision ID: 0050
-Revises: 0049
+Revision ID: 0051
+Revises: 0050
 """
 
 from alembic import context, op
@@ -25,8 +25,8 @@ from fishsense_services_api.schema_audit import (
     RESEARCH_ROLE,
 )
 
-revision = "0050"
-down_revision = "0049"
+revision = "0051"
+down_revision = "0050"
 
 TABLE = "capture_renders"
 VIEW = "current_capture_renders"

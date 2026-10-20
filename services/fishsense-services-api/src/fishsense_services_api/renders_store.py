@@ -1,4 +1,4 @@
-"""Every capture's render (0050): what is owed, and what was rendered where.
+"""Every capture's render (0051): what is owed, and what was rendered where.
 
 New in v2 (2026-10-19). A capture is owed a render at a render version until
 it is settled at that version under its device's current pinhole camera
