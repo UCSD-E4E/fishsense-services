@@ -519,3 +519,27 @@ async def test_a_raw_copy_is_recorded_once_per_bucket_and_whole(
                   bucket="other")])  # fmt: skip
 
     assert written == [1, 0]
+
+
+async def test_the_catalog_passes_the_bucket_to_current_renders(
+    owner_engine, app_engine, seed_memberships
+):
+    """Review of the stack: the catalog dropped `bucket`, so a caller through
+    it got renders from old buckets, which presign to nothing."""
+    tenants = await seed_memberships(
+        {"service:fishsense-orchestrator": {"lab": "member"}}
+    )
+    lab = tenants["lab"]
+    mission_id = await _plain_mission(owner_engine, lab)
+    c = await capture(owner_engine, lab, mission_id)
+    camera = (await _in(app_engine, lab, render_inputs, mission_id, bucket=BUCKET,
+                        render_version=V)).camera_calibration_id  # fmt: skip
+    await _in(app_engine, lab, persist_renders, mission_id, [
+        _rendered(c, camera, key="renders/here.JPG"),
+        _rendered(c, camera, render_version=2, bucket="other", key="renders/there.JPG"),
+    ])  # fmt: skip
+    catalog = RendersCatalog(app_engine, sub="service:fishsense-orchestrator")
+
+    got = await catalog.current_renders(lab, [c], bucket="lab-bucket")
+
+    assert got[c].key == "renders/here.JPG"
