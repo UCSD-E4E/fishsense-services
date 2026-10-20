@@ -78,7 +78,8 @@ class ObservationView(BaseModel):
     place_name: str | None
     #: A mobile capture's uuid: its full record is ``/mobile/captures/{uuid}``.
     client_capture_uuid: uuid.UUID | None
-    #: A presigned GET of the photo, valid for an hour; None for Lite (yet).
+    #: A presigned GET of the photo, valid for an hour: a phone's own image,
+    #: or a Lite frame's render; None until a Lite frame is rendered.
     photo_url: str | None
 
 
@@ -132,9 +133,13 @@ def add_observation_routes(
         if found.photo_key is None:
             return None
         try:
-            return stores.for_tenant(slug).presign_get(found.photo_key)
+            store = stores.for_tenant(slug)
         except NoTenantStore:
             return None
+        # A render names its bucket; signing it for another is a dead link.
+        if found.photo_bucket is not None and found.photo_bucket != store.bucket:
+            return None
+        return store.presign_get(found.photo_key)
 
     def view(slug: str, found: Observation) -> ObservationView:
         return ObservationView(

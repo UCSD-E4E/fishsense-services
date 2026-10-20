@@ -11,6 +11,13 @@ app layer's own line of defence (as every store does).
   method rests on: for ``laser``, the laser depth, the calibration's producer
   and the labelled dot, head and tail; for ``lidar``, the phone's snout and
   fork and who placed them.
+
+**The photo** (Phase 4 of §9.26). A mobile capture's is its own image; a Lite
+capture's is its render -- the raw rectified to a JPEG, in the tenant's own
+bucket (0051) -- the newest one rendered, whatever its version or camera: an
+abstention after it (a raw gone from scratch on a later version) leaves it
+standing. The render row names its bucket, so the API signs it only for that
+bucket. A Lite frame not yet rendered has no photo.
 """
 
 from __future__ import annotations
@@ -64,8 +71,12 @@ class Observation:
     derived_place_name: str | None
     #: A mobile capture's own uuid (its page is ``/captures``).
     client_capture_uuid: uuid.UUID | None
-    #: The capture's image in its tenant's bucket (Mobile only, for now).
+    #: The capture's image in its tenant's bucket: a phone's own, else the
+    #: capture's newest render (0051).
     photo_key: str | None
+    #: The bucket a render was written to; None for a phone's own image,
+    #: which is always in the tenant's current bucket.
+    photo_bucket: str | None = None
 
     @property
     def cursor(self) -> tuple[datetime, uuid.UUID, uuid.UUID]:
@@ -108,7 +119,16 @@ _COLUMNS = """o.capture_id, o.fish_id, o.method, o.length_m, o.captured_at,
     o.device_kind, o.device_name, o.mission_number, o.mission_name,
     o.scientific_name, o.common_name, o.fish_model, o.known_length_m,
     o.latitude, o.longitude, o.place_name, pn.place_name AS derived_place_name,
-    o.client_capture_uuid, o.photo_key"""
+    o.client_capture_uuid, coalesce(o.photo_key, r.key) AS photo_key,
+    CASE WHEN o.photo_key IS NULL THEN r.bucket END AS photo_bucket"""
+
+#: The capture's newest render (0051), for a frame with no image of its own.
+_RENDER = """LEFT JOIN LATERAL (
+    SELECT bucket, key FROM capture_renders
+    WHERE tenant_id = o.tenant_id AND capture_id = o.capture_id
+      AND status = 'rendered'
+    ORDER BY seq DESC LIMIT 1
+) r ON true"""
 
 #: The name the server derived from the capture's coordinates (0041).
 _DERIVED_PLACE_NAME = """LEFT JOIN LATERAL (
@@ -135,6 +155,7 @@ async def list_observations(
             SELECT {_COLUMNS}
             FROM observations o
             {_DERIVED_PLACE_NAME}
+            {_RENDER}
             WHERE o.tenant_id = :tenant_id
               AND (CAST(:device AS text) IS NULL
                    OR (:device = 'other'
@@ -182,6 +203,7 @@ async def observation(
                     dp.snout_x, dp.snout_y, dp.fork_x, dp.fork_y, dp.origin
                 FROM observations o
                 {_DERIVED_PLACE_NAME}
+                {_RENDER}
                 JOIN measurements m
                   ON m.tenant_id = o.tenant_id AND m.id = o.measurement_id
                 LEFT JOIN laser_calibrations cal
@@ -269,4 +291,5 @@ def _observation(row) -> Observation:
         derived_place_name=row.derived_place_name,
         client_capture_uuid=row.client_capture_uuid,
         photo_key=row.photo_key,
+        photo_bucket=row.photo_bucket,
     )

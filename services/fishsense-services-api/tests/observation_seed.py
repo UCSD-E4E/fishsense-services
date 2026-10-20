@@ -175,3 +175,44 @@ async def mobile(app_engine, owner_engine, tenant_id, *, at=T0, uuid_=None):
     async with tenant_transaction(app_engine, tenant_id) as conn:
         committed = await commit_capture(conn, tenant_id, capture_, [measured])
     return committed.capture_id, client_uuid
+
+
+async def render(
+    owner_engine,
+    tenant_id,
+    capture_id,
+    *,
+    status="rendered",
+    version=1,
+    bucket="fishsense-tenant-lab",
+    key=None,
+):
+    """A row of the capture's render (0051), under its device's current
+    camera calibration; ``key`` defaults to the render's layout."""
+    camera = await one(
+        owner_engine,
+        "SELECT cc.id FROM captures c JOIN current_camera_calibrations cc "
+        "ON cc.tenant_id = c.tenant_id AND cc.device_id = c.device_id "
+        "WHERE c.id = :c",
+        c=capture_id,
+    )
+    rendered = status == "rendered"
+    key = key or f"renders/r{version}_{camera.hex}/{capture_id.hex}.JPG"
+    await exec_(
+        owner_engine,
+        "INSERT INTO capture_renders (tenant_id, capture_id, status, render_version, "
+        "camera_calibration_id, bucket, key, bytes, md5, width, height) VALUES "
+        "(:t, :c, :s, :v, :cam, :b, :k, :n, :md5, :w, :h)",
+        t=tenant_id,
+        c=capture_id,
+        s=status,
+        v=version,
+        cam=camera,
+        b=bucket if rendered else None,
+        k=key if rendered else None,
+        n=5_700_000 if rendered else None,
+        md5="0123456789abcdef0123456789abcdef" if rendered else None,
+        w=4014 if rendered else None,
+        h=3016 if rendered else None,
+    )
+    return key

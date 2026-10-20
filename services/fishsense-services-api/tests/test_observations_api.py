@@ -4,8 +4,9 @@
 ``GET /tenants/{slug}/observations/{capture_id}/{fish_id}``, for any member of
 the tenant (PLAN.md §4.9, Phase 1 of §9.26). One list for both devices,
 newest first; ``?device=lite|mobile`` narrows it. A mobile fish carries a
-presigned link to its photo; a Lite fish has none yet (its frames are not in
-the tenant's bucket). The detail carries the evidence of its method.
+presigned link to its photo; a Lite fish's is its capture's render, once one
+is in the tenant's bucket (Phase 4, 0051). The detail carries the evidence of
+its method.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from depth_measure_seed import T0, exec_, forget_identities  # noqa: F401
 from fishsense_services_api.app import create_app
 from fishsense_services_api.auth import StaticKeySource, TokenValidator
 from fishsense_services_api.tenant_stores import TenantStore, TenantStores
-from observation_seed import ALICE, lite, mobile
+from observation_seed import ALICE, lite, mobile, render
 
 ISSUER = "https://auth.example.test/application/o/fishsense/"
 AUDIENCE = "fishsense-web"
@@ -110,6 +111,37 @@ class TestList:
         assert decoy["species"] is None
         assert decoy["photo_url"] is None
         assert decoy["length_m"] == pytest.approx(0.305)
+
+    async def test_a_lite_fish_shows_its_render_from_the_tenants_bucket(
+        self, client, owner_engine, app_engine, tenants
+    ):
+        capture_id, fish_id = await lite(owner_engine, tenants["lab"])
+        key = await render(owner_engine, tenants["lab"], capture_id)
+
+        [listed] = (await _get(client, "/tenants/lab/observations")).json()[
+            "observations"
+        ]
+        detail = (
+            await _get(client, f"/tenants/lab/observations/{capture_id}/{fish_id}")
+        ).json()
+
+        expected = f"http://garage.test:3900/fishsense-tenant-lab/{key}"
+        assert listed["photo_url"].startswith(expected)
+        assert detail["observation"]["photo_url"].startswith(expected)
+
+    async def test_a_render_in_another_bucket_is_not_signed_for_this_one(
+        self, client, owner_engine, app_engine, tenants
+    ):
+        """A presign names the tenant's bucket; a render recorded in another
+        (the tenant moved buckets since) would be a link to nothing."""
+        capture_id, _ = await lite(owner_engine, tenants["lab"])
+        await render(owner_engine, tenants["lab"], capture_id, bucket="old-lab-bucket")
+
+        [listed] = (await _get(client, "/tenants/lab/observations")).json()[
+            "observations"
+        ]
+
+        assert listed["photo_url"] is None
 
     @pytest.mark.parametrize("device, method", [("lite", "laser"), ("mobile", "lidar")])
     async def test_device_narrows_the_list(

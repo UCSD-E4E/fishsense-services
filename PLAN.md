@@ -1333,7 +1333,12 @@ the UI as it lands (decided 2026-10-17)*
        the rule.
 3. Direct e4edm ingest (the never-ingested Canyonview / Scripps Pier / Sealab / NIWC
    datasets are the first users).
-4. **Lite photo upload** (the owner's direction, 2026-10-18). Lite photos are uploaded into
+4. ***Built 2026-10-20:*** Lite photos on `/fish`. A Lite fish's photo is its capture's
+   newest render (0051, made by the render stage of #144, in the tenant's own bucket),
+   signed only for the bucket the render records. Labelled points are listed, not drawn,
+   because they were placed on v1's JPEG. The render backlog fills them in (started by
+   hand; human-measured missions first).
+   **Lite photo upload** (the owner's direction, 2026-10-18). Lite photos are uploaded into
    the tenant's own bucket, as Mobile's are, and processed there. Until processing
    finishes, the UI shows the camera's JPEG. Lite frames today are only in the shared
    labels bucket, which the API does not read, and the API is not to be given it.

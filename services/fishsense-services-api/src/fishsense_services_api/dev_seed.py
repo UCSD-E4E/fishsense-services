@@ -222,6 +222,8 @@ async def seed(
             for sub, role in USERS.items()
         }
         lite = await _lite(conn, tenant_id, frames)
+    async with owner_engine.begin() as conn:
+        await _lite_renders(conn, tenant_id, stores, frames)
 
     mobile = 0
     for i in range(MOBILE_CAPTURES):
@@ -487,6 +489,67 @@ async def _lite(
             h=head_tail,
         )
     return len(frames)
+
+
+async def _lite_renders(
+    conn: AsyncConnection,
+    tenant_id: uuid.UUID,
+    stores: TenantStores,
+    frames: Sequence[Frame],
+) -> None:
+    """Each Lite frame's render (0051), so /fish shows its photo (Phase 4).
+    The harness has no raws, so the frame's JPEG stands in for the raw
+    rectified, stored and recorded as the render stage would. Frames already
+    rendered are left alone."""
+    by_checksum = {hashlib.md5(f.jpeg).hexdigest(): f for f in frames}
+    rows = (
+        await conn.execute(
+            text("""
+                SELECT c.id, c.checksum, cc.id AS camera
+                FROM captures c
+                JOIN missions m ON m.id = c.mission_id
+                JOIN current_camera_calibrations cc
+                  ON cc.tenant_id = c.tenant_id AND cc.device_id = c.device_id
+                WHERE c.tenant_id = :t AND m.source_path LIKE :p
+                  AND NOT EXISTS (SELECT 1 FROM capture_renders r
+                                  WHERE r.capture_id = c.id)
+                """),
+            {"t": tenant_id, "p": MISSION_PREFIX + "%"},
+        )
+    ).all()
+    objects = stores.for_tenant(TENANT)
+    for row in rows:
+        frame = by_checksum.get(row.checksum)
+        if frame is None:
+            continue
+        key = f"renders/r1_{row.camera.hex}/{row.checksum}.JPG"
+        upload = objects.presign_put(
+            key,
+            sha256=base64.b64encode(hashlib.sha256(frame.jpeg).digest()).decode(),
+            size=len(frame.jpeg),
+            content_type="image/jpeg",
+        )
+        request = urllib.request.Request(
+            upload.url, data=frame.jpeg, method="PUT", headers=upload.headers
+        )
+        with urllib.request.urlopen(request):
+            pass
+        await conn.execute(
+            text("""
+                INSERT INTO capture_renders (tenant_id, capture_id, status,
+                    render_version, camera_calibration_id, bucket, key, bytes, md5)
+                VALUES (:t, :c, 'rendered', 1, :cam, :b, :k, :n, :md5)
+                """),
+            {
+                "t": tenant_id,
+                "c": row.id,
+                "cam": row.camera,
+                "b": objects.bucket,
+                "k": key,
+                "n": len(frame.jpeg),
+                "md5": row.checksum,
+            },
+        )
 
 
 async def _mobile(

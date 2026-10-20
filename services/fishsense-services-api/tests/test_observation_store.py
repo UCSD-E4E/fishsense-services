@@ -23,7 +23,7 @@ from fishsense_services_api.observation_store import (
     list_observations,
     observation,
 )
-from observation_seed import ALICE, lite as _lite, mobile as _mobile
+from observation_seed import ALICE, lite as _lite, mobile as _mobile, render
 
 
 @pytest.fixture
@@ -61,6 +61,26 @@ class TestList:
         assert found.length_m == pytest.approx(0.305)
         assert found.photo_key is None
 
+    async def test_a_lite_fishs_photo_is_its_captures_render(
+        self, owner_engine, app_engine, tenants
+    ):
+        """Phase 4: a Lite frame's photo is its raw rectified to a JPEG, in
+        the tenant's own bucket (0051). The newest rendered row is shown; an
+        abstention after it (a raw gone from scratch on a later version) does
+        not take the photo away."""
+        lab = tenants["lab"]
+        capture_id, _ = await _lite(owner_engine, lab)
+        await render(owner_engine, lab, capture_id, version=1, key="renders/r1/a.JPG")
+        await render(owner_engine, lab, capture_id, version=2, key="renders/r2/a.JPG")
+        await render(owner_engine, lab, capture_id, version=3, status="raw_unavailable")
+
+        [found] = await _list(app_engine, lab)
+
+        assert (found.photo_key, found.photo_bucket) == (
+            "renders/r2/a.JPG",
+            "fishsense-tenant-lab",
+        )
+
     async def test_a_mobile_capture_is_an_observation_by_lidar(
         self, owner_engine, app_engine, tenants
     ):
@@ -78,6 +98,7 @@ class TestList:
         assert (found.latitude, found.longitude) == (32.8665, -117.2546)
         assert found.length_m == pytest.approx(0.42)
         assert found.photo_key == f"mobile/captures/{client_uuid}/rgb_jpeg"
+        assert found.photo_bucket is None
         assert found.mission_number is None
 
     async def test_both_are_listed_together_newest_first_and_filter_by_device(

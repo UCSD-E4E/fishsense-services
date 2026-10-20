@@ -111,6 +111,11 @@ async def _scalar(owner_engine, sql: str, **params):
         return (await conn.execute(text(sql), params)).scalar_one()
 
 
+async def _rows(engine, sql):
+    async with engine.connect() as conn:
+        return [dict(r._mapping) for r in await conn.execute(text(sql))]
+
+
 class TestOnlyADevDatabase:
     async def test_an_unmarked_database_is_refused_before_anything_is_written(
         self, unmarked_engine, stores
@@ -249,9 +254,34 @@ class TestSeed:
             with urllib.request.urlopen(objects.presign_get(capture.rgb_key)) as got:
                 assert got.read() in {f.jpeg for f in FRAMES}
 
+    async def test_every_lite_frame_has_a_render_in_the_tenants_bucket(
+        self, dev_engine, app_engine, stores
+    ):
+        """Phase 4: a Lite fish's photo on /fish is its frame's render. The
+        harness has no raws to render, so it stores each frame's JPEG as its
+        render, as the render stage would."""
+        await _seed(dev_engine, stores)
+
+        rows = await _rows(
+            dev_engine,
+            "SELECT r.key, r.bucket, c.checksum FROM capture_renders r "
+            "JOIN captures c ON c.id = r.capture_id WHERE r.status = 'rendered'",
+        )
+        assert len(rows) == len(FRAMES)
+        objects = stores.for_tenant("lab")
+        jpegs = {f.jpeg for f in FRAMES}
+        for row in rows:
+            assert row["key"].startswith("renders/r1_")
+            assert row["bucket"] == objects.bucket
+            with urllib.request.urlopen(objects.presign_get(row["key"])) as got:
+                assert got.read() in jpegs
+
     async def test_seeding_twice_changes_nothing(self, dev_engine, stores):
         await _seed(dev_engine, stores)
-        counts = "SELECT (SELECT count(*) FROM captures), (SELECT count(*) FROM measurements)"
+        counts = (
+            "SELECT (SELECT count(*) FROM captures), (SELECT count(*) FROM measurements),"
+            " (SELECT count(*) FROM capture_renders)"
+        )
         async with dev_engine.connect() as conn:
             before = (await conn.execute(text(counts))).one()
 
