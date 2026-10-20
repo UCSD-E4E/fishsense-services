@@ -64,7 +64,6 @@ from fishsense_services_api.mobile_capture_store import (
 )
 from fishsense_services_api.renders_store import RenderRow, persist_renders
 from fishsense_services_api.tenant_stores import TenantStore, TenantStores
-from fishsense_services_contracts.renders import RENDER_VERSION, render_key
 
 __all__ = [
     "Frame",
@@ -492,6 +491,18 @@ async def _lite(
             h=head_tail,
         )
     return len(frames)
+
+
+#: The render the seed stands in for: `contracts.renders.RENDER_VERSION` and
+#: `render_key`, repeated because the API image does not install the
+#: contracts; tests/test_dev_seed.py pins them together.
+RENDER_VERSION = 1
+
+
+def render_key(
+    render_version: int, camera_calibration_id: uuid.UUID, checksum: str
+) -> str:
+    return f"renders/r{render_version}_{camera_calibration_id.hex}/{checksum}.JPG"
 
 
 def jpeg_size(jpeg: bytes) -> tuple[int, int]:
