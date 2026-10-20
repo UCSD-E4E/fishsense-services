@@ -1371,11 +1371,6 @@ class CaptureRender(Base):
         _fk(("tenant_id", "camera_calibration_id"), "camera_calibrations"),
         _capture_seq_index("capture_renders"),
         Index(
-            "capture_renders_rendered_once_idx",
-            "tenant_id", "capture_id", "render_version", "camera_calibration_id",
-            unique=True, postgresql_where=text("status = 'rendered'"),
-        ),  # fmt: skip
-        Index(
             "capture_renders_rendered_once_per_bucket_idx",
             "tenant_id", "capture_id", "render_version", "camera_calibration_id",
             "bucket", unique=True, postgresql_where=text("status = 'rendered'"),
@@ -1419,6 +1414,48 @@ class CaptureRaw(Base):
     key: Mapped[str] = mapped_column(Text)
     bytes: Mapped[int] = mapped_column(BigInteger)
     md5: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class CaptureThumbnail(Base):
+    """A render's thumbnail for /fish's cards, or that the render was not
+    there to read (0053); append-only."""
+
+    __tablename__ = "capture_thumbnails"
+    __table_args__ = (UniqueConstraint("tenant_id", "id"), _fk(
+        ("tenant_id", "render_id"), "capture_renders"
+    ), _fk(("tenant_id", "capture_id"), "captures"), Index(
+        "capture_thumbnails_settled_once_idx",
+        "tenant_id",
+        "render_id",
+        "target_width",
+        unique=True,
+        postgresql_where=text("status IN ('made', 'render_unavailable')"),
+        ),  # fmt: skip
+        Index(None, "tenant_id", "render_id"),
+        Index(None, "tenant_id", "capture_id"),
+        CheckConstraint(
+            "status IN ('made', 'render_unavailable', 'failed')",
+            name="capture_thumbnails_status_check",
+        ),
+        CheckConstraint(
+            "target_width > 0", name="capture_thumbnails_target_width_check"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    render_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    status: Mapped[str] = mapped_column(Text)
+    target_width: Mapped[int] = mapped_column(Integer)
+    bucket: Mapped[str | None] = mapped_column(Text)
+    key: Mapped[str | None] = mapped_column(Text)
+    bytes: Mapped[int | None] = mapped_column(BigInteger)
+    md5: Mapped[str | None] = mapped_column(Text)
+    width: Mapped[int | None] = mapped_column(Integer)
+    height: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = _created_at()
 
 

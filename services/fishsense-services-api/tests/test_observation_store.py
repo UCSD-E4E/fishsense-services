@@ -29,6 +29,7 @@ from observation_seed import (
     mobile as _mobile,
     recalibrate_camera,
     render,
+    thumbnail,
 )
 
 BUCKET = "fishsense-tenant-lab"
@@ -37,6 +38,15 @@ BUCKET = "fishsense-tenant-lab"
 @pytest.fixture
 async def tenants(seed_memberships):
     return await seed_memberships({ALICE: {"lab": "member", "partner": "member"}})
+
+
+async def _photo(app_engine, tenant_id, capture_id, fish_id, bucket):
+    """The photo key of a fish's page: its capture's render."""
+    async with tenant_transaction(app_engine, tenant_id) as conn:
+        found = await observation(
+            conn, tenant_id, capture_id, fish_id, photo_bucket=bucket
+        )
+    return found.observation.photo_key
 
 
 async def _list(app_engine, tenant_id, **kwargs):
@@ -77,27 +87,27 @@ class TestList:
         written -- not by version number -- whatever its camera. An abstention
         after it does not take the photo away."""
         lab = tenants["lab"]
-        capture_id, _ = await _lite(owner_engine, lab)
+        capture_id, fish_id = await _lite(owner_engine, lab)
         await render(owner_engine, lab, capture_id, version=2, key="renders/r2/a.JPG")
         await render(owner_engine, lab, capture_id, version=1, key="renders/r1/a.JPG")
         await render(owner_engine, lab, capture_id, version=3, status="raw_unavailable")
 
-        [found] = await _list(app_engine, lab, photo_bucket=BUCKET)
+        found = await _photo(app_engine, lab, capture_id, fish_id, BUCKET)
 
-        assert found.photo_key == "renders/r1/a.JPG"
+        assert found == "renders/r1/a.JPG"
 
     async def test_a_render_under_a_newer_camera_is_shown(
         self, owner_engine, app_engine, tenants
     ):
         lab = tenants["lab"]
-        capture_id, _ = await _lite(owner_engine, lab)
+        capture_id, fish_id = await _lite(owner_engine, lab)
         await render(owner_engine, lab, capture_id, key="renders/old-camera.JPG")
         await recalibrate_camera(owner_engine, lab, capture_id)
         await render(owner_engine, lab, capture_id, key="renders/new-camera.JPG")
 
-        [found] = await _list(app_engine, lab, photo_bucket=BUCKET)
+        found = await _photo(app_engine, lab, capture_id, fish_id, BUCKET)
 
-        assert found.photo_key == "renders/new-camera.JPG"
+        assert found == "renders/new-camera.JPG"
 
     async def test_the_photo_is_the_newest_render_in_the_tenants_bucket(
         self, owner_engine, app_engine, tenants
@@ -106,16 +116,49 @@ class TestList:
         would be a link to nothing, so the newest render *there* is shown --
         and with no bucket, none is."""
         lab = tenants["lab"]
-        capture_id, _ = await _lite(owner_engine, lab)
+        capture_id, fish_id = await _lite(owner_engine, lab)
         await render(owner_engine, lab, capture_id, key="renders/here.JPG")
         await render(owner_engine, lab, capture_id, version=2, bucket="old-bucket",
                      key="renders/there.JPG")  # fmt: skip
 
-        [here] = await _list(app_engine, lab, photo_bucket=BUCKET)
-        [none] = await _list(app_engine, lab, photo_bucket=None)
+        here = await _photo(app_engine, lab, capture_id, fish_id, BUCKET)
+        none = await _photo(app_engine, lab, capture_id, fish_id, None)
 
-        assert here.photo_key == "renders/here.JPG"
-        assert none.photo_key is None
+        assert here == "renders/here.JPG"
+        assert none is None
+
+    async def test_a_lite_card_shows_its_renders_thumbnail_never_the_render(
+        self, owner_engine, app_engine, tenants
+    ):
+        """Review of #151: a full render as a card is ~6-8 MB. The list shows
+        the thumbnail of the render the fish's page shows (0053); with none
+        made yet, no photo -- not the full render."""
+        lab = tenants["lab"]
+        capture_id, _ = await _lite(owner_engine, lab)
+        key = await render(owner_engine, lab, capture_id)
+
+        [before] = await _list(app_engine, lab, photo_bucket=BUCKET)
+        thumb = await thumbnail(owner_engine, lab, key)
+        [after] = await _list(app_engine, lab, photo_bucket=BUCKET)
+
+        assert before.photo_key is None
+        assert after.photo_key == thumb
+
+    async def test_a_newer_render_without_its_thumbnail_keeps_the_older_one(
+        self, owner_engine, app_engine, tenants
+    ):
+        """Review of the stack: re-rendered (a new version, camera or bucket),
+        a capture's card went blank until the next thumbnail run. The card is
+        the newest render that has a thumbnail."""
+        lab = tenants["lab"]
+        capture_id, _ = await _lite(owner_engine, lab)
+        old = await render(owner_engine, lab, capture_id, key="renders/r1/a.JPG")
+        old_thumb = await thumbnail(owner_engine, lab, old)
+        await render(owner_engine, lab, capture_id, version=2, key="renders/r2/a.JPG")
+
+        [found] = await _list(app_engine, lab, photo_bucket=BUCKET)
+
+        assert found.photo_key == old_thumb
 
     async def test_a_mobile_capture_is_an_observation_by_lidar(
         self, owner_engine, app_engine, tenants

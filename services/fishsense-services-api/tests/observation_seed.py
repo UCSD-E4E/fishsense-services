@@ -229,3 +229,21 @@ async def recalibrate_camera(owner_engine, tenant_id, capture_id):
         t=tenant_id,
         c=capture_id,
     )
+
+
+async def thumbnail(owner_engine, tenant_id, render_key, *, width=640):
+    """The render's thumbnail (0053), made; returns its key."""
+    key = f"thumbnails/w{width}/{render_key}"
+    await exec_(
+        owner_engine,
+        "INSERT INTO capture_thumbnails (tenant_id, render_id, capture_id, status, "
+        "target_width, bucket, key, bytes, md5, width, height) SELECT :t, r.id, "
+        "r.capture_id, 'made', :w, r.bucket, :k, 40000, "
+        "'0123456789abcdef0123456789abcdef', :w, 481 FROM capture_renders r "
+        "WHERE r.key = :rk",
+        t=tenant_id,
+        w=width,
+        k=key,
+        rk=render_key,
+    )
+    return key

@@ -31,6 +31,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from fishsense_services_api.renders_store import newest_render
+from fishsense_services_api.thumbnails_store import THUMBNAIL_WIDTH
 
 __all__ = [
     "DEVICE_GROUPS",
@@ -75,7 +76,7 @@ class Observation:
     #: A mobile capture's own uuid (its page is ``/captures``).
     client_capture_uuid: uuid.UUID | None
     #: The capture's image in its tenant's bucket: a phone's own, else the
-    #: capture's newest render there (0051).
+    #: capture's newest render there (0051) -- its thumbnail in a list (0053).
     photo_key: str | None
 
     @property
@@ -119,13 +120,26 @@ _COLUMNS = """o.capture_id, o.fish_id, o.method, o.length_m, o.captured_at,
     o.device_kind, o.device_name, o.mission_number, o.mission_name,
     o.scientific_name, o.common_name, o.fish_model, o.known_length_m,
     o.latitude, o.longitude, o.place_name, pn.place_name AS derived_place_name,
-    o.client_capture_uuid, coalesce(o.photo_key, r.key) AS photo_key"""
+    o.client_capture_uuid"""
 
 #: The capture's newest render (0051) in the tenant's current bucket, for a
 #: frame with no image of its own: `renders_store.newest_render`'s rule.
 _RENDER = f"""LEFT JOIN LATERAL (
     {newest_render("o.capture_id", "o.tenant_id", "r.bucket = :photo_bucket")}
 ) r ON true"""
+
+#: The card: the thumbnail (0053) of the capture's newest render that has one
+#: made at the cards' width, in the same bucket -- so a re-render waiting for
+#: its thumbnail does not blank the card (review of the stack). Never the full
+#: render (review of #151).
+_THUMBNAIL = f"""LEFT JOIN LATERAL (
+    SELECT h.key FROM capture_thumbnails h
+    JOIN capture_renders rr ON rr.tenant_id = h.tenant_id AND rr.id = h.render_id
+    WHERE h.tenant_id = o.tenant_id AND h.capture_id = o.capture_id
+      AND h.status = 'made' AND h.target_width = {THUMBNAIL_WIDTH}
+      AND h.bucket = :photo_bucket
+    ORDER BY rr.seq DESC LIMIT 1
+) h ON true"""
 
 #: The name the server derived from the capture's coordinates (0041).
 _DERIVED_PLACE_NAME = """LEFT JOIN LATERAL (
@@ -153,7 +167,7 @@ async def list_observations(
     # the LIMIT would probe every observation in the tenant (review of #151).
     rows = await conn.execute(
         text(f"""
-            SELECT {_COLUMNS}
+            SELECT {_COLUMNS}, coalesce(o.photo_key, h.key) AS photo_key
             FROM (
                 SELECT * FROM observations o
                 WHERE o.tenant_id = :tenant_id
@@ -170,6 +184,7 @@ async def list_observations(
             ) o
             {_DERIVED_PLACE_NAME}
             {_RENDER}
+            {_THUMBNAIL}
             ORDER BY o.captured_at DESC, o.capture_id DESC, o.fish_id DESC
             """),
         {
@@ -200,7 +215,7 @@ async def observation(
     row = (
         await conn.execute(
             text(f"""
-                SELECT {_COLUMNS},
+                SELECT {_COLUMNS}, coalesce(o.photo_key, r.key) AS photo_key,
                     COALESCE(m.measured_at, m.created_at) AS measured,
                     m.algorithm, m.algorithm_version, m.core_version,
                     m.model_version,

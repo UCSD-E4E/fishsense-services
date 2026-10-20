@@ -64,6 +64,13 @@ from fishsense_services_api.mobile_capture_store import (
 )
 from fishsense_services_api.renders_store import RenderRow, persist_renders
 from fishsense_services_api.tenant_stores import TenantStore, TenantStores
+from fishsense_services_api.thumbnails_store import (
+    THUMBNAIL_WIDTH,
+    ThumbnailRow,
+    owed_thumbnails,
+    persist_thumbnails,
+    thumbnail_key,
+)
 
 __all__ = [
     "Frame",
@@ -598,6 +605,47 @@ async def _lite_renders(
     async with owner_engine.begin() as conn:
         for mission_id, mission_renders in renders.items():
             await persist_renders(conn, tenant_id, mission_id, mission_renders)
+    await _lite_thumbnails(owner_engine, tenant_id, objects, by_checksum)
+
+
+async def _lite_thumbnails(owner_engine, tenant_id, objects, by_checksum) -> None:
+    """Each seeded render's thumbnail (0053), so /fish's cards show. The
+    harness's frames are small already, so each stands in for its own
+    thumbnail, recorded with its real size."""
+    async with owner_engine.connect() as conn:
+        owed = await owed_thumbnails(
+            conn, tenant_id, bucket=objects.bucket, width=THUMBNAIL_WIDTH
+        )
+        checksums = {
+            r.id: r.checksum
+            for r in await conn.execute(
+                text("SELECT id, checksum FROM captures WHERE id = ANY(:ids)"),
+                {"ids": [o.capture_id for o in owed]},
+            )
+        }
+    rows = []
+    for o in owed:
+        frame = by_checksum.get(checksums.get(o.capture_id))
+        if frame is None:
+            continue
+        key = thumbnail_key(o.render_key)
+        upload = objects.presign_put(
+            key,
+            sha256=base64.b64encode(hashlib.sha256(frame.jpeg).digest()).decode(),
+            size=len(frame.jpeg),
+            content_type="image/jpeg",
+        )
+        await asyncio.to_thread(_put, upload.url, frame.jpeg, upload.headers)
+        width, height = jpeg_size(frame.jpeg)
+        rows.append(
+            ThumbnailRow(render_id=o.render_id, capture_id=o.capture_id,
+                         status="made", target_width=THUMBNAIL_WIDTH,
+                         bucket=objects.bucket, key=key, bytes=len(frame.jpeg),
+                         md5=hashlib.md5(frame.jpeg).hexdigest(), width=width,
+                         height=height)  # fmt: skip
+        )
+    async with owner_engine.begin() as conn:
+        await persist_thumbnails(conn, tenant_id, rows)
 
 
 async def _mobile(
