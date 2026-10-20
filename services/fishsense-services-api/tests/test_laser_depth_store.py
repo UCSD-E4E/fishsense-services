@@ -45,6 +45,8 @@ import uuid
 import pytest
 from sqlalchemy import text
 
+from depth_measure_seed import restate_port
+
 from depth_measure_seed import (  # noqa: F401  (forget_identities: a fixture)
     IMPLAUSIBLE_POSITION,
     T0,
@@ -886,3 +888,71 @@ async def test_the_catalog_acts_only_in_tenants_it_is_a_member_of(
             depths=[],
             refusals=[],
         )
+
+
+@pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
+async def test_a_mission_not_behind_the_corrective_optic_is_not_offered(
+    owner_engine, app_engine, port
+):
+    """2b-2 (the owner, 2026-10-20): pinhole maths holds only behind the
+    corrective optic. The control first: the mission is work; then only its
+    port changes."""
+    lab = await tenant(owner_engine)
+    mission_id = await mission(
+        owner_engine, lab, device_id=await device(owner_engine, lab)
+    )
+    await calibrate(owner_engine, lab, mission_id)
+    await _labelled(owner_engine, lab, mission_id)
+    assert await _next(app_engine, lab) == mission_id
+
+    await restate_port(owner_engine, mission_id, port)
+
+    assert await _next(app_engine, lab) is None
+
+
+@pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
+async def test_a_mission_off_the_corrective_optic_has_no_depth_work_to_write(
+    owner_engine, app_engine, port
+):
+    """The cohort, the resolver and the persist check read one predicate, so
+    they cannot disagree: a workflow already holding the dive's work, or one
+    started by id, writes nothing once the port is restated (2b-2)."""
+    lab = await tenant(owner_engine)
+    mission_id, calibration = await calibrated_dive(owner_engine, lab)
+    capture_id, label = await _labelled(owner_engine, lab, mission_id)
+    assert (await _work(app_engine, lab, mission_id)).captures
+
+    await restate_port(owner_engine, mission_id, port)
+
+    assert (await _work(app_engine, lab, mission_id)).captures == []
+    persisted = await _persist(
+        app_engine,
+        lab,
+        mission_id,
+        calibration,
+        depths=[DepthRecord(capture_id, label, 100.0, 200.0, 1.2, 1.25, 3e-6)],
+    )
+    assert persisted.written == 0
+
+
+@pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
+async def test_a_calibration_borrowed_from_another_port_is_not_used(
+    owner_engine, app_engine, port
+):
+    """A fish dive borrowing its laser calibration projects through the
+    source's fit, so the source must be behind the corrective optic too."""
+    lab = await tenant(owner_engine)
+    slate_mission, _ = await calibrated_dive(owner_engine, lab)
+    fish_mission = await mission(
+        owner_engine,
+        lab,
+        device_id=await device(owner_engine, lab),
+        source_mission=slate_mission,
+    )
+    await _labelled(owner_engine, lab, fish_mission)
+    assert await _next(app_engine, lab) == fish_mission
+
+    await restate_port(owner_engine, slate_mission, port)
+
+    assert await _next(app_engine, lab) is None
+    assert (await _work(app_engine, lab, fish_mission)).captures == []

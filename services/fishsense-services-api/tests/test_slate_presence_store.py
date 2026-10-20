@@ -29,6 +29,8 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import text
+
+from depth_measure_seed import restate_port
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from _slate_calibration_seed import (
@@ -751,3 +753,18 @@ async def test_the_detector_slate_predicate_looks_up_each_frames_latest_predicti
     )
 
     assert _reads_each_frames_latest_row(nodes)
+
+
+@pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
+async def test_slate_detection_admits_only_the_corrective_optic(
+    owner_engine, app_engine, port
+):
+    """2b-2: the control first (the mission is work), then only its port."""
+    lab = await tenant(owner_engine)
+    only = await _dive(owner_engine, lab)
+    await capture(owner_engine, lab, only)
+    assert await _next(app_engine, lab) == only
+
+    await restate_port(owner_engine, only, port)
+
+    assert await _next(app_engine, lab) is None

@@ -52,6 +52,13 @@ export default async function MissionPage({ params }: Props) {
             Nothing says which port this camera was behind. A missing D does not mean flat.
           </span>
         )}
+        {!mission.processable && (
+          <span className="block text-xs text-amber-700 dark:text-amber-400">
+            The pipeline won&apos;t process this mission: it needs the corrective optic and a
+            pinhole camera calibration, and a borrowed calibration from a mission that has
+            them too.
+          </span>
+        )}
       </span>,
     ],
     [

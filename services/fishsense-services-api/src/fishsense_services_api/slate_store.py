@@ -81,6 +81,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api.camera_sql import RECTIFIABLE_MISSION
 from fishsense_services_api.service_principal import ServicePrincipal
 from fishsense_services_api.slate_presence_store import detector_slate_frame
 from fishsense_services_api.taxonomy_sql import SLATE_CONTENT_MARKER
@@ -267,11 +268,8 @@ _MARKED_AND_UNLABELED = _slate_frame_and_unlabeled(":marker")
 #: Dive `d` is one stage 9 can run at all: its device has a current camera
 #: calibration, and its template can be scaled (a dpi, reference points) and
 #: staged (a NAS path). The resolver and `stage_slate_pdf` refuse the rest.
-_RESOLVABLE = """
-    EXISTS (
-        SELECT 1 FROM current_camera_calibrations cc
-        WHERE cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
-    )
+_RESOLVABLE = f"""
+    {RECTIFIABLE_MISSION}
     AND EXISTS (
         SELECT 1 FROM slate_templates st
         WHERE st.id = d.slate_template_id AND st.dpi IS NOT NULL

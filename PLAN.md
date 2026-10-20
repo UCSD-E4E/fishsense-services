@@ -1316,8 +1316,21 @@ the UI as it lands (decided 2026-10-17)*
      nothing but the board (with a date, the rig, a number or "dive") means
      `laser_calibration`. Beside anything else (a site, a box, a pool, a calibration
      word) the board decides nothing.
-   - 2b-2: run the backfill in production (dry run reviewed first), then
-     stages refuse `port = 'unknown'`.
+   - ***Backfill applied 2026-10-20 (v0.15.0):*** all 525 missions are corrective optic
+     (477 `backfill`, 48 `device_suffix`), every mission has a purpose, and there are 4
+     deployments.
+   - ***2b-2, built 2026-10-20:*** only `corrective_optic` is processed (the owner: flat is
+     axial, and a dome's centring is unchecked). `camera_sql.RECTIFIABLE_MISSION` carries
+     the port, so laser, head/tail, species, slate presence, slate preprocessing, both
+     calibrations and the automatic track admit nothing else.
+     - Laser depth and measurement use `ADMITTED_PORT`: their own port, and the port of
+       any mission they borrow a calibration from. They use it in the selector, the
+       resolver and the persist check.
+     - Clustering, species prediction and laser auto-accept use `CORRECTIVE_OPTIC`.
+     - The automatic validation harness scores only admitted missions.
+     - Migration 0050 recreates `dive_pipeline_status`'s function with the same terms.
+     - The API returns `processable` from those predicates, so the web doesn't restate
+       the rule.
 3. Direct e4edm ingest (the never-ingested Canyonview / Scripps Pier / Sealab / NIWC
    datasets are the first users).
 4. **Lite photo upload** (the owner's direction, 2026-10-18). Lite photos are uploaded into

@@ -58,6 +58,7 @@ from sqlalchemy import text
 
 from depth_measure_seed import (  # noqa: F401  (forget_identities: a fixture)
     REAL_FISH,
+    restate_port,
     calibrate,
     capture,
     cluster,
@@ -193,8 +194,10 @@ async def _dive(
         owner_engine,
         "INSERT INTO missions (tenant_id, source_path, name, started_at, priority, "
         "device_id, slate_template_id, calibration_target_id, "
-        "calibration_source_mission_id, created_at) VALUES (:t, :p, :name, :at, "
-        ":priority, :device, :slate, :target, :src, :created) RETURNING id, number",
+        "calibration_source_mission_id, created_at, port, port_source) VALUES (:t, "
+        ":p, :name, :at, :priority, :device, :slate, :target, :src, :created, "
+        # Behind the corrective optic, as every production mission is (2b-2).
+        "'corrective_optic', 'operator') RETURNING id, number",
         t=tenant_id,
         p=f"/dives/{n}",
         name=name,
@@ -453,6 +456,22 @@ def test_the_view_is_what_todays_cohorts_render():
     migration that recreates the function from today's predicates, then move
     this pin to it."""
     migration = _migration()
+    rendered = hashlib.sha256(migration.FUNCTION_SQL.encode()).hexdigest()
+    assert rendered == migration.RENDERED_SHA256
+
+
+def test_0050_adds_the_port_terms_todays_stores_use():
+    """0050 recreates the function with the port terms (2b-2), spelled in the
+    migration because a function is frozen. When `camera_sql` changes them,
+    this fails: ship a migration that recreates the function again."""
+    from fishsense_services_api import camera_sql
+
+    migration = importlib.import_module(
+        "fishsense_services_api.migrations.versions.0050_status_knows_the_port"
+    )
+    assert migration.CORRECTIVE_OPTIC == camera_sql.CORRECTIVE_OPTIC
+    assert migration.ADMITTED_PORT == camera_sql.ADMITTED_PORT
+    assert migration.RECTIFIABLE_MISSION == camera_sql.RECTIFIABLE_MISSION
     rendered = hashlib.sha256(migration.FUNCTION_SQL.encode()).hexdigest()
     assert rendered == migration.RENDERED_SHA256
 
@@ -1768,6 +1787,15 @@ async def _assert_parity(owner_engine, app_engine, tenant, column, select, expec
     assert viewed == selected
     # Never vacuous: the corpus has work, and has dives without it.
     assert viewed == {d.number for d in expected}
+    # 2b-2: off the corrective optic, the same dives are neither picked nor
+    # pending (0050). Restated, compared, then put back.
+    for port in ("unknown", "flat"):
+        for d in expected:
+            await restate_port(owner_engine, d.id, port)
+        assert await _selected(owner_engine, app_engine, tenant, select) == set()
+        assert await _pending(app_engine, tenant, column) == set()
+    for d in expected:
+        await restate_port(owner_engine, d.id, "corrective_optic")
 
 
 async def _other_tenant_with_work(owner_engine, seed):

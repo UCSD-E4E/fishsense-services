@@ -129,13 +129,17 @@ async def mission(
     priority="high",
     source_mission=None,
     created_at=None,
+    port="corrective_optic",
 ):
+    """A dive. Its port is the corrective optic, as every production mission's
+    is, unless a test says otherwise: the stages admit no other (2b-2)."""
     n = _n()
     return await _one(
         owner_engine,
         "INSERT INTO missions (tenant_id, source_path, name, started_at, priority, "
-        "device_id, calibration_source_mission_id, created_at) VALUES (:t, :p, :p, "
-        ":at, :priority, :device, :src, :created) RETURNING id",
+        "device_id, calibration_source_mission_id, created_at, port, port_source) "
+        "VALUES (:t, :p, :p, :at, :priority, :device, :src, :created, :port, "
+        "CASE WHEN :port = 'unknown' THEN NULL ELSE 'operator' END) RETURNING id",
         t=tenant_id,
         p=f"/dives/{n}",
         at=T0,
@@ -143,6 +147,7 @@ async def mission(
         device=device_id,
         src=source_mission,
         created=created_at or T0 + timedelta(seconds=n),
+        port=port,
     )
 
 
@@ -408,3 +413,14 @@ async def measurable_capture(
             owner_engine, tenant_id, mission_id, [capture_id], fish_id=cluster_fish
         )
     return capture_id
+
+
+async def restate_port(owner_engine, mission_id, port: str) -> None:
+    """Restate a mission's port, as an operator would (2b-2)."""
+    await exec_(
+        owner_engine,
+        "UPDATE missions SET port = :p, port_source = "
+        "CASE WHEN :p = 'unknown' THEN NULL ELSE 'operator' END WHERE id = :m",
+        p=port,
+        m=mission_id,
+    )

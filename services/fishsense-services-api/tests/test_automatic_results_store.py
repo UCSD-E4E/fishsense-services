@@ -37,6 +37,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from depth_measure_seed import (  # noqa: F401  (forget_identities: a fixture)
+    restate_port,
     PLAUSIBLE_POSITION,
     calibrate,
     calibrated_dive,
@@ -286,6 +287,21 @@ async def test_a_mission_the_pipeline_cannot_rectify_is_not_selected(
     await capture(owner_engine, lab, d)
     none = await mission(owner_engine, lab, priority="low")
     await capture(owner_engine, lab, none)
+
+    assert await _next(app_engine, lab) is None
+
+
+@pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
+async def test_a_mission_not_behind_the_corrective_optic_is_not_selected(
+    owner_engine, app_engine, port
+):
+    """2b-2: the frames stage rectifies the raw as a pinhole camera."""
+    lab = await tenant(owner_engine)
+    d = await _backlog_mission(owner_engine, lab)
+    await capture(owner_engine, lab, d)
+    assert await _next(app_engine, lab) == d
+
+    await restate_port(owner_engine, d, port)
 
     assert await _next(app_engine, lab) is None
 

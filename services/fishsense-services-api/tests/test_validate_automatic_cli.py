@@ -26,6 +26,7 @@ from depth_measure_seed import (  # noqa: F401  (forget_identities: a fixture)
     forget_identities,
     head_tail_label,
     laser_label,
+    restate_port,
     species_label,
     tenant,
 )
@@ -249,3 +250,30 @@ async def test_a_sessions_calibrations_are_its_stored_axis_and_its_own_fit(
     assert s.mission_number == 62
     assert s.stored_axis is not None
     assert (s.vanishing_px, list(s.line_direction)) == (-2000.0, [-0.29, -0.957])
+
+
+@pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
+async def test_a_mission_off_the_corrective_optic_is_not_scored(
+    owner_engine, app_engine, references, port
+):
+    """The pipeline does not process such a mission (2b-2), so the paper's
+    accuracy tables must not mix its frames in. The control first."""
+    await references("Grouper", 0.36)
+    lab = await tenant(owner_engine)
+    pool = await _paper_mission(owner_engine, lab, 58)
+    await _labelled(owner_engine, lab, pool, "Fish Model, Grouper")
+
+    async def read():
+        async with tenant_transaction(app_engine, lab) as conn:
+            frames = await validation_frames(
+                conn, lab, pool_missions=[58], reef_missions=[]
+            )
+            sessions = await session_calibrations(conn, lab, [58])
+        return frames, sessions
+
+    frames, sessions = await read()
+    assert len(frames) == 1 and len(sessions) == 1
+
+    await restate_port(owner_engine, pool, port)
+
+    assert await read() == ([], [])

@@ -46,6 +46,7 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api.camera_sql import ADMITTED_PORT
 from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
@@ -70,9 +71,14 @@ __all__ = [
 #: selector adds: the dive has a row of migration 0026's `laser_depth_work`.
 #: Named so `dive_pipeline_status` reads the same predicate (migration
 #: 0029).
-LASER_DEPTH_COHORT = """EXISTS (
+LASER_DEPTH_COHORT = f"""{ADMITTED_PORT} AND EXISTS (
     SELECT 1 FROM laser_depth_work w
     WHERE w.tenant_id = d.tenant_id AND w.mission_id = d.id
+)"""
+#: The resolver's and the persist check's form of the same port term (2b-2).
+_ADMITTED = f"""EXISTS (
+    SELECT 1 FROM missions d
+    WHERE d.tenant_id = :tenant AND d.id = :mission AND {ADMITTED_PORT}
 )"""
 
 Vector3 = tuple[float, float, float]
@@ -220,9 +226,9 @@ async def laser_depth_work(
     its valid unrefused labels in label order."""
     geometry = await mission_geometry(conn, tenant_id, mission_id)
     rows = await conn.execute(
-        text("""
+        text(f"""
             SELECT capture_id, laser_label_id, x, y FROM laser_depth_work
-            WHERE tenant_id = :tenant AND mission_id = :mission
+            WHERE tenant_id = :tenant AND mission_id = :mission AND {_ADMITTED}
             ORDER BY capture_number, laser_label_number
             """),
         {"tenant": tenant_id, "mission": mission_id},
@@ -319,8 +325,8 @@ async def _is_work(
     work of this dive under this calibration?"""
     return (
         await conn.execute(
-            text("""
-                SELECT EXISTS (
+            text(f"""
+                SELECT {_ADMITTED} AND EXISTS (
                     SELECT 1 FROM laser_depth_work
                     WHERE tenant_id = :tenant AND mission_id = :mission
                       AND capture_id = :capture AND laser_label_id = :label

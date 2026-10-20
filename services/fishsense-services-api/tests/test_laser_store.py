@@ -40,6 +40,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import text
 
+from depth_measure_seed import restate_port
+
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.laser_store import (
     ForeignRows,
@@ -100,9 +102,10 @@ class Seed:
             return result.scalar() if result.returns_rows else None
 
     async def mission(self, *, priority="high", number=None, created_at=None,
-                   device=_CALIBRATED):  # fmt: skip
-        """A dive; by default on the tenant's one calibrated device, as the
-        stage-0.1 and prediction cohorts require. `device=None` has none."""
+                   device=_CALIBRATED, port="corrective_optic"):  # fmt: skip
+        """A dive; by default on the tenant's one calibrated device and behind
+        the corrective optic, as the stage-0.1 and prediction cohorts require.
+        `device=None` has none."""
         if device is _CALIBRATED:
             if self._device is None:
                 self._device = await self.camera()
@@ -110,10 +113,11 @@ class Seed:
         self._path += 1
         return await self._one(
             "INSERT INTO missions (tenant_id, source_path, started_at, priority, number, "
-            "device_id, created_at) VALUES (:t, :p, :at, :pr, :n, :dev, "
-            "coalesce(:c, now())) RETURNING id",
+            "device_id, created_at, port, port_source) VALUES (:t, :p, :at, :pr, :n, "
+            ":dev, coalesce(:c, now()), :port, "
+            "CASE WHEN :port = 'unknown' THEN NULL ELSE 'operator' END) RETURNING id",
             t=self.tenant, p=f"/{uuid.uuid4()}", at=T0, pr=priority, n=number,
-            dev=device, c=created_at,
+            dev=device, c=created_at, port=port,
         )  # fmt: skip
 
     async def capture(self, mission, *, canonical=True, checksum=None, number=None,
@@ -414,6 +418,46 @@ async def test_a_mission_on_an_axial_camera_is_never_selected(
     await lab.capture(axial)
 
     assert await _next(app_engine, lab, selector) is None
+
+
+@pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
+async def test_laser_preprocessing_admits_only_the_corrective_optic(
+    lab, app_engine, port
+):
+    """2b-2: the control first (the mission is work), then only its port."""
+    mission = await lab.mission()
+    await lab.label(await lab.capture(mission), project=None)
+    assert await _next(app_engine, lab, next_mission_for_laser_preprocessing) == mission
+
+    await restate_port(lab.owner, mission, port)
+
+    assert await _next(app_engine, lab, next_mission_for_laser_preprocessing) is None
+
+
+@pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
+async def test_laser_prediction_admits_only_the_corrective_optic(lab, app_engine, port):
+    """2b-2: the control first (the mission is work), then only its port."""
+    mission = await lab.mission()
+    await lab.capture(mission)
+    assert await _next(app_engine, lab, next_mission_for_laser_prediction) == mission
+
+    await restate_port(lab.owner, mission, port)
+
+    assert await _next(app_engine, lab, next_mission_for_laser_prediction) is None
+
+
+@pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
+async def test_laser_auto_accept_admits_only_the_corrective_optic(
+    lab, app_engine, port
+):
+    """2b-2: the control first (the mission is work), then only its port."""
+    mission = await lab.mission()
+    await lab.prediction(await lab.capture(mission))
+    assert await _next(app_engine, lab, next_mission_for_laser_auto_accept) == mission
+
+    await restate_port(lab.owner, mission, port)
+
+    assert await _next(app_engine, lab, next_mission_for_laser_auto_accept) is None
 
 
 async def test_an_axial_camera_is_not_a_mission_camera(lab, app_engine):

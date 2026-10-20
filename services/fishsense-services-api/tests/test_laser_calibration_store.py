@@ -49,6 +49,8 @@ import uuid
 import pytest
 from sqlalchemy import text
 
+from depth_measure_seed import restate_port
+
 from _slate_calibration_seed import (
     BAD_POSITION,
     DISTORTION,
@@ -1465,4 +1467,24 @@ async def test_a_refusal_recorded_after_the_link_write_stands(owner_engine, app_
     await _refuse(app_engine, lab, only, calibration_target_id=target,
                   inputs_as_of=later(99))  # fmt: skip
 
+    assert await _board(app_engine, lab) is None
+
+
+@pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
+async def test_a_mission_not_behind_the_corrective_optic_is_not_calibrated(
+    owner_engine, app_engine, port
+):
+    """2b-2 (the owner, 2026-10-20): pinhole maths holds only behind the
+    corrective optic. The control first: the mission is work; then only its
+    port changes."""
+    lab = await tenant(owner_engine)
+    slate = await _slate_mission(owner_engine, lab)
+    board = await _board_mission(owner_engine, lab)
+    assert await _stage13(app_engine, lab) == slate
+    assert await _board(app_engine, lab) == board
+
+    for mission_id in (slate, board):
+        await restate_port(owner_engine, mission_id, port)
+
+    assert await _stage13(app_engine, lab) is None
     assert await _board(app_engine, lab) is None

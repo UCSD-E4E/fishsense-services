@@ -30,6 +30,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import text
+
+from depth_measure_seed import restate_port
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from fishsense_services_api.db import tenant_transaction
@@ -76,7 +78,9 @@ async def _dive(owner_engine, tenant, *, priority="high", at=T0):
     return await _exec(
         owner_engine,
         "INSERT INTO missions (tenant_id, source_path, name, started_at, priority, "
-        "created_at) VALUES (:t, :p, 'd', :at, :prio, :at) RETURNING id",
+        "created_at, port, port_source) VALUES (:t, :p, 'd', :at, :prio, :at, "
+        # Behind the corrective optic, as every production mission is (2b-2).
+        "'corrective_optic', 'operator') RETURNING id",
         t=tenant,
         p=f"/d/{uuid.uuid4()}",
         at=at,
@@ -585,3 +589,17 @@ async def test_the_catalog_acts_only_in_tenants_it_is_a_member_of(
     assert await catalog.next_mission_for_species_prediction(lab, predictor_version=V)
     with pytest.raises(PermissionError):
         await catalog.next_mission_for_species_prediction(reef, predictor_version=V)
+
+
+@pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
+async def test_species_prediction_admits_only_the_corrective_optic(
+    owner_engine, app_engine, port
+):
+    """2b-2: the control first (the mission is work), then only its port."""
+    lab = await _tenant(owner_engine)
+    mission, _, _ = await _seed(owner_engine, lab)
+    assert await _next(app_engine, lab) == mission
+
+    await restate_port(owner_engine, mission, port)
+
+    assert await _next(app_engine, lab) is None

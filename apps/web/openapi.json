@@ -1366,6 +1366,10 @@
             "title": "Priority",
             "type": "string"
           },
+          "processable": {
+            "title": "Processable",
+            "type": "boolean"
+          },
           "purpose": {
             "anyOf": [
               {
@@ -1425,7 +1429,8 @@
           "port_source",
           "site",
           "deployment_number",
-          "deployment_name"
+          "deployment_name",
+          "processable"
         ],
         "title": "Mission",
         "type": "object"
@@ -1575,6 +1580,10 @@
             "title": "Priority",
             "type": "string"
           },
+          "processable": {
+            "title": "Processable",
+            "type": "boolean"
+          },
           "purpose": {
             "anyOf": [
               {
@@ -1650,6 +1659,7 @@
           "site",
           "deployment_number",
           "deployment_name",
+          "processable",
           "source_path",
           "notes",
           "port_note",

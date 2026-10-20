@@ -25,6 +25,7 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api.camera_sql import CORRECTIVE_OPTIC
 from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
@@ -50,7 +51,8 @@ VALID_LASER = "l.completed AND NOT l.superseded AND l.x IS NOT NULL AND l.y IS N
 #: prediction cluster yet. Named so `dive_pipeline_status` reads the same
 #: predicate (migration 0029).
 CLUSTERING_COHORT = f"""
-    EXISTS (
+    {CORRECTIVE_OPTIC}
+    AND EXISTS (
         SELECT 1 FROM laser_labels l
         JOIN captures c
           ON c.tenant_id = l.tenant_id AND c.id = l.capture_id

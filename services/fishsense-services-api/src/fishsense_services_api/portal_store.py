@@ -39,6 +39,8 @@ from typing import Literal, get_args
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api.camera_sql import ADMITTED_PORT, RECTIFIABLE_MISSION
+
 from fishsense_services_api import (
     headtail_store,
     laser_calibration_store,
@@ -129,6 +131,10 @@ class MissionSummary:
     site: str | None
     deployment_number: int | None
     deployment_name: str | None
+    #: The stages will take it: the corrective optic and a pinhole camera,
+    #: and any borrowed calibration's source behind the corrective optic too
+    #: (`camera_sql`, 2b-2). Computed here so no client restates the rule.
+    processable: bool
 
 
 def _gate_scan(*, judged: bool) -> str:
@@ -200,13 +206,14 @@ async def label_studio_project_ids(
     return list(rows.scalars())
 
 
-_MISSION_COLUMNS = """
+_MISSION_COLUMNS = f"""
     d.number, d.name, d.started_at, d.priority,
     t.number AS slate_template_number,
     g.number AS calibration_target_number,
     s.number AS calibration_source_number,
     d.purpose, d.port, d.port_source, d.site,
-    p.number AS deployment_number, p.name AS deployment_name
+    p.number AS deployment_number, p.name AS deployment_name,
+    ({RECTIFIABLE_MISSION} AND {ADMITTED_PORT}) AS processable
 """
 _MISSION_JOINS = """
     LEFT JOIN slate_templates t ON t.id = d.slate_template_id
