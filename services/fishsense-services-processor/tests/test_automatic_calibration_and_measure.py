@@ -131,7 +131,12 @@ async def test_the_mission_line_comes_from_every_automatic_dot():
     """Given the dive's dots, their line is used, not the frames' own."""
     turn = np.radians(1.0)
     rot = np.array([[np.cos(turn), -np.sin(turn)], [np.sin(turn), np.cos(turn)]])
-    line_dots = [list(rot @ _dot_at(z)) for z in np.linspace(0.8, 5.0, 40)]
+    # Turned about the frames' middle dot: a dive's line passes through its
+    # calibration dots (they are among its dots), at a slightly different angle.
+    pivot = _dot_at(2.0)
+    line_dots = [
+        list(pivot + rot @ (_dot_at(z) - pivot)) for z in np.linspace(0.8, 5.0, 40)
+    ]
     payload, store = _calibration_input(np.linspace(1.0, 3.0, 10), line_dots=line_dots)
 
     r = await _fit(payload, store)
@@ -141,6 +146,124 @@ async def test_the_mission_line_comes_from_every_automatic_dot():
     frames = _dot_at(1.0) - _dot_at(5.0)
     assert _angle(direction, [*mission, 0]) < 0.01
     assert _angle(direction, [*frames, 0]) > 0.9
+
+
+def _off_line(payload, store, zs, offset_px):
+    """Frames whose dot is `offset_px` off the dive line, sized as if their
+    dot were on the object at a range unrelated to where it sits on the line
+    (session 77's block of dots 35-41 px off its line, 2026-10-19)."""
+    texture = _texture()
+    u = _dot_at(1.0) - _dot_at(3.0)
+    n = np.array([-u[1], u[0]]) / np.hypot(*u)
+    extra = []
+    for z, size in zs:
+        dot = _dot_at(z) + offset_px * n
+        key = f"tenants/{uuid.uuid4()}/preprocess_headtail_jpeg/{uuid.uuid4().hex}.JPG"
+        store.jpegs[key] = _frame(texture, dot, size)
+        extra.append(
+            AutomaticCalibrationFrame(capture_id=uuid.uuid4(),
+                                      jpeg=ObjectRef(bucket="b", key=key),
+                                      x=float(dot[0]), y=float(dot[1]))  # fmt: skip
+        )
+    return payload.model_copy(update={"frames": [*payload.frames, *extra]}), extra
+
+
+_MISSION_DOTS = [list(_dot_at(z)) for z in np.linspace(0.8, 5.0, 40)]
+_OFF = [(1.2, 0.7), (1.6, 1.4), (2.0, 0.5), (2.4, 1.3), (2.8, 0.6), (1.4, 1.1)]
+
+
+async def test_dots_off_the_mission_line_are_not_fitted():
+    """A dot 38 px off the dive line is not the laser on the slate at that
+    range (a reflection, or the detector on the slate's pattern); fitted, it
+    breaks the size-range relation the fit rests on."""
+    payload, store = _calibration_input(
+        np.linspace(1.0, 3.0, 10), line_dots=_MISSION_DOTS
+    )
+    payload, off = _off_line(payload, store, _OFF, 38.0)
+
+    r = await _fit(payload, store)
+
+    assert r.outcome == "accepted", r.refusal_reason
+    assert r.candidate_count == 16
+    assert not set(r.capture_ids) & {f.capture_id for f in off}
+    assert _angle(r.laser_axis, TRUE_D) < 0.1
+
+
+async def test_without_a_mission_line_the_frames_own_line_gates_them():
+    payload, store = _calibration_input(np.linspace(1.0, 3.0, 10))
+    payload, off = _off_line(payload, store, _OFF, 38.0)
+
+    r = await _fit(payload, store)
+
+    assert r.outcome == "accepted", r.refusal_reason
+    assert not set(r.capture_ids) & {f.capture_id for f in off}
+    assert _angle(r.laser_axis, TRUE_D) < 0.1
+
+
+@pytest.mark.parametrize(
+    "line_dots, fitted_with_a_line",
+    [(_MISSION_DOTS, True), ([], False)],
+    ids=["mission-line", "no-mission-line"],
+)
+async def test_with_no_mission_line_the_fit_takes_cscws_fallback(
+    monkeypatch, line_dots, fitted_with_a_line
+):
+    """The frames' own RANSAC line only gates the dots; the fit itself, with
+    no mission line, takes its direction through the dots it uses
+    (`fit_label_free(line=None)`, cscw's fallback) -- as before the gate
+    (review of #136)."""
+    from fishsense_services_processor.automatic_results import size_constancy
+
+    seen = []
+    real = size_constancy.fit_label_free
+    monkeypatch.setattr(size_constancy, "fit_label_free",
+                        lambda **kw: seen.append(kw["line"]) or real(**kw))  # fmt: skip
+    payload, store = _calibration_input(np.linspace(1.0, 3.0, 10), line_dots=line_dots)
+    payload, off = _off_line(payload, store, _OFF, 38.0)
+
+    r = await _fit(payload, store)
+
+    assert (seen[0] is not None) == fitted_with_a_line
+    assert not set(r.capture_ids) & {f.capture_id for f in off}
+
+
+async def test_dots_a_few_px_off_the_line_are_kept():
+    """Detector jitter is a pixel or two (automatic vs human dots, 2026-10-19)."""
+    payload, store = _calibration_input(
+        np.linspace(1.0, 3.0, 10), line_dots=_MISSION_DOTS
+    )
+    payload, near = _off_line(payload, store, [(1.5, 1.5 / 1.5), (2.5, 1.5 / 2.5)], 3.0)
+
+    r = await _fit(payload, store)
+
+    assert {f.capture_id for f in near} <= set(r.capture_ids)
+
+
+async def test_a_second_line_of_dots_makes_the_line_ambiguous():
+    """Session 77 (2026-10-19): a reflection's dots formed a line of their own,
+    30 dots to the laser's 48 by the dive line's count -- and the dive line had
+    taken the wrong one (1.35 deg from the line fitted from labels). Without
+    labels the two cannot be told apart, so the fit refuses."""
+    payload, store = _calibration_input(
+        np.linspace(1.0, 3.0, 10), line_dots=_MISSION_DOTS
+    )
+    second = [(z, 1.5 / z) for z in np.linspace(1.1, 2.9, 9)]
+    payload, _ = _off_line(payload, store, second, 38.0)
+
+    r = await _fit(payload, store)
+
+    assert (r.outcome, r.refusal_reason) == ("refused", "ambiguous_line")
+    assert r.candidate_count == 19
+
+
+async def test_every_dot_off_the_line_is_a_refusal():
+    payload, store = _calibration_input([], line_dots=_MISSION_DOTS)
+    payload, _ = _off_line(payload, store, _OFF * 2, 38.0)
+
+    r = await _fit(payload, store)
+
+    assert (r.outcome, r.refusal_reason) == ("refused", "too_few_frames")
+    assert r.candidate_count == 12
 
 
 async def test_no_slate_frames_is_a_refusal():

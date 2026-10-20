@@ -57,5 +57,7 @@ def test_the_workers_and_clients_use_this_converter():
     assert options["data_converter"] is DATA_CONVERTER
 
 
-def test_the_version_says_the_wire_did_not_change():
-    assert CONTRACT_VERSION == 7
+def test_the_version_is_pinned():
+    """Bumped on purpose, here too. v7 was the rename alone (the wire did not
+    change); v8 (2026-10-19) added optional fields for the automatic render."""
+    assert CONTRACT_VERSION == 8

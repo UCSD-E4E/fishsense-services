@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from dataclasses import replace
 
 import pytest
 from sqlalchemy import text
@@ -73,6 +74,7 @@ from fishsense_services_api.automatic_results_store import (
     persist_automatic_head_tails,
     persist_automatic_measurements,
     persist_automatic_species,
+    _pinhole_camera,
 )
 from fishsense_services_api.db import tenant_transaction
 
@@ -120,7 +122,25 @@ def _predicted(capture_id, **extra) -> AutomaticHeadTailRow:
     return AutomaticHeadTailRow(**fields)
 
 
-async def _predict(app_engine, lab, mission_id, *rows):
+async def _camera(app_engine, lab, mission_id) -> uuid.UUID:
+    """The mission's pinhole camera calibration: what its raws render with."""
+    return (await _in(app_engine, lab, _pinhole_camera, mission_id)).id
+
+
+#: Statuses with no render (the raw was not there, or would not decode).
+_NO_RENDER = {"raw_unavailable", "decode_failed"}
+
+
+async def _predict(app_engine, lab, mission_id, *rows, rendered=True):
+    """Append rows; `rendered`, each frame with a raw names render 1 under the
+    mission's camera, as the frames stage writes them (0049)."""
+    if rendered:
+        camera = await _camera(app_engine, lab, mission_id)
+        rows = [
+            r if r.status in _NO_RENDER or r.jpeg_render_version is not None
+            else replace(r, jpeg_render_version=1, jpeg_camera_calibration_id=camera)
+            for r in rows
+        ]  # fmt: skip
     return await _in(
         app_engine, lab, persist_automatic_head_tails, mission_id, list(rows)
     )
@@ -467,6 +487,93 @@ async def test_species_naming_another_captures_mask_is_refused(
             AutomaticSpeciesRow(capture_id=a, automatic_head_tail_prediction_id=by[b],
                                 status="decode_failed", predictor_version=1,
                                 model_id="m")])  # fmt: skip
+
+
+# -- the automatic render ------------------------------------------------------------
+
+
+async def test_a_frames_render_reaches_species_and_calibration(
+    owner_engine, app_engine
+):
+    """The frames stage records which render of the raw its dot and mask were
+    found in -- the render version and the camera calibration it rectified
+    with -- and species and calibration read that render (2026-10-19). A row
+    from before renders were recorded is no species work: its pixels are in
+    no automatic render."""
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    camera = await _camera(app_engine, lab, mission_id)
+    fish = await capture(owner_engine, lab, mission_id)
+    slate = await capture(owner_engine, lab, mission_id)
+    legacy = await capture(owner_engine, lab, mission_id)
+    await _predict(
+        app_engine, lab, mission_id, _predicted(fish),
+        AutomaticHeadTailRow(capture_id=slate, status="slate_frame", laser_x=10.0,
+                             laser_y=20.0, slate_probability=0.9, predictor_version=1),
+    )  # fmt: skip
+    await _predict(app_engine, lab, mission_id, _predicted(legacy), rendered=False)
+
+    async def detector(conn, tenant_id, d):
+        return [(slate, 0.9)]
+
+    jobs = await _in(app_engine, lab, automatic_species_captures, mission_id,
+                     species_version=1)  # fmt: skip
+    inputs = await _in(app_engine, lab, automatic_calibration_inputs, mission_id,
+                       slate_frames=detector)  # fmt: skip
+    frames = await _in(app_engine, lab, automatic_frames_inputs, mission_id,
+                       headtail_version=2)  # fmt: skip
+
+    assert [(j.capture_id, j.jpeg_render_version, j.jpeg_camera_calibration_id)
+            for j in jobs] == [(fish, 1, camera)]  # fmt: skip
+    assert [(c.capture_id, c.jpeg_render_version, c.jpeg_camera_calibration_id)
+            for c in inputs.candidates] == [(slate, 1, camera)]  # fmt: skip
+    assert inputs.camera_calibration_id == frames.camera_calibration_id == camera
+
+
+async def test_an_unrendered_frame_is_no_species_work(owner_engine, app_engine):
+    """It would hold its mission in the cohort with nothing able to do it."""
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    fish_frame = await capture(owner_engine, lab, mission_id)
+    await _predict(app_engine, lab, mission_id, _predicted(fish_frame), rendered=False)
+    await _in(app_engine, lab, persist_automatic_calibration, mission_id,
+              _label_free(outcome="refused", refusal_reason="no_candidates",
+                          laser_position=None, laser_axis=None))  # fmt: skip
+
+    assert await _next(app_engine, lab) is None
+
+
+@pytest.mark.parametrize(
+    "version, camera",
+    [(0, True), (1, False), (None, True)],
+    ids=["version-0", "version-without-camera", "camera-without-version"],
+)
+async def test_a_render_is_a_positive_version_and_a_camera(
+    owner_engine, app_engine, version, camera
+):
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    cam = await _camera(app_engine, lab, mission_id) if camera else None
+    c = await capture(owner_engine, lab, mission_id)
+    with pytest.raises(IntegrityError):
+        async with owner_engine.begin() as conn:
+            await conn.execute(
+                text("INSERT INTO automatic_head_tail_predictions (tenant_id, "
+                     "capture_id, status, predictor_version, jpeg_render_version, "
+                     "jpeg_camera_calibration_id) "
+                     "VALUES (:t, :c, 'no_laser_dot', 1, :v, :cam)"),
+                {"t": lab, "c": c, "v": version, "cam": cam},
+            )  # fmt: skip
+
+
+async def test_a_render_names_one_of_the_tenants_cameras(owner_engine, app_engine):
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    c = await capture(owner_engine, lab, mission_id)
+    with pytest.raises(IntegrityError):
+        await _predict(app_engine, lab, mission_id, AutomaticHeadTailRow(
+            capture_id=c, status="no_laser_dot", predictor_version=1,
+            jpeg_render_version=1, jpeg_camera_calibration_id=uuid.uuid4()))  # fmt: skip
 
 
 # -- calibration ---------------------------------------------------------------------

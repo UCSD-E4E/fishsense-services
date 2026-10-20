@@ -32,11 +32,15 @@ from fishsense_services_contracts.task_queues import (
     PROCESSOR_TASK_QUEUE,
 )
 
+#: v8 (2026-10-19): the automatic frames carry their render's version and camera
+#: (`AutomaticFrame.jpeg_render_version`, `PredictAutomaticFrame(s)Input.
+#: camera_calibration_id`, `AutomaticFrameResult.jpeg_render_version` and
+#: `jpeg_camera_calibration_id`); all optional, so v7 payloads still parse.
 #: v7 (2026-10-18, Phase 2a): the models renamed dive -> mission. Every payload's
 #: JSON is unchanged -- each renamed field keeps its old name on the wire
 #: (`renamed.py`) -- so a v6 processor and a v7 orchestrator interoperate; only
 #: the published schema's model names differ.
-CONTRACT_VERSION = 7
+CONTRACT_VERSION = 8
 
 
 def _discover_models() -> tuple[type[BaseModel], ...]:

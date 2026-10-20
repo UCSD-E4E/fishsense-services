@@ -72,6 +72,7 @@ class PredictAutomaticFramesWorkflow:
                         camera_matrix=payload.camera_matrix,
                         distortion_coefficients=payload.distortion_coefficients,
                         laser_region=payload.laser_region,
+                        camera_calibration_id=payload.camera_calibration_id,
                     ),
                     start_to_close_timeout=timedelta(minutes=15),
                     retry_policy=_FRAME_RETRY,

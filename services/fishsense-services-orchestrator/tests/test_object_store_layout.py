@@ -29,7 +29,11 @@ import uuid
 
 import pytest
 
-from fishsense_services_contracts.object_store import ObjectRef, ObjectStoreConnection
+from fishsense_services_contracts.object_store import (
+    ObjectRef,
+    ObjectStoreConnection,
+    automatic_jpeg_folder,
+)
 from fishsense_services_orchestrator.object_store import layout as sut
 
 TENANT = uuid.UUID("7b0c7d4e-3f58-4d8e-9a3c-0c5f1f7f2d11")
@@ -106,6 +110,15 @@ def test_the_stage_folders_are_v1s():
         "preprocess_slate_images_jpeg",
         "checkerboard_lattice_jpeg",
     )
+
+
+def test_the_automatic_render_is_written_under_its_version_and_camera(layout):
+    camera = uuid.UUID(int=5)
+    ref = layout.processed_jpeg(TENANT, automatic_jpeg_folder(3, camera), CHECKSUM)
+    assert ref.key.endswith(f"/automatic_jpeg_r3_{camera.hex}/{CHECKSUM}.JPG")
+    for unversioned in ("automatic_jpeg", "automatic_jpeg_r3"):
+        with pytest.raises(ValueError, match="folder"):
+            layout.processed_jpeg(TENANT, unversioned, CHECKSUM)
 
 
 def test_an_unknown_folder_is_refused(layout):

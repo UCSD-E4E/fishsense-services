@@ -20,6 +20,7 @@ Each is shared by every tenant, with the tenant as the first key segment
 (§9.11); a later move to bucket-per-tenant swaps that segment for a bucket.
 """
 
+import re
 import uuid
 from urllib.parse import urlsplit
 
@@ -50,6 +51,38 @@ JPEG_FOLDERS = (
     CHECKERBOARD_LATTICE_JPEG_FOLDER,
 )
 
+#: The automatic track's render of each frame: rectified from the raw by the
+#: automatic frames stage, which finds the dot and the mask against it, and read
+#: by every automatic step after it (calibration, species). Its own folder: the
+#: head/tail JPEG at v1's key is the image human labels were drawn on, and a
+#: migrated frame's head/tail JPEG is v1's render, not this one (2026-10-19).
+#: One folder per render: the render version
+#: (`automatic_results.AUTOMATIC_JPEG_RENDER_VERSION`) and the camera
+#: calibration the raw was rectified with, either of which changes the pixels.
+#: So a re-render never overwrites the image older rows' pixels belong to
+#: (review of #136: a corrected camera at the same version would have).
+_AUTOMATIC_JPEG = re.compile(r"automatic_jpeg_r[1-9][0-9]*_[0-9a-f]{32}")
+
+
+def automatic_jpeg_folder(render_version: int, camera_calibration_id: uuid.UUID) -> str:
+    """The automatic render's folder: ``automatic_jpeg_r{version}_{camera hex}``."""
+    if (
+        isinstance(render_version, bool)
+        or not isinstance(render_version, int)
+        or (render_version < 1)
+    ):
+        raise ValueError(f"a render version is a positive int, not {render_version!r}")
+    if not isinstance(camera_calibration_id, uuid.UUID):
+        raise ValueError(
+            f"a camera calibration is a UUID, not {camera_calibration_id!r}"
+        )
+    return f"automatic_jpeg_r{render_version}_{camera_calibration_id.hex}"
+
+
+def is_jpeg_folder(folder: str) -> bool:
+    """A stage's JPEG folder, or an automatic render's."""
+    return folder in JPEG_FOLDERS or bool(_AUTOMATIC_JPEG.fullmatch(folder))
+
 
 def is_processed_jpeg_key(key: str, *, legacy_prefix: str) -> bool:
     """Whether `key` is a processed JPEG's: ``{folder}/{checksum}.JPG`` under a
@@ -60,7 +93,7 @@ def is_processed_jpeg_key(key: str, *, legacy_prefix: str) -> bool:
     label image_urls hold -- never moves.
     """
     segments = key.split("/")
-    if len(segments) < 2 or segments[-2] not in JPEG_FOLDERS:
+    if len(segments) < 2 or not is_jpeg_folder(segments[-2]):
         return False
     stem, dot, extension = segments[-1].rpartition(".")
     if not (dot and extension == "JPG" and stem.isalnum()):
@@ -72,6 +105,9 @@ def is_processed_jpeg_key(key: str, *, legacy_prefix: str) -> bool:
         except ValueError:
             return False
         return True
+    # v1 never wrote an automatic render: those are only ever a tenant's.
+    if segments[-2] not in JPEG_FOLDERS:
+        return False
     return owner == (legacy_prefix.split("/") if legacy_prefix else [])
 
 

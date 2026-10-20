@@ -46,6 +46,7 @@ from fishsense_services_contracts.object_store import (
     SLATE_JPEG_FOLDER,
     SPECIES_JPEG_FOLDER,
     TENANTS_PREFIX,
+    is_jpeg_folder,
 )
 
 __all__ = [
@@ -129,7 +130,8 @@ class ObjectLayout:
         # dedupes by URL. A migrated frame keeps that key for good; a redraw
         # overwrites it where it is (`OrchestratorObjectStore.processed_jpeg_target`).
         new = self.processed_jpeg(tenant_id, folder, checksum)
-        if from_v1:
+        # v1 wrote only the stage folders, never an automatic render.
+        if from_v1 and folder in JPEG_FOLDERS:
             return [self.legacy_processed_jpeg(folder, checksum), new]
         return [new]
 
@@ -142,8 +144,11 @@ class ObjectLayout:
 
 
 def _folder(folder: str) -> str:
-    if folder not in JPEG_FOLDERS:
-        raise ValueError(f"unknown JPEG folder {folder!r}; one of {JPEG_FOLDERS}")
+    if not is_jpeg_folder(folder):
+        raise ValueError(
+            f"unknown JPEG folder {folder!r}; one of {JPEG_FOLDERS} or an "
+            "automatic render's (`automatic_jpeg_folder`)"
+        )
     return folder
 
 

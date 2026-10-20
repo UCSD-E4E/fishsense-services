@@ -8,8 +8,17 @@ rules:
 * the target is (tenant, dive); the selector takes the oldest backlog dive
   across every tenant the orchestrator serves;
 * **the orchestrator issues the keys** (PLAN.md §9.11): a frame's staged raw,
-  and the head/tail stage's JPEG key -- where the JPEG already is (read, left
-  alone), else the tenant's (written by the GPU stage);
+  and its automatic render's (`object_store.automatic_jpeg_folder`: the render
+  version and the camera, under the tenant);
+* **one image per frame, rectified from the raw** (2026-10-19): the frames
+  stage renders it from the raw with the camera's own matrix and distortion
+  -- the dot's pixel space -- finds the mask against it and writes it, for
+  every frame, under its render version (`AUTOMATIC_JPEG_RENDER_VERSION`,
+  recorded on the frame's row); species and calibration read the render the
+  row records, and a frame with none recorded waits. They used to read the
+  head/tail JPEG, which for a migrated frame is v1's render: not the image the
+  dot and mask were found in. That JPEG is the one human labels were drawn on,
+  so this track never writes it;
 * species reuse the species stage's processor contract unchanged, cropped by
   the automatic mask's box, with the automatic head/tail's id in the
   `headtail_prediction_id` slot (it is echoed back, and the write checks it is
@@ -45,6 +54,7 @@ from fishsense_services_api.automatic_results_store import (
 from fishsense_services_contracts.automatic_results import (
     AUTOMATIC_CALIBRATION_VERSION,
     AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
+    AUTOMATIC_JPEG_RENDER_VERSION,
     AUTOMATIC_HEADTAIL_STATUSES,
     AUTOMATIC_MEASUREMENT_VERSION,
     AutomaticCalibrationFrame,
@@ -58,7 +68,7 @@ from fishsense_services_contracts.automatic_results import (
     PredictAutomaticFramesInput,
 )
 from fishsense_services_contracts.laser_region import LASER_REGION_POLYGON
-from fishsense_services_contracts.object_store import HEADTAIL_JPEG_FOLDER
+from fishsense_services_contracts.object_store import ObjectRef, automatic_jpeg_folder
 from fishsense_services_contracts.species_prediction import (
     SPECIES_PREDICTOR_VERSION,
     SPECIES_STATUSES,
@@ -87,6 +97,10 @@ VERSIONS = {
     "calibration_version": AUTOMATIC_CALIBRATION_VERSION,
     "measurement_version": AUTOMATIC_MEASUREMENT_VERSION,
 }
+
+
+#: The frame statuses with no render: the raw was not there, or would not decode.
+_NO_RENDER = frozenset({"raw_unavailable", "decode_failed"})
 
 
 @dataclass(frozen=True)
@@ -178,10 +192,36 @@ class AutomaticResultsActivities:
         #: cohort holds no dive for species work.
         self._species_enabled = species_enabled
 
-    async def _jpeg(self, target: AutomaticTarget, checksum: str, from_v1: bool):
-        return await self._store.locate_processed_jpeg(
-            target.tenant_id, HEADTAIL_JPEG_FOLDER, checksum, from_v1=from_v1
+    def _automatic_jpeg_key(
+        self, target: AutomaticTarget, checksum: str, camera: uuid.UUID
+    ):
+        return self._store.layout.processed_jpeg(
+            target.tenant_id,
+            automatic_jpeg_folder(AUTOMATIC_JPEG_RENDER_VERSION, camera),
+            checksum,
         )
+
+    async def _recorded_render(self, target: AutomaticTarget, row) -> ObjectRef:
+        """The render `row` records (its version, under its camera). Missing
+        from Garage, the step fails: a row names an image nobody can read,
+        and deferring would hold its mission in the cohort for good."""
+        ref = await self._store.locate_processed_jpeg(
+            target.tenant_id,
+            automatic_jpeg_folder(
+                row.jpeg_render_version, row.jpeg_camera_calibration_id
+            ),
+            row.checksum,
+            from_v1=False,
+        )
+        if ref is None:
+            raise ApplicationError(
+                f"dive {target.mission_id}: capture {row.capture_id}'s render "
+                f"r{row.jpeg_render_version} under camera "
+                f"{row.jpeg_camera_calibration_id} is not in Garage",
+                type="AutomaticRenderMissing",
+                non_retryable=True,
+            )
+        return ref
 
     async def _write(self, target: AutomaticTarget, fn, *args, **kwargs):
         try:
@@ -284,16 +324,15 @@ class AutomaticResultsActivities:
         )
         frames = []
         for f in inputs.frames:
-            located = await self._jpeg(target, f.checksum, f.from_v1)
             frames.append(
                 AutomaticFrame(
                     capture_id=f.capture_id,
                     raw=self._store.layout.raw(target.tenant_id, f.checksum),
-                    jpeg=located
-                    or self._store.layout.processed_jpeg(
-                        target.tenant_id, HEADTAIL_JPEG_FOLDER, f.checksum
+                    jpeg=self._automatic_jpeg_key(
+                        target, f.checksum, inputs.camera_calibration_id
                     ),
-                    write_jpeg=located is None,
+                    write_jpeg=True,
+                    jpeg_render_version=AUTOMATIC_JPEG_RENDER_VERSION,
                     slate_probability=f.slate_probability,
                     is_slate=f.is_slate,
                 )
@@ -308,6 +347,7 @@ class AutomaticResultsActivities:
             mission_id=target.mission_id,
             camera_matrix=inputs.camera_matrix,
             distortion_coefficients=inputs.distortion_coefficients,
+            camera_calibration_id=inputs.camera_calibration_id,
             laser_region=[list(v) for v in LASER_REGION_POLYGON],
             frames=frames,
         )
@@ -324,7 +364,35 @@ class AutomaticResultsActivities:
             r.predictor_version != AUTOMATIC_HEADTAIL_PREDICTOR_VERSION for r in results
         ):
             raise _refuse(target, "a result from another automatic version")
-        rows = [AutomaticHeadTailRow(**r.model_dump()) for r in results]
+        # A row's pixels belong to the render it was found in: every frame
+        # whose raw decoded was rendered, and must name the render this
+        # orchestrator asks for. One naming none was resolved before the
+        # deploy (contract 7): its pixels are in no automatic render, so it is
+        # not written and stays owed -- not a failure of the dive (review of
+        # #136). One naming another is a processor at another version.
+        if any(
+            r.jpeg_render_version is not None
+            and r.jpeg_render_version != AUTOMATIC_JPEG_RENDER_VERSION
+            for r in results
+        ):
+            raise _refuse(target, "a frame found in another render")
+        unnamed = [
+            r
+            for r in results
+            if r.status not in _NO_RENDER and r.jpeg_render_version is None
+        ]
+        if unnamed:
+            activity.logger.warning(
+                "dive=%s: %d frames came back with no render named (resolved "
+                "before the render was versioned); left owed",
+                target.mission_id,
+                len(unnamed),
+            )
+        rows = [
+            AutomaticHeadTailRow(**r.model_dump())
+            for r in results
+            if r.status in _NO_RENDER or r.jpeg_render_version is not None
+        ]
         written = await self._write(
             target, self._catalog.persist_automatic_head_tails, rows
         )
@@ -353,12 +421,8 @@ class AutomaticResultsActivities:
         )
         images = []
         for c in captures:
-            jpeg = await self._jpeg(target, c.checksum, c.from_v1)
-            if jpeg is None:
-                activity.logger.info(
-                    "no JPEG yet for capture %s; deferring", c.capture_id
-                )
-                continue
+            # Every capture here has a render recorded (the store selects them).
+            jpeg = await self._recorded_render(target, c)
             images.append(
                 PredictSpeciesImage(
                     capture_id=c.capture_id,
@@ -415,13 +479,34 @@ class AutomaticResultsActivities:
             target.tenant_id, target.mission_id
         )
         frames = []
+        unrendered = [c for c in inputs.candidates if c.jpeg_render_version is None]
+        other_camera = [
+            c
+            for c in inputs.candidates
+            if c.jpeg_render_version is not None
+            and c.jpeg_camera_calibration_id != inputs.camera_calibration_id
+        ]
+        if unrendered or other_camera:
+            # The fit reads features through the mission's current camera: a
+            # frame rendered under another, or never rendered, is not in it.
+            activity.logger.warning(
+                "dive=%s: %d of %d slate frames left out of the fit: "
+                "%d with no render, %d rendered under another camera",
+                target.mission_id,
+                len(unrendered) + len(other_camera),
+                len(inputs.candidates),
+                len(unrendered),
+                len(other_camera),
+            )
+        skip = {c.capture_id for c in (*unrendered, *other_camera)}
         for c in inputs.candidates:
-            jpeg = await self._jpeg(target, c.checksum, c.from_v1)
-            if jpeg is not None:
-                frames.append(
-                    AutomaticCalibrationFrame(capture_id=c.capture_id, jpeg=jpeg,
-                                              x=c.x, y=c.y)  # fmt: skip
-                )
+            if c.capture_id in skip:
+                continue
+            jpeg = await self._recorded_render(target, c)
+            frames.append(
+                AutomaticCalibrationFrame(capture_id=c.capture_id, jpeg=jpeg,
+                                          x=c.x, y=c.y)  # fmt: skip
+            )
         return AutomaticCalibrationPlan(
             payload=FitAutomaticCalibrationInput(
                 tenant_id=target.tenant_id,

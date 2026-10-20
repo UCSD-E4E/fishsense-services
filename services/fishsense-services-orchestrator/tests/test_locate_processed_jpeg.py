@@ -28,7 +28,11 @@ from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
 
 from fishsense_services_api.raw_staging_store import CaptureChecksum
-from fishsense_services_contracts.object_store import ObjectRef, ObjectStoreConnection
+from fishsense_services_contracts.object_store import (
+    ObjectRef,
+    ObjectStoreConnection,
+    automatic_jpeg_folder,
+)
 from fishsense_services_orchestrator.object_store.contracts import (
     ProcessedJpegRequest,
 )
@@ -121,6 +125,25 @@ async def test_a_folder_no_stage_writes_is_refused(s3):
 
     assert excinfo.value.non_retryable
     assert excinfo.value.type == "UnknownJpegFolder"
+
+
+AUTOMATIC = automatic_jpeg_folder(1, uuid.UUID(int=9))
+
+
+async def test_an_automatic_render_is_found_under_the_tenant(s3):
+    """The layout and the processor accept automatic renders; so does this
+    (review of #136: it alone still checked the stage folders)."""
+    key = f"tenants/{TENANT}/{AUTOMATIC}/{SUM}.JPG"
+    s3.put_object(Bucket=LABELS, Key=key, Body=b"x")
+
+    assert await _locate(s3, INGESTED, AUTOMATIC) == ObjectRef(bucket=LABELS, key=key)
+
+
+async def test_a_migrated_frames_automatic_render_is_never_a_v1_key(s3):
+    """v1 never wrote one: only the tenant's key is looked at."""
+    s3.put_object(Bucket=LABELS, Key=f"fishsense-lite/{AUTOMATIC}/{SUM}.JPG", Body=b"x")
+
+    assert await _locate(s3, MIGRATED, AUTOMATIC) is None
 
 
 # -- where a render writes: in place, as v1 ------------------------------------------

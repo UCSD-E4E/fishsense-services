@@ -11,8 +11,16 @@ owns it in production:
   detector) and its expected-laser region gate;
 * the rectified JPEG: the head/tail stage-5.1 rendering
   (`headtail_preprocess.activities.rectify_and_encode_jpeg`), written where
-  the orchestrator says when it is not in Garage yet (`write_jpeg`), so the
-  species and calibration steps read the very frame SAM saw;
+  the orchestrator says, so the species and calibration steps read the very
+  frame SAM saw. It is render `AUTOMATIC_JPEG_RENDER_VERSION` under the
+  payload's camera calibration, keyed by both
+  (`object_store.automatic_jpeg_folder`): a frame asking for another render,
+  or whose key is not that render's, is refused and retried
+  (`RenderVersionMismatch`), so a worker at another version -- a lab worker
+  deployed by hand -- never writes its render where another is expected; the
+  result names the render and camera it wrote (2026-10-19). A contract-7
+  frame (no render named; in flight across the deploy) runs as it did --
+  written only if `write_jpeg` -- and names none;
 * the mask and head/tail: `automatic_results.frames` (the head/tail kernel
   behind SAM's own score gate), with SAM 3.1's verified checkpoint
   (`headtail_predict.weights`).
@@ -37,13 +45,16 @@ from typing import Any, Optional
 
 from botocore.exceptions import ClientError
 from temporalio import activity
+from temporalio.exceptions import ApplicationError
 
 from fishsense_services_contracts.automatic_results import (
     AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
+    AUTOMATIC_JPEG_RENDER_VERSION,
     AutomaticFrameResult,
     PredictAutomaticFrameInput,
 )
 from fishsense_services_contracts.laser_region import point_in_laser_region
+from fishsense_services_contracts.object_store import automatic_jpeg_folder
 from fishsense_services_processor.slate_detect.frame import DECODE_ERRORS
 from fishsense_services_processor.automatic_results.frames import (
     LaserDot,
@@ -98,6 +109,12 @@ class AutomaticFramesActivities:  # pylint: disable=too-few-public-methods
         if not self._cuda_available():
             raise _no_gpu()
         frame = payload.frame
+        # Contract 8 names the render; contract 7 (in flight across the
+        # deploy) does not, and runs as it did, naming none.
+        versioned = frame.jpeg_render_version is not None
+        if versioned:
+            _check_render(payload)
+        write = versioned or frame.write_jpeg
         store = self._object_store()
         with tempfile.TemporaryDirectory() as tmpdir:
             try:
@@ -147,7 +164,7 @@ class AutomaticFramesActivities:  # pylint: disable=too-few-public-methods
             and not point_in_laser_region(dot.x, dot.y, payload.laser_region)
         ):
             dot = None  # the laser stage's region gate
-        if frame.write_jpeg:
+        if write:
             await store.upload_processed_jpeg(frame.jpeg, jpeg)
 
         path, model_id = await self._sam3_checkpoint()
@@ -184,7 +201,36 @@ class AutomaticFramesActivities:  # pylint: disable=too-few-public-methods
             result.sam_score,
             "-" if peak is None else f"{peak / 2**30:.2f}",
         )
+        if versioned:
+            result = result.model_copy(
+                update={
+                    "jpeg_render_version": AUTOMATIC_JPEG_RENDER_VERSION,
+                    "jpeg_camera_calibration_id": payload.camera_calibration_id,
+                }
+            )
         return result
+
+
+def _check_render(payload: PredictAutomaticFrameInput) -> None:
+    """The frame asks for this worker's render, keyed under its camera, or the
+    activity fails -- retryably: another worker may be at the asked version."""
+    frame = payload.frame
+    camera = payload.camera_calibration_id
+    expected = (
+        None
+        if camera is None
+        else automatic_jpeg_folder(AUTOMATIC_JPEG_RENDER_VERSION, camera)
+    )
+    folder = frame.jpeg.key.split("/")[-2] if "/" in frame.jpeg.key else None
+    if frame.jpeg_render_version != AUTOMATIC_JPEG_RENDER_VERSION or (
+        expected is None or folder != expected
+    ):
+        raise ApplicationError(
+            f"capture {frame.capture_id}: asked for render "
+            f"{frame.jpeg_render_version} at {frame.jpeg.key} (camera {camera}); "
+            f"this worker renders {AUTOMATIC_JPEG_RENDER_VERSION}, to {expected}",
+            type="RenderVersionMismatch",
+        )
 
 
 def _exit_soon(delay_s: float = 5.0) -> None:
