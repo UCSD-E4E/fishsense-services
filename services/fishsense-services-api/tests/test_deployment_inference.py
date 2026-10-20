@@ -153,11 +153,33 @@ def test_a_missions_folder_date(path, expected):
     assert folder_date(path) == expected
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "2024.13.40.FishSense.Keys/ED-00/FSL-01D/Reef",  # no such day
+        "2024.02.30.FishSense.Keys/ED-00/FSL-01D/Reef",
+        "2031.01.01.FishSense.Keys/ED-00/FSL-01D/Reef",  # after it was ingested
+        "2014.01.01.FishSense.Keys/ED-00/FSL-01D/Reef",  # before FishSense
+    ],
+)
+def test_a_dataset_name_that_is_no_date_is_unreadable_not_an_error(path):
+    assert folder_date(path, latest=date(2026, 10, 20)) is None
+
+
+def test_a_folder_date_after_the_mission_was_ingested_is_not_read():
+    """The bound is the mission's own ingest, not the day the plan is made, so
+    a plan reviewed today is the plan applied tomorrow."""
+    path = f"{SMILE}/120624_ElbowReef_FSL01"
+
+    assert folder_date(path, latest=date(2024, 12, 6)) == date(2024, 12, 6)
+    assert folder_date(path, latest=date(2024, 12, 5)) is None
+
+
 def test_a_date_code_that_is_no_date_is_not_read_from_the_folder_above():
     """082329 is no date (2029): the captures say, not the parent's 082923."""
     path = f"{DUMP}/082923_Pool Calibration/082329_Slate_FSL05"
 
-    assert folder_date(path) is None
+    assert folder_date(path, latest=date(2026, 10, 20)) is None
 
 
 @pytest.mark.parametrize(
@@ -314,6 +336,60 @@ async def test_an_operator_puts_a_mission_with_another(owner_engine, app_engine)
     assert after[misfiled] == after[july] == "2024.07.09.FishSense"
     with pytest.raises(ValueError, match="no such mission"):
         await _plan(app_engine, lab, together={misfiled: 999999})
+    # The review sees why it moved, not the folder date it no longer uses.
+    (trip,) = [
+        t for t in (await _plan(app_engine, lab, together={misfiled: july})).trips
+        if misfiled in t.missions
+    ]  # fmt: skip
+    assert [f.note for f in trip.flags if f.mission == misfiled] == [
+        f"put with mission {july} by the operator"
+    ]
+
+
+async def test_a_mission_put_with_one_placed_by_its_camera_follows_it(
+    owner_engine, app_engine
+):
+    lab = await _tenant(owner_engine, "lab")
+    one = await _device(owner_engine, lab, "FSL-01")
+    five = await _device(owner_engine, lab, "FSL-05")
+    await _mission(owner_engine, lab, f"{SMILE}/070924_Molasses_FSL01", device=one,
+                   at=_utc(2024, 7, 9, 15))  # fmt: skip
+    unplaced = await _mission(owner_engine, lab, f"{SMILE}/07_2024_FSL01/070924_Dive1",
+                              device=one, at=_utc(2024, 7, 9, 21))  # fmt: skip
+    moved = await _mission(owner_engine, lab,
+                           f"{SMILE}/08_20_24_Alligator_FSL05/082024_Dive1_fix site",
+                           device=five, at=_utc(2024, 7, 9, 21))  # fmt: skip
+
+    # Another FSL-05 session that day, with no place: the moved mission's own
+    # folders (Alligator) were overruled, so they place nothing.
+    beside = await _mission(owner_engine, lab, f"{SMILE}/070924_Photos_FSL05",
+                            device=five, at=_utc(2024, 7, 9, 15))  # fmt: skip
+
+    trips = _trip_of(await _plan(app_engine, lab, together={moved: unplaced}))
+
+    assert trips[moved] == trips[unplaced] == "2024.07.09.FishSense.Key Largo"
+    assert trips[beside] == "2024.07.09.FishSense"
+
+
+async def test_chained_choices_are_refused(owner_engine, app_engine):
+    """5=6 with 6=7 would depend on which is applied first."""
+    lab = await _tenant(owner_engine, "lab")
+    one = await _device(owner_engine, lab, "FSL-01")
+    a, b, c = [
+        await _mission(owner_engine, lab, f"{SMILE}/07092{i}_Dive_FSL01", device=one,
+                       at=_utc(2024, 7, 9 + i, 15))  # fmt: skip
+        for i in range(3)
+    ]
+
+    with pytest.raises(ValueError, match="chain"):
+        await _plan(app_engine, lab, together={a: b, b: c})
+
+
+async def test_a_negative_gap_is_refused(owner_engine, app_engine):
+    lab = await _tenant(owner_engine, "lab")
+
+    with pytest.raises(ValueError, match="gap"):
+        await _plan(app_engine, lab, gap_days=-1)
 
 
 async def test_a_trip_holding_a_grouped_mission_joins_its_deployment(
@@ -337,8 +413,35 @@ async def test_a_trip_holding_a_grouped_mission_joins_its_deployment(
 
     (planned,) = plan.trips
     assert planned.name == "2023.08.03.FishSense.FSL-01D" and planned.exists
+    assert planned.deployment_id == trip
     assert set(planned.missions) == {grouped, copy, earlier}
     assert set(planned.to_write) == {copy, earlier}
+
+    await _apply(app_engine, lab, plan.fingerprint)
+
+    assert set((await _deployments_of(owner_engine, lab)).values()) == {
+        "2023.08.03.FishSense.FSL-01D"
+    }
+
+
+async def test_an_unplaced_legacy_mission_does_not_join_an_unplaced_deployment(
+    owner_engine, app_engine
+):
+    """An e4edm dataset at a place `PLACES` does not know is anchored by its
+    deployment, not pooled with every unplaced mission nearby."""
+    lab = await _tenant(owner_engine, "lab")
+    nine = await _device(owner_engine, lab, "FSL-09")
+    two = await _device(owner_engine, lab, "FSL-02")
+    bonaire = await _deployment(owner_engine, lab, "2024.06.20.FishSense.Bonaire",
+                                date(2024, 6, 20))  # fmt: skip
+    await _mission(owner_engine, lab, "2024.06.20.FishSense.Bonaire/ED-00/FSL-09D/Reef",
+                   device=nine, at=_utc(2024, 6, 20, 15), deployment=bonaire)  # fmt: skip
+    legacy = await _mission(owner_engine, lab, f"{SMILE}/062124_Photos_FSL02",
+                            device=two, at=_utc(2024, 6, 21, 15))  # fmt: skip
+
+    trips = _trip_of(await _plan(app_engine, lab))
+
+    assert trips[legacy] == "2024.06.21.FishSense"
 
 
 async def test_a_trip_spanning_two_deployments_is_left_alone_and_said(

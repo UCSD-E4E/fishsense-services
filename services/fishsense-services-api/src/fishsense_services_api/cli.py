@@ -38,7 +38,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from fishsense_services_api import dev_seed
@@ -216,7 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
     infer.add_argument("--tenant", required=True, help="the tenant's slug, or its id")
     infer.add_argument(
         "--gap-days",
-        type=int,
+        type=_days,
         default=2,
         help="missions at one place at most this many days apart are one trip",
     )
@@ -347,12 +347,21 @@ def format_inference_plan(plan: InferencePlan) -> str:
     return "\n".join(lines)
 
 
+def _days(value: str) -> int:
+    if not value.isdigit():
+        raise argparse.ArgumentTypeError(f"{value!r}: want a whole number of days")
+    return int(value)
+
+
 def _together(values: Sequence[str]) -> dict[int, int] | None:
     together: dict[int, int] = {}
     for value in values:
         number, _, other = value.partition("=")
         if not (number.isdigit() and other.isdigit()):
             print(f"--together {value!r}: want NUMBER=OTHER", file=sys.stderr)
+            return None
+        if int(number) in together:
+            print(f"--together: mission {number} chosen twice", file=sys.stderr)
             return None
         together[int(number)] = int(other)
     return together
@@ -382,7 +391,7 @@ async def _infer_deployments(args: argparse.Namespace) -> int:
                         gap_days=args.gap_days,
                         together=together,
                     )
-            except (InferenceChanged, ValueError) as error:
+            except (InferenceChanged, ValueError, DBAPIError) as error:
                 print(f"nothing written: {error}", file=sys.stderr)
                 return 1
             print(

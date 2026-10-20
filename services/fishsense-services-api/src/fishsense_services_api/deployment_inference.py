@@ -42,8 +42,6 @@ and each write is guarded on the exact old value, so a row that moved in
 between rolls the whole apply back.
 """
 
-import hashlib
-import json
 import re
 import uuid
 from collections import defaultdict
@@ -54,7 +52,8 @@ from datetime import date, timedelta
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from fishsense_services_api.mission_facts import dataset_date
+from fishsense_services_api.mission_backfill import PlanChanged, plan_fingerprint
+from fishsense_services_api.mission_facts import is_dataset_name
 
 __all__ = [
     "Applied",
@@ -87,7 +86,6 @@ PLACES = (
 )
 _PLACES = tuple((name, re.compile(rx, re.I)) for name, rx in PLACES)
 
-_DATASET = re.compile(r"^\d{4}\.\d{2}\.\d{2}\.[^.]+\.\S.*$")
 _SIX = re.compile(r"(?<!\d)(\d{2})(\d{2})(\d{2})(?!\d)")
 _FIVE = re.compile(r"(?<!\d)\d{5}(?!\d)")
 _SEPARATED = re.compile(r"(?<!\d)(\d{1,2})[._](\d{1,2})[._](\d{4}|\d{2})(?!\d)")
@@ -95,45 +93,45 @@ _EARLIEST = date(2015, 1, 1)
 NOTE = "inferred from folder names and capture dates (the owner's rules, 2026-10-20)"
 
 
-class PlanChanged(Exception):
-    """The tenant's missions are not what the reviewed plan was made from."""
-
-
-def _day(year: int, month: int, day: int) -> date | None:
+def _day(year: int, month: int, day: int, latest: date | None) -> date | None:
     try:
         found = date(year if year > 99 else 2000 + year, month, day)
     except ValueError:
         return None
-    return found if _EARLIEST <= found <= date.today() else None
+    if found < _EARLIEST or (latest is not None and found > latest):
+        return None
+    return found
 
 
 class _Unreadable(Exception):
     pass
 
 
-def _component_date(component: str) -> date | None:
-    if _DATASET.match(component):
-        return dataset_date(component)
-    if _FIVE.search(component):
+def _component_date(component: str, latest: date | None) -> date | None:
+    if is_dataset_name(component):
+        year, month, day = (int(part) for part in component.split(".")[:3])
+        codes = [(year, month, day)]
+    elif _FIVE.search(component):
         raise _Unreadable(component)
-    for m in _SIX.finditer(component):
-        found = _day(int(m[3]), int(m[1]), int(m[2]))
-        if found is None:
-            raise _Unreadable(component)
-        return found
-    for m in _SEPARATED.finditer(component):
-        found = _day(int(m[3]), int(m[1]), int(m[2]))
-        if found is None:
-            raise _Unreadable(component)
-        return found
-    return None
+    else:
+        codes = [(int(m[3]), int(m[1]), int(m[2])) for m in _SIX.finditer(component)]
+        codes += [
+            (int(m[3]), int(m[1]), int(m[2])) for m in _SEPARATED.finditer(component)
+        ]
+    if not codes:
+        return None
+    found = _day(*codes[0], latest)
+    if found is None:
+        raise _Unreadable(component)
+    return found
 
 
-def folder_date(source_path: str) -> date | None:
-    """The date in the nearest folder that has one; None when none is readable."""
+def folder_date(source_path: str, *, latest: date | None = None) -> date | None:
+    """The date in the nearest folder that has one; None when none is readable.
+    A date after ``latest`` (when the mission was ingested) cannot be its dive's."""
     for component in reversed(source_path.split("/")):
         try:
-            found = _component_date(component)
+            found = _component_date(component, latest)
         except _Unreadable:
             return None
         if found is not None:
@@ -161,6 +159,8 @@ class Flag:
 @dataclass(frozen=True)
 class PlannedTrip:
     name: str
+    #: The deployment it joins, when it exists.
+    deployment_id: uuid.UUID | None
     place: str | None
     started_on: date
     ended_on: date
@@ -193,11 +193,14 @@ class _Mission:
     source_path: str
     device_id: uuid.UUID | None
     deployment: str | None
+    deployment_id: uuid.UUID | None
     session: tuple
     captured_on: date
     folder_on: date | None
     place: str | None
     on: date = date.min
+    #: Put with this mission by the operator.
+    with_: int | None = None
     notes: list[str] = field(default_factory=list)
 
 
@@ -206,7 +209,8 @@ async def _missions(conn, tenant_id, lock: bool) -> list[_Mission]:
         await conn.execute(
             text("""
                 SELECT m.number, m.source_path, m.device_id, m.started_at,
-                       d.name AS deployment, c.n, c.lo, c.hi
+                       m.created_at, d.id AS deployment_id, d.name AS deployment,
+                       c.n, c.lo, c.hi
                 FROM missions m
                 LEFT JOIN deployments d
                   ON d.tenant_id = m.tenant_id AND d.id = m.deployment_id
@@ -230,11 +234,12 @@ async def _missions(conn, tenant_id, lock: bool) -> list[_Mission]:
                 source_path=r.source_path,
                 device_id=r.device_id,
                 deployment=r.deployment,
+                deployment_id=r.deployment_id,
                 # Without captures a mission is a session of its own.
                 session=(r.device_id, r.lo, r.hi, r.n) if r.n else (r.number,),
                 # The camera's local time is stored as UTC (see above).
                 captured_on=last.date(),
-                folder_on=folder_date(r.source_path),
+                folder_on=folder_date(r.source_path, latest=r.created_at.date()),
                 place=place_of(r.source_path),
             )
         )
@@ -253,8 +258,13 @@ def _share_between_copies(missions: list[_Mission]) -> None:
                 c.place = next(iter(places))
             if c.folder_on is None and len(dates) == 1:
                 c.folder_on = next(iter(dates))
+
+
+def _date(missions: list[_Mission]) -> None:
     for m in missions:
         m.on = m.folder_on or m.captured_on
+        if m.with_ is not None:
+            continue  # its date is the other mission's: see _put_together
         if m.folder_on is None:
             m.notes.append(f"no readable folder date: its captures', {m.on}")
         elif abs((m.folder_on - m.captured_on).days) > 1:
@@ -264,9 +274,12 @@ def _share_between_copies(missions: list[_Mission]) -> None:
 
 
 def _join_by_camera(missions: list[_Mission], gap: int) -> None:
-    placed = [m for m in missions if m.place is not None and m.device_id]
+    # A moved mission's own folders are what the operator overruled.
+    placed = [
+        m for m in missions if m.place is not None and m.device_id and m.with_ is None
+    ]
     for m in missions:
-        if m.place is not None or m.device_id is None:
+        if m.place is not None or m.device_id is None or m.with_ is not None:
             continue
         near = sorted(
             (abs((o.on - m.on).days), o.place)
@@ -278,22 +291,38 @@ def _join_by_camera(missions: list[_Mission], gap: int) -> None:
             m.notes.append(f"no place in its folders: its camera was at {m.place}")
 
 
-def _put_together(missions, together: Mapping[int, int]) -> None:
+def _choose(missions, together: Mapping[int, int]) -> None:
+    """Mark the operator's choices, before any date or place is decided."""
     by_number = {m.number: m for m in missions}
     missing = (set(together) | set(together.values())) - set(by_number)
     if missing:
         raise ValueError(f"no such mission: {', '.join(map(str, sorted(missing)))}")
+    chained = sorted(n for n, o in together.items() if o in together and o != n)
+    if chained:
+        raise ValueError(
+            f"a chain of choices through mission {', '.join(map(str, chained))}: "
+            "put each mission with one that is not itself moved"
+        )
     for number, other in together.items():
-        m, o = by_number[number], by_number[other]
-        for c in (c for c in missions if c.session == m.session):
-            c.on, c.place = o.on, o.place
+        for c in (c for c in missions if c.session == by_number[number].session):
+            c.with_ = other
             c.notes.append(f"put with mission {other} by the operator")
 
 
-def _trips(missions: list[_Mission], gap: int) -> list[list[_Mission]]:
-    by_place: dict[str | None, list[_Mission]] = defaultdict(list)
+def _put_together(missions, attr: str) -> None:
+    """A chosen mission takes its other's date, or (once known) its place."""
+    by_number = {m.number: m for m in missions}
     for m in missions:
-        by_place[m.place].append(m)
+        if m.with_ is not None:
+            setattr(m, attr, getattr(by_number[m.with_], attr))
+
+
+def _trips(missions: list[_Mission], gap: int) -> list[list[_Mission]]:
+    # A grouped mission at no known place is anchored by its own deployment,
+    # not pooled with every unplaced mission nearby.
+    by_place: dict[object, list[_Mission]] = defaultdict(list)
+    for m in missions:
+        by_place[m.place or (m.deployment and ("deployment", m.deployment))].append(m)
     trips = []
     for group in by_place.values():
         group.sort(key=lambda m: (m.on, m.number))
@@ -314,9 +343,7 @@ def _name(started_on: date, place: str | None) -> str:
 
 def _fingerprint(gap, trips) -> str:
     # An operator's choice is in it as the flag it leaves on its mission.
-    body = {"gap_days": gap, "trips": [asdict(t) for t in trips]}
-    encoded = json.dumps(body, sort_keys=True, default=str).encode()
-    return hashlib.sha256(encoded).hexdigest()[:16]
+    return plan_fingerprint({"gap_days": gap, "trips": [asdict(t) for t in trips]})
 
 
 async def plan_inference(
@@ -328,11 +355,16 @@ async def plan_inference(
     _lock: bool = False,
 ) -> InferencePlan:
     """The deployments the tenant's missions would be grouped into. Writes nothing."""
+    if gap_days < 0:
+        raise ValueError(f"a gap of {gap_days} days: want 0 or more")
     together = dict(together or {})
     missions = await _missions(conn, tenant_id, _lock)
     _share_between_copies(missions)
-    _put_together(missions, together)
+    _choose(missions, together)
+    _date(missions)
+    _put_together(missions, "on")
     _join_by_camera(missions, gap_days)
+    _put_together(missions, "place")
     existing = {
         r.name
         for r in await conn.execute(
@@ -344,18 +376,20 @@ async def plan_inference(
     for trip in _trips(missions, gap_days):
         place = trip[0].place
         started_on, ended_on = trip[0].on, trip[-1].on
-        held = sorted({m.deployment for m in trip} - {None})
+        held = sorted({(m.deployment, m.deployment_id) for m in trip} - {(None, None)})
         flags = [Flag(m.number, n) for m in trip for n in m.notes]
-        name = held[0] if len(held) == 1 else _name(started_on, place)
+        name = held[0][0] if len(held) == 1 else _name(started_on, place)
         conflict = len(held) > 1
         if conflict:
-            flags.append(Flag(0, f"spans deployments {', '.join(held)}: left alone"))
+            spanned = ", ".join(n for n, _ in held)
+            flags.append(Flag(0, f"spans deployments {spanned}: left alone"))
         elif not held and name in existing:
             conflict = True
             flags.append(Flag(0, f"{name} already names another trip: left alone"))
         planned.append(
             PlannedTrip(
                 name=name,
+                deployment_id=held[0][1] if len(held) == 1 else None,
                 place=place,
                 started_on=started_on,
                 ended_on=ended_on,
@@ -397,14 +431,7 @@ async def apply_inference(
         if not trip.to_write:
             continue
         if trip.exists:
-            deployment_id = (
-                await conn.execute(
-                    text(
-                        "SELECT id FROM deployments WHERE tenant_id = :t AND name = :n"
-                    ),
-                    {"t": tenant_id, "n": trip.name},
-                )
-            ).scalar_one()
+            deployment_id = trip.deployment_id
         else:
             deployment_id = (
                 await conn.execute(

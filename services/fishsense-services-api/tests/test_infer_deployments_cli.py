@@ -10,8 +10,11 @@ import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
+from fishsense_services_api import cli
 from fishsense_services_api.cli import main
 
 SMILE = "2025-02-10 REEF Data Dump SMILE 6"
@@ -133,3 +136,42 @@ async def test_a_malformed_choice_is_refused(
     monkeypatch.setenv("FISHSENSE_DATABASE_URL", app_url)
 
     assert await main(["infer-deployments", "--tenant", lab, "--together", "x"]) == 2
+
+
+async def test_a_mission_chosen_twice_is_refused(
+    owner_engine, app_url, monkeypatch, capsys
+):
+    lab, n = await _seed(owner_engine)
+    monkeypatch.setenv("FISHSENSE_DATABASE_URL", app_url)
+    m, j = n["misfiled"], n["july"]
+
+    assert (
+        await main(["infer-deployments", "--tenant", lab, "--together", f"{m}={j}",
+                    "--together", f"{m}={m}"])  # fmt: skip
+        == 2
+    )
+    assert "twice" in capsys.readouterr().err
+
+
+async def test_a_negative_gap_is_refused(owner_engine, app_url, monkeypatch, capsys):
+    lab, _ = await _seed(owner_engine)
+    monkeypatch.setenv("FISHSENSE_DATABASE_URL", app_url)
+
+    with pytest.raises(SystemExit):
+        await main(["infer-deployments", "--tenant", lab, "--gap-days", "-1"])
+
+
+async def test_a_database_refusal_on_apply_is_nothing_written(
+    owner_engine, app_url, monkeypatch, capsys
+):
+    """A deployment created between the locked re-plan and the INSERT."""
+    lab, _ = await _seed(owner_engine)
+    monkeypatch.setenv("FISHSENSE_DATABASE_URL", app_url)
+
+    async def collides(*args, **kwargs):
+        raise IntegrityError("INSERT", {}, Exception("deployments_tenant_id_name_key"))
+
+    monkeypatch.setattr(cli, "apply_inference", collides)
+
+    assert await main(["infer-deployments", "--tenant", lab, "--apply", "0" * 16]) == 1
+    assert "nothing written" in capsys.readouterr().err
