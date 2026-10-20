@@ -27,6 +27,7 @@ from depth_measure_seed import (  # noqa: F401  (forget_identities: a fixture)
     forget_identities,
     measurement,
     mission,
+    restate_port,
     tenant,
 )
 from fishsense_services_api.automatic_results_store import ForeignCapture
@@ -327,3 +328,25 @@ async def test_the_catalog_serves_only_member_tenants_and_names_them(
     assert await catalog.tenant_slug(lab) == "lab"
     (got,) = await catalog.render_missions(lab, render_version=V)
     assert got.mission_id == mission_id
+
+
+@pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
+async def test_a_mission_off_the_corrective_optic_owes_no_render(
+    owner_engine, app_engine, port
+):
+    """A render rectifies the raw as a pinhole camera, which holds only behind
+    the corrective optic (2b-2, camera_sql.RECTIFIABLE_MISSION): a flat port's
+    frame rendered that way would be the wrong image for every later step and
+    for /fish. The control first, then only the port changes."""
+    lab = await tenant(owner_engine)
+    mission_id = await _plain_mission(owner_engine, lab)
+    await capture(owner_engine, lab, mission_id)
+    assert [m.mission_id for m in await _in(
+        app_engine, lab, render_missions, render_version=V
+    )] == [mission_id]  # fmt: skip
+
+    await restate_port(owner_engine, mission_id, port)
+
+    assert await _in(app_engine, lab, render_missions, render_version=V) == []
+    inputs = await _in(app_engine, lab, render_inputs, mission_id, render_version=V)
+    assert inputs.captures == []

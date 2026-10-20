@@ -22,8 +22,8 @@ tests/test_mission_pipeline_status_view.py pins them to `camera_sql`: when
 the stores' terms change, that test fails, and the function needs recreating
 again. The outputs (Superset's columns) are unchanged.
 
-Revision ID: 0050
-Revises: 0049
+Revision ID: 0051
+Revises: 0050
 """
 
 import importlib.util
@@ -32,8 +32,8 @@ from pathlib import Path
 
 from alembic import op
 
-revision = "0050"
-down_revision = "0049"
+revision = "0051"
+down_revision = "0050"
 
 
 def _migration(filename: str):
