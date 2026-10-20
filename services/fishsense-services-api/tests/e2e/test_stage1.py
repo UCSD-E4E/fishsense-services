@@ -33,8 +33,11 @@ def _seed_a_mission_ready_for_clustering(stack) -> tuple[uuid.UUID, list[set]]:
         ).scalar_one()
         mission = conn.execute(
             text(
-                "INSERT INTO missions (tenant_id, source_path, started_at, priority) "
-                "VALUES (:t, :p, :at, 'high') RETURNING id"
+                # Behind the corrective optic, as every production mission is:
+                # no stage takes any other (2b-2).
+                "INSERT INTO missions (tenant_id, source_path, started_at, priority, "
+                "port, port_source) VALUES (:t, :p, :at, 'high', 'corrective_optic', "
+                "'operator') RETURNING id"
             ),
             {"t": tenant, "p": f"e2e/{slug}", "at": T0},
         ).scalar_one()
