@@ -4,9 +4,16 @@
 **What this is:** the design language the owner agreed for the app and the web
 portal together (2026-10-20). The full system is
 [`docs/design/README.md`](../../design/README.md), the values are in
-[`docs/design/tokens.json`](../../design/tokens.json), and the screens are on the
-[FishSense design](https://claude.ai/artifact/NVqUWFd1LYzNKPTtiUgR9B) canvas (ask
-the owner for access). Nothing on the server changes for this.
+[`docs/design/tokens.json`](../../design/tokens.json), and the owner can share
+the canvas with every screen drawn.
+
+**What depends on the server.** Sections 2 to 5 are app-only and can start now.
+Section 1's Data tab needs server work that is **not built yet**. The server will
+group a phone's captures into missions and deployments by location and time, and
+an API will return that grouping. The thresholds aren't decided (proposed: 2 h and
+1 km for a mission). We'll hand over that endpoint's contract when it exists. Until
+then, build the Data tab grouped by day on the phone. It should switch to the
+server's grouping without changing the tab's layout.
 
 The app is already close: the black ground, teal `#00AAA5`, 12 px corners and a
 bottom tab bar all stay. These are the changes.
@@ -19,8 +26,8 @@ bottom tab bar all stay. These are the changes.
   and of Data, as on the web.
 - **Data is new.** It shows everything the phone collected, grouped by trip
   (deployment) and session (mission), with a "not measured" count on each
-  mission. The server will group phone captures by place and time, so the app
-  only shows the grouping it is given. Until that exists, Data can group by day.
+  mission. The grouping is the server's (see "What depends on the server" above),
+  so the app shows what it is given. For now, group by day on the phone.
 
 ## 2. Colour
 
@@ -35,9 +42,10 @@ bottom tab bar all stay. These are the changes.
 
 ## 3. Measurement overlay (`fish_photo_overlay.dart`, `fish_result_screen.dart`)
 
-- Snout `#4DA3FF`, fork `#FF9F43`, mask teal at 35% with a `#00AAA5` edge.
+- Snout `#2563EB`, fork `#FFB547`, mask teal at 35% with a `#00AAA5` edge.
 - These replace `#4CAF50`, `#FF5252` and `#00C8FF`. Green and red are the pair
-  colour-blind users confuse most, and blue and orange also differ in lightness.
+  colour-blind users confuse most. Blue and orange differ in hue and in lightness
+  (luminance 0.15 against 0.55), so they stay apart in greyscale too.
 - Draw each point with a 3 px ring in the ground colour, so it stands out on any
   photo.
 

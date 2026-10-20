@@ -1,14 +1,15 @@
 # FishSense design: Deep water
 
 One design language for the web portal (`apps/web`) and FishSense Mobile, agreed
-with the owner on 2026-10-20. The canvas with every screen is
-[FishSense design](https://claude.ai/artifact/NVqUWFd1LYzNKPTtiUgR9B). It is
-private, so ask the owner to share it with you. The colour, type and shape values
-live in [`tokens.json`](tokens.json). The mobile team's part is
+with the owner on 2026-10-20. The colour, type and shape values are in
+[`tokens.json`](tokens.json). The mobile team's part is
 [`docs/handoff/fishsense-mobile/DESIGN.md`](../handoff/fishsense-mobile/DESIGN.md).
+The owner keeps a canvas with every screen drawn; ask them for access. Every
+decision on it is written down here, so this page stands on its own.
 
 Nothing here is built yet. The portal still uses its own Tailwind look, and these
-docs describe where it is going.
+docs describe where it is going. PLAN.md stays the design of record for the system.
+This page covers how the apps look and are organised.
 
 ## The structure: Fish and Data
 
@@ -17,24 +18,26 @@ The two apps share two top-level places, kept apart:
 - **Fish** is what was measured: a fish (a species, or a fish model with a known
   length), its measurements (laser for Lite, LiDAR for Mobile; versions kept, the
   newest current) and the evidence for each one.
-- **Data** is what was collected: **deployment** (one trip, one place, on
-  consecutive days) → **mission** (one session with one camera or phone) →
-  **capture** (every frame, measured or not).
+- **Data** is what was collected: **deployment** → **mission** → **capture**.
+  - A **deployment** is one trip: one place, on dates at most two days apart.
+    Consecutive dives chain, so a week of dives every other day is one deployment.
+  - A **mission** is one session with one camera or phone.
+  - A **capture** is every frame, measured or not.
 
 Both Lite and Mobile fill both places. A phone capture that was never measured
 lives in its mission under Data. That is why the portal's separate Mobile captures
 page (`/captures`) is to be retired.
 
-How a capture finds its mission:
+How the groupings are made, in two steps:
 
-| Mode | Lite | Mobile |
+| Step | Lite | Mobile |
 |---|---|---|
-| Standard | Folder names and dates (`infer-deployments`, live since 2026-10-20) | Location and time: one phone's captures close in time and place form a mission. **Thresholds not decided** (proposed: 2 h, 1 km). |
-| Enterprise (later) | An operator states the deployment and missions first (e4edm's datasets) | The phone records into the active mission |
+| Capture → mission | Ingest: the folder a session was offloaded into is its mission | **Not built.** One phone's captures close in time and place form a mission. Thresholds not decided (proposed: 2 h, 1 km). |
+| Mission → deployment | `infer-deployments` (live since 2026-10-20): one place, on dates at most two days apart. A mission's place and date come from its folder names. | The same rule, with the place and date taken from the captures' location and time. **Not built.** |
+| Enterprise mode (later) | An operator states the deployment and its missions first (e4edm's datasets) | The phone records into the active mission |
 
-In both modes, missions at one place on dates at most two days apart form a
-deployment. Every grouping records how it was made. A stated grouping is never
-replaced by an inferred one.
+Every grouping records how it was made. A stated grouping is never replaced by an
+inferred one.
 
 ## Navigation
 
@@ -53,7 +56,12 @@ replaced by an inferred one.
   page, and the last tenant you used opens next time.
 - System admins can open every tenant from the same menu. While they are in a
   tenant they don't belong to, a banner says so, and the visit is recorded.
-- Superset and Temporal links are for system admins only.
+- Operator links are for system admins only:
+  - **Temporal** always appears there.
+  - **Superset** appears only while it still exists. It survives from v1 behind the
+    compose stack's `superset` profile, and PLAN.md §4.9 replaces it with the
+    portal's per-tenant dashboards. Show the link only when the deploy runs that
+    profile.
 - On the phone, the tenant is under Settings › Account and decides where captures
   sync.
 
@@ -77,10 +85,15 @@ replaced by an inferred one.
 ## The language
 
 - **Teal `#00AAA5` is the identity**, as in the app today. It is a fill, never
-  text on white (2.9:1): text uses `#00706C` on light and `#2CCBC5` on dark, and
-  text on a teal fill is `#001A19`. Every label passes 4.5:1.
+  text: it is 2.9:1 on white. Text uses `tealText` (`#00706C` light, `#2CCBC5`
+  dark), and text on a teal fill uses `onTeal` `#001A19` (6.3:1).
 - **Dark is the field theme, light the desk theme.** The phone is always dark. The
-  web follows the system setting, and both themes come from the same tokens.
+  web follows the system setting. Both themes have the same token names in
+  `tokens.json`, so a theme switch only changes values.
+- **Contrast:** every text token, the state colours included, passes 4.5:1 on its
+  theme's ground, surface and raised colours. The worst cases, checked 2026-10-20:
+  dark `text3` 4.97, light `text3` 5.41, light `warn` 5.44, light `tealText` 5.27.
+  Check again before adding a surface or a text colour.
 - **The length is the hero.** It is set at 56 px on the web and 44 px on the phone,
   with tabular figures and a smaller, quieter unit. Its method (laser or LiDAR)
   always sits one line below it.
@@ -92,11 +105,15 @@ replaced by an inferred one.
   current logo. The mark on the canvas is a stand-in, because the logo may be
   replaced.
 - **Colour use:** one filled teal action per screen. Facts are neutral chips, and
-  only a state that needs a person is coloured (amber for a look, coral for a
+  only a state that needs a person is coloured (`warn` for a look, `error` for a
   refusal, an outline for waiting).
-- **Measurement overlays:** snout `#4DA3FF` (blue), fork `#FF9F43` (orange), mask
-  teal at 35%, and the laser dot `#E51717`, after the logo's red. Blue and orange
-  differ in lightness as well as hue, so colour-blind viewers can tell them apart.
-  They replace the app's green, red and cyan.
+- **Measurement overlays:**
+  - snout `#2563EB` (blue), fork `#FFB547` (orange), mask teal at 35%, and the
+    laser dot `#E51717`, after the logo's red;
+  - snout and fork differ in hue **and** lightness: relative luminance 0.15 against
+    0.55, a ratio of 2.9:1. So they stay apart for colour-blind viewers and in
+    greyscale;
+  - each point is drawn with a 3 px ring in the ground colour;
+  - these replace the app's green, red and cyan.
 - **Photos:** edge to edge, never cropped on the fish. A missing image is a
   labelled outline, never a blank space.
