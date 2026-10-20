@@ -200,6 +200,33 @@ async def test_without_a_mission_line_the_frames_own_line_gates_them():
     assert _angle(r.laser_axis, TRUE_D) < 0.1
 
 
+@pytest.mark.parametrize(
+    "line_dots, fitted_with_a_line",
+    [(_MISSION_DOTS, True), ([], False)],
+    ids=["mission-line", "no-mission-line"],
+)
+async def test_with_no_mission_line_the_fit_takes_cscws_fallback(
+    monkeypatch, line_dots, fitted_with_a_line
+):
+    """The frames' own RANSAC line only gates the dots; the fit itself, with
+    no mission line, takes its direction through the dots it uses
+    (`fit_label_free(line=None)`, cscw's fallback) -- as before the gate
+    (review of #136)."""
+    from fishsense_services_processor.automatic_results import size_constancy
+
+    seen = []
+    real = size_constancy.fit_label_free
+    monkeypatch.setattr(size_constancy, "fit_label_free",
+                        lambda **kw: seen.append(kw["line"]) or real(**kw))  # fmt: skip
+    payload, store = _calibration_input(np.linspace(1.0, 3.0, 10), line_dots=line_dots)
+    payload, off = _off_line(payload, store, _OFF, 38.0)
+
+    r = await _fit(payload, store)
+
+    assert (seen[0] is not None) == fitted_with_a_line
+    assert not set(r.capture_ids) & {f.capture_id for f in off}
+
+
 async def test_dots_a_few_px_off_the_line_are_kept():
     """Detector jitter is a pixel or two (automatic vs human dots, 2026-10-19)."""
     payload, store = _calibration_input(

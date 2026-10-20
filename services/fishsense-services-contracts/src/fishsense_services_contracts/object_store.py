@@ -56,20 +56,27 @@ JPEG_FOLDERS = (
 #: by every automatic step after it (calibration, species). Its own folder: the
 #: head/tail JPEG at v1's key is the image human labels were drawn on, and a
 #: migrated frame's head/tail JPEG is v1's render, not this one (2026-10-19).
-#: One folder per render version (`automatic_results.AUTOMATIC_JPEG_RENDER_VERSION`),
-#: so a new rendering never overwrites the image older rows' pixels belong to.
-_AUTOMATIC_JPEG = re.compile(r"automatic_jpeg_r[1-9][0-9]*")
+#: One folder per render: the render version
+#: (`automatic_results.AUTOMATIC_JPEG_RENDER_VERSION`) and the camera
+#: calibration the raw was rectified with, either of which changes the pixels.
+#: So a re-render never overwrites the image older rows' pixels belong to
+#: (review of #136: a corrected camera at the same version would have).
+_AUTOMATIC_JPEG = re.compile(r"automatic_jpeg_r[1-9][0-9]*_[0-9a-f]{32}")
 
 
-def automatic_jpeg_folder(render_version: int) -> str:
-    """The automatic render's folder at `render_version`."""
+def automatic_jpeg_folder(render_version: int, camera_calibration_id: uuid.UUID) -> str:
+    """The automatic render's folder: ``automatic_jpeg_r{version}_{camera hex}``."""
     if (
         isinstance(render_version, bool)
         or not isinstance(render_version, int)
         or (render_version < 1)
     ):
         raise ValueError(f"a render version is a positive int, not {render_version!r}")
-    return f"automatic_jpeg_r{render_version}"
+    if not isinstance(camera_calibration_id, uuid.UUID):
+        raise ValueError(
+            f"a camera calibration is a UUID, not {camera_calibration_id!r}"
+        )
+    return f"automatic_jpeg_r{render_version}_{camera_calibration_id.hex}"
 
 
 def is_jpeg_folder(folder: str) -> bool:

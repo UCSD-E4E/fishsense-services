@@ -234,6 +234,49 @@ def test_a_frame_whose_size_disagrees_with_its_range_is_dropped():
     assert _beam_angle(got.laser_axis, TRUE_D) < 0.05
 
 
+def _with_a_bad_frame(z_dot, z_size, n=12):
+    """`n` good frames at 1-3 m and one more whose dot is at `z_dot` on a
+    slate sized as at `z_size`; the pairs, and the same pairs without it."""
+    z = np.linspace(1.0, 3.0, n)
+    dots = np.vstack([[_dot_at(zi) for zi in z], [_dot_at(z_dot)]])
+    pairs = _noisy_pairs(np.append(z, z_size))
+    without = [p for p in pairs if n not in (p.i, p.j)]
+    return dots, pairs, without
+
+
+def test_a_trimmed_frames_pairs_no_longer_shape_the_sizes():
+    """The sizes are re-solved without the dropped frame's pairs, so the fit
+    is the fit of the frames kept, exactly (review of #136)."""
+    dots, pairs, without = _with_a_bad_frame(8.0, 1.2)
+
+    got = sc.fit_label_free(dots=dots, pairs=pairs, camera_matrix=K)
+    want = sc.fit_label_free(dots=dots[:12], pairs=without, camera_matrix=K)
+
+    assert got.used == want.used == list(range(12))
+    assert got.vanishing_px == pytest.approx(want.vanishing_px, abs=1e-6)
+
+
+@pytest.mark.parametrize(
+    "z_dot, z_size",
+    [(8.0, 0.3), (5.0, 10.0), (0.7, 5.0)],
+    ids=["pins-the-fit", "sets-the-bracket", "nearest-far-slate"],
+)
+def test_one_wrong_range_frame_costs_only_itself(z_dot, z_size):
+    """Judged by a fit it took no part in, the wrong frame is the one dropped:
+    it cannot pin the fit to the bracket it sets, or push good frames out
+    first (review of #136: it was refused `unconstrained` or
+    `too_few_frames`)."""
+    dots, pairs, without = _with_a_bad_frame(z_dot, z_size)
+
+    got = sc.fit_label_free(dots=dots, pairs=pairs, camera_matrix=K)
+    want = sc.fit_label_free(dots=dots[:12], pairs=without, camera_matrix=K)
+
+    assert got.outcome == "accepted", got.refusal_reason
+    assert got.used == list(range(12))
+    assert got.vanishing_px == pytest.approx(want.vanishing_px, abs=1e-6)
+    assert _beam_angle(got.laser_axis, TRUE_D) < 0.05
+
+
 def test_frames_within_the_noise_are_all_kept():
     z = np.linspace(1.0, 3.0, 12)
     dots = np.array([_dot_at(zi) for zi in z])

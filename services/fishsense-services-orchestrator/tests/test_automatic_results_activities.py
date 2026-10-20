@@ -89,8 +89,8 @@ class _Catalog:
 
 class _Store:
     """Keys as the layout writes them. `existing` have a head/tail JPEG at v1's
-    key (the image human labels were drawn on); `automatic` have the automatic
-    track's own render, under the tenant."""
+    key (the image human labels were drawn on); `automatic` are the automatic
+    renders in Garage, as ``(folder, checksum)``."""
 
     def __init__(self, existing=(), automatic=()):
         self.existing = set(existing)
@@ -107,9 +107,7 @@ class _Store:
     async def locate_processed_jpeg(self, tenant_id, folder, checksum, *, from_v1):
         if folder.startswith("automatic_jpeg_r"):
             assert not from_v1  # v1 never wrote one
-            if (folder, checksum) in self.automatic or (
-                folder == RENDER and checksum in self.automatic
-            ):
+            if (folder, checksum) in self.automatic:
                 return self.layout.processed_jpeg(tenant_id, folder, checksum)
             return None
         assert folder == HEADTAIL_JPEG_FOLDER
@@ -120,7 +118,8 @@ class _Store:
         return None
 
 
-RENDER = automatic_jpeg_folder(AUTOMATIC_JPEG_RENDER_VERSION)
+CAMERA = uuid.uuid4()
+RENDER = automatic_jpeg_folder(AUTOMATIC_JPEG_RENDER_VERSION, CAMERA)
 
 
 def _acts(catalog, store=None, **settings):
@@ -166,7 +165,7 @@ async def test_with_species_off_the_cohort_has_no_species_work():
 async def test_with_species_off_there_are_no_species_images():
     catalog = _Catalog(automatic_species_captures=[
         AutomaticSpeciesCapture(uuid.uuid4(), "cc" * 16, True, uuid.uuid4(),
-                                [1, 2, 30, 40], False),
+                                [1, 2, 30, 40], False, 1, CAMERA),
     ])  # fmt: skip
     got = await _run(
         _acts(catalog, _Store(["cc" * 16]), species_enabled=False)
@@ -194,7 +193,7 @@ async def test_every_frame_writes_its_own_render_of_the_raw():
         AutomaticFrame(uuid.uuid4(), new, False, None),
     ]
     catalog = _Catalog(
-        automatic_frames_inputs=AutomaticFramesInputs(K, [0.1] * 5, frames)
+        automatic_frames_inputs=AutomaticFramesInputs(K, [0.1] * 5, frames, CAMERA)
     )
 
     got = await _run(
@@ -209,13 +208,14 @@ async def test_every_frame_writes_its_own_render_of_the_raw():
     assert a.is_slate and a.slate_probability == 0.9
     assert not b.is_slate
     assert got.laser_region == [list(v) for v in LASER_REGION_POLYGON]
-    assert got.camera_matrix == K
+    assert got.camera_matrix == K and got.camera_calibration_id == CAMERA
 
 
 def _frame_result(status="predicted", **extra):
     fields = dict(capture_id=uuid.uuid4(), status=status,
                   predictor_version=AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
-                  jpeg_render_version=AUTOMATIC_JPEG_RENDER_VERSION)  # fmt: skip
+                  jpeg_render_version=AUTOMATIC_JPEG_RENDER_VERSION,
+                  jpeg_camera_calibration_id=CAMERA)  # fmt: skip
     fields.update(extra)
     return AutomaticFrameResult(**fields)
 
@@ -245,37 +245,45 @@ async def test_a_result_that_is_no_automatic_row_is_refused(bad):
     assert catalog.calls == []
 
 
-@pytest.mark.parametrize(
-    "bad",
-    [
-        _frame_result(jpeg_render_version=AUTOMATIC_JPEG_RENDER_VERSION + 1),
-        _frame_result(jpeg_render_version=None),
-        _frame_result(
-            "slate_frame", laser_x=1.0, laser_y=2.0, jpeg_render_version=None
-        ),
-        _frame_result("no_laser_dot", jpeg_render_version=None),
-    ],
-    ids=[
-        "another-render",
-        "predicted-no-render",
-        "slate-no-render",
-        "no-dot-no-render",
-    ],
-)
-async def test_a_frame_found_in_another_render_is_refused(bad):
-    """Its pixels belong to a render this orchestrator did not ask for (a
-    processor deployed at another version)."""
+async def test_a_frame_found_in_another_render_is_refused():
+    """Its pixels belong to a render this orchestrator did not ask for: a
+    processor at another render version."""
     catalog = _Catalog(persist_automatic_head_tails=1)
+    bad = _frame_result(jpeg_render_version=AUTOMATIC_JPEG_RENDER_VERSION + 1)
     with pytest.raises(ApplicationError) as error:
         await _run(_acts(catalog).persist_automatic_frames, TARGET, [bad])
     assert error.value.non_retryable
     assert catalog.calls == []
 
 
+async def test_a_rendered_frame_with_no_render_named_is_left_owed():
+    """A frame resolved before the deploy (contract 7) comes back rendered but
+    with no render named: it is not written -- its pixels are in no automatic
+    render -- and not a failure of the dive; it stays owed and the next run
+    renders it (review of #136). The rest of the batch is written."""
+    written = []
+    catalog = _Catalog(
+        persist_automatic_head_tails=lambda t, d, rows: written.extend(rows)
+        or len(rows)
+    )
+    good = _frame_result()
+    legacy = [
+        _frame_result(jpeg_render_version=None, jpeg_camera_calibration_id=None),
+        _frame_result("slate_frame", laser_x=1.0, laser_y=2.0,
+                      jpeg_render_version=None, jpeg_camera_calibration_id=None),
+        _frame_result("no_laser_dot", jpeg_render_version=None,
+                      jpeg_camera_calibration_id=None),
+    ]  # fmt: skip
+
+    n = await _run(_acts(catalog).persist_automatic_frames, TARGET, [good, *legacy])
+
+    assert n == 1 and [r.capture_id for r in written] == [good.capture_id]
+
+
 @pytest.mark.parametrize("status", ["raw_unavailable", "decode_failed"])
 async def test_a_frame_with_no_render_needs_no_render_version(status):
     catalog = _Catalog(persist_automatic_head_tails=lambda t, d, rows: len(rows))
-    r = _frame_result(status, jpeg_render_version=None)
+    r = _frame_result(status, jpeg_render_version=None, jpeg_camera_calibration_id=None)
     assert await _run(_acts(catalog).persist_automatic_frames, TARGET, [r]) == 1
 
 
@@ -289,30 +297,43 @@ async def test_a_store_refusal_is_final():
 # -- species ------------------------------------------------------------------------
 
 
-async def test_species_are_cropped_by_the_automatic_mask_from_the_automatic_jpeg():
-    """The mask box is in the pixels of the render it was found in, so the
-    crop is from that render -- the version its row records, not today's; a
-    frame with no render recorded (only v1's JPEG) waits for one."""
+async def test_species_are_cropped_by_the_automatic_mask_from_its_render():
+    """The mask box is in the pixels of the render it was found in -- the
+    version and camera its row records, not today's -- so the crop is from
+    that render."""
     ht = uuid.uuid4()
-    have, older, v1_only = "cc" * 16, "ee" * 16, "dd" * 16
+    have, older = "cc" * 16, "ee" * 16
+    old_camera = uuid.uuid4()
     catalog = _Catalog(automatic_species_captures=[
         AutomaticSpeciesCapture(uuid.uuid4(), have, True, ht, [1, 2, 30, 40], False,
-                                AUTOMATIC_JPEG_RENDER_VERSION),
+                                AUTOMATIC_JPEG_RENDER_VERSION, CAMERA),
         AutomaticSpeciesCapture(uuid.uuid4(), older, True, uuid.uuid4(), [1, 2, 3, 4],
-                                False, 7),
-        AutomaticSpeciesCapture(uuid.uuid4(), v1_only, True, uuid.uuid4(), [1, 2, 3, 4],
-                                False, None),
+                                False, 7, old_camera),
     ])  # fmt: skip
-    store = _Store([have, v1_only],
-                   automatic=[have, (automatic_jpeg_folder(7), older)])  # fmt: skip
+    store = _Store(automatic=[(RENDER, have),
+                              (automatic_jpeg_folder(7, old_camera), older)])  # fmt: skip
 
     got = await _run(_acts(catalog, store).resolve_automatic_species_inputs, TARGET)
 
     a, b = got.images
     assert a.headtail_prediction_id == ht and a.mask_bbox == [1, 2, 30, 40]
     assert a.jpeg.key == f"tenants/{TENANT_A}/{RENDER}/{have}.JPG"
-    assert b.jpeg.key == f"tenants/{TENANT_A}/automatic_jpeg_r7/{older}.JPG"
+    assert b.jpeg.key == (
+        f"tenants/{TENANT_A}/{automatic_jpeg_folder(7, old_camera)}/{older}.JPG"
+    )
     assert got.candidates  # the species labeling config's target species
+
+
+async def test_a_recorded_render_missing_from_garage_fails_the_species_step():
+    """Not deferred: a row names a render nobody can read, which would hold its
+    mission in the cohort for good. Failed, it is a strike, and visible."""
+    catalog = _Catalog(automatic_species_captures=[
+        AutomaticSpeciesCapture(uuid.uuid4(), "cc" * 16, True, uuid.uuid4(),
+                                [1, 2, 30, 40], False, 1, CAMERA),
+    ])  # fmt: skip
+    with pytest.raises(ApplicationError) as error:
+        await _run(_acts(catalog).resolve_automatic_species_inputs, TARGET)
+    assert error.value.type == "AutomaticRenderMissing" and error.value.non_retryable
 
 
 async def test_a_species_outside_the_candidates_is_refused():
@@ -330,27 +351,55 @@ async def test_a_species_outside_the_candidates_is_refused():
 # -- calibration and lengths ------------------------------------------------------
 
 
-async def test_calibration_frames_are_slate_frames_with_an_automatic_jpeg():
-    """Features are taken from the render the dot was found against; v1's JPEG
-    is not that image."""
-    have, v1_only = "ee" * 16, "ff" * 16
-    a = AutomaticCalibrationCandidate(uuid.uuid4(), have, True, 10.0, 20.0,
-                                      AUTOMATIC_JPEG_RENDER_VERSION)  # fmt: skip
-    b = AutomaticCalibrationCandidate(uuid.uuid4(), v1_only, True, 11.0, 21.0, None)
-    camera = uuid.uuid4()
-    catalog = _Catalog(automatic_calibration_inputs=AutomaticCalibrationInputs(
-        camera, K, [a, b], [[10.0, 20.0], [11.0, 21.0], [500.0, 600.0]]))  # fmt: skip
+async def test_calibration_frames_are_slate_frames_rendered_with_the_fits_camera(
+    caplog,
+):
+    """Features are taken from the render the dot was found against, and the
+    fit reads them through the mission's current camera: a frame with no
+    render, or rendered under another camera, is left out, and the log says
+    how many (review of #136)."""
+    have, unrendered, stale = "ee" * 16, "ff" * 16, "dd" * 16
+    a = AutomaticCalibrationCandidate(
+        uuid.uuid4(), have, True, 10.0, 20.0, AUTOMATIC_JPEG_RENDER_VERSION, CAMERA
+    )
+    b = AutomaticCalibrationCandidate(uuid.uuid4(), unrendered, True, 11.0, 21.0)
+    c = AutomaticCalibrationCandidate(
+        uuid.uuid4(),
+        stale,
+        True,
+        12.0,
+        22.0,
+        AUTOMATIC_JPEG_RENDER_VERSION,
+        uuid.uuid4(),
+    )
+    catalog = _Catalog(
+        automatic_calibration_inputs=AutomaticCalibrationInputs(
+            CAMERA, K, [a, b, c], [[10.0, 20.0], [11.0, 21.0], [500.0, 600.0]]
+        )
+    )
+    store = _Store(automatic=[(RENDER, have)])  # fmt: skip
 
-    got = await _run(
-        _acts(catalog, _Store([have, v1_only], automatic=[have]))
-        .resolve_automatic_calibration_inputs, TARGET,
-    )  # fmt: skip
+    with caplog.at_level("WARNING"):
+        got = await _run(_acts(catalog, store).resolve_automatic_calibration_inputs,
+                         TARGET)  # fmt: skip
 
     frames = got.payload.frames
     assert [(f.capture_id, f.x, f.y) for f in frames] == [(a.capture_id, 10.0, 20.0)]
     assert frames[0].jpeg.key == f"tenants/{TENANT_A}/{RENDER}/{have}.JPG"
     assert len(got.payload.line_dots) == 3
-    assert got.camera_calibration_id == camera
+    assert got.camera_calibration_id == CAMERA
+    assert "1 with no render" in caplog.text and "1 rendered under" in caplog.text
+
+
+async def test_a_recorded_render_missing_from_garage_fails_the_calibration_step():
+    a = AutomaticCalibrationCandidate(
+        uuid.uuid4(), "ee" * 16, True, 10.0, 20.0, AUTOMATIC_JPEG_RENDER_VERSION, CAMERA
+    )
+    catalog = _Catalog(automatic_calibration_inputs=AutomaticCalibrationInputs(
+        CAMERA, K, [a], [[10.0, 20.0]]))  # fmt: skip
+    with pytest.raises(ApplicationError) as error:
+        await _run(_acts(catalog).resolve_automatic_calibration_inputs, TARGET)
+    assert error.value.type == "AutomaticRenderMissing" and error.value.non_retryable
 
 
 async def test_a_calibration_is_written_with_its_camera():

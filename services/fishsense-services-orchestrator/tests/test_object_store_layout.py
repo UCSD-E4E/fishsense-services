@@ -112,11 +112,13 @@ def test_the_stage_folders_are_v1s():
     )
 
 
-def test_the_automatic_render_is_written_under_its_version(layout):
-    ref = layout.processed_jpeg(TENANT, automatic_jpeg_folder(3), CHECKSUM)
-    assert ref.key.endswith(f"/automatic_jpeg_r3/{CHECKSUM}.JPG")
-    with pytest.raises(ValueError, match="folder"):
-        layout.processed_jpeg(TENANT, "automatic_jpeg", CHECKSUM)
+def test_the_automatic_render_is_written_under_its_version_and_camera(layout):
+    camera = uuid.UUID(int=5)
+    ref = layout.processed_jpeg(TENANT, automatic_jpeg_folder(3, camera), CHECKSUM)
+    assert ref.key.endswith(f"/automatic_jpeg_r3_{camera.hex}/{CHECKSUM}.JPG")
+    for unversioned in ("automatic_jpeg", "automatic_jpeg_r3"):
+        with pytest.raises(ValueError, match="folder"):
+            layout.processed_jpeg(TENANT, unversioned, CHECKSUM)
 
 
 def test_an_unknown_folder_is_refused(layout):

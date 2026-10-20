@@ -280,6 +280,7 @@ def test_the_processor_cannot_delete():
 
 LEGACY = "fishsense-lite"
 SUM = "0123456789abcdef0123456789abcdef"
+CAM = "fedcba9876543210fedcba9876543210"
 
 
 @pytest.mark.parametrize(
@@ -289,8 +290,8 @@ SUM = "0123456789abcdef0123456789abcdef"
         # A migrated frame's redraw overwrites v1's JPEG in place, as v1 did.
         f"{LEGACY}/preprocess_headtail_jpeg/{SUM}.JPG",
         # The automatic track's render, under its render version.
-        f"tenants/{TENANT}/automatic_jpeg_r1/{SUM}.JPG",
-        f"tenants/{TENANT}/automatic_jpeg_r12/{SUM}.JPG",
+        f"tenants/{TENANT}/automatic_jpeg_r1_{CAM}/{SUM}.JPG",
+        f"tenants/{TENANT}/automatic_jpeg_r12_{CAM}/{SUM}.JPG",
     ],
     ids=["tenant", "v1-in-place", "automatic-r1", "automatic-r12"],
 )
@@ -311,13 +312,15 @@ async def test_a_processed_jpeg_is_written_where_the_orchestrator_says(s3, key):
         f"elsewhere/preprocess_jpeg/{SUM}.JPG",
         f"preprocess_jpeg/{SUM}.JPG",
         f"tenants/{TENANT}/automatic_jpeg/{SUM}.JPG",
-        f"tenants/{TENANT}/automatic_jpeg_r0/{SUM}.JPG",
-        f"tenants/{TENANT}/automatic_jpeg_r01/{SUM}.JPG",
-        f"{LEGACY}/automatic_jpeg_r1/{SUM}.JPG",
+        f"tenants/{TENANT}/automatic_jpeg_r1/{SUM}.JPG",
+        f"tenants/{TENANT}/automatic_jpeg_r0_{CAM}/{SUM}.JPG",
+        f"tenants/{TENANT}/automatic_jpeg_r01_{CAM}/{SUM}.JPG",
+        f"{LEGACY}/automatic_jpeg_r1_{CAM}/{SUM}.JPG",
     ],
     ids=["tenant-not-a-uuid", "not-a-jpeg-folder", "not-a-checksum",
          "nested", "v1-not-a-jpeg-folder", "not-v1s-prefix", "no-prefix",
-         "automatic-unversioned", "automatic-r0", "automatic-r01",
+         "automatic-unversioned", "automatic-no-camera", "automatic-r0",
+         "automatic-r01",
          "automatic-at-v1s-prefix"],
 )  # fmt: skip
 async def test_anything_else_is_refused(s3, key):

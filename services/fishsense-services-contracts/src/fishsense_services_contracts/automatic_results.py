@@ -31,17 +31,19 @@ is a slate); 2 (2026-10-16) the detector wired (a slate frame keeps only its
 dot), and a kept mask whose SAM score can't be named under the dot is
 ``laser_off_all_fish``, not an unscored prediction. No version-1 row was ever
 written in production. 3 (2026-10-19) every frame's render -- rectified from
-its raw, the image its dot and mask were found in -- is written to
-`AUTOMATIC_JPEG_FOLDER`, and calibration and species read only that; under 2
+its raw, the image its dot and mask were found in -- is written under
+`object_store.automatic_jpeg_folder`, and calibration and species read only
+that; under 2
 a migrated frame kept v1's head/tail JPEG, which they then read. A frame's dot
 and head/tail are as under 2; the bump re-runs every frame to write its render.
 
 `AUTOMATIC_JPEG_RENDER_VERSION` names that render: the raw decoded and
 rectified by fishsense-core with the camera's matrix and distortion, then
-encoded (processor `headtail_preprocess.rectify_and_encode_jpeg`). It is part
-of the JPEG's key (`object_store.automatic_jpeg_folder`) and recorded on each
-frame's row, so a new rendering never overwrites an image older rows' pixels
-belong to, and the frames to re-render are the rows at an older version. Bump
+encoded (processor `headtail_preprocess.rectify_and_encode_jpeg`). It and the
+camera calibration the raw was rectified with are the JPEG's key
+(`object_store.automatic_jpeg_folder`) and are recorded on each frame's row,
+so a re-render never overwrites an image older rows' pixels belong to, and the
+frames to re-render are the rows at an older version or camera. Bump
 it when the rendering would change a pixel, and bump
 `AUTOMATIC_HEADTAIL_PREDICTOR_VERSION` with it: the dot and mask are found
 against the render. History: 1 (2026-10-19) as above.
@@ -129,9 +131,11 @@ class AutomaticFrame(BaseModel):
     capture_id: UUID
     raw: ObjectRef
     jpeg: ObjectRef
-    #: Write the render to `jpeg` (always, from contract 8).
+    #: Contract 7's: write the render to `jpeg` only if set. Read only for a
+    #: payload with no `jpeg_render_version` (resolved before contract 8).
     write_jpeg: bool = False
-    #: The render `jpeg` is for; a processor rendering another refuses.
+    #: The render `jpeg` is for: the processor writes it there, refusing if it
+    #: renders another or `jpeg` is not that render's key.
     jpeg_render_version: Optional[int] = None
     #: The slate-presence detector's score (None: no detector). A slate frame
     #: keeps its dot for the calibration and is never measured as a fish.
@@ -148,6 +152,8 @@ class PredictAutomaticFramesInput(BaseModel):
     mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     camera_matrix: List[List[float]]
     distortion_coefficients: List[float]
+    #: The camera calibration those intrinsics are: part of the render's key.
+    camera_calibration_id: Optional[UUID] = None
     #: The expected-laser region (`laser_region.LASER_REGION_POLYGON`).
     laser_region: Optional[List[List[float]]] = None
     frames: List[AutomaticFrame]
@@ -160,6 +166,7 @@ class PredictAutomaticFrameInput(BaseModel):
     camera_matrix: List[List[float]]
     distortion_coefficients: List[float]
     laser_region: Optional[List[List[float]]] = None
+    camera_calibration_id: Optional[UUID] = None
 
 
 class AutomaticFrameResult(BaseModel):
@@ -190,8 +197,11 @@ class AutomaticFrameResult(BaseModel):
     checkpoint: Optional[str] = None
     core_version: Optional[str] = None
     #: The render of the raw the dot and mask were found in, written to the
-    #: frame's `jpeg`; None when no render was made (the raw would not decode).
+    #: frame's `jpeg`, and the camera calibration it was rectified with; None
+    #: when no render was written (the raw would not decode, or a contract-7
+    #: payload).
     jpeg_render_version: Optional[int] = None
+    jpeg_camera_calibration_id: Optional[UUID] = None
 
     @field_validator("mask_bbox")
     @classmethod

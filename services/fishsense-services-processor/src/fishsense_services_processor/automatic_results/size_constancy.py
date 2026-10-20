@@ -39,16 +39,19 @@ What v2 changes, and only where it must:
   production dive line), else the line through the frames' own dots (cscw's
   fallback). Oriented to negative y, cscw's FSL-mount convention;
 * **a frame whose size disagrees with its place on the line is dropped**
-  (`trim_frames`, 2026-10-19), one at a time, worst first, refitting each
-  time, while one is more than `FRAME_RESIDUAL_MAX` off. A detector dot can
-  sit on the line at the wrong range -- mission 80 had one far down the line
-  on a slate as near as its nearest frames, and with it the vanishing point
-  was 360 px off (standard error 324 px), without it 11 px (0.9 px). The
-  pairs already have their own loop check (`solve_log_sizes`); this is the
-  same idea a level up. On cscw's own frames (human dots) it drops one, on
-  session 114, whose error against the known-size calibration goes from
-  0.129 to 0.048 deg: Table 3 becomes 10 of 10 within 0.05 deg, where cscw
-  had 9. A fit pinned at the bracket is refused before any trim.
+  (`trim_frames`, 2026-10-19), one at a time, while one is more than
+  `FRAME_RESIDUAL_MAX` off. A detector dot can sit on the line at the wrong
+  range -- mission 80 had one far down the line on a slate as near as its
+  nearest frames, and with it the vanishing point was 360 px off (standard
+  error 324 px), without it 11 px (0.9 px). Each frame is judged by the fit of
+  the others (`deleted_residuals`), so a wrong frame cannot shape the fit it
+  is judged by -- setting the bracket, pinning the optimum, pushing good
+  frames out first -- and after each drop the sizes are re-solved from the
+  kept frames' own pairs, so the dropped frame's pairs no longer shape them
+  (review of #136). The pairs already have their own loop check
+  (`solve_log_sizes`); this is the same idea a level up. A fit pinned at the
+  bracket after the trim is refused (``unconstrained``), and so is one the
+  trim leaves too few frames when it was pinned before it.
 """
 
 from __future__ import annotations
@@ -61,6 +64,7 @@ import numpy as np
 
 __all__ = [
     "BOOTSTRAP_DRAWS",
+    "deleted_residuals",
     "FRAME_RESIDUAL_MAX",
     "FrameFeatures",
     "LabelFreeFit",
@@ -108,11 +112,11 @@ MIN_FRAMES = 8
 #: Apparent-size spread a fit needs: the paper's "at least about 1.5x in
 #: distance" (§4.3); sessions under 1.12x are unconstrained.
 MIN_SIZE_RATIO = 1.5
-#: The most a frame's log size may sit off the fitted ``log(t - t_v)`` (after
-#: the median offset): 5 % in size. Pairs carry ~1 % (register's floor); the
-#: paper's sessions' frames are under it but one on session 114; mission 80's
-#: bad frame was 0.92 (2026-10-19).
-FRAME_RESIDUAL_MAX = 0.05
+#: The most a frame's log size may sit off the relation fitted without it
+#: (`deleted_residuals`): 10 % in size. On cscw's ten sessions (human dots) the
+#: largest is 0.058, but one frame of session 114 at 0.41; mission 80's
+#: wrong-range detector frame was 0.92 (2026-10-19). Pairs carry ~1 %.
+FRAME_RESIDUAL_MAX = 0.10
 #: Bootstrap draws for the standard error (register / slate_unknown: 200).
 BOOTSTRAP_DRAWS = 200
 #: fit_tv's bracket: from 4000 px below to 5 px below the nearest dot.
@@ -321,23 +325,54 @@ def fit_vanishing_position(t: np.ndarray, s: np.ndarray) -> float:
     )
 
 
-def trim_frames(
-    t: np.ndarray, s: np.ndarray, max_residual: float = FRAME_RESIDUAL_MAX
-) -> np.ndarray:
-    """Indices of the frames kept: while the worst frame's
-    ``log s - log(t - t_v)`` (less the median) is beyond `max_residual`, drop
-    it and refit."""
+def deleted_residuals(t: np.ndarray, s: np.ndarray) -> np.ndarray:
+    """Each frame's ``|log s - log(t - t_v) - c|`` under the fit of the other
+    frames (`t_v` and the median offset `c` without it); infinite for a frame
+    at or below that fit's vanishing position."""
     t, s = np.asarray(t, float), np.asarray(s, float)
-    keep = np.arange(len(t))
+    log_s = np.log(s)
+    out = np.empty(len(t))
+    for i in range(len(t)):
+        rest = np.arange(len(t)) != i
+        tv = fit_vanishing_position(t[rest], s[rest])
+        c = np.median(log_s[rest] - np.log(t[rest] - tv))
+        gap = t[i] - tv
+        out[i] = np.inf if gap <= 0 else abs(log_s[i] - np.log(gap) - c)
+    return out
+
+
+def _sizes_of(pairs: Sequence[PairScale], keep: np.ndarray):
+    """`keep`'s connected frames and their sizes, from their own pairs only."""
+    index = {int(f): k for k, f in enumerate(keep)}
+    own = [
+        PairScale(index[p.i], index[p.j], p.log_scale, p.near)
+        for p in pairs
+        if p.i in index and p.j in index
+    ]
+    sizes = solve_log_sizes(len(keep), own)
+    return keep[sizes.connected], np.exp(sizes.log_sizes[sizes.connected])
+
+
+def trim_frames(
+    t: np.ndarray,
+    pairs: Sequence[PairScale],
+    keep: np.ndarray,
+    s: np.ndarray,
+    max_residual: float = FRAME_RESIDUAL_MAX,
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(kept frames, their sizes)``: while the frame with the largest
+    deleted residual is beyond `max_residual`, drop it and re-solve the sizes
+    from the rest's pairs. `t` is every frame's place on the line, `keep`
+    the frames in play with sizes `s`."""
+    t = np.asarray(t, float)
+    keep, s = np.asarray(keep), np.asarray(s, float)
     while len(keep) > 2:
-        tv = fit_vanishing_position(t[keep], s[keep])
-        r = np.log(s[keep]) - np.log(t[keep] - tv)
-        r = np.abs(r - np.median(r))
+        r = deleted_residuals(t[keep], s)
         worst = int(np.argmax(r))
         if r[worst] <= max_residual:
             break
-        keep = np.delete(keep, worst)
-    return keep
+        keep, s = _sizes_of(pairs, np.delete(keep, worst))
+    return keep, s
 
 
 def bootstrap_se(
@@ -377,6 +412,12 @@ def beam_from_vanishing(
     o = np.array([u[0] / k[0, 0], u[1] / k[1, 1]])
     origin = np.append(o_mag_m * o / np.linalg.norm(o), 0.0)
     return origin, axis / np.linalg.norm(axis)
+
+
+def _pinned(t: np.ndarray, tv: float) -> bool:
+    """The optimum is the search bracket's edge, not a minimum."""
+    hi = float(np.min(t)) - _BRACKET_GAP_PX
+    return tv > hi - _AT_BOUND_PX or tv < hi - _BRACKET_PX + _AT_BOUND_PX
 
 
 def _refused(reason: str, **seen) -> LabelFreeFit:
@@ -425,16 +466,11 @@ def fit_label_free(
     if seen["size_ratio"] < min_size_ratio:
         return _refused("too_little_range_spread", **seen)
     u = line_direction(line, dots[used])
-    t = dots[used] @ u
-    hi = t.min() - _BRACKET_GAP_PX
-    tv = fit_vanishing_position(t, s)
-    if tv > hi - _AT_BOUND_PX or tv < hi - _BRACKET_PX + _AT_BOUND_PX:
-        return _refused("unconstrained", **seen)
-    kept = trim_frames(t, s)
-    used, s = used[kept], s[kept]
+    pinned = _pinned(dots[used] @ u, fit_vanishing_position(dots[used] @ u, s))
+    used, s = trim_frames(dots @ u, pairs, used, s)
     seen.update(used=[int(i) for i in used], frames_used=len(used))
     if len(used) < min_frames:
-        return _refused("too_few_frames", **seen)
+        return _refused("unconstrained" if pinned else "too_few_frames", **seen)
     seen["size_ratio"] = float(s.max() / s.min())
     if seen["size_ratio"] < min_size_ratio:
         return _refused("too_little_range_spread", **seen)
@@ -445,8 +481,7 @@ def fit_label_free(
     seen.update(
         vanishing_px=tv, line_direction=[float(c) for c in u], line_offset_px=offset
     )
-    hi = t.min() - _BRACKET_GAP_PX
-    if tv > hi - _AT_BOUND_PX or tv < hi - _BRACKET_PX + _AT_BOUND_PX:
+    if _pinned(t, tv):
         return _refused("unconstrained", **seen)
     origin, axis = beam_from_vanishing(tv, u, offset, camera_matrix, o_mag_m)
     return LabelFreeFit(

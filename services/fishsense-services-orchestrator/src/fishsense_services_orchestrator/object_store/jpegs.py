@@ -25,7 +25,7 @@ from typing import Optional
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from fishsense_services_contracts.object_store import ObjectRef
+from fishsense_services_contracts.object_store import ObjectRef, is_jpeg_folder
 from fishsense_services_orchestrator.object_store.catalog import RawStagingCatalog
 from fishsense_services_orchestrator.object_store.contracts import (
     ProcessedJpegRequest,
@@ -49,9 +49,10 @@ class ProcessedJpegActivities:
     async def locate_processed_jpeg(
         self, request: ProcessedJpegRequest
     ) -> Optional[ObjectRef]:
-        if request.folder not in JPEG_FOLDERS:
+        if not is_jpeg_folder(request.folder):
             raise ApplicationError(
-                f"no stage writes JPEGs to {request.folder!r}; one of {JPEG_FOLDERS}",
+                f"no stage writes JPEGs to {request.folder!r}; one of {JPEG_FOLDERS} "
+                "or an automatic render's",
                 type="UnknownJpegFolder",
                 non_retryable=True,
             )

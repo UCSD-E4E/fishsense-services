@@ -1214,6 +1214,7 @@ class AutomaticHeadTailPrediction(Base):
         UniqueConstraint("tenant_id", "id"),
         _fk(("tenant_id", "capture_id"), "captures"),
         _capture_seq_index("automatic_head_tail_predictions"),
+        _fk(("tenant_id", "jpeg_camera_calibration_id"), "camera_calibrations"),
     )
 
     id: Mapped[uuid.UUID] = _id()
@@ -1246,6 +1247,7 @@ class AutomaticHeadTailPrediction(Base):
     created_at: Mapped[datetime] = _created_at()
     #: The render of the raw the dot and mask were found in (0049).
     jpeg_render_version: Mapped[int | None] = mapped_column(Integer)
+    jpeg_camera_calibration_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
 
 
 class AutomaticLaserCalibration(Base):

@@ -130,7 +130,8 @@ class ObjectLayout:
         # dedupes by URL. A migrated frame keeps that key for good; a redraw
         # overwrites it where it is (`OrchestratorObjectStore.processed_jpeg_target`).
         new = self.processed_jpeg(tenant_id, folder, checksum)
-        if from_v1:
+        # v1 wrote only the stage folders, never an automatic render.
+        if from_v1 and folder in JPEG_FOLDERS:
             return [self.legacy_processed_jpeg(folder, checksum), new]
         return [new]
 

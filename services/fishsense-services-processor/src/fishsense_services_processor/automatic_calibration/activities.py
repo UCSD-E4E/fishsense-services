@@ -29,10 +29,13 @@ laser where the beam meets the slate (a reflection, or the detector on the
 slate's pattern), and its range is wrong. Session 77 had 33 of its 60 detector
 dots 35-41 px off its line, in one run of frames, and fitted with them its
 vanishing point moved from the paper's -2069 px to -3732 px, standard error
-1510 px; without them, -2069 px, 0.8 px. cscw never met this: its fits used
-human dots on human-labelled slate frames. The line is the dive's (above), or,
-with none, the RANSAC line through the frames' own dots (`fit_dive_line`'s
-4 px inliers: the most dots that agree); with neither, every dot is kept.
+1510 px; without them, on cscw's features and the labelled line, -2069 px,
+0.8 px (77 itself is refused below). cscw never met this: its fits used human
+dots on human-labelled slate frames. The dots are gated on the dive's line
+(above), or, with none, the RANSAC line through the frames' own dots
+(`fit_dive_line`'s 4 px inliers: the most dots that agree) -- which gates
+only: the fit is then given no line and takes cscw's fallback, the direction
+through the dots it uses. With neither, every dot is kept.
 
 **Unless the line is ambiguous.** When the dots off the line hold a line of
 their own of at least `MIN_FRAMES` dots and a quarter of those on it
@@ -152,12 +155,16 @@ def _features(jpeg: bytes, dot) -> sc.FrameFeatures:
     return sc.extract_features(image, dot)
 
 
-def _line(payload: FitAutomaticCalibrationInput):
-    """The dive's line, else the frames' own, else None."""
-    line = mission_line(payload.line_dots) if payload.line_dots else None
-    if line is None and len(payload.frames) >= 2:
-        line = mission_line([[f.x, f.y] for f in payload.frames])
-    return line
+def _lines(payload: FitAutomaticCalibrationInput):
+    """``(gate, fit)``: the line the dots are gated on -- the dive's, else the
+    RANSAC line through the frames' own dots -- and the one the fit is given:
+    the dive's, else None, so the fit takes its direction through the dots it
+    uses (cscw's fallback; review of #136)."""
+    fit = mission_line(payload.line_dots) if payload.line_dots else None
+    gate = fit
+    if gate is None and len(payload.frames) >= 2:
+        gate = mission_line([[f.x, f.y] for f in payload.frames])
+    return gate, fit
 
 
 def _fit(features, kept, line, camera_matrix):
@@ -193,7 +200,7 @@ class AutomaticCalibrationActivities:  # pylint: disable=too-few-public-methods
             return AutomaticCalibrationResult(
                 outcome="refused", refusal_reason="no_candidates", **base
             )
-        line = await asyncio.to_thread(_line, payload)
+        line, fit_line = await asyncio.to_thread(_lines, payload)
         frames = payload.frames
         off: list = []
         if line is not None:
@@ -240,7 +247,7 @@ class AutomaticCalibrationActivities:  # pylint: disable=too-few-public-methods
                 )
             activity.heartbeat()
         fit = await _while_heartbeating(
-            _fit, features, kept, line, payload.camera_matrix
+            _fit, features, kept, fit_line, payload.camera_matrix
         )
         activity.logger.info(
             "dive=%s label-free %s (%s): frames=%d pairs=%d ratio=%s",

@@ -403,6 +403,19 @@
         "default": null,
         "title": "Height"
       },
+      "jpeg_camera_calibration_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Jpeg Camera Calibration Id"
+      },
       "jpeg_render_version": {
         "anyOf": [
           {
@@ -4596,6 +4609,19 @@
       }
     },
     "properties": {
+      "camera_calibration_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Camera Calibration Id"
+      },
       "camera_matrix": {
         "items": {
           "items": {
@@ -4721,6 +4747,19 @@
       }
     },
     "properties": {
+      "camera_calibration_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Camera Calibration Id"
+      },
       "camera_matrix": {
         "items": {
           "items": {

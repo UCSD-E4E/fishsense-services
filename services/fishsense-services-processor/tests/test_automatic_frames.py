@@ -232,66 +232,89 @@ def _activities(
     )
 
 
-def _payload(**frame) -> PredictAutomaticFrameInput:
-    frame.setdefault("jpeg", _ref("preprocess_headtail_jpeg"))
+CAMERA = uuid.UUID(int=11)
+RENDER = automatic_jpeg_folder(AUTOMATIC_JPEG_RENDER_VERSION, CAMERA)
+
+
+def _payload(camera=CAMERA, **frame) -> PredictAutomaticFrameInput:
+    """A contract-8 frame by default: the render at this version under
+    `camera`'s key. ``jpeg_render_version=None`` makes it contract 7's."""
+    frame.setdefault("jpeg_render_version", AUTOMATIC_JPEG_RENDER_VERSION)
+    frame.setdefault("jpeg", _ref(RENDER if frame["jpeg_render_version"] else
+                                  "preprocess_headtail_jpeg"))  # fmt: skip
     return PredictAutomaticFrameInput(
         frame=AutomaticFrame(
             capture_id=CAPTURE, raw=ObjectRef(bucket="s", key="raw/x.ORF"), **frame,
         ),
         camera_matrix=K, distortion_coefficients=[0.0] * 5,
         laser_region=[[0, 0], [FRAME_W, 0], [FRAME_W, FRAME_H], [0, FRAME_H]],
+        camera_calibration_id=camera,
     )  # fmt: skip
 
 
 async def test_the_activity_chains_dot_mask_and_head_tail():
     store = _Store()
     acts = _activities(store)
-    r = await ActivityEnvironment().run(
-        acts.predict_automatic_frame,
-        _payload(write_jpeg=True, jpeg_render_version=AUTOMATIC_JPEG_RENDER_VERSION),
-    )
+    r = await ActivityEnvironment().run(acts.predict_automatic_frame, _payload())
     assert r.status == "predicted" and r.sam_score == pytest.approx(0.8)
     assert list(store.uploaded.values()) == [_jpeg()]
 
 
-async def test_the_jpeg_is_left_alone_when_it_exists():
-    store = _Store()
-    r = await ActivityEnvironment().run(
-        _activities(store).predict_automatic_frame, _payload()
-    )
-    assert store.uploaded == {}
-    assert r.jpeg_render_version is None
-
-
-async def test_the_render_is_written_under_its_version_and_named():
+async def test_the_render_is_written_and_named_by_version_and_camera():
     """The JPEG the dot and mask were found in is stored, and the row says
-    which render it is (2026-10-19)."""
+    which render it is (2026-10-19). Written whatever `write_jpeg` says: from
+    contract 8 the render version alone decides (review of #136)."""
     store = _Store()
-    ref = _ref(automatic_jpeg_folder(AUTOMATIC_JPEG_RENDER_VERSION))
+    payload = _payload(write_jpeg=False)
     r = await ActivityEnvironment().run(
-        _activities(store).predict_automatic_frame,
-        _payload(jpeg=ref, write_jpeg=True,
-                 jpeg_render_version=AUTOMATIC_JPEG_RENDER_VERSION),
-    )  # fmt: skip
-    assert store.uploaded == {ref.key: _jpeg()}
+        _activities(store).predict_automatic_frame, payload
+    )
+    assert store.uploaded == {payload.frame.jpeg.key: _jpeg()}
     assert r.status == "predicted"
     assert r.jpeg_render_version == AUTOMATIC_JPEG_RENDER_VERSION
+    assert r.jpeg_camera_calibration_id == CAMERA
 
 
-@pytest.mark.parametrize("asked", [AUTOMATIC_JPEG_RENDER_VERSION + 1, None])
-async def test_a_frame_for_another_render_is_refused_and_retried(asked):
-    """A processor at another render version (a lab worker deployed by hand)
-    must not write its render where another is expected; retried, the frame
-    reaches a worker at the asked version."""
+@pytest.mark.parametrize(
+    "payload",
+    [
+        _payload(jpeg_render_version=AUTOMATIC_JPEG_RENDER_VERSION + 1,
+                 jpeg=_ref(automatic_jpeg_folder(AUTOMATIC_JPEG_RENDER_VERSION + 1,
+                                                 CAMERA))),
+        _payload(jpeg=_ref(automatic_jpeg_folder(AUTOMATIC_JPEG_RENDER_VERSION,
+                                                 uuid.UUID(int=12)))),
+        _payload(jpeg=_ref("preprocess_headtail_jpeg")),
+        _payload(camera=None),
+    ],
+    ids=["another-version", "another-cameras-key", "not-a-render-key", "no-camera"],
+)  # fmt: skip
+async def test_a_frame_for_another_render_is_refused_and_retried(payload):
+    """A processor at another render version (a lab worker deployed by hand),
+    or a key that is not this render's, must not get this render written to
+    it; retried, the frame reaches a worker at the asked version."""
     store = _Store()
     with pytest.raises(ApplicationError) as error:
         await ActivityEnvironment().run(
-            _activities(store).predict_automatic_frame,
-            _payload(write_jpeg=True, jpeg_render_version=asked),
+            _activities(store).predict_automatic_frame, payload
         )
     assert error.value.type == "RenderVersionMismatch"
     assert not error.value.non_retryable
     assert store.uploaded == {}
+
+
+@pytest.mark.parametrize("write", [True, False])
+async def test_a_frame_resolved_before_the_render_was_versioned_runs_as_it_did(write):
+    """Contract 7 (in flight across the deploy): no render named. It runs as
+    it did -- the render written only if asked -- and names no render, so the
+    orchestrator leaves it owed rather than failing the dive (review of #136)."""
+    store = _Store()
+    payload = _payload(jpeg_render_version=None, write_jpeg=write, camera=None)
+    r = await ActivityEnvironment().run(
+        _activities(store).predict_automatic_frame, payload
+    )
+    assert r.status == "predicted"
+    assert store.uploaded == ({payload.frame.jpeg.key: _jpeg()} if write else {})
+    assert (r.jpeg_render_version, r.jpeg_camera_calibration_id) == (None, None)
 
 
 async def test_a_dot_outside_the_laser_region_is_no_dot():
@@ -342,6 +365,8 @@ async def test_the_workflow_fans_out_one_activity_per_frame():
     @activity.defn(name="predict_automatic_frame")
     async def stub(payload: PredictAutomaticFrameInput) -> AutomaticFrameResult:
         seen.append(payload.frame.capture_id)
+        # Each frame carries the camera its render is keyed under.
+        assert payload.camera_calibration_id == CAMERA
         return AutomaticFrameResult(
             capture_id=payload.frame.capture_id, status="no_laser_dot",
             predictor_version=AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
@@ -355,6 +380,7 @@ async def test_the_workflow_fans_out_one_activity_per_frame():
     payload = PredictAutomaticFramesInput(
         tenant_id=TENANT, mission_id=uuid.uuid4(), camera_matrix=K,
         distortion_coefficients=[0.0] * 5, frames=frames,
+        camera_calibration_id=CAMERA,
     )  # fmt: skip
     async with await WorkflowEnvironment.start_time_skipping(
         data_converter=DATA_CONVERTER
