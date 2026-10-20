@@ -90,7 +90,7 @@ describe("the gate", () => {
   });
 
   it("refuses a tenant the caller is not in", async () => {
-    const result = await setPurposeAction("elsewhere", 7, "slate");
+    const result = await setPurposeAction("elsewhere", 7, "known_length");
 
     expect(result).toEqual({ ok: false, error: "Not authorized" });
     expect(setMissionPurpose).not.toHaveBeenCalled();

@@ -199,3 +199,20 @@ def test_the_contract_round_trips_through_json():
     restored = IngestReport.model_validate_json(report.model_dump_json())
 
     assert restored == report
+
+
+def test_a_slate_purpose_from_before_0048_still_decodes_as_laser_calibration():
+    """v0.14.0 accepted ``slate`` as a purpose. An ingest started then, or a
+    preflight result already in its history, must still decode and replay;
+    0048 maps the value to laser_calibration, and so does the contract."""
+    from fishsense_services_orchestrator.ingest.contracts import IngestPreflight
+
+    request = IngestMissionRequest.model_validate(
+        {"tenant": "lab", "dive_path": "a/b", "purpose": "slate"}
+    )
+    preflight = IngestPreflight.model_validate(
+        {"dive_path": "a/b", "resolved_purpose": "slate"}
+    )
+
+    assert request.purpose == "laser_calibration"
+    assert preflight.resolved_purpose == "laser_calibration"

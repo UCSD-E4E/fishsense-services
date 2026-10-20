@@ -12,7 +12,7 @@ fishsense-services-api add-tenant conservation-angler \\
                                     # a partner's tenant, joined by its org's
                                     # invitees (migration 0037), as the owner
 fishsense-services-api backfill-mission-facts --tenant <id> \\
-    --ingested-before 2026-10-16T00:00:00+00:00 [--purpose 510=slate ...]
+    --ingested-before 2026-10-16T00:00:00+00:00 [--purpose 509=known_length ...]
                                     # dry run: ports, deployments and purposes
                                     # for missions before 0047; --apply <the
                                     # dry run's fingerprint> writes that plan
