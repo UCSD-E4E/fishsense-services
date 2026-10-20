@@ -1417,6 +1417,41 @@ class CaptureRaw(Base):
     created_at: Mapped[datetime] = _created_at()
 
 
+class CaptureThumbnail(Base):
+    """A render's thumbnail for /fish's cards, or that the render was not
+    there to read (0053); append-only."""
+
+    __tablename__ = "capture_thumbnails"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        UniqueConstraint("tenant_id", "render_id", "target_width"),
+        _fk(("tenant_id", "render_id"), "capture_renders"),
+        _fk(("tenant_id", "capture_id"), "captures"),
+        CheckConstraint(
+            "status IN ('made', 'render_unavailable')",
+            name="capture_thumbnails_status_check",
+        ),
+        CheckConstraint(
+            "target_width > 0", name="capture_thumbnails_target_width_check"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    render_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    status: Mapped[str] = mapped_column(Text)
+    target_width: Mapped[int] = mapped_column(Integer)
+    bucket: Mapped[str | None] = mapped_column(Text)
+    key: Mapped[str | None] = mapped_column(Text)
+    bytes: Mapped[int | None] = mapped_column(BigInteger)
+    md5: Mapped[str | None] = mapped_column(Text)
+    width: Mapped[int | None] = mapped_column(Integer)
+    height: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = _created_at()
+
+
 class MobileCapture(Base):
     """The mobile CaptureExtension (0038): what the phone recorded with a
     capture, and the commit request as received. Append-only."""

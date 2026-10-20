@@ -61,5 +61,6 @@ def test_the_version_is_pinned():
     """Bumped on purpose, here too. v7 was the rename alone (the wire did not
     change); v8 (2026-10-19) added optional fields for the automatic render;
     v9 (2026-10-19) renders in the tenant's bucket, read by URL; v10
-    (2026-10-20) a render frame may carry its raw's copy too."""
-    assert CONTRACT_VERSION == 10
+    (2026-10-20) a render frame may carry its raw's copy too; v11 (2026-10-20)
+    each render's thumbnail."""
+    assert CONTRACT_VERSION == 11

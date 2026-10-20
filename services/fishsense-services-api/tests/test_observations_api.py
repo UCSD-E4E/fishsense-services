@@ -25,7 +25,7 @@ from depth_measure_seed import T0, exec_, forget_identities  # noqa: F401
 from fishsense_services_api.app import create_app
 from fishsense_services_api.auth import StaticKeySource, TokenValidator
 from fishsense_services_api.tenant_stores import TenantStore, TenantStores
-from observation_seed import ALICE, lite, mobile, render
+from observation_seed import ALICE, lite, mobile, render, thumbnail
 
 ISSUER = "https://auth.example.test/application/o/fishsense/"
 AUDIENCE = "fishsense-web"
@@ -117,6 +117,7 @@ class TestList:
     ):
         capture_id, fish_id = await lite(owner_engine, tenants["lab"])
         key = await render(owner_engine, tenants["lab"], capture_id)
+        thumb = await thumbnail(owner_engine, tenants["lab"], key)
 
         [listed] = (await _get(client, "/tenants/lab/observations")).json()[
             "observations"
@@ -125,9 +126,10 @@ class TestList:
             await _get(client, f"/tenants/lab/observations/{capture_id}/{fish_id}")
         ).json()
 
-        expected = f"http://garage.test:3900/fishsense-tenant-lab/{key}"
-        assert listed["photo_url"].startswith(expected)
-        assert detail["observation"]["photo_url"].startswith(expected)
+        base = "http://garage.test:3900/fishsense-tenant-lab/"
+        # The card is the thumbnail; the fish's page, the render itself.
+        assert listed["photo_url"].startswith(base + thumb)
+        assert detail["observation"]["photo_url"].startswith(base + key)
 
     async def test_a_render_in_another_bucket_is_not_signed_for_this_one(
         self, client, owner_engine, app_engine, tenants

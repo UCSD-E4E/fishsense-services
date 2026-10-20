@@ -32,6 +32,8 @@ from fishsense_services_contracts.task_queues import (
     PROCESSOR_TASK_QUEUE,
 )
 
+#: v11 (2026-10-20): thumbnails -- each render scaled for /fish's cards, made
+#: from the stored render (`thumbnails`). New models only; v10 parses.
 #: v10 (2026-10-20): a render frame may also carry its raw's copy into the
 #: tenant's bucket (`RenderFrame.raw_key`/`raw_put_url`/`checksum`), and may owe
 #: only that (`key`/`put_url` optional); a result reports the copy
@@ -49,7 +51,7 @@ from fishsense_services_contracts.task_queues import (
 #: JSON is unchanged -- each renamed field keeps its old name on the wire
 #: (`renamed.py`) -- so a v6 processor and a v7 orchestrator interoperate; only
 #: the published schema's model names differ.
-CONTRACT_VERSION = 10
+CONTRACT_VERSION = 11
 
 
 def _discover_models() -> tuple[type[BaseModel], ...]:

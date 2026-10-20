@@ -1346,7 +1346,10 @@ the UI as it lands (decided 2026-10-17)*
      object matches the processor's report and the capture's checksum. What a capture
      owes is judged in the tenant's current bucket, so a bucket move re-renders.
      Captures rendered before this owe only their copy, and aren't rendered again.
-   - *Next:* thumbnails for the cards, made from each render without reading the NAS.
+   - ***Built 2026-10-20 (0053):*** `/fish`'s cards show a 640 px thumbnail of the
+     render (~70 kB against ~6-8 MB), made from the stored render, never the NAS. The
+     fish's page keeps the full render. `ThumbnailBacklogWorkflow` makes them: hourly when
+     `FISHSENSE_THUMBNAILS_ENABLED`, otherwise on demand.
    - *Later:* uploading new Lite photos straight into the tenant's bucket, as Mobile
      does. The API is never given the shared labels bucket.
 5. Species for mobile captures.

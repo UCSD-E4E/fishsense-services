@@ -22,3 +22,6 @@ class RenderSettings(BaseSettings):
     #: The hourly backlog schedule (`RenderBacklogWorkflow`); off, renders run
     #: on demand only.
     renders_enabled: bool = False
+    #: The hourly thumbnail backlog (`ThumbnailBacklogWorkflow`, 2026-10-20);
+    #: off, thumbnails run on demand only.
+    thumbnails_enabled: bool = False

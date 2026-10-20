@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from fishsense_services_api import dev_seed
 from fishsense_services_contracts.renders import RENDER_VERSION, render_key
+from fishsense_services_contracts.thumbnails import THUMBNAIL_WIDTH, thumbnail_key
 from fishsense_services_api.cli import main
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.mobile_capture_store import list_mobile_captures
@@ -298,6 +299,20 @@ class TestSeed:
             )
             with urllib.request.urlopen(objects.presign_get(row["key"])) as got:
                 assert got.read() == by_checksum[row["checksum"]]
+
+        # And each render's thumbnail, for /fish's cards (0053).
+        thumbs = await _rows(
+            dev_engine,
+            "SELECT h.key, h.bucket, h.target_width, r.key AS render_key "
+            "FROM capture_thumbnails h JOIN capture_renders r ON r.id = h.render_id "
+            "WHERE h.status = 'made'",
+        )
+        assert len(thumbs) == len(FRAMES)
+        for t in thumbs:
+            assert t["key"] == thumbnail_key(t["render_key"])
+            assert (t["bucket"], t["target_width"]) == (objects.bucket, THUMBNAIL_WIDTH)
+            with urllib.request.urlopen(objects.presign_get(t["key"])):
+                pass
 
     def test_a_jpegs_size_is_read_from_its_header(self):
         assert dev_seed.jpeg_size(_jpeg(0, width=4014, height=3016)) == (4014, 3016)
