@@ -51,6 +51,7 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api.camera_sql import ADMITTED_PORT
 from fishsense_services_api.laser_depth_store import (
     MissionGeometry,
     Dot,
@@ -191,7 +192,7 @@ async def next_mission_for_measurement(
             text(f"""
                 SELECT d.id, d.created_at, d.number FROM missions d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
-                  AND {MEASUREMENT_COHORT}
+                  AND {MEASUREMENT_COHORT} AND {ADMITTED_PORT}
                 ORDER BY d.created_at, d.number
                 LIMIT 1
                 """),

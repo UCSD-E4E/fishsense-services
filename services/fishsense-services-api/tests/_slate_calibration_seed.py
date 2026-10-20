@@ -132,8 +132,10 @@ async def mission(
         engine,
         "INSERT INTO missions (tenant_id, source_path, name, started_at, priority, "
         "slate_template_id, calibration_target_id, device_id, "
-        "calibration_source_mission_id, created_at, v1_id) VALUES (:t, :p, :n, :at, "
-        ":pr, :s, :g, :dev, :src, coalesce(:c, now()), :v1) RETURNING id",
+        "calibration_source_mission_id, created_at, v1_id, port, port_source) "
+        "VALUES (:t, :p, :n, :at, :pr, :s, :g, :dev, :src, coalesce(:c, now()), "
+        # Behind the corrective optic, as every production mission is (2b-2).
+        ":v1, 'corrective_optic', 'operator') RETURNING id",
         t=tenant_id,
         p=f"/dives/{uuid.uuid4()}",
         n=name,

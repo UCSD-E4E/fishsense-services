@@ -46,6 +46,7 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api.camera_sql import ADMITTED_PORT
 from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
@@ -174,7 +175,7 @@ async def next_mission_for_laser_depth(
             text(f"""
                 SELECT d.id, d.created_at, d.number FROM missions d
                 WHERE d.tenant_id = :tenant AND d.priority = 'high'
-                  AND {LASER_DEPTH_COHORT}
+                  AND {LASER_DEPTH_COHORT} AND {ADMITTED_PORT}
                 ORDER BY d.created_at, d.number
                 LIMIT 1
                 """),

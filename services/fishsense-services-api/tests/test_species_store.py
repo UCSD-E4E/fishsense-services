@@ -122,9 +122,11 @@ async def _dive(app_engine, tenant, path, *, priority="high", device=_PINHOLE):
             _PINHOLE_DEVICES[tenant] = await _pinhole_device(tenant)
         device = _PINHOLE_DEVICES[tenant]
     async with tenant_transaction(app_engine, tenant) as conn:
+        # Behind the corrective optic, as every production mission is (2b-2).
         mission = await create_mission(
-            conn, tenant, source_path=path, name=path, started_at=T0, device_id=device
-        )
+            conn, tenant, source_path=path, name=path, started_at=T0, device_id=device,
+            port="corrective_optic", port_source="operator",
+        )  # fmt: skip
         await finalize_mission(conn, tenant, mission, priority=priority, started_at=T0)
     return mission
 

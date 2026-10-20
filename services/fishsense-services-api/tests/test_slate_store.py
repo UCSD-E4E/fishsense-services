@@ -1009,3 +1009,33 @@ async def test_the_catalog_works_within_a_served_tenant(
     assert await catalog.apply_slate_sync(lab, 8001, _sync()) is True
     # v1 counts the rows it touched, flagged or not (its idempotency test).
     assert await catalog.clear_slate_reprocess_flags(lab, only, checksums=None) == 1
+
+
+async def _set_port(owner_engine, mission_id, port):
+    """Restate the mission's port (2b-2)."""
+    async with owner_engine.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE missions SET port = :p, port_source = "
+                "CASE WHEN :p = 'unknown' THEN NULL ELSE 'operator' END "
+                "WHERE id = :m"
+            ),
+            {"p": port, "m": mission_id},
+        )
+
+
+@pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
+async def test_a_mission_not_behind_the_corrective_optic_is_not_offered(
+    owner_engine, app_engine, port
+):
+    """2b-2 (the owner, 2026-10-20): pinhole maths holds only behind the
+    corrective optic. The control first: the mission is work; then only its
+    port changes."""
+    lab = await tenant(owner_engine)
+    mission_id = await _slate_mission(owner_engine, lab)
+    await species(owner_engine, lab, await capture(owner_engine, lab, mission_id))
+    assert await _next(app_engine, lab) == mission_id
+
+    await _set_port(owner_engine, mission_id, port)
+
+    assert await _next(app_engine, lab) is None

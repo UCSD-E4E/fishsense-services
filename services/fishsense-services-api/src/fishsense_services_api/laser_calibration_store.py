@@ -79,6 +79,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api.camera_sql import RECTIFIABLE_MISSION
 from fishsense_services_api.service_principal import ServicePrincipal
 from fishsense_services_api.species_store import REFUSAL_OUTLIVED_SQL
 
@@ -249,14 +250,10 @@ _EFFECTIVE_TARGET = """
      WHERE t.id = d.calibration_target_id)
 """
 
-#: The dive's device has a current camera calibration: without one both
-#: resolvers refuse (`_require_camera`).
-_HAS_CAMERA = """
-    EXISTS (
-        SELECT 1 FROM current_camera_calibrations cc
-        WHERE cc.tenant_id = d.tenant_id AND cc.device_id = d.device_id
-    )
-"""
+#: The dive's device has a current camera calibration -- without one both
+#: resolvers refuse (`_require_camera`) -- and a pinhole one behind the
+#: corrective optic, the only camera the fits' maths holds for (2b-2).
+_HAS_CAMERA = RECTIFIABLE_MISSION
 
 #: The dive's slate template can scale a fit: a dpi and reference points,
 #: which `slate_calibration_inputs` refuses without.

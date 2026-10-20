@@ -73,6 +73,12 @@ const SOURCE_NAMES: Record<PortSource, string> = {
   calibration: "inferred from a lens calibration",
 };
 
+/** The pipeline rectifies with pinhole maths, which holds only behind the
+ *  corrective optic (2b-2): any other port is recorded but not processed. */
+export function isProcessedPort(port: Port): boolean {
+  return port === "corrective_optic";
+}
+
 export function portLabel(port: Port, source: PortSource | null | undefined): string {
   return source ? `${PORT_NAMES[port]} (${SOURCE_NAMES[source]})` : PORT_NAMES[port];
 }

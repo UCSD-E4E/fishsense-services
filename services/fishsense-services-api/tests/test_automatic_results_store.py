@@ -290,6 +290,18 @@ async def test_a_mission_the_pipeline_cannot_rectify_is_not_selected(
     assert await _next(app_engine, lab) is None
 
 
+@pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
+async def test_a_mission_not_behind_the_corrective_optic_is_not_selected(
+    owner_engine, app_engine, port
+):
+    """2b-2: the frames stage rectifies the raw as a pinhole camera."""
+    lab = await tenant(owner_engine)
+    d = await _backlog_mission(owner_engine, lab, port=port)
+    await capture(owner_engine, lab, d)
+
+    assert await _next(app_engine, lab) is None
+
+
 async def test_the_cohort_drains(owner_engine, app_engine):
     """Every frame predicted (or abstained), a calibration row (even a
     refusal), no length possible without a calibration: done."""

@@ -886,3 +886,36 @@ async def test_the_catalog_acts_only_in_tenants_it_is_a_member_of(
             depths=[],
             refusals=[],
         )
+
+
+async def _set_port(owner_engine, mission_id, port):
+    """Restate the mission's port (2b-2)."""
+    async with owner_engine.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE missions SET port = :p, port_source = "
+                "CASE WHEN :p = 'unknown' THEN NULL ELSE 'operator' END "
+                "WHERE id = :m"
+            ),
+            {"p": port, "m": mission_id},
+        )
+
+
+@pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
+async def test_a_mission_not_behind_the_corrective_optic_is_not_offered(
+    owner_engine, app_engine, port
+):
+    """2b-2 (the owner, 2026-10-20): pinhole maths holds only behind the
+    corrective optic. The control first: the mission is work; then only its
+    port changes."""
+    lab = await tenant(owner_engine)
+    mission_id = await mission(
+        owner_engine, lab, device_id=await device(owner_engine, lab)
+    )
+    await calibrate(owner_engine, lab, mission_id)
+    await _labelled(owner_engine, lab, mission_id)
+    assert await _next(app_engine, lab) == mission_id
+
+    await _set_port(owner_engine, mission_id, port)
+
+    assert await _next(app_engine, lab) is None

@@ -100,9 +100,10 @@ class Seed:
             return result.scalar() if result.returns_rows else None
 
     async def mission(self, *, priority="high", number=None, created_at=None,
-                   device=_CALIBRATED):  # fmt: skip
-        """A dive; by default on the tenant's one calibrated device, as the
-        stage-0.1 and prediction cohorts require. `device=None` has none."""
+                   device=_CALIBRATED, port="corrective_optic"):  # fmt: skip
+        """A dive; by default on the tenant's one calibrated device and behind
+        the corrective optic, as the stage-0.1 and prediction cohorts require.
+        `device=None` has none."""
         if device is _CALIBRATED:
             if self._device is None:
                 self._device = await self.camera()
@@ -110,10 +111,11 @@ class Seed:
         self._path += 1
         return await self._one(
             "INSERT INTO missions (tenant_id, source_path, started_at, priority, number, "
-            "device_id, created_at) VALUES (:t, :p, :at, :pr, :n, :dev, "
-            "coalesce(:c, now())) RETURNING id",
+            "device_id, created_at, port, port_source) VALUES (:t, :p, :at, :pr, :n, "
+            ":dev, coalesce(:c, now()), :port, "
+            "CASE WHEN :port = 'unknown' THEN NULL ELSE 'operator' END) RETURNING id",
             t=self.tenant, p=f"/{uuid.uuid4()}", at=T0, pr=priority, n=number,
-            dev=device, c=created_at,
+            dev=device, c=created_at, port=port,
         )  # fmt: skip
 
     async def capture(self, mission, *, canonical=True, checksum=None, number=None,
@@ -412,6 +414,23 @@ async def test_a_mission_on_an_axial_camera_is_never_selected(
     no candidate, as in stage 5.1 (headtail_store._RENDERABLE)."""
     axial = await lab.mission(device=await lab.camera(model="axial_refractive"))
     await lab.capture(axial)
+
+    assert await _next(app_engine, lab, selector) is None
+
+
+@pytest.mark.parametrize(
+    "selector",
+    [next_mission_for_laser_preprocessing, next_mission_for_laser_prediction],
+)
+@pytest.mark.parametrize("port", ["unknown", "flat", "dome"])
+async def test_a_mission_not_behind_the_corrective_optic_is_never_selected(
+    lab, app_engine, selector, port
+):
+    """2b-2 (the owner, 2026-10-20): the pipeline rectifies with pinhole maths,
+    which is right only for the corrective optic. A flat port is axial, a
+    dome's centring is unchecked, and an unknown port is nothing yet."""
+    behind = await lab.mission(port=port)
+    await lab.capture(behind)
 
     assert await _next(app_engine, lab, selector) is None
 

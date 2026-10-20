@@ -168,7 +168,9 @@ Q() { docker exec fishsense-postgres-1 psql -U postgres -d fishsense_services -A
   The `D` counts only in file names (the path), never in the EXIF Artist,
   which is free text typed into the camera. Nothing else counts: a missing
   `D` does not mean flat, and lab notes are not evidence. Never write a port without its
-  `port_source`.
+  `port_source`. Only `corrective_optic` is processed: a new stage selects its
+  missions through `camera_sql.RECTIFIABLE_MISSION` (or `ADMITTED_PORT`, if it
+  only projects), never through its own camera check.
 - **A mission's purpose is what it was for, never whether it calibrates**
   (0048). Nearly every dive has a calibration board in it. Never select laser
   calibration by purpose; find the board in the frames.

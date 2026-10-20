@@ -135,8 +135,9 @@ async def _dive(
     return await _exec(
         owner_engine,
         "INSERT INTO missions (tenant_id, source_path, name, started_at, priority, "
-        "device_id, created_at) VALUES (:t, :p, 'd', :at, :prio, :dev, :at) "
-        "RETURNING id",
+        "device_id, created_at, port, port_source) VALUES (:t, :p, 'd', :at, :prio, "
+        # Behind the corrective optic, as every production mission is (2b-2).
+        ":dev, :at, 'corrective_optic', 'operator') RETURNING id",
         t=tenant,
         p=f"/d/{uuid.uuid4()}",
         at=at,

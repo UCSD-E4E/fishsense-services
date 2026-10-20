@@ -193,8 +193,10 @@ async def _dive(
         owner_engine,
         "INSERT INTO missions (tenant_id, source_path, name, started_at, priority, "
         "device_id, slate_template_id, calibration_target_id, "
-        "calibration_source_mission_id, created_at) VALUES (:t, :p, :name, :at, "
-        ":priority, :device, :slate, :target, :src, :created) RETURNING id, number",
+        "calibration_source_mission_id, created_at, port, port_source) VALUES (:t, "
+        ":p, :name, :at, :priority, :device, :slate, :target, :src, :created, "
+        # Behind the corrective optic, as every production mission is (2b-2).
+        "'corrective_optic', 'operator') RETURNING id, number",
         t=tenant_id,
         p=f"/dives/{n}",
         name=name,
