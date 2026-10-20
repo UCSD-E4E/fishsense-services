@@ -16,6 +16,10 @@ fishsense-services-api backfill-mission-facts --tenant <id> \\
                                     # dry run: ports, deployments and purposes
                                     # for missions before 0047; --apply <the
                                     # dry run's fingerprint> writes that plan
+fishsense-services-api infer-deployments --tenant <id> [--together 398=400 ...]
+                                    # dry run: deployments for legacy missions
+                                    # from their folders and dates; --apply
+                                    # <the dry run's fingerprint> writes them
 fishsense-services-api dev-seed --frames deploy/local/ui/frames
                                     # LOCAL ONLY: the UI harness's synthetic
                                     # tenant (compose.ui.yml, dev_seed.py)
@@ -55,6 +59,14 @@ from fishsense_services_api.automatic_validation_store import (
     validation_frames,
 )
 from fishsense_services_api.db import tenant_transaction
+from fishsense_services_api.deployment_inference import (
+    InferencePlan,
+    apply_inference,
+    plan_inference,
+)
+from fishsense_services_api.deployment_inference import (
+    PlanChanged as InferenceChanged,
+)
 from fishsense_services_api.mission_backfill import (
     BackfillPlan,
     PlanChanged,
@@ -196,6 +208,31 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="FINGERPRINT",
         help="write the plan whose dry run printed this fingerprint",
     )
+    infer = commands.add_parser(
+        "infer-deployments",
+        help="plan (and with --apply, write) deployments for missions in none, "
+        "from their folders and dates; a dry run by default",
+    )
+    infer.add_argument("--tenant", required=True, help="the tenant's slug, or its id")
+    infer.add_argument(
+        "--gap-days",
+        type=int,
+        default=2,
+        help="missions at one place at most this many days apart are one trip",
+    )
+    infer.add_argument(
+        "--together",
+        action="append",
+        default=[],
+        metavar="NUMBER=OTHER",
+        help="put mission NUMBER on mission OTHER's trip (its date and place); "
+        "repeatable, and part of the reviewed plan",
+    )
+    infer.add_argument(
+        "--apply",
+        metavar="FINGERPRINT",
+        help="write the plan whose dry run printed this fingerprint",
+    )
     seed = commands.add_parser(
         "dev-seed",
         help="LOCAL ONLY: seed the UI harness's synthetic tenant (compose.ui.yml); "
@@ -225,6 +262,8 @@ async def main(argv: Sequence[str]) -> int:
         return await _add_tenant(args)
     if args.command == "backfill-mission-facts":
         return await _backfill_mission_facts(args)
+    if args.command == "infer-deployments":
+        return await _infer_deployments(args)
     if args.command == "dev-seed":
         return await _dev_seed(args)
     return 2  # unreachable: argparse rejects unknown commands
@@ -282,6 +321,94 @@ def format_backfill_plan(plan: BackfillPlan) -> str:
             f"{m.purpose_why or '-'} / {m.deployment or '-'} / {m.name}"
         )
     return "\n".join(lines)
+
+
+def format_inference_plan(plan: InferencePlan) -> str:
+    """The dry run's report: totals first, then every trip and what to look at."""
+    new = [t for t in plan.trips if not t.exists and t.to_write]
+    lines = [
+        f"trips: {len(plan.trips)}; {len(new)} new deployments; "
+        f"{sum(len(t.to_write) for t in plan.trips)} missions to write; "
+        f"{sum(t.conflict for t in plan.trips)} left alone",
+    ]
+    for t in plan.trips:
+        state = (
+            "LEFT ALONE"
+            if t.conflict
+            else "exists" if t.exists else f"new, {t.started_on}..{t.ended_on}"
+        )
+        lines.append(
+            f"\n{t.name}  ({state}; {len(t.missions)} missions, {t.sessions} "
+            f"sessions; writes {len(t.to_write)})"
+        )
+        lines.append(f"  missions: {', '.join(map(str, t.missions))}")
+        for flag in t.flags:
+            lines.append(f"  ! {flag.mission or 'trip'}: {flag.note}")
+    return "\n".join(lines)
+
+
+def _together(values: Sequence[str]) -> dict[int, int] | None:
+    together: dict[int, int] = {}
+    for value in values:
+        number, _, other = value.partition("=")
+        if not (number.isdigit() and other.isdigit()):
+            print(f"--together {value!r}: want NUMBER=OTHER", file=sys.stderr)
+            return None
+        together[int(number)] = int(other)
+    return together
+
+
+async def _infer_deployments(args: argparse.Namespace) -> int:
+    """Dry run unless --apply names the fingerprint of the plan reviewed."""
+    together = _together(args.together)
+    if together is None:
+        return 2
+    settings = _settings(AuditSettings)
+    if settings is None:
+        return 2
+    engine = create_async_engine(settings.database_url.get_secret_value())
+    try:
+        tenant_id = await _tenant_id(engine, args.tenant)
+        if tenant_id is None:
+            print(f"unknown tenant {args.tenant!r}", file=sys.stderr)
+            return 1
+        if args.apply:
+            try:
+                async with tenant_transaction(engine, tenant_id) as conn:
+                    applied = await apply_inference(
+                        conn,
+                        tenant_id,
+                        expect=args.apply,
+                        gap_days=args.gap_days,
+                        together=together,
+                    )
+            except (InferenceChanged, ValueError) as error:
+                print(f"nothing written: {error}", file=sys.stderr)
+                return 1
+            print(
+                f"applied {args.apply}: {applied.missions} missions, "
+                f"{applied.deployments} new deployments"
+            )
+            return 0
+        try:
+            async with tenant_transaction(engine, tenant_id) as conn:
+                plan = await plan_inference(
+                    conn, tenant_id, gap_days=args.gap_days, together=together
+                )
+        except ValueError as error:
+            print(str(error), file=sys.stderr)
+            return 2
+        print("DRY RUN: nothing written")
+        print(format_inference_plan(plan))
+        again = " ".join(f"--together {v}" for v in args.together)
+        print(
+            f"\nto write exactly this plan: infer-deployments --tenant {args.tenant} "
+            f"--gap-days {args.gap_days} {again + ' ' if again else ''}"
+            f"--apply {plan.fingerprint}"
+        )
+        return 0
+    finally:
+        await engine.dispose()
 
 
 async def _backfill_mission_facts(args: argparse.Namespace) -> int:
