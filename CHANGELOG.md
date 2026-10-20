@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.16.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.15.1...v0.16.0) (2026-10-20)
+
+
+### Features
+
+* only missions behind the corrective optic are processed ([bce4593](https://github.com/UCSD-E4E/fishsense-services/commit/bce45934042ec0d5964983fbc0e56be5b6fbcdc9))
+* only missions behind the corrective optic are processed ([52a86be](https://github.com/UCSD-E4E/fishsense-services/commit/52a86beffdbd24010d1c7f061da62b7a3b3740dd))
+* **renders:** every capture's raw rectified to a JPEG, in its tenant's bucket ([b6d976c](https://github.com/UCSD-E4E/fishsense-services/commit/b6d976cd719f4c3003992faef4cd8fbce8185f03))
+* **renders:** every capture's raw rectified to a JPEG, once, in its tenant's bucket ([a1d93a8](https://github.com/UCSD-E4E/fishsense-services/commit/a1d93a875dd715cd183f6363e9f05a6fa0259599))
+
+
+### Bug Fixes
+
+* **api:** renumber the capture renders migration to 0051 ([d548a5b](https://github.com/UCSD-E4E/fishsense-services/commit/d548a5b5b5c4b7a95fe4e8dcd15c0d101bc32458))
+* **api:** renumber the capture renders migration to 0051 ([9c21d37](https://github.com/UCSD-E4E/fishsense-services/commit/9c21d3744c755046932e76b8e82464d14b0527c1))
+* one migration head again, and renders admit only the corrective optic ([ed8865d](https://github.com/UCSD-E4E/fishsense-services/commit/ed8865d6592fe14fd28b121fabfc4eacc952636f))
+* one migration head again, and renders admit only the corrective optic ([e7879d2](https://github.com/UCSD-E4E/fishsense-services/commit/e7879d2a790839d83b01ce82de7a2c7b547022b6))
+* **renders:** review of [#144](https://github.com/UCSD-E4E/fishsense-services/issues/144) -- abstentions settle frames, lookups by camera, pages ([077a160](https://github.com/UCSD-E4E/fishsense-services/commit/077a160ed19a80a7e583138aa4b41999fca31c6a))
+* restore the port gate's migration to 0050 ([152086b](https://github.com/UCSD-E4E/fishsense-services/commit/152086b730079e0693d9f19327d24f81fcc06f33))
+* restore the port gate's migration to 0050 ([630a1d6](https://github.com/UCSD-E4E/fishsense-services/commit/630a1d69e6d1559e585c82b36b6d59503f26f528))
+* review findings on the port gate ([#143](https://github.com/UCSD-E4E/fishsense-services/issues/143)) ([d32f950](https://github.com/UCSD-E4E/fishsense-services/commit/d32f950726d7d2b5acc773dc2d0dbd822e8c5a61))
+
 ## [0.15.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.15.0...v0.15.1) (2026-10-20)
 
 
