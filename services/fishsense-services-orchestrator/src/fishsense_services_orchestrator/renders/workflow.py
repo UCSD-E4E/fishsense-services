@@ -91,6 +91,10 @@ class RenderMissionReport:
     unverified: int = 0
     #: Owed captures the processor left out after its tries.
     left_out: int = 0
+    #: Raws copied into the tenant's bucket, and copies the stored object or
+    #: the capture's checksum disagreed with (2026-10-20).
+    raws: int = 0
+    raws_unverified: int = 0
     no_bucket: bool = False
     #: The mission's render child is running under another firing.
     running_elsewhere: bool = False
@@ -175,6 +179,8 @@ async def render_pages(
         report.rendered += persisted.rendered
         report.abstained += persisted.abstained
         report.unverified += len(persisted.unverified)
+        report.raws += persisted.raws
+        report.raws_unverified += len(persisted.raws_unverified)
         report.left_out += len(frames) - len(results)
         page = await _page(target, page.last_number)
 

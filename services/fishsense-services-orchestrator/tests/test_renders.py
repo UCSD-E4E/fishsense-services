@@ -46,6 +46,7 @@ from fishsense_services_contracts.renders import (
     RenderCapturesInput,
     RenderFrame,
     RenderResult,
+    raw_key,
     render_key,
 )
 from fishsense_services_contracts.temporal import DATA_CONVERTER
@@ -88,6 +89,10 @@ class _Objects:
         return PresignedUpload(url=f"https://garage/{self.bucket}/{key}?sig",
                                headers={"Content-Type": "image/jpeg"})  # fmt: skip
 
+    def presign_raw_put(self, key):
+        return PresignedUpload(url=f"https://garage/{self.bucket}/{key}?raw",
+                               headers={"Content-Type": "application/octet-stream"})  # fmt: skip
+
     def head(self, key):
         return self.stored.get(key)
 
@@ -105,6 +110,8 @@ class _Stores:
 class _Catalog:
     def __init__(self, captures=2, missions=None, slugs=None):
         self.persisted = []
+        self.raws = []
+        self.buckets = []
         self.captures = [RenderCapture(uuid.uuid4(), f"{i:032x}", i + 1)
                          for i in range(captures)]  # fmt: skip
         self.missions = missions or {LAB: [RenderMission(MISSION, captures, True, T0)]}
@@ -117,13 +124,15 @@ class _Catalog:
     async def tenant_slug(self, tenant_id):
         return self.slugs[tenant_id]
 
-    async def render_missions(self, tenant_id, *, render_version, limit=None):
+    async def render_missions(self, tenant_id, *, bucket, render_version, limit=None):
         assert render_version == RENDER_VERSION
+        self.buckets.append(bucket)
         return self.missions.get(tenant_id, [])[:limit]
 
-    async def render_inputs(self, tenant_id, mission_id, *, render_version,
+    async def render_inputs(self, tenant_id, mission_id, *, bucket, render_version,
                             after_number=None, limit=None):  # fmt: skip
         self.pages.append((after_number, limit))
+        self.buckets.append(bucket)
         owed = [
             c for c in self.captures if after_number is None or c.number > after_number
         ]
@@ -131,6 +140,10 @@ class _Catalog:
 
     async def persist_renders(self, tenant_id, mission_id, rows):
         self.persisted.extend(rows)
+        return len(rows)
+
+    async def persist_raws(self, tenant_id, mission_id, rows):
+        self.raws.extend(rows)
         return len(rows)
 
 
@@ -194,6 +207,8 @@ async def test_owed_captures_come_a_page_at_a_time_with_their_raw_key_and_put():
 
     assert [len(first.payload.frames), len(rest.payload.frames)] == [2, 1]
     assert catalog.pages == [(None, 2), (2, 2)]
+    # Owed in the tenant's *current* bucket (review of #151).
+    assert set(catalog.buckets) == {"fishsense-tenant-lab"}
     got = first.payload
     assert (got.render_version, got.camera_calibration_id) == (RENDER_VERSION, CAMERA)
     for frame, c in zip(got.frames, catalog.captures):
@@ -320,7 +335,8 @@ def _stubs(*, payload, results=None, page=None, fail=None):
     async def persist(target: RenderTarget, p: RenderCapturesInput,
                       r: List[RenderResult]) -> RenderPersistReport:  # fmt: skip
         EVENTS.append(("persist", len(r)))
-        return RenderPersistReport(written=len(r), rendered=len(r))
+        return RenderPersistReport(written=len(r), rendered=len(r), raws=len(r),
+                                   raws_unverified=[uuid.uuid4()])  # fmt: skip
 
     @activity.defn(name="select_render_missions")
     async def select(limit: Optional[int]) -> List[RenderTarget]:
@@ -366,6 +382,8 @@ async def test_a_mission_is_staged_once_rendered_a_page_at_a_time_and_cleaned_up
     assert ("render", f"render-captures-{MISSION}", 2) in EVENTS
     # each page's child leaves its last capture out (the stub): 5 owed, 2 rendered
     assert (report.owed, report.rendered, report.left_out) == (5, 2, 3)
+    # The raws copied, and not, are in the mission's result (review of the stack).
+    assert (report.raws, report.raws_unverified) == (2, 3)
 
 
 async def test_a_tenant_with_no_bucket_stages_nothing():
@@ -393,3 +411,153 @@ def test_off_by_default():
     (schedule,) = render_schedules(RenderSettings(renders_enabled=True))
     assert schedule.workflow is RenderBacklogWorkflow
     assert schedule.every == timedelta(hours=1)
+
+
+# -- the raw, copied in the same pass (2026-10-20) ------------------------------------
+
+
+async def test_a_frame_carries_what_its_capture_owes():
+    """Render and raw copy, or the copy alone for a capture rendered before
+    raws were copied -- which is not rendered again."""
+    catalog = _Catalog(captures=2)
+    both, copy_only = catalog.captures
+    catalog.captures = [
+        RenderCapture(both.capture_id, both.checksum, 1, True, True),
+        RenderCapture(copy_only.capture_id, copy_only.checksum, 2, False, True),
+    ]
+
+    page = await _run(_acts(catalog).resolve_render_inputs, RenderTarget(LAB, MISSION))
+
+    first, second = page.payload.frames
+    assert first.owes_render and first.owes_raw
+    assert first.raw_key == raw_key(both.checksum) and first.checksum == both.checksum
+    assert first.raw_put_url.endswith(f"{raw_key(both.checksum)}?raw")
+    assert (second.owes_render, second.owes_raw) == (False, True)
+    assert second.key is None and second.put_url is None
+
+
+def _raw_payload(catalog, *, render=False):
+    frames = [
+        RenderFrame(capture_id=c.capture_id, raw=ObjectRef(bucket="s", key="r"),
+                    checksum=c.checksum, raw_key=raw_key(c.checksum), raw_put_url="p",
+                    **({"key": render_key(RENDER_VERSION, CAMERA, c.checksum),
+                        "put_url": "u"} if render else {}))
+        for c in catalog.captures
+    ]  # fmt: skip
+    return RenderCapturesInput(
+        tenant_id=LAB, mission_id=MISSION, render_version=RENDER_VERSION,
+        camera_calibration_id=CAMERA, camera_matrix=K,
+        distortion_coefficients=[0.0] * 5, frames=frames,
+    )  # fmt: skip
+
+
+def _copied(capture_id, raw_md5, **extra):
+    fields = dict(capture_id=capture_id, status="not_asked",
+                  render_version=RENDER_VERSION, camera_calibration_id=CAMERA,
+                  raw_status="copied", raw_bytes=200, raw_md5=raw_md5)  # fmt: skip
+    fields.update(extra)
+    return RenderResult(**fields)
+
+
+async def test_only_a_copy_matching_the_store_and_the_capture_is_recorded():
+    """The stored object must match what the processor reported, and its MD5
+    must be the capture's own checksum: a raw changed on the NAS since ingest
+    is not the capture's raw."""
+    catalog = _Catalog(captures=4)
+    payload = _raw_payload(catalog)
+    good, stored_differs, not_the_capture, missing = payload.frames
+    objects = _Objects({
+        good.raw_key: StoredObject(size=200, sha256=None, md5=good.checksum),
+        stored_differs.raw_key: StoredObject(size=999, sha256=None,
+                                             md5=stored_differs.checksum),
+        not_the_capture.raw_key: StoredObject(size=200, sha256=None, md5=MD5),
+    })  # fmt: skip
+    results = [
+        _copied(good.capture_id, good.checksum),
+        _copied(stored_differs.capture_id, stored_differs.checksum),
+        _copied(not_the_capture.capture_id, MD5),
+        RenderResult(capture_id=missing.capture_id, status="raw_unavailable",
+                     render_version=RENDER_VERSION, camera_calibration_id=CAMERA,
+                     raw_status="raw_unavailable"),
+    ]  # fmt: skip
+
+    report = await _run(_acts(catalog, objects).persist_renders,
+                        RenderTarget(LAB, MISSION), payload, results)  # fmt: skip
+
+    assert report.raws == 1
+    assert set(report.raws_unverified) == {
+        stored_differs.capture_id,
+        not_the_capture.capture_id,
+    }
+    (raw,) = catalog.raws
+    assert (raw.capture_id, raw.bucket, raw.key, raw.bytes, raw.md5) == (
+        good.capture_id,
+        "fishsense-tenant-lab",
+        good.raw_key,
+        200,
+        good.checksum,
+    )
+    # The missing raw counts toward its abstention; no render row otherwise.
+    (abstention,) = catalog.persisted
+    assert (abstention.capture_id, abstention.status) == (
+        missing.capture_id,
+        "raw_unavailable",
+    )
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        lambda f: _rendered(f.capture_id),
+        lambda f: _copied(f.capture_id, f.checksum, status="rendered", bytes=1,
+                          md5=MD5),
+    ],
+    ids=["rendered-unasked", "rendered-with-copy-unasked"],
+)  # fmt: skip
+async def test_a_result_claiming_work_the_frame_did_not_owe_is_refused(bad):
+    catalog = _Catalog(captures=1)
+    payload = _raw_payload(catalog)  # owes only its copy
+    with pytest.raises(ApplicationError) as error:
+        await _run(_acts(catalog).persist_renders, RenderTarget(LAB, MISSION),
+                   payload, [bad(payload.frames[0])])  # fmt: skip
+    assert error.value.type == "InvalidRenders"
+    assert catalog.persisted == [] and catalog.raws == []
+
+
+async def test_a_copy_reported_for_a_frame_owing_none_is_refused():
+    catalog = _Catalog(captures=1)
+    payload = _payload(catalog)  # owes only its render
+    frame = payload.frames[0]
+    with pytest.raises(ApplicationError) as error:
+        await _run(_acts(catalog).persist_renders, RenderTarget(LAB, MISSION), payload,
+                   [_rendered(frame.capture_id, raw_status="copied", raw_bytes=1,
+                              raw_md5=MD5)])  # fmt: skip
+    assert error.value.type == "InvalidRenders"
+
+
+async def test_a_render_owed_but_not_made_is_refused():
+    """Review of the stack: ``not_asked`` for a frame that owes its render was
+    skipped silently -- the capture stayed owed and the run looked clean."""
+    catalog = _Catalog(captures=1)
+    payload = _payload(catalog)  # owes its render
+    frame = payload.frames[0]
+    with pytest.raises(ApplicationError) as error:
+        await _run(_acts(catalog).persist_renders, RenderTarget(LAB, MISSION), payload,
+                   [RenderResult(capture_id=frame.capture_id, status="not_asked",
+                                 render_version=RENDER_VERSION,
+                                 camera_calibration_id=CAMERA)])  # fmt: skip
+    assert error.value.type == "InvalidRenders" and "owed" in str(error.value)
+
+
+async def test_a_raw_owed_but_not_answered_is_refused_as_an_older_processor():
+    """A processor older than contract 10 renders and says nothing of the raw
+    it was asked to copy: refused, loudly, rather than left owed forever."""
+    catalog = _Catalog(captures=1)
+    payload = _raw_payload(catalog, render=True)  # owes both
+    frame = payload.frames[0]
+    with pytest.raises(ApplicationError) as error:
+        await _run(_acts(catalog).persist_renders, RenderTarget(LAB, MISSION), payload,
+                   [_rendered(frame.capture_id)])  # fmt: skip
+    assert error.value.type == "InvalidRenders"
+    assert "contract 10" in str(error.value)
+    assert catalog.persisted == [] and catalog.raws == []

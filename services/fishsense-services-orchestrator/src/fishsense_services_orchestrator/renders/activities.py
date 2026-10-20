@@ -12,6 +12,14 @@ shared fallback.
 reports the size and MD5 it wrote, and each is compared with the stored
 object (its single-part ETag is its MD5) before the render is recorded. One
 that does not match, or is not there, is not recorded and stays owed.
+
+**The raw, copied in the same pass** (2026-10-20). What a capture owes is
+judged in its tenant's *current* bucket (review of #151): a render, a copy of
+its raw (``raws/{checksum}.ORF``), or both. A frame carries a presigned PUT
+for each it owes; one rendered before raws were copied owes only the copy and
+is not rendered again. A copy is recorded only if the stored object matches
+the processor's report and its MD5 is the capture's own checksum -- a raw
+changed on the NAS since ingest is not the capture's raw.
 """
 
 from __future__ import annotations
@@ -24,13 +32,14 @@ from typing import Any, List, Optional
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from fishsense_services_api.renders_store import RenderRow
+from fishsense_services_api.renders_store import RawRow, RenderRow
 from fishsense_services_api.tenant_stores import NoTenantStore
 from fishsense_services_contracts.renders import (
     RENDER_VERSION,
     RenderCapturesInput,
     RenderFrame,
     RenderResult,
+    raw_key,
     render_key,
 )
 
@@ -75,6 +84,10 @@ class RenderPersistReport:
     abstained: int = 0
     #: Rendered, but the stored object did not match what was reported.
     unverified: List[uuid.UUID] = field(default_factory=list)
+    #: Raws copied and recorded (2026-10-20).
+    raws: int = 0
+    #: Copied, but the stored object or the capture's checksum disagreed.
+    raws_unverified: List[uuid.UUID] = field(default_factory=list)
 
 
 def _first(mission) -> tuple:
@@ -124,10 +137,14 @@ class RenderActivities:
         one (review of #144)."""
         found = []
         for tenant_id in await self._catalog.member_tenants():
-            if await self._objects(tenant_id) is None:
+            objects = await self._objects(tenant_id)
+            if objects is None:
                 continue
             for m in await self._catalog.render_missions(
-                tenant_id, render_version=RENDER_VERSION, limit=limit
+                tenant_id,
+                bucket=objects.bucket,
+                render_version=RENDER_VERSION,
+                limit=limit,
             ):
                 found.append((tenant_id, m))
         found.sort(key=lambda tm: _first(tm[1]))
@@ -150,19 +167,31 @@ class RenderActivities:
         inputs = await self._catalog.render_inputs(
             target.tenant_id,
             target.mission_id,
+            bucket=objects.bucket,
             render_version=RENDER_VERSION,
             after_number=after_number,
             limit=limit,
         )
         frames = []
         for c in inputs.captures:
-            key = render_key(RENDER_VERSION, inputs.camera_calibration_id, c.checksum)
+            owed: dict = {}
+            if c.render_owed:
+                key = render_key(
+                    RENDER_VERSION, inputs.camera_calibration_id, c.checksum
+                )
+                owed.update(key=key, put_url=objects.presign_render_put(key).url)
+            if c.raw_owed:
+                copy = raw_key(c.checksum)
+                owed.update(
+                    checksum=c.checksum,
+                    raw_key=copy,
+                    raw_put_url=objects.presign_raw_put(copy).url,
+                )
             frames.append(
                 RenderFrame(
                     capture_id=c.capture_id,
                     raw=self._store.layout.raw(target.tenant_id, c.checksum),
-                    key=key,
-                    put_url=objects.presign_render_put(key).url,
+                    **owed,
                 )
             )
             activity.heartbeat()
@@ -192,6 +221,7 @@ class RenderActivities:
         asked = {f.capture_id: f for f in payload.frames}
         report = RenderPersistReport()
         rows: List[RenderRow] = []
+        raws: List[RawRow] = []
         for r in results:
             frame = asked.get(r.capture_id)
             if frame is None:
@@ -201,6 +231,32 @@ class RenderActivities:
                 payload.camera_calibration_id,
             ):
                 raise _refuse(target, f"capture {r.capture_id}: another render")
+            if r.status == "rendered" and not frame.owes_render:
+                raise _refuse(target, f"capture {r.capture_id}: a render not owed")
+            if r.raw_status is not None and not frame.owes_raw:
+                raise _refuse(target, f"capture {r.capture_id}: a raw copy not owed")
+            # Review of the stack: what a frame owes must be answered, or the
+            # capture stays owed while the run looks clean.
+            if r.status == "not_asked" and frame.owes_render:
+                raise _refuse(
+                    target, f"capture {r.capture_id}: a render owed, not made"
+                )
+            if (
+                frame.owes_raw
+                and r.raw_status is None
+                and r.status != "raw_unavailable"
+            ):
+                raise _refuse(
+                    target,
+                    f"capture {r.capture_id}: its raw copy was owed and not answered "
+                    "-- a processor older than contract 10?",
+                )
+            if r.raw_status == "copied":
+                raw = await self._checked_raw(target, objects, frame, r, report)
+                if raw is not None:
+                    raws.append(raw)
+            if r.status == "not_asked":
+                continue
             if r.status != "rendered":
                 report.abstained += 1
                 rows.append(RenderRow(capture_id=r.capture_id, status=r.status,
@@ -229,9 +285,37 @@ class RenderActivities:
         report.written = await self._catalog.persist_renders(
             target.tenant_id, target.mission_id, rows
         )
+        report.raws = await self._catalog.persist_raws(
+            target.tenant_id, target.mission_id, raws
+        )
         activity.logger.info(
-            "mission=%s renders written=%d rendered=%d abstained=%d unverified=%d",
+            "mission=%s renders written=%d rendered=%d abstained=%d unverified=%d "
+            "raws=%d raws_unverified=%d",
             target.mission_id, report.written, report.rendered, report.abstained,
-            len(report.unverified),
+            len(report.unverified), report.raws, len(report.raws_unverified),
         )  # fmt: skip
         return report
+
+    async def _checked_raw(
+        self, target: RenderTarget, objects, frame: RenderFrame, r: RenderResult,
+        report: RenderPersistReport,
+    ) -> Optional[RawRow]:  # fmt: skip
+        """The copy, if the stored object is what the processor reported and
+        that is the capture's raw (its checksum); else None, left owed."""
+        stored = await asyncio.to_thread(objects.head, frame.raw_key)
+        if (
+            stored is None
+            or stored.size != r.raw_bytes
+            or stored.md5 != r.raw_md5
+            or r.raw_md5 != frame.checksum
+        ):
+            activity.logger.warning(
+                "mission=%s capture=%s: raw copy %s does not match (stored %s; "
+                "reported %s bytes, md5 %s; capture checksum %s); left owed",
+                target.mission_id, r.capture_id, frame.raw_key, stored, r.raw_bytes,
+                r.raw_md5, frame.checksum,
+            )  # fmt: skip
+            report.raws_unverified.append(r.capture_id)
+            return None
+        return RawRow(capture_id=r.capture_id, bucket=objects.bucket,
+                      key=frame.raw_key, bytes=r.raw_bytes, md5=r.raw_md5)  # fmt: skip

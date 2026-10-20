@@ -151,6 +151,20 @@ def test_a_render_upload_is_stored_and_its_md5_read_back(stores):
     assert stored.md5 == hashlib.md5(BODY).hexdigest()
 
 
+def test_a_raw_put_is_unsigned_bytes_checked_after(stores):
+    """The render stage copies each raw into the tenant's bucket (2026-10-20):
+    the processor reports the MD5 it wrote, and the stored object is checked
+    against it and the capture's checksum, as for a render."""
+    lab = stores.for_tenant("lab")
+    upload = lab.presign_raw_put("raws/c.ORF")
+
+    assert "X-Amz-Expires=604800" in upload.url
+    assert upload.headers == {"Content-Type": "application/octet-stream"}
+    assert _put(upload, BODY) == 200
+    stored = lab.head("raws/c.ORF")
+    assert (stored.size, stored.md5) == (len(BODY), hashlib.md5(BODY).hexdigest())
+
+
 def test_urls_are_signed_for_the_public_endpoint(garage):
     """Phones and browsers reach Garage at its public address; the API's own
     checks use the internal one. A signature covers the host, so presigning

@@ -16,6 +16,14 @@ or one that will not decode, is an abstention (`raw_unavailable`,
 another render version is refused and retried (`RenderVersionMismatch`): a
 worker at another version -- a lab worker deployed by hand -- never writes
 its rendering under another version's key.
+
+**The raw, copied in the same pass** (2026-10-20). A frame may also owe a copy
+of its raw in the tenant's bucket (`RenderFrame.raw_put_url`). The raw is
+downloaded once, copied first -- an undecodable raw is still the data -- and
+rendered after, if the frame owes a render; one owing only its copy is not
+rendered (``not_asked``), since its stored render must keep matching its
+recorded MD5. The result names the copy's size and MD5 for the orchestrator
+to check against the stored object and the capture's checksum.
 """
 
 from __future__ import annotations
@@ -88,7 +96,8 @@ class RenderActivities:  # pylint: disable=too-few-public-methods
 
     @activity.defn(name="render_capture")
     async def render_capture(self, payload: RenderCaptureInput) -> RenderResult:
-        """Render one capture's raw and PUT it where the orchestrator says."""
+        """Copy one capture's raw and render it, as its frame owes, each PUT
+        where the orchestrator says."""
         frame = payload.frame
         if payload.render_version != RENDER_VERSION:
             raise ApplicationError(
@@ -112,20 +121,26 @@ class RenderActivities:  # pylint: disable=too-few-public-methods
                 activity.logger.warning(
                     "capture=%s: raw %s not in scratch", frame.capture_id, frame.raw.uri
                 )
-                return RenderResult(status="raw_unavailable", **base)
-            try:
-                raw = await asyncio.to_thread(raw_path.read_bytes)
-                jpeg = await asyncio.to_thread(
-                    self._render_jpeg,
-                    raw,
-                    payload.camera_matrix,
-                    payload.distortion_coefficients,
+                missing = "raw_unavailable" if frame.owes_raw else None
+                return RenderResult(
+                    status="raw_unavailable", raw_status=missing, **base
                 )
-            except DECODE_ERRORS as exc:
-                activity.logger.warning(
-                    "capture=%s: raw would not decode: %s", frame.capture_id, exc
-                )
-                return RenderResult(status="decode_failed", **base)
+            raw = await asyncio.to_thread(raw_path.read_bytes)
+        copy = await self._copy_raw(frame, raw) if frame.owes_raw else {}
+        if not frame.owes_render:
+            return RenderResult(status="not_asked", **copy, **base)
+        try:
+            jpeg = await asyncio.to_thread(
+                self._render_jpeg,
+                raw,
+                payload.camera_matrix,
+                payload.distortion_coefficients,
+            )
+        except DECODE_ERRORS as exc:
+            activity.logger.warning(
+                "capture=%s: raw would not decode: %s", frame.capture_id, exc
+            )
+            return RenderResult(status="decode_failed", **copy, **base)
         status = await asyncio.to_thread(
             self._put, frame.put_url, {"Content-Type": "image/jpeg"}, jpeg
         )
@@ -140,5 +155,24 @@ class RenderActivities:  # pylint: disable=too-few-public-methods
             md5=hashlib.md5(jpeg).hexdigest(),
             width=width,
             height=height,
+            **copy,
             **base,
         )
+
+    async def _copy_raw(self, frame, raw: bytes) -> dict:
+        """PUT the raw where the orchestrator presigned; the copy's fields."""
+        status = await asyncio.to_thread(
+            self._put,
+            frame.raw_put_url,
+            {"Content-Type": "application/octet-stream"},
+            raw,
+        )
+        if not 200 <= status < 300:
+            raise RuntimeError(
+                f"capture {frame.capture_id}: PUT of its raw answered {status}"
+            )
+        return {
+            "raw_status": "copied",
+            "raw_bytes": len(raw),
+            "raw_md5": hashlib.md5(raw).hexdigest(),
+        }

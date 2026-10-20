@@ -22,6 +22,17 @@ when a pixel would change. History: 1 (2026-10-19) as above.
 **Verified.** A presigned PUT cannot sign bytes not rendered yet, so the
 processor reports the render's size and MD5, and the orchestrator checks them
 against the stored object before recording it.
+
+**The raw, copied in the same pass** (the owner, 2026-10-20: Lite's raws in
+the tenant's bucket, as Mobile's are). The render stage already stages each
+raw from the NAS, so a frame can also carry a presigned PUT for the raw, at
+`raw_key` (``raws/{checksum}.ORF``). The processor uploads the bytes it read
+and reports their size and MD5; the orchestrator records the copy only if the
+stored object matches them and the MD5 is the capture's own checksum. A frame
+owes a render, a raw copy, or both: a capture rendered before raws were
+copied is owed only the copy, and is not rendered again (its stored render
+must keep matching its recorded MD5). Its result is then ``not_asked`` for
+the render. A frame of contract 9 owes its render and no raw.
 """
 
 from __future__ import annotations
@@ -41,7 +52,10 @@ __all__ = [
     "RenderCaptureInput",
     "RenderCapturesInput",
     "RenderFrame",
+    "RESULT_STATUSES",
+    "RAW_STATUSES",
     "RenderResult",
+    "raw_key",
     "render_key",
 ]
 
@@ -50,6 +64,11 @@ RENDER_VERSION = 1
 
 #: ``rendered``; or why not: the raw was not in scratch, or would not decode.
 RENDER_STATUSES = ("rendered", "raw_unavailable", "decode_failed")
+#: A result's render status: also ``not_asked``, for a frame owing only its raw
+#: copy. Never recorded.
+RESULT_STATUSES = (*RENDER_STATUSES, "not_asked")
+#: A raw copy's: ``copied``, or the raw was not in scratch to copy.
+RAW_STATUSES = ("copied", "raw_unavailable")
 
 _MD5 = re.compile(r"[0-9a-f]{32}")
 
@@ -71,15 +90,49 @@ def render_key(render_version: int, camera_calibration_id: UUID, checksum: str) 
     return f"renders/r{render_version}_{camera_calibration_id.hex}/{checksum}.JPG"
 
 
+def raw_key(checksum: str) -> str:
+    """Where a capture's raw is copied, in its tenant's bucket."""
+    if not checksum or not checksum.isalnum():
+        raise ValueError(f"not a checksum: {checksum!r}")
+    return f"raws/{checksum}.ORF"
+
+
 class RenderFrame(BaseModel):
-    """One capture to render: its staged raw, and where the render goes."""
+    """One capture: its staged raw, and what it owes -- a render, a copy of
+    its raw in the tenant's bucket, or both."""
 
     capture_id: UUID
     raw: ObjectRef
-    #: `render_key` in the tenant's bucket, for the record.
-    key: str
-    #: A presigned PUT to that key.
-    put_url: str
+    #: `render_key` in the tenant's bucket, and a presigned PUT to it; both
+    #: None when the capture owes no render.
+    key: Optional[str] = None
+    put_url: Optional[str] = None
+    #: The capture's checksum, which the copy's MD5 must be.
+    checksum: Optional[str] = None
+    #: `raw_key` in the tenant's bucket, and a presigned PUT to it; both None
+    #: when the capture's raw is already there.
+    raw_key: Optional[str] = None
+    raw_put_url: Optional[str] = None
+
+    @property
+    def owes_render(self) -> bool:
+        return self.put_url is not None
+
+    @property
+    def owes_raw(self) -> bool:
+        return self.raw_put_url is not None
+
+    @model_validator(mode="after")
+    def _whole(self) -> "RenderFrame":
+        if (self.key is None) != (self.put_url is None):
+            raise ValueError("a render needs its key and its PUT")
+        if (self.raw_key is None) != (self.raw_put_url is None):
+            raise ValueError("a raw copy needs its key and its PUT")
+        if self.owes_raw and not self.checksum:
+            raise ValueError("a raw copy needs the checksum it must match")
+        if not (self.owes_render or self.owes_raw):
+            raise ValueError("a frame owes a render, a raw copy, or both")
+        return self
 
 
 class RenderCapturesInput(BaseModel):
@@ -116,11 +169,27 @@ class RenderResult(BaseModel):
     md5: Optional[str] = None
     width: Optional[int] = None
     height: Optional[int] = None
+    #: The raw's copy, when the frame owed one (`RAW_STATUSES`).
+    raw_status: Optional[str] = None
+    raw_bytes: Optional[int] = None
+    raw_md5: Optional[str] = None
 
     @model_validator(mode="after")
     def _consistent(self) -> "RenderResult":
-        if self.status not in RENDER_STATUSES:
+        if self.status not in RESULT_STATUSES:
             raise ValueError(f"not a render status: {self.status!r}")
+        if self.raw_status is not None and self.raw_status not in RAW_STATUSES:
+            raise ValueError(f"not a raw copy status: {self.raw_status!r}")
+        copied = self.raw_status == "copied"
+        if copied and not (
+            self.raw_bytes
+            and self.raw_bytes > 0
+            and self.raw_md5
+            and _MD5.fullmatch(self.raw_md5)
+        ):
+            raise ValueError("a copied raw names its size and its MD5 (32 hex)")
+        if not copied and (self.raw_bytes is not None or self.raw_md5 is not None):
+            raise ValueError("a raw not copied has no bytes")
         rendered = self.status == "rendered"
         if rendered and not (
             self.bytes and self.bytes > 0 and self.md5 and _MD5.fullmatch(self.md5)

@@ -32,6 +32,11 @@ from fishsense_services_contracts.task_queues import (
     PROCESSOR_TASK_QUEUE,
 )
 
+#: v10 (2026-10-20): a render frame may also carry its raw's copy into the
+#: tenant's bucket (`RenderFrame.raw_key`/`raw_put_url`/`checksum`), and may owe
+#: only that (`key`/`put_url` optional); a result reports the copy
+#: (`RenderResult.raw_status`/`raw_bytes`/`raw_md5`) and ``not_asked`` for a
+#: render it did not owe. A v9 frame still parses, owing its render alone.
 #: v9 (2026-10-19): renders -- every capture's raw rectified to a JPEG once, in
 #: its tenant's bucket (`renders`); readers take it by presigned URL
 #: (`jpeg_url`, `AutomaticFrame.render_url`), and the frames stage stops
@@ -44,7 +49,7 @@ from fishsense_services_contracts.task_queues import (
 #: JSON is unchanged -- each renamed field keeps its old name on the wire
 #: (`renamed.py`) -- so a v6 processor and a v7 orchestrator interoperate; only
 #: the published schema's model names differ.
-CONTRACT_VERSION = 9
+CONTRACT_VERSION = 10
 
 
 def _discover_models() -> tuple[type[BaseModel], ...]:
