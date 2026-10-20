@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.15.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.15.0...v0.15.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* **automatic:** every automatic step reads one versioned render of the raw ([bd6da76](https://github.com/UCSD-E4E/fishsense-services/commit/bd6da76dbe2921ddd47b7a64fbc256792d546141))
+* **automatic:** key renders by camera too, judge frames by fits they took no part in ([fd10777](https://github.com/UCSD-E4E/fishsense-services/commit/fd107776b8b3743fe550787e4ab068817177021c))
+* **automatic:** one versioned render of the raw for every step; calibration gates ([7683ebd](https://github.com/UCSD-E4E/fishsense-services/commit/7683ebda9b8ecf47dedbcb04aa6eb9d1f07caba2))
+
 ## [0.15.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.14.0...v0.15.0) (2026-10-20)
 
 
