@@ -8,8 +8,16 @@ rules:
 * the target is (tenant, dive); the selector takes the oldest backlog dive
   across every tenant the orchestrator serves;
 * **the orchestrator issues the keys** (PLAN.md §9.11): a frame's staged raw,
-  and the head/tail stage's JPEG key -- where the JPEG already is (read, left
-  alone), else the tenant's (written by the GPU stage);
+  and its automatic JPEG's (`AUTOMATIC_JPEG_FOLDER`, under the tenant);
+* **one image per frame, rectified from the raw** (2026-10-19): the frames
+  stage renders it from the raw with the camera's own matrix and distortion
+  -- the dot's pixel space -- finds the mask against it and writes it, for
+  every frame, under its render version (`AUTOMATIC_JPEG_RENDER_VERSION`,
+  recorded on the frame's row); species and calibration read the render the
+  row records, and a frame with none recorded waits. They used to read the
+  head/tail JPEG, which for a migrated frame is v1's render: not the image the
+  dot and mask were found in. That JPEG is the one human labels were drawn on,
+  so this track never writes it;
 * species reuse the species stage's processor contract unchanged, cropped by
   the automatic mask's box, with the automatic head/tail's id in the
   `headtail_prediction_id` slot (it is echoed back, and the write checks it is
@@ -45,6 +53,7 @@ from fishsense_services_api.automatic_results_store import (
 from fishsense_services_contracts.automatic_results import (
     AUTOMATIC_CALIBRATION_VERSION,
     AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
+    AUTOMATIC_JPEG_RENDER_VERSION,
     AUTOMATIC_HEADTAIL_STATUSES,
     AUTOMATIC_MEASUREMENT_VERSION,
     AutomaticCalibrationFrame,
@@ -58,7 +67,7 @@ from fishsense_services_contracts.automatic_results import (
     PredictAutomaticFramesInput,
 )
 from fishsense_services_contracts.laser_region import LASER_REGION_POLYGON
-from fishsense_services_contracts.object_store import HEADTAIL_JPEG_FOLDER
+from fishsense_services_contracts.object_store import automatic_jpeg_folder
 from fishsense_services_contracts.species_prediction import (
     SPECIES_PREDICTOR_VERSION,
     SPECIES_STATUSES,
@@ -87,6 +96,10 @@ VERSIONS = {
     "calibration_version": AUTOMATIC_CALIBRATION_VERSION,
     "measurement_version": AUTOMATIC_MEASUREMENT_VERSION,
 }
+
+
+#: The frame statuses with no render: the raw was not there, or would not decode.
+_NO_RENDER = frozenset({"raw_unavailable", "decode_failed"})
 
 
 @dataclass(frozen=True)
@@ -178,9 +191,25 @@ class AutomaticResultsActivities:
         #: cohort holds no dive for species work.
         self._species_enabled = species_enabled
 
-    async def _jpeg(self, target: AutomaticTarget, checksum: str, from_v1: bool):
+    def _automatic_jpeg_key(self, target: AutomaticTarget, checksum: str):
+        return self._store.layout.processed_jpeg(
+            target.tenant_id,
+            automatic_jpeg_folder(AUTOMATIC_JPEG_RENDER_VERSION),
+            checksum,
+        )
+
+    async def _automatic_jpeg(
+        self, target: AutomaticTarget, checksum: str, render_version: Optional[int]
+    ):
+        """The render the frame's row records, or None: none recorded, or not
+        in Garage."""
+        if render_version is None:
+            return None
         return await self._store.locate_processed_jpeg(
-            target.tenant_id, HEADTAIL_JPEG_FOLDER, checksum, from_v1=from_v1
+            target.tenant_id,
+            automatic_jpeg_folder(render_version),
+            checksum,
+            from_v1=False,
         )
 
     async def _write(self, target: AutomaticTarget, fn, *args, **kwargs):
@@ -284,16 +313,13 @@ class AutomaticResultsActivities:
         )
         frames = []
         for f in inputs.frames:
-            located = await self._jpeg(target, f.checksum, f.from_v1)
             frames.append(
                 AutomaticFrame(
                     capture_id=f.capture_id,
                     raw=self._store.layout.raw(target.tenant_id, f.checksum),
-                    jpeg=located
-                    or self._store.layout.processed_jpeg(
-                        target.tenant_id, HEADTAIL_JPEG_FOLDER, f.checksum
-                    ),
-                    write_jpeg=located is None,
+                    jpeg=self._automatic_jpeg_key(target, f.checksum),
+                    write_jpeg=True,
+                    jpeg_render_version=AUTOMATIC_JPEG_RENDER_VERSION,
                     slate_probability=f.slate_probability,
                     is_slate=f.is_slate,
                 )
@@ -324,6 +350,15 @@ class AutomaticResultsActivities:
             r.predictor_version != AUTOMATIC_HEADTAIL_PREDICTOR_VERSION for r in results
         ):
             raise _refuse(target, "a result from another automatic version")
+        # A row's pixels belong to the render it was found in: every frame
+        # whose raw decoded was rendered, and must name the render this
+        # orchestrator asked for.
+        if any(
+            r.status not in _NO_RENDER
+            and r.jpeg_render_version != AUTOMATIC_JPEG_RENDER_VERSION
+            for r in results
+        ):
+            raise _refuse(target, "a frame found in another render")
         rows = [AutomaticHeadTailRow(**r.model_dump()) for r in results]
         written = await self._write(
             target, self._catalog.persist_automatic_head_tails, rows
@@ -353,7 +388,7 @@ class AutomaticResultsActivities:
         )
         images = []
         for c in captures:
-            jpeg = await self._jpeg(target, c.checksum, c.from_v1)
+            jpeg = await self._automatic_jpeg(target, c.checksum, c.jpeg_render_version)
             if jpeg is None:
                 activity.logger.info(
                     "no JPEG yet for capture %s; deferring", c.capture_id
@@ -416,7 +451,7 @@ class AutomaticResultsActivities:
         )
         frames = []
         for c in inputs.candidates:
-            jpeg = await self._jpeg(target, c.checksum, c.from_v1)
+            jpeg = await self._automatic_jpeg(target, c.checksum, c.jpeg_render_version)
             if jpeg is not None:
                 frames.append(
                     AutomaticCalibrationFrame(capture_id=c.capture_id, jpeg=jpeg,

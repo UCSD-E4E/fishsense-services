@@ -212,6 +212,23 @@ async def test_dots_a_few_px_off_the_line_are_kept():
     assert {f.capture_id for f in near} <= set(r.capture_ids)
 
 
+async def test_a_second_line_of_dots_makes_the_line_ambiguous():
+    """Session 77 (2026-10-19): a reflection's dots formed a line of their own,
+    30 dots to the laser's 48 by the dive line's count -- and the dive line had
+    taken the wrong one (1.35 deg from the line fitted from labels). Without
+    labels the two cannot be told apart, so the fit refuses."""
+    payload, store = _calibration_input(
+        np.linspace(1.0, 3.0, 10), line_dots=_MISSION_DOTS
+    )
+    second = [(z, 1.5 / z) for z in np.linspace(1.1, 2.9, 9)]
+    payload, _ = _off_line(payload, store, second, 38.0)
+
+    r = await _fit(payload, store)
+
+    assert (r.outcome, r.refusal_reason) == ("refused", "ambiguous_line")
+    assert r.candidate_count == 19
+
+
 async def test_every_dot_off_the_line_is_a_refusal():
     payload, store = _calibration_input([], line_dots=_MISSION_DOTS)
     payload, _ = _off_line(payload, store, _OFF * 2, 38.0)

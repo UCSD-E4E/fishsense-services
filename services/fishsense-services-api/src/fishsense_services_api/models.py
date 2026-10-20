@@ -1241,6 +1241,8 @@ class AutomaticHeadTailPrediction(Base):
     checkpoint: Mapped[str | None] = mapped_column(Text)
     core_version: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
+    #: The render of the raw the dot and mask were found in (0049).
+    jpeg_render_version: Mapped[int | None] = mapped_column(Integer)
 
 
 class AutomaticLaserCalibration(Base):

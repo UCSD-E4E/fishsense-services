@@ -11,8 +11,12 @@ owns it in production:
   detector) and its expected-laser region gate;
 * the rectified JPEG: the head/tail stage-5.1 rendering
   (`headtail_preprocess.activities.rectify_and_encode_jpeg`), written where
-  the orchestrator says when it is not in Garage yet (`write_jpeg`), so the
-  species and calibration steps read the very frame SAM saw;
+  the orchestrator says (`write_jpeg`), so the species and calibration steps
+  read the very frame SAM saw. It is render `AUTOMATIC_JPEG_RENDER_VERSION`:
+  a frame asking for another is refused and retried
+  (`RenderVersionMismatch`), so a worker at another version -- a lab worker
+  deployed by hand -- never writes its render where another is expected, and
+  the result names the render it wrote (2026-10-19);
 * the mask and head/tail: `automatic_results.frames` (the head/tail kernel
   behind SAM's own score gate), with SAM 3.1's verified checkpoint
   (`headtail_predict.weights`).
@@ -37,9 +41,11 @@ from typing import Any, Optional
 
 from botocore.exceptions import ClientError
 from temporalio import activity
+from temporalio.exceptions import ApplicationError
 
 from fishsense_services_contracts.automatic_results import (
     AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
+    AUTOMATIC_JPEG_RENDER_VERSION,
     AutomaticFrameResult,
     PredictAutomaticFrameInput,
 )
@@ -98,6 +104,15 @@ class AutomaticFramesActivities:  # pylint: disable=too-few-public-methods
         if not self._cuda_available():
             raise _no_gpu()
         frame = payload.frame
+        if frame.write_jpeg and frame.jpeg_render_version != (
+            AUTOMATIC_JPEG_RENDER_VERSION
+        ):
+            raise ApplicationError(
+                f"capture {frame.capture_id}: asked for render "
+                f"{frame.jpeg_render_version}, this worker renders "
+                f"{AUTOMATIC_JPEG_RENDER_VERSION}",
+                type="RenderVersionMismatch",
+            )
         store = self._object_store()
         with tempfile.TemporaryDirectory() as tmpdir:
             try:
@@ -184,6 +199,10 @@ class AutomaticFramesActivities:  # pylint: disable=too-few-public-methods
             result.sam_score,
             "-" if peak is None else f"{peak / 2**30:.2f}",
         )
+        if frame.write_jpeg:
+            result = result.model_copy(
+                update={"jpeg_render_version": AUTOMATIC_JPEG_RENDER_VERSION}
+            )
         return result
 
 

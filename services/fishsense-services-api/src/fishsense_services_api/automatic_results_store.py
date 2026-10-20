@@ -643,6 +643,8 @@ class AutomaticHeadTailRow:
     slate_probability: float | None = None
     checkpoint: str | None = None
     core_version: str | None = None
+    #: The render of the raw the dot and mask were found in (0049).
+    jpeg_render_version: int | None = None
 
 
 async def _check_captures(conn, tenant_id, mission_id, captures) -> None:
@@ -728,6 +730,8 @@ class AutomaticSpeciesCapture:
     automatic_head_tail_prediction_id: uuid.UUID
     mask_bbox: list[int]
     has_existing_prediction: bool
+    #: The render the mask's box is in pixels of; None: none recorded (0049).
+    jpeg_render_version: int | None = None
 
 
 async def automatic_species_captures(
@@ -743,7 +747,7 @@ async def automatic_species_captures(
         text(f"""
             SELECT c.id, c.checksum, c.v1_id IS NOT NULL AS from_v1,
                    h.id AS head_tail_id, h.mask_bbox,
-                   s.id IS NOT NULL AS has_existing
+                   s.id IS NOT NULL AS has_existing, h.jpeg_render_version
             FROM captures c
             JOIN current_automatic_head_tail_predictions h
               ON h.tenant_id = c.tenant_id AND h.capture_id = c.id
@@ -760,7 +764,8 @@ async def automatic_species_captures(
     )
     return [
         AutomaticSpeciesCapture(r.id, r.checksum, r.from_v1, r.head_tail_id,
-                                list(r.mask_bbox), r.has_existing)  # fmt: skip
+                                list(r.mask_bbox), r.has_existing,
+                                r.jpeg_render_version)  # fmt: skip
         for r in rows
     ]
 
@@ -819,6 +824,8 @@ class AutomaticCalibrationCandidate:
     from_v1: bool
     x: float
     y: float
+    #: The render the dot was found against; None: none recorded (0049).
+    jpeg_render_version: int | None = None
 
 
 @dataclass(frozen=True)
@@ -845,7 +852,7 @@ async def automatic_calibration_inputs(
         await conn.execute(
             text("""
                 SELECT c.id, c.checksum, c.v1_id IS NOT NULL AS from_v1,
-                       h.laser_x, h.laser_y
+                       h.laser_x, h.laser_y, h.jpeg_render_version
                 FROM captures c
                 JOIN current_automatic_head_tail_predictions h
                   ON h.tenant_id = c.tenant_id AND h.capture_id = c.id
@@ -861,7 +868,7 @@ async def automatic_calibration_inputs(
         camera_matrix=[[float(x) for x in r] for r in camera.camera_matrix],
         candidates=[
             AutomaticCalibrationCandidate(r.id, r.checksum, r.from_v1, r.laser_x,
-                                          r.laser_y)  # fmt: skip
+                                          r.laser_y, r.jpeg_render_version)  # fmt: skip
             for r in rows
             if slate.get(r.id, 0.0) >= SLATE_FRAME_THRESHOLD
         ],

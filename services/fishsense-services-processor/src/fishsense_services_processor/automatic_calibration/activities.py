@@ -33,6 +33,15 @@ vanishing point moved from the paper's -2069 px to -3732 px, standard error
 human dots on human-labelled slate frames. The line is the dive's (above), or,
 with none, the RANSAC line through the frames' own dots (`fit_dive_line`'s
 4 px inliers: the most dots that agree); with neither, every dot is kept.
+
+**Unless the line is ambiguous.** When the dots off the line hold a line of
+their own of at least `MIN_FRAMES` dots and a quarter of those on it
+(`second_line`), the laser cannot be told from its reflection without labels
+and the fit refuses (``ambiguous_line``). Session 77: the off-line dots formed
+a line of 30 to the chosen line's 48, and the chosen one was the wrong line,
+1.35 deg from the one fitted from labels (the fit was 0.42 deg off the
+known-size calibration). On every other calibrated mission the off-line dots
+formed a line of at most 6, a fifth of the line's.
 """
 
 from __future__ import annotations
@@ -57,8 +66,10 @@ __all__ = [
     "HEARTBEAT_EVERY_S",
     "MAX_CALIBRATION_FRAMES",
     "OFF_LINE_PX",
+    "SECOND_LINE_SHARE",
     "mission_line",
     "on_line",
+    "second_line",
     "spread",
 ]
 
@@ -70,6 +81,9 @@ HEARTBEAT_EVERY_S = 30.0
 #: dots land within 1-2 px of human ones; session 77's off-line block sat at
 #: 35-41 px (2026-10-19).
 OFF_LINE_PX = 10.0
+#: The share of the line's dots a second line among the rest must reach (as
+#: well as `size_constancy.MIN_FRAMES`) to make the line ambiguous.
+SECOND_LINE_SHARE = 0.25
 
 
 def spread(dots, cap: int) -> list[int]:
@@ -115,6 +129,18 @@ def on_line(dots, line, max_px: float = OFF_LINE_PX) -> list[int]:
     a, b, c = line
     dist = np.abs(xy @ np.array([a, b]) + c) / np.hypot(a, b)
     return [int(i) for i in np.flatnonzero(dist <= max_px)]
+
+
+def second_line(dots) -> int:
+    """How many of `dots` lie on the RANSAC line through them (none: 0)."""
+    # pylint: disable-next=import-outside-toplevel
+    from fishsense_core.line_fit import fit_dive_line
+
+    xy = np.asarray(dots, float).reshape(-1, 2)
+    if len(xy) < 2:
+        return 0
+    fit = fit_dive_line(xy)
+    return 0 if fit is None else int(fit.inlier_count)
 
 
 def _features(jpeg: bytes, dot) -> sc.FrameFeatures:
@@ -169,8 +195,11 @@ class AutomaticCalibrationActivities:  # pylint: disable=too-few-public-methods
             )
         line = await asyncio.to_thread(_line, payload)
         frames = payload.frames
+        off: list = []
         if line is not None:
-            frames = [frames[i] for i in on_line([[f.x, f.y] for f in frames], line)]
+            kept = set(on_line([[f.x, f.y] for f in frames], line))
+            off = [f for i, f in enumerate(frames) if i not in kept]
+            frames = [f for i, f in enumerate(frames) if i in kept]
             if len(frames) < len(payload.frames):
                 activity.logger.info(
                     "dive=%s: %d of %d slate dots off the dive line, not fitted",
@@ -181,6 +210,15 @@ class AutomaticCalibrationActivities:  # pylint: disable=too-few-public-methods
         if len(frames) < sc.MIN_FRAMES:
             return AutomaticCalibrationResult(
                 outcome="refused", refusal_reason="too_few_frames", **base
+            )
+        rival = await asyncio.to_thread(second_line, [[f.x, f.y] for f in off])
+        if rival >= max(sc.MIN_FRAMES, SECOND_LINE_SHARE * len(frames)):
+            activity.logger.info(
+                "dive=%s: off-line dots form a line of %d to the line's %d",
+                payload.mission_id, rival, len(frames),
+            )  # fmt: skip
+            return AutomaticCalibrationResult(
+                outcome="refused", refusal_reason="ambiguous_line", **base
             )
         store = self._object_store()
         chosen = [

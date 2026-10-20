@@ -37,12 +37,13 @@ from temporalio.worker import Worker
 
 from fishsense_services_contracts.automatic_results import (
     AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
+    AUTOMATIC_JPEG_RENDER_VERSION,
     AutomaticFrame,
     AutomaticFrameResult,
     PredictAutomaticFrameInput,
     PredictAutomaticFramesInput,
 )
-from fishsense_services_contracts.object_store import ObjectRef
+from fishsense_services_contracts.object_store import ObjectRef, automatic_jpeg_folder
 from fishsense_services_processor.automatic_frames.activities import (
     AutomaticFramesActivities,
     LaserDot,
@@ -232,10 +233,10 @@ def _activities(
 
 
 def _payload(**frame) -> PredictAutomaticFrameInput:
+    frame.setdefault("jpeg", _ref("preprocess_headtail_jpeg"))
     return PredictAutomaticFrameInput(
         frame=AutomaticFrame(
-            capture_id=CAPTURE, raw=ObjectRef(bucket="s", key="raw/x.ORF"),
-            jpeg=_ref("preprocess_headtail_jpeg"), **frame,
+            capture_id=CAPTURE, raw=ObjectRef(bucket="s", key="raw/x.ORF"), **frame,
         ),
         camera_matrix=K, distortion_coefficients=[0.0] * 5,
         laser_region=[[0, 0], [FRAME_W, 0], [FRAME_W, FRAME_H], [0, FRAME_H]],
@@ -246,7 +247,8 @@ async def test_the_activity_chains_dot_mask_and_head_tail():
     store = _Store()
     acts = _activities(store)
     r = await ActivityEnvironment().run(
-        acts.predict_automatic_frame, _payload(write_jpeg=True)
+        acts.predict_automatic_frame,
+        _payload(write_jpeg=True, jpeg_render_version=AUTOMATIC_JPEG_RENDER_VERSION),
     )
     assert r.status == "predicted" and r.sam_score == pytest.approx(0.8)
     assert list(store.uploaded.values()) == [_jpeg()]
@@ -254,9 +256,41 @@ async def test_the_activity_chains_dot_mask_and_head_tail():
 
 async def test_the_jpeg_is_left_alone_when_it_exists():
     store = _Store()
-    await ActivityEnvironment().run(
+    r = await ActivityEnvironment().run(
         _activities(store).predict_automatic_frame, _payload()
     )
+    assert store.uploaded == {}
+    assert r.jpeg_render_version is None
+
+
+async def test_the_render_is_written_under_its_version_and_named():
+    """The JPEG the dot and mask were found in is stored, and the row says
+    which render it is (2026-10-19)."""
+    store = _Store()
+    ref = _ref(automatic_jpeg_folder(AUTOMATIC_JPEG_RENDER_VERSION))
+    r = await ActivityEnvironment().run(
+        _activities(store).predict_automatic_frame,
+        _payload(jpeg=ref, write_jpeg=True,
+                 jpeg_render_version=AUTOMATIC_JPEG_RENDER_VERSION),
+    )  # fmt: skip
+    assert store.uploaded == {ref.key: _jpeg()}
+    assert r.status == "predicted"
+    assert r.jpeg_render_version == AUTOMATIC_JPEG_RENDER_VERSION
+
+
+@pytest.mark.parametrize("asked", [AUTOMATIC_JPEG_RENDER_VERSION + 1, None])
+async def test_a_frame_for_another_render_is_refused_and_retried(asked):
+    """A processor at another render version (a lab worker deployed by hand)
+    must not write its render where another is expected; retried, the frame
+    reaches a worker at the asked version."""
+    store = _Store()
+    with pytest.raises(ApplicationError) as error:
+        await ActivityEnvironment().run(
+            _activities(store).predict_automatic_frame,
+            _payload(write_jpeg=True, jpeg_render_version=asked),
+        )
+    assert error.value.type == "RenderVersionMismatch"
+    assert not error.value.non_retryable
     assert store.uploaded == {}
 
 
@@ -289,6 +323,7 @@ async def test_a_raw_that_will_not_decode_is_an_abstention(stage):
     )
     assert r.status == "decode_failed"
     assert r.capture_id == CAPTURE
+    assert r.jpeg_render_version is None
 
 
 async def test_no_gpu_is_a_final_refusal():

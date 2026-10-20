@@ -46,6 +46,7 @@ from fishsense_services_contracts.object_store import (
     SLATE_JPEG_FOLDER,
     SPECIES_JPEG_FOLDER,
     TENANTS_PREFIX,
+    is_jpeg_folder,
 )
 
 __all__ = [
@@ -142,8 +143,11 @@ class ObjectLayout:
 
 
 def _folder(folder: str) -> str:
-    if folder not in JPEG_FOLDERS:
-        raise ValueError(f"unknown JPEG folder {folder!r}; one of {JPEG_FOLDERS}")
+    if not is_jpeg_folder(folder):
+        raise ValueError(
+            f"unknown JPEG folder {folder!r}; one of {JPEG_FOLDERS} or an "
+            "automatic render's (`automatic_jpeg_folder`)"
+        )
     return folder
 
 

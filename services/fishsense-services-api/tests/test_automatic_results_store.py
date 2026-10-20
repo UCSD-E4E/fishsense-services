@@ -469,6 +469,60 @@ async def test_species_naming_another_captures_mask_is_refused(
                                 model_id="m")])  # fmt: skip
 
 
+# -- the automatic render ------------------------------------------------------------
+
+
+async def test_a_frames_render_version_reaches_species_and_calibration(
+    owner_engine, app_engine
+):
+    """The frames stage records which render of the raw its dot and mask were
+    found in; species and calibration read that render, so they are told which
+    (2026-10-19). A row from before renders were recorded has none."""
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    fish = await capture(owner_engine, lab, mission_id)
+    slate = await capture(owner_engine, lab, mission_id)
+    legacy = await capture(owner_engine, lab, mission_id)
+    await _predict(
+        app_engine, lab, mission_id,
+        _predicted(fish, jpeg_render_version=1),
+        AutomaticHeadTailRow(capture_id=slate, status="slate_frame", laser_x=10.0,
+                             laser_y=20.0, slate_probability=0.9, predictor_version=1,
+                             jpeg_render_version=1),
+        _predicted(legacy),
+    )  # fmt: skip
+
+    async def detector(conn, tenant_id, d):
+        return [(slate, 0.9)]
+
+    jobs = await _in(app_engine, lab, automatic_species_captures, mission_id,
+                     species_version=1)  # fmt: skip
+    inputs = await _in(app_engine, lab, automatic_calibration_inputs, mission_id,
+                       slate_frames=detector)  # fmt: skip
+
+    assert {j.capture_id: j.jpeg_render_version for j in jobs} == {
+        fish: 1,
+        legacy: None,
+    }
+    assert [(c.capture_id, c.jpeg_render_version) for c in inputs.candidates] == [
+        (slate, 1)
+    ]
+
+
+async def test_a_render_version_is_positive(owner_engine):
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    c = await capture(owner_engine, lab, mission_id)
+    with pytest.raises(IntegrityError):
+        async with owner_engine.begin() as conn:
+            await conn.execute(
+                text("INSERT INTO automatic_head_tail_predictions (tenant_id, "
+                     "capture_id, status, predictor_version, jpeg_render_version) "
+                     "VALUES (:t, :c, 'no_laser_dot', 1, 0)"),
+                {"t": lab, "c": c},
+            )  # fmt: skip
+
+
 # -- calibration ---------------------------------------------------------------------
 
 

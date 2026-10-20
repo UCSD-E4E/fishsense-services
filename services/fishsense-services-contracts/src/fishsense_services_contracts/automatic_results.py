@@ -30,7 +30,21 @@ the chain as cscw ran it, with the slate-presence detector stubbed (no frame
 is a slate); 2 (2026-10-16) the detector wired (a slate frame keeps only its
 dot), and a kept mask whose SAM score can't be named under the dot is
 ``laser_off_all_fish``, not an unscored prediction. No version-1 row was ever
-written in production.
+written in production. 3 (2026-10-19) every frame's render -- rectified from
+its raw, the image its dot and mask were found in -- is written to
+`AUTOMATIC_JPEG_FOLDER`, and calibration and species read only that; under 2
+a migrated frame kept v1's head/tail JPEG, which they then read. A frame's dot
+and head/tail are as under 2; the bump re-runs every frame to write its render.
+
+`AUTOMATIC_JPEG_RENDER_VERSION` names that render: the raw decoded and
+rectified by fishsense-core with the camera's matrix and distortion, then
+encoded (processor `headtail_preprocess.rectify_and_encode_jpeg`). It is part
+of the JPEG's key (`object_store.automatic_jpeg_folder`) and recorded on each
+frame's row, so a new rendering never overwrites an image older rows' pixels
+belong to, and the frames to re-render are the rows at an older version. Bump
+it when the rendering would change a pixel, and bump
+`AUTOMATIC_HEADTAIL_PREDICTOR_VERSION` with it: the dot and mask are found
+against the render. History: 1 (2026-10-19) as above.
 
 `AUTOMATIC_CALIBRATION_VERSION` 2 (2026-10-19): slate dots more than 10 px off
 the dive line are not fitted (processor `automatic_calibration.activities`),
@@ -57,6 +71,7 @@ __all__ = [
     "AUTOMATIC_CALIBRATION_VERSION",
     "AUTOMATIC_HEADTAIL_PREDICTOR_VERSION",
     "AUTOMATIC_HEADTAIL_STATUSES",
+    "AUTOMATIC_JPEG_RENDER_VERSION",
     "AUTOMATIC_MEASUREMENT_ALGORITHM",
     "AUTOMATIC_MEASUREMENT_VERSION",
     "AUTOMATIC_SAM_SCORE_GATE",
@@ -74,7 +89,8 @@ __all__ = [
 ]
 
 #: See the module docstring.
-AUTOMATIC_HEADTAIL_PREDICTOR_VERSION = 2
+AUTOMATIC_HEADTAIL_PREDICTOR_VERSION = 3
+AUTOMATIC_JPEG_RENDER_VERSION = 1
 AUTOMATIC_CALIBRATION_VERSION = "2"
 AUTOMATIC_MEASUREMENT_VERSION = "1"
 
@@ -106,14 +122,17 @@ AUTOMATIC_HEADTAIL_STATUSES = (
 
 
 class AutomaticFrame(BaseModel):
-    """One canonical frame: its staged raw, and where its rectified JPEG is
-    (or goes: `write_jpeg`), which the species and calibration steps read."""
+    """One canonical frame: its staged raw, and where its render of the raw
+    goes (`jpeg`, under `jpeg_render_version`'s folder), which the species and
+    calibration steps read."""
 
     capture_id: UUID
     raw: ObjectRef
     jpeg: ObjectRef
-    #: The JPEG is not in Garage yet: write the rendering there.
+    #: Write the render to `jpeg` (always, from contract 8).
     write_jpeg: bool = False
+    #: The render `jpeg` is for; a processor rendering another refuses.
+    jpeg_render_version: Optional[int] = None
     #: The slate-presence detector's score (None: no detector). A slate frame
     #: keeps its dot for the calibration and is never measured as a fish.
     slate_probability: Optional[float] = None
@@ -170,6 +189,9 @@ class AutomaticFrameResult(BaseModel):
     slate_probability: Optional[float] = None
     checkpoint: Optional[str] = None
     core_version: Optional[str] = None
+    #: The render of the raw the dot and mask were found in, written to the
+    #: frame's `jpeg`; None when no render was made (the raw would not decode).
+    jpeg_render_version: Optional[int] = None
 
     @field_validator("mask_bbox")
     @classmethod
