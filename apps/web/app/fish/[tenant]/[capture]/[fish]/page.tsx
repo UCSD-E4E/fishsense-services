@@ -22,8 +22,9 @@ type Point = { x: number; y: number } | null | undefined;
 
 /**
  * One measured fish (PLAN.md §4.9, Phase 1 of §9.26): its length, what it
- * is, and the evidence its method rests on. A Lite fish has no photo here
- * yet; its frames are to come into the tenant's bucket in a later phase.
+ * is, and the evidence its method rests on. A Lite fish's photo is its
+ * frame's render, when it has one (Phase 4). The labelled points are listed,
+ * not drawn: they were placed on v1's JPEG, not on this render.
  */
 export default async function FishDetailPage({ params }: Props) {
   const { tenant, capture, fish } = await params;
@@ -154,9 +155,7 @@ export default async function FishDetailPage({ params }: Props) {
 
       {!o.photo_url && (
         <p className="text-sm text-slate-500">
-          {o.method === "laser"
-            ? "Photos of FishSense Lite frames aren't shown here yet."
-            : "No photo is available for this fish."}
+          No photo of this frame is available.
         </p>
       )}
     </main>

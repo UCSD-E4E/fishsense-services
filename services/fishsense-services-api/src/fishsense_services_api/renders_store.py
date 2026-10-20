@@ -40,6 +40,7 @@ __all__ = [
     "RenderRow",
     "RendersCatalog",
     "current_renders",
+    "newest_render",
     "persist_renders",
     "render_inputs",
     "render_missions",
@@ -276,22 +277,39 @@ async def renders_at(
     }
 
 
+def newest_render(capture: str, tenant: str, bucket: str) -> str:
+    """The one rule for "a capture's render" -- here and on /fish
+    (`observation_store`): its newest rendered row by write order (``seq``),
+    whatever its version or camera, among rows whose bucket meets ``bucket``
+    (SQL over ``r.bucket``). An abstention after it does not replace it."""
+    return f"""
+        SELECT r.bucket, r.key, r.render_version, r.camera_calibration_id
+        FROM capture_renders r
+        WHERE r.tenant_id = {tenant} AND r.capture_id = {capture}
+          AND r.status = 'rendered' AND {bucket}
+        ORDER BY r.seq DESC LIMIT 1"""
+
+
 async def current_renders(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
     capture_ids: list[uuid.UUID],
+    *,
+    bucket: str | None = None,
 ) -> dict[uuid.UUID, CurrentRender]:
-    """Each capture's newest render, where it has one."""
+    """Each capture's newest render, where it has one (in ``bucket``, when
+    named)."""
+    newest = newest_render(
+        "c.id", ":t", "(CAST(:bucket AS text) IS NULL OR r.bucket = :bucket)"
+    )
     rows = await conn.execute(
-        text("""
-            SELECT DISTINCT ON (r.capture_id) r.capture_id, r.bucket, r.key,
-                   r.render_version, r.camera_calibration_id
-            FROM capture_renders r
-            WHERE r.tenant_id = :t AND r.capture_id = ANY(:ids)
-              AND r.status = 'rendered'
-            ORDER BY r.capture_id, r.seq DESC
+        text(f"""
+            SELECT c.id AS capture_id, r.bucket, r.key, r.render_version,
+                   r.camera_calibration_id
+            FROM unnest(CAST(:ids AS uuid[])) AS c(id)
+            CROSS JOIN LATERAL ({newest}) r
             """),
-        {"t": tenant_id, "ids": list(capture_ids)},
+        {"t": tenant_id, "ids": list(capture_ids), "bucket": bucket},
     )
     return {
         r.capture_id: CurrentRender(r.capture_id, r.bucket, r.key, r.render_version,
@@ -340,7 +358,11 @@ class RendersCatalog(ServicePrincipal):
             return await persist_renders(conn, tenant_id, mission_id, rows)
 
     async def current_renders(
-        self, tenant_id: uuid.UUID, capture_ids: list[uuid.UUID]
+        self,
+        tenant_id: uuid.UUID,
+        capture_ids: list[uuid.UUID],
+        *,
+        bucket: str | None = None,
     ) -> dict[uuid.UUID, CurrentRender]:
         async with self._tenant(tenant_id) as conn:
-            return await current_renders(conn, tenant_id, capture_ids)
+            return await current_renders(conn, tenant_id, capture_ids, bucket=bucket)

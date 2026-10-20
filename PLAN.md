@@ -1333,10 +1333,19 @@ the UI as it lands (decided 2026-10-17)*
        the rule.
 3. Direct e4edm ingest (the never-ingested Canyonview / Scripps Pier / Sealab / NIWC
    datasets are the first users).
-4. **Lite photo upload** (the owner's direction, 2026-10-18). Lite photos are uploaded into
-   the tenant's own bucket, as Mobile's are, and processed there. Until processing
-   finishes, the UI shows the camera's JPEG. Lite frames today are only in the shared
-   labels bucket, which the API does not read, and the API is not to be given it.
+4. **Lite photos** (the owner's direction, 2026-10-18).
+   - ***Built 2026-10-20:*** a Lite fish's photo on `/fish` is its capture's newest render
+     in the tenant's own bucket (0051, written by the render stage of #144; one rule,
+     `renders_store.newest_render`). Labelled points are listed, not drawn, because they
+     were placed on v1's JPEG. Photos fill in as the render backlog runs (started by hand
+     on 2026-10-20; human-measured missions first). A frame that is never rendered (a
+     raw that won't decode, a mission off the corrective optic) has no photo.
+   - *Next:* thumbnails for the cards, made from each render without reading the NAS.
+     Each raw is also copied into the tenant's bucket in the same NAS pass (the owner,
+     2026-10-20: for consistency with Mobile, whose raws are already there). Captures
+     rendered before that get theirs on a catch-up pass.
+   - *Later:* uploading new Lite photos straight into the tenant's bucket, as Mobile
+     does. The API is never given the shared labels bucket.
 5. Species for mobile captures.
 6. The board pitch check (§9.25).
 7. The wuwnet math into fishsense-core.

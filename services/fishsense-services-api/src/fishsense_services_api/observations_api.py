@@ -78,7 +78,8 @@ class ObservationView(BaseModel):
     place_name: str | None
     #: A mobile capture's uuid: its full record is ``/mobile/captures/{uuid}``.
     client_capture_uuid: uuid.UUID | None
-    #: A presigned GET of the photo, valid for an hour; None for Lite (yet).
+    #: A presigned GET of the photo, valid for an hour: a phone's own image,
+    #: or a Lite frame's render; None until a Lite frame is rendered.
     photo_url: str | None
 
 
@@ -127,6 +128,13 @@ def add_observation_routes(
     """``membership`` is the app's dependency; ``stores`` signs photo links."""
 
     Member = Annotated[Membership, Depends(membership)]
+
+    def bucket(slug: str) -> str | None:
+        """The tenant's current bucket: a Lite photo is a render there."""
+        try:
+            return stores.for_tenant(slug).bucket
+        except NoTenantStore:
+            return None
 
     def photo_url(slug: str, found: Observation) -> str | None:
         if found.photo_key is None:
@@ -194,6 +202,7 @@ def add_observation_routes(
                 limit=limit + 1,
                 before=cursor,
                 device=device,
+                photo_bucket=bucket(slug),
             )
         page, more = found[:limit], len(found) > limit
         return ObservationPage(
@@ -210,7 +219,9 @@ def add_observation_routes(
         slug: str, capture_id: uuid.UUID, fish_id: uuid.UUID, member: Member
     ) -> ObservationDetailView:
         async with tenant_transaction(engine, member.tenant_id) as conn:
-            found = await observation(conn, member.tenant_id, capture_id, fish_id)
+            found = await observation(
+                conn, member.tenant_id, capture_id, fish_id, photo_bucket=bucket(slug)
+            )
         if found is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND)
         laser = found.laser

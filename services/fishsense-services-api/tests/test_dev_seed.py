@@ -28,16 +28,31 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from fishsense_services_api import dev_seed
+from fishsense_services_contracts.renders import RENDER_VERSION, render_key
 from fishsense_services_api.cli import main
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.mobile_capture_store import list_mobile_captures
 from fishsense_services_api.tenant_stores import TenantStore, TenantStores
 from garage import ADMIN_TOKEN, REGION, Garage
 
+
+def _jpeg(n: int, width: int = 1600, height: int = 1200) -> bytes:
+    """Not an image, but a JPEG's headers as far as its size: SOI, an APP0,
+    and a baseline start-of-frame (SOF0) giving ``width`` x ``height``."""
+    app0 = b"\xff\xe0\x00\x04" + bytes([n, n])
+    sof0 = (
+        b"\xff\xc0\x00\x11\x08"
+        + height.to_bytes(2, "big")
+        + width.to_bytes(2, "big")
+        + b"\x03\x01\x22\x00\x02\x11\x01\x03\x11\x01"
+    )
+    return b"\xff\xd8" + app0 + sof0 + b"\xff\xd9"
+
+
 FRAMES = [
     dev_seed.Frame(
         name=f"P117{n:04d}",
-        jpeg=b"\xff\xd8\xff\xe0 not really a jpeg " + bytes([n]),
+        jpeg=_jpeg(n, width=1600 + n),
         head=(640.0 + n, 450.0),
         tail=(880.0 + n, 545.0),
         dot=(770.0 + n, 525.0),
@@ -109,6 +124,11 @@ def _bucket_exists(garage, bucket: str) -> bool:
 async def _scalar(owner_engine, sql: str, **params):
     async with owner_engine.connect() as conn:
         return (await conn.execute(text(sql), params)).scalar_one()
+
+
+async def _rows(engine, sql):
+    async with engine.connect() as conn:
+        return [dict(r._mapping) for r in await conn.execute(text(sql))]
 
 
 class TestOnlyADevDatabase:
@@ -249,9 +269,55 @@ class TestSeed:
             with urllib.request.urlopen(objects.presign_get(capture.rgb_key)) as got:
                 assert got.read() in {f.jpeg for f in FRAMES}
 
+    async def test_every_lite_frame_has_a_render_in_the_tenants_bucket(
+        self, dev_engine, app_engine, stores
+    ):
+        """Phase 4: a Lite fish's photo on /fish is its frame's render. The
+        harness has no raws to render, so it stores each frame's JPEG as its
+        render, as the render stage would."""
+        await _seed(dev_engine, stores)
+
+        rows = await _rows(
+            dev_engine,
+            "SELECT r.key, r.bucket, r.render_version, r.camera_calibration_id, "
+            "r.width, r.height, c.checksum FROM capture_renders r "
+            "JOIN captures c ON c.id = r.capture_id WHERE r.status = 'rendered'",
+        )
+        assert len(rows) == len(FRAMES)
+        objects = stores.for_tenant("lab")
+        by_checksum = {hashlib.md5(f.jpeg).hexdigest(): f.jpeg for f in FRAMES}
+        for row in rows:
+            # As the render stage writes it: its key, version and size.
+            assert row["render_version"] == RENDER_VERSION
+            assert row["key"] == render_key(
+                RENDER_VERSION, row["camera_calibration_id"], row["checksum"]
+            )
+            assert row["bucket"] == objects.bucket
+            assert (row["width"], row["height"]) == dev_seed.jpeg_size(
+                by_checksum[row["checksum"]]
+            )
+            with urllib.request.urlopen(objects.presign_get(row["key"])) as got:
+                assert got.read() == by_checksum[row["checksum"]]
+
+    def test_the_seeds_render_is_the_contracts(self):
+        """Repeated in the API (its image lacks the contracts); pinned here."""
+        camera = uuid.uuid4()
+        assert dev_seed.RENDER_VERSION == RENDER_VERSION
+        assert dev_seed.render_key(1, camera, "c" * 32) == render_key(
+            1, camera, "c" * 32
+        )
+
+    def test_a_jpegs_size_is_read_from_its_header(self):
+        assert dev_seed.jpeg_size(_jpeg(0, width=4014, height=3016)) == (4014, 3016)
+        with pytest.raises(ValueError):
+            dev_seed.jpeg_size(b"not a jpeg")
+
     async def test_seeding_twice_changes_nothing(self, dev_engine, stores):
         await _seed(dev_engine, stores)
-        counts = "SELECT (SELECT count(*) FROM captures), (SELECT count(*) FROM measurements)"
+        counts = (
+            "SELECT (SELECT count(*) FROM captures), (SELECT count(*) FROM measurements),"
+            " (SELECT count(*) FROM capture_renders)"
+        )
         async with dev_engine.connect() as conn:
             before = (await conn.execute(text(counts))).one()
 

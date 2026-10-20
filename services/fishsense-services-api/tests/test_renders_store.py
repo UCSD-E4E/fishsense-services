@@ -350,3 +350,51 @@ async def test_a_mission_off_the_corrective_optic_owes_no_render(
     assert await _in(app_engine, lab, render_missions, render_version=V) == []
     inputs = await _in(app_engine, lab, render_inputs, mission_id, render_version=V)
     assert inputs.captures == []
+
+
+async def test_current_renders_are_the_newest_rendered_in_a_bucket(
+    owner_engine, app_engine
+):
+    """The one rule for "a capture's render", shared with /fish: the newest
+    rendered row by write order, in the given bucket when one is named."""
+    lab = await tenant(owner_engine)
+    mission_id = await _plain_mission(owner_engine, lab)
+    c = await capture(owner_engine, lab, mission_id)
+    camera = (await _in(app_engine, lab, render_inputs, mission_id,
+                        render_version=V)).camera_calibration_id  # fmt: skip
+    await _in(app_engine, lab, persist_renders, mission_id, [
+        _rendered(c, camera, render_version=2, key="renders/r2/c.JPG"),
+        _rendered(c, camera, render_version=3, bucket="other", key="renders/r3/c.JPG"),
+        RenderRow(capture_id=c, status="raw_unavailable", render_version=4,
+                  camera_calibration_id=camera),
+    ])  # fmt: skip
+
+    anywhere = await _in(app_engine, lab, current_renders, [c])
+    here = await _in(app_engine, lab, current_renders, [c], bucket="lab-bucket")
+
+    assert anywhere[c].key == "renders/r3/c.JPG"
+    assert here[c].key == "renders/r2/c.JPG"
+
+
+async def test_the_catalog_passes_the_bucket_to_current_renders(
+    owner_engine, app_engine, seed_memberships
+):
+    """Review of the stack: the catalog dropped `bucket`, so a caller through
+    it got renders from old buckets, which presign to nothing."""
+    tenants = await seed_memberships(
+        {"service:fishsense-orchestrator": {"lab": "member"}}
+    )
+    lab = tenants["lab"]
+    mission_id = await _plain_mission(owner_engine, lab)
+    c = await capture(owner_engine, lab, mission_id)
+    camera = (await _in(app_engine, lab, render_inputs, mission_id,
+                        render_version=V)).camera_calibration_id  # fmt: skip
+    await _in(app_engine, lab, persist_renders, mission_id, [
+        _rendered(c, camera, key="renders/here.JPG"),
+        _rendered(c, camera, render_version=2, bucket="other", key="renders/there.JPG"),
+    ])  # fmt: skip
+    catalog = RendersCatalog(app_engine, sub="service:fishsense-orchestrator")
+
+    got = await catalog.current_renders(lab, [c], bucket="lab-bucket")
+
+    assert got[c].key == "renders/here.JPG"

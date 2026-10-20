@@ -160,7 +160,7 @@ function FishCard({ slug, observation: o }: { slug: string; observation: Observa
         />
       ) : (
         <div className="flex aspect-4/3 w-full items-center justify-center bg-slate-100 text-sm text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-          No photo yet
+          No photo
         </div>
       )}
       <div className="space-y-1 p-4 text-sm">
