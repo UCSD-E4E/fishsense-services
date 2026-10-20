@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.17.0...v0.18.0) (2026-10-20)
+
+
+### Features
+
+* **renders:** copy each raw into the tenant's bucket, and settle per bucket ([000b266](https://github.com/UCSD-E4E/fishsense-services/commit/000b266f58ace97dfa88a9b8611265c31f84a505))
+
 ## [0.17.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.16.0...v0.17.0) (2026-10-20)
 
 
