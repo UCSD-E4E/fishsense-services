@@ -460,14 +460,14 @@ def test_the_view_is_what_todays_cohorts_render():
     assert rendered == migration.RENDERED_SHA256
 
 
-def test_0051_adds_the_port_terms_todays_stores_use():
-    """0051 recreates the function with the port terms (2b-2), spelled in the
+def test_0050_adds_the_port_terms_todays_stores_use():
+    """0050 recreates the function with the port terms (2b-2), spelled in the
     migration because a function is frozen. When `camera_sql` changes them,
     this fails: ship a migration that recreates the function again."""
     from fishsense_services_api import camera_sql
 
     migration = importlib.import_module(
-        "fishsense_services_api.migrations.versions.0051_status_knows_the_port"
+        "fishsense_services_api.migrations.versions.0050_status_knows_the_port"
     )
     assert migration.CORRECTIVE_OPTIC == camera_sql.CORRECTIVE_OPTIC
     assert migration.ADMITTED_PORT == camera_sql.ADMITTED_PORT
@@ -1788,7 +1788,7 @@ async def _assert_parity(owner_engine, app_engine, tenant, column, select, expec
     # Never vacuous: the corpus has work, and has dives without it.
     assert viewed == {d.number for d in expected}
     # 2b-2: off the corrective optic, the same dives are neither picked nor
-    # pending (0051). Restated, compared, then put back.
+    # pending (0050). Restated, compared, then put back.
     for port in ("unknown", "flat"):
         for d in expected:
             await restate_port(owner_engine, d.id, port)

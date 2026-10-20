@@ -1328,7 +1328,7 @@ the UI as it lands (decided 2026-10-17)*
        resolver and the persist check.
      - Clustering, species prediction and laser auto-accept use `CORRECTIVE_OPTIC`.
      - The automatic validation harness scores only admitted missions.
-     - Migration 0051 recreates `dive_pipeline_status`'s function with the same terms.
+     - Migration 0050 recreates `dive_pipeline_status`'s function with the same terms.
      - The API returns `processable` from those predicates, so the web doesn't restate
        the rule.
 3. Direct e4edm ingest (the never-ingested Canyonview / Scripps Pier / Sealab / NIWC
