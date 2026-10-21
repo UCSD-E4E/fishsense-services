@@ -44,7 +44,6 @@ from fishsense_services_contracts.automatic_results import (
     PredictAutomaticFramesInput,
 )
 from fishsense_services_contracts.object_store import ObjectRef, automatic_jpeg_folder
-import gzip
 import hashlib
 
 from fishsense_services_contracts.masks import MaskUpload, mask_key
@@ -597,7 +596,7 @@ async def test_a_kept_mask_is_stored_in_the_apps_encoding_and_named():
     )
 
     ((url, data),) = puts
-    pixels = np.frombuffer(gzip.decompress(data), np.uint8).reshape(FRAME_H, FRAME_W)
+    pixels = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED)
     ox, oy = crop_origin(*DOT, FRAME_W, FRAME_H, CROP_W, CROP_H)
     expected = np.zeros((FRAME_H, FRAME_W), np.uint8)
     expected[oy : oy + CROP_H, ox : ox + CROP_W] = _mask_at(*DOT) * 255
@@ -648,3 +647,20 @@ async def test_an_unscored_mask_passed_no_gate_and_is_not_stored():
     finally:
         automatic_frames_module.automatic_frame_result = original
     assert r.status == "mask_unscored" and r.mask is None
+
+
+@pytest.mark.parametrize("failure", ["refused", "unreachable"])
+async def test_a_mask_that_cannot_be_stored_costs_only_itself(failure):
+    """Review of #232: the mask is an addition. A PUT the store refuses, or
+    can't be reached for, is logged; the frame's prediction stands, with no
+    mask named -- not failed, and SAM not run again."""
+
+    def put(url, headers, data):
+        if failure == "unreachable":
+            raise OSError("connection refused")
+        return 403
+
+    r = await ActivityEnvironment().run(
+        _activities(_Store(), put=put).predict_automatic_frame, _with_mask()
+    )
+    assert r.status == "predicted" and r.mask is None

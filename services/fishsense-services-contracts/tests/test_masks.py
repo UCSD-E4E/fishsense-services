@@ -3,8 +3,8 @@
 New in v2 (2026-10-21). The mobile app syncs its fish mask as ``mask_u8``:
 uint8, width x height, nonzero = fish, in the pixels of the frame it measured
 (docs/handoff/fishsense-mobile/SYNC.md). Ours are stored the same way, at the
-frame SAM segmented, gzip'd -- a raw 4014x3016 mask is 12 MB, a binary one
-gzips to tens of KB (owner's choice, 2026-10-21). Each mask is a new key: a
+frame SAM segmented, as the PNG the app's mask is moving to (#230: 8-bit
+greyscale, lossless, nonzero = fish). Each mask is a new key: a
 re-run never overwrites a mask an older prediction names.
 """
 
@@ -40,11 +40,9 @@ CAPTURE = uuid.UUID(int=3)
 
 
 def test_a_mask_key_is_new_per_mask_under_its_source_and_capture():
-    assert mask_key("automatic", CAPTURE, ID) == (
-        f"masks/automatic/{CAPTURE}/{ID}.u8.gz"
-    )
+    assert mask_key("automatic", CAPTURE, ID) == (f"masks/automatic/{CAPTURE}/{ID}.png")
     assert set(MASK_SOURCES) == {"automatic", "headtail"}
-    assert MASK_CONTENT_TYPE == "application/gzip"
+    assert MASK_CONTENT_TYPE == "image/png"
 
 
 def test_a_key_says_whose_mask_it_is():

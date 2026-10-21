@@ -77,7 +77,7 @@ from fishsense_services_contracts.species_prediction import (
     SpeciesPredictionResult,
 )
 from fishsense_services_contracts.masks import MaskUpload
-from fishsense_services_orchestrator.masks import checked_masks, mask_upload
+from fishsense_services_orchestrator.masks import checked_masks, discard, mask_upload
 from fishsense_services_orchestrator.species_predict.candidates import (
     species_candidates,
 )
@@ -461,20 +461,23 @@ class AutomaticResultsActivities:
         ]
         rows = [AutomaticHeadTailRow(**r.model_dump(exclude={"mask"})) for r in kept]
         # Contract 12: each stored mask, read back and checked, is named
-        # against its prediction in the same transaction.
-        masks = []
-        if any(r.mask is not None for r in kept):
+        # against its row's prediction in the same transaction; one that fails,
+        # or whose frame is not written, is deleted rather than left unnamed.
+        masks: list = []
+        if any(r.mask is not None for r in results):
             objects = await self._renders.objects(target.tenant_id)
             if objects is not None:
-                masks = await checked_masks(objects, "automatic", kept)
-        if masks:
-            written = await self._write(
-                target, self._catalog.persist_automatic_head_tails, rows, masks
-            )
-        else:
-            written = await self._write(
-                target, self._catalog.persist_automatic_head_tails, rows
-            )
+                masks, failed = await checked_masks(objects, "automatic", kept)
+                written_ids = {id(r) for r in kept}
+                dropped = [r.mask.key for r in results
+                           if r.mask is not None and id(r) not in written_ids]  # fmt: skip
+                await discard(objects, failed + dropped)
+        written = await self._write(
+            target,
+            self._catalog.persist_automatic_head_tails,
+            rows,
+            masks if any(m is not None for m in masks) else [],
+        )
         activity.logger.info(
             "dive=%s automatic frames written=%d", target.mission_id, written
         )

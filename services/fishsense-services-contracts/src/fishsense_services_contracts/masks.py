@@ -1,22 +1,24 @@
 """A prediction's SAM mask, stored as a file in the tenant's bucket (v12).
 
 New in v2 (2026-10-21). SAM's mask was dropped once its head/tail, box and area
-were taken. FishSense Mobile syncs its own fish mask as ``mask_u8``: uint8,
-width x height, nonzero = fish, in the pixels of the frame it measured
-(docs/handoff/fishsense-mobile/SYNC.md), stored in the tenant's bucket and
-named in ``capture_objects``. Ours are stored the same way (owner, 2026-10-21):
+were taken. FishSense Mobile stores its fish mask as a file in the tenant's
+bucket, named in ``capture_objects``; the owner chose ours to match the app's
+(2026-10-21). The app's mask is moving from raw ``mask_u8`` to ``mask_png``
+(#230, docs/handoff/fishsense-mobile/README.md): an 8-bit greyscale PNG,
+lossless, exactly the mask's width x height, nonzero on the fish -- a fraction
+of the raw size (ours would be 12 MB raw at 4014x3016), and a browser draws it
+as it is. Ours are that PNG (review of #232):
 
-* **the app's encoding**, at the frame SAM segmented: uint8, ``width x
-  height``, row by row, 255 on the fish and 0 elsewhere -- the crop SAM saw,
-  placed in a frame-sized array;
-* **gzip'd**: a 4014x3016 frame is 12 MB raw and a binary mask gzips to tens of
-  KB (owner's choice, 2026-10-21). Gunzipped, it is the app's ``mask_u8``;
+* **at the frame SAM segmented**: the crop SAM saw, placed in a frame-sized
+  array, 255 on the fish and 0 elsewhere;
 * **a new key per mask** (`mask_key`): a re-run never overwrites a mask an
   older prediction names; the prediction rows are append-only, and so are their
   masks;
 * **checked before it is recorded**: the processor PUTs it through a presigned
   URL and reports its size and SHA-256; the orchestrator reads it back and
-  checks both, and its gunzipped size against the frame, first.
+  checks both, and that its PNG header is 8-bit greyscale at the frame;
+* **an addition, never a reason to fail**: a mask that can't be stored or
+  doesn't check out costs only itself; its prediction stands.
 
 Both stages that segment store theirs: the automatic track (the capture's
 render) and the human-path head/tail predictor (its head/tail JPEG).
@@ -46,9 +48,10 @@ __all__ = [
 #: The stage whose prediction a mask belongs to.
 MASK_SOURCES = ("automatic", "headtail")
 MaskSource = Literal["automatic", "headtail"]
-MASK_CONTENT_TYPE = "application/gzip"
+MASK_CONTENT_TYPE = "image/png"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _PREFIX = "masks/"
+_SUFFIX = ".png"
 
 
 def mask_key(source: str, capture_id: UUID, mask_id: UUID) -> str:
@@ -60,16 +63,16 @@ def mask_key(source: str, capture_id: UUID, mask_id: UUID) -> str:
     for name, value in (("capture", capture_id), ("mask", mask_id)):
         if not isinstance(value, uuid.UUID):
             raise ValueError(f"a {name} id is a UUID, not {value!r}")
-    return f"{_PREFIX}{source}/{capture_id}/{mask_id}.u8.gz"
+    return f"{_PREFIX}{source}/{capture_id}/{mask_id}{_SUFFIX}"
 
 
 def is_mask_of(key: str, source: str, capture_id: UUID) -> bool:
     """`key` is one of `mask_key`'s for this stage and capture."""
-    return key.startswith(f"{_PREFIX}{source}/{capture_id}/") and key.endswith(".u8.gz")
+    return key.startswith(f"{_PREFIX}{source}/{capture_id}/") and key.endswith(_SUFFIX)
 
 
 def _a_mask_key(value: str) -> str:
-    if not value.startswith(_PREFIX) or not value.endswith(".u8.gz"):
+    if not value.startswith(_PREFIX) or not value.endswith(_SUFFIX):
         raise ValueError(f"not a mask key: {value!r}")
     return value
 
@@ -84,8 +87,8 @@ class MaskUpload(BaseModel):
 
 
 class StoredMask(BaseModel):
-    """A mask the processor PUT: its key, its gzip'd size and SHA-256, and the
-    frame it is in (gunzipped, ``width x height`` bytes)."""
+    """A mask the processor PUT: its key, the PNG's size and SHA-256, and the
+    frame it is in (the PNG's ``width x height``)."""
 
     key: str
     size: int = Field(gt=0)

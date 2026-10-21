@@ -1602,8 +1602,8 @@ async def test_a_human_path_prediction_and_its_mask_are_written_together(
     lab = await _tenant(owner_engine)
     mission, capture, laser = await _predict_seed(owner_engine, lab)
     mask = PredictionMask(capture_id=capture, bucket="fishsense-tenant-lab",
-                          key="masks/headtail/abc/1.u8.gz", sha256="b" * 64,
-                          size=700, content_type="application/gzip",
+                          key="masks/headtail/abc/1.png", sha256="b" * 64,
+                          size=700, content_type="image/png",
                           width=4014, height=3016)  # fmt: skip
 
     await _in(app_engine, lab, persist_headtail_predictions, mission,
@@ -1614,4 +1614,4 @@ async def test_a_human_path_prediction_and_its_mask_are_written_together(
             SELECT m.object_key, p.capture_id FROM prediction_masks m
             JOIN head_tail_predictions p ON p.id = m.head_tail_prediction_id
             """))).one()  # fmt: skip
-    assert (key, of) == ("masks/headtail/abc/1.u8.gz", capture)
+    assert (key, of) == ("masks/headtail/abc/1.png", capture)

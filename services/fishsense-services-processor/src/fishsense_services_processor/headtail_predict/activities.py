@@ -42,7 +42,7 @@ from fishsense_services_contracts.headtail import (
     PredictHeadtailImage,
 )
 from fishsense_services_contracts.masks import KEPT_MASK_STATUSES
-from fishsense_services_processor.masks import MaskSink, Put, store_mask
+from fishsense_services_processor.masks import MaskSink, Put, store_mask_or_none
 from fishsense_services_processor.renders.activities import http_put
 from fishsense_services_processor.headtail_predict.predict import (
     FALLBACK_CHECKPOINT,
@@ -176,9 +176,12 @@ class HeadtailPredictActivities:  # pylint: disable=too-few-public-methods
             and (result.status in KEPT_MASK_STATUSES)
         ):
             stored = await asyncio.to_thread(
-                store_mask, self._put, payload.mask, sink.mask
+                lambda: store_mask_or_none(
+                    self._put, payload.mask, sink.mask, capture_id=payload.capture_id
+                )
             )
-            result = result.model_copy(update={"mask": stored})
+            if stored is not None:
+                result = result.model_copy(update={"mask": stored})
         activity.logger.info(
             "predicted headtail capture=%s status=%s crop=(%s,%s) ratio=%s",
             result.capture_id,

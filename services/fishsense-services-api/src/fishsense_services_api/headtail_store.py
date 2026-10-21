@@ -613,7 +613,7 @@ async def persist_headtail_predictions(
     tenant_id: uuid.UUID,
     mission_id: uuid.UUID,
     rows: Sequence[HeadTailPredictionRow],
-    masks: Sequence[PredictionMask] = (),
+    masks: Sequence[PredictionMask | None] = (),
 ) -> int:
     """Append the dive's predictions, abstentions included, all or nothing, in
     the caller's transaction. Returns how many were written.
@@ -662,9 +662,9 @@ async def persist_headtail_predictions(
                 f"laser label {r.laser_label_id} is not capture {r.capture_id}'s"
             )
 
-    ids: dict[uuid.UUID, uuid.UUID] = {}
+    ids: list[uuid.UUID] = []
     for r in rows:
-        ids[r.capture_id] = (await conn.execute(
+        ids.append((await conn.execute(
             text("""
                 INSERT INTO head_tail_predictions (
                     tenant_id, capture_id, status, head_x, head_y, tail_x, tail_y,
@@ -679,10 +679,10 @@ async def persist_headtail_predictions(
                 RETURNING id
                 """),
             {"tenant": tenant_id, **r.__dict__},
-        )).scalar_one()  # fmt: skip
+        )).scalar_one())  # fmt: skip
     if masks:
-        # Each stored mask, named against its capture's prediction (0058).
-        await insert_prediction_masks(conn, tenant_id, "headtail", ids, masks)
+        # Each stored mask, named against its row's prediction (0058).
+        await insert_prediction_masks(conn, tenant_id, "headtail", rows, ids, masks)
     return len(rows)
 
 
@@ -888,7 +888,7 @@ class HeadtailCatalog(ServicePrincipal):
         tenant_id: uuid.UUID,
         mission_id: uuid.UUID,
         rows: Sequence[HeadTailPredictionRow],
-        masks: Sequence[PredictionMask] = (),
+        masks: Sequence[PredictionMask | None] = (),
     ) -> int:
         async with self._tenant(tenant_id) as conn:
             return await persist_headtail_predictions(

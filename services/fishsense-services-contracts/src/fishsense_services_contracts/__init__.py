@@ -32,7 +32,8 @@ from fishsense_services_contracts.task_queues import (
     PROCESSOR_TASK_QUEUE,
 )
 
-#: v12 (2026-10-21): SAM masks stored as files in the tenant's bucket (`masks`):
+#: v12 (2026-10-21): SAM masks stored as 8-bit greyscale PNGs in the tenant's
+#: bucket, as the app's ``mask_png`` (`masks`):
 #: a frame to predict may carry a mask's key and PUT (`AutomaticFrame.mask`,
 #: `PredictHeadtailImage.mask`), and a result that kept a mask names it as
 #: stored (`AutomaticFrameResult.mask`, `HeadtailPredictionResult.mask`). All

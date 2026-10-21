@@ -339,11 +339,26 @@ def _predict_stubs(*, mode="gpu", images=1):
         EVENTS.append(("backfill", target.mission_id))
         return 0
 
-    return [select, resolve, wake, persist, backfill, _record, _child_results]
+    @activity.defn(name="presign_headtail_masks")
+    async def presign(target: HeadtailTarget, ids: List[uuid.UUID]) -> list:
+        from fishsense_services_contracts.masks import MaskUpload, mask_key
+
+        CHUNKS.append(len(ids))
+        return [MaskUpload(key=mask_key("headtail", i, uuid.uuid4()),
+                           put_url="https://g/m").model_dump(mode="json")
+                for i in ids]  # fmt: skip
+
+    return [select, resolve, wake, persist, backfill, presign, _record,
+            _child_results]  # fmt: skip
+
+
+#: The images each presigned chunk held (contract 12).
+CHUNKS: list = []
 
 
 async def _run_predict(child_results=(), before=None, **stubs):
     CHILD_RESULTS.extend(child_results)
+    CHUNKS.clear()
     async with await WorkflowEnvironment.start_time_skipping(
         data_converter=DATA_CONVERTER
     ) as env:
@@ -668,3 +683,20 @@ def test_children_reuse_their_ids_whatever_the_last_one_did():
     """ALLOW_DUPLICATE, never FAILED_ONLY: a completed child must not burn
     the id, or a dive gaining work later never gets it done (prod dive 60)."""
     assert sut.CHILD_ID_REUSE == WorkflowIDReusePolicy.ALLOW_DUPLICATE
+
+
+async def test_a_large_mission_goes_to_the_gpu_a_presigned_chunk_at_a_time():
+    """Contract 12, review of #232: each image's mask PUT is presigned for
+    its chunk -- a whole mission's would pass Temporal's 2 MB limit -- and
+    every image is handed out every firing, so none is starved behind images
+    that never persist."""
+    from fishsense_services_orchestrator.headtail.workflow import PREDICT_CHUNK
+
+    await _run_predict([_predicted()], images=2 * PREDICT_CHUNK + 7)
+
+    assert CHUNKS == [PREDICT_CHUNK, PREDICT_CHUNK, 7]
+    assert [e[1] for e in EVENTS if e[0] == "child"] == [
+        f"predict-headtail-{MISSION}", f"predict-headtail-{MISSION}-1",
+        f"predict-headtail-{MISSION}-2",
+    ]  # fmt: skip
+    assert _kinds().count("persist") == 3 and _kinds()[-1] == "backfill"

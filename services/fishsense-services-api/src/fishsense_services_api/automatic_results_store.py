@@ -721,11 +721,12 @@ async def persist_automatic_head_tails(
     tenant_id: uuid.UUID,
     mission_id: uuid.UUID,
     rows: Sequence[AutomaticHeadTailRow],
-    masks: Sequence[PredictionMask] = (),
+    masks: Sequence[PredictionMask | None] = (),
 ) -> int:
     """Append the dive's automatic head/tails, abstentions included, all or
-    nothing, in the caller's transaction, and name each stored mask against
-    its prediction (0058). Returns how many were written."""
+    nothing, in the caller's transaction, and name each stored mask -- `masks`
+    parallel to `rows`, or empty -- against its row's prediction (0058).
+    Returns how many rows were written."""
     rows = list(rows)
     if not rows:
         if masks:
@@ -734,10 +735,7 @@ async def persist_automatic_head_tails(
     await _check_captures(conn, tenant_id, mission_id, [r.capture_id for r in rows])
     ids = await _insert(conn, "automatic_head_tail_predictions", tenant_id, rows)
     if masks:
-        await insert_prediction_masks(
-            conn, tenant_id, "automatic",
-            {r.capture_id: i for r, i in zip(rows, ids)}, masks,
-        )  # fmt: skip
+        await insert_prediction_masks(conn, tenant_id, "automatic", rows, ids, masks)
     return len(ids)
 
 

@@ -1,18 +1,18 @@
 """SAM masks stored as files (contract 12, `fishsense_services_contracts.masks`).
 
 New in v2 (2026-10-21). The mask SAM kept was dropped once its head/tail, box
-and area were taken. Both stages now place it in a frame-sized uint8 array --
-the app's ``mask_u8``: width x height, 255 on the fish -- gzip it, and PUT it
-to the key the orchestrator presigned, reporting its size and SHA-256. A frame
-with no upload slot, or no kept mask, stores nothing.
+and area were taken. Both stages now place it in a frame-sized array -- the
+app's ``mask_png`` (#230): 8-bit greyscale PNG, width x height, 255 on the
+fish -- and PUT it to the key the orchestrator presigned, reporting its size
+and SHA-256. A frame with no upload slot, or no kept mask, stores nothing.
 """
 
 from __future__ import annotations
 
-import gzip
 import hashlib
 import uuid
 
+import cv2
 import numpy as np
 import pytest
 
@@ -28,26 +28,29 @@ def _crop(h=4, w=6):
     return crop
 
 
-def test_a_mask_is_the_apps_encoding_at_the_frame_gzipd():
+def _decoded(data):
+    return cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED)
+
+
+def test_a_mask_is_the_apps_png_at_the_frame():
     mask = FrameMask(crop=_crop(), x=10, y=20, width=40, height=30)
 
     data = mask.encode()
-    pixels = np.frombuffer(gzip.decompress(data), np.uint8).reshape(30, 40)
+    pixels = _decoded(data)
 
     expected = np.zeros((30, 40), np.uint8)
     expected[21:23, 12:15] = 255
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"
+    # IHDR: 8-bit (byte 24), greyscale (colour type 0, byte 25).
+    assert (data[24], data[25]) == (8, 0)
+    assert pixels.dtype == np.uint8 and pixels.shape == (30, 40)
     assert (pixels == expected).all()
-    # No timestamp in the gzip header (bytes 4-7): the same mask is always the
-    # same bytes, and the same SHA-256.
-    assert data[4:8] == bytes(4)
+    assert mask.encode() == data  # the same mask, the same bytes
 
 
 def test_a_crop_past_the_frame_edge_is_clipped_to_the_frame():
     crop = np.ones((10, 10), np.uint8)
-    pixels = np.frombuffer(
-        gzip.decompress(FrameMask(crop=crop, x=35, y=25, width=40, height=30).encode()),
-        np.uint8,
-    ).reshape(30, 40)
+    pixels = _decoded(FrameMask(crop=crop, x=35, y=25, width=40, height=30).encode())
     assert pixels[25:, 35:].all() and pixels.sum() == 255 * 5 * 5
 
 

@@ -86,6 +86,7 @@ def _activities(deps: Deps):
         headtail.clear_headtail_reprocess_flags,
         headtail.select_next_mission_for_headtail_prediction,
         headtail.resolve_headtail_predict_inputs,
+        headtail.presign_headtail_masks,
         headtail.persist_headtail_predictions,
         labels.select_missions_needing_headtail_population,
         labels.create_headtail_label_studio_project,

@@ -13,6 +13,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
+from fishsense_services_orchestrator.object_store.tenant_buckets import tenant_objects
 from temporalio.exceptions import ApplicationError
 
 from fishsense_services_api.renders_store import RenderAt
@@ -50,11 +51,7 @@ class TenantRenderUrls:
     async def objects(self, tenant_id: uuid.UUID) -> Any:
         """The tenant's bucket (`TenantObjects`), or None when it has none:
         where stored masks are presigned and read back (contract 12)."""
-        slug = await self._catalog.tenant_slug(tenant_id)
-        try:
-            return self._stores.for_tenant(slug)
-        except NoTenantStore:
-            return None
+        return await tenant_objects(self._catalog, self._stores, tenant_id)
 
     async def presigner(self, tenant_id: uuid.UUID) -> Callable[[str], str]:
         """Presigned GETs in the tenant's bucket: the slug looked up once, the

@@ -53,7 +53,8 @@ from fishsense_services_contracts.headtail import (
     PreprocessHeadtailImagesInput,
 )
 from fishsense_services_contracts.object_store import HEADTAIL_JPEG_FOLDER
-from fishsense_services_orchestrator.masks import checked_masks, mask_upload
+from fishsense_services_contracts.masks import MaskUpload
+from fishsense_services_orchestrator.masks import checked_masks, discard, mask_upload
 from fishsense_services_orchestrator.object_store.tenant_buckets import tenant_objects
 from fishsense_services_orchestrator.object_store.store import (
     OrchestratorObjectStore,
@@ -124,13 +125,6 @@ class HeadtailCatalog(Protocol):
     ) -> int: ...
 
     async def tenant_slug(self, tenant_id: uuid.UUID) -> str: ...
-
-
-#: The most images one predict firing hands out (contract 12, 2026-10-21):
-#: each carries its mask's presigned PUT (~650 characters), and a whole large
-#: mission's would pass Temporal's 2 MB payload limit. The rest wait for the
-#: next firing, as images with no JPEG yet do.
-HEADTAIL_PREDICT_PAGE = 1000
 
 
 class HeadtailActivities:
@@ -267,10 +261,7 @@ class HeadtailActivities:
             predictor_version=HEADTAIL_PREDICTOR_VERSION,
         )
         images = []
-        bucket = await self._mask_bucket(target.tenant_id)
         for capture in captures:
-            if len(images) >= HEADTAIL_PREDICT_PAGE:
-                break
             jpeg = await self._store.locate_processed_jpeg(
                 target.tenant_id,
                 HEADTAIL_JPEG_FOLDER,
@@ -292,11 +283,6 @@ class HeadtailActivities:
                     laser_label_ids=[d.laser_label_id for d in capture.dots],
                     has_existing_prediction=capture.has_existing_prediction,
                     existing_laser_superseded=capture.existing_laser_superseded,
-                    mask=(
-                        None
-                        if bucket is None
-                        else mask_upload(bucket, "headtail", capture.capture_id)
-                    ),
                 )
             )
         activity.logger.info(
@@ -308,6 +294,20 @@ class HeadtailActivities:
         return PredictHeadtailImagesInput(
             tenant_id=target.tenant_id, mission_id=target.mission_id, images=images
         )
+
+    @activity.defn(name="presign_headtail_masks")
+    async def presign_headtail_masks(
+        self, target: HeadtailTarget, capture_ids: List[uuid.UUID]
+    ) -> List[Optional[MaskUpload]]:
+        """A mask upload for each of a GPU chunk's images (contract 12): a new
+        key in the tenant's bucket and its presigned PUT; none with no bucket.
+        Per chunk (review of #232): a whole large mission's URLs would pass
+        Temporal's 2 MB payload limit, and a firing that capped its images
+        instead starved those behind images that never persist."""
+        bucket = await self._mask_bucket(target.tenant_id)
+        if bucket is None:
+            return [None] * len(capture_ids)
+        return [mask_upload(bucket, "headtail", c) for c in capture_ids]
 
     @activity.defn(name="persist_headtail_predictions")
     async def persist_headtail_predictions(
@@ -327,21 +327,20 @@ class HeadtailActivities:
             HeadTailPredictionRow(**r.model_dump(exclude={"mask"})) for r in results
         ]
         # Contract 12: each stored mask, read back and checked, is named
-        # against its prediction in the same transaction.
-        masks = []
+        # against its row's prediction in the same transaction; one that fails
+        # is deleted rather than left unnamed.
+        masks: list = []
         if any(r.mask is not None for r in results):
             bucket = await self._mask_bucket(target.tenant_id)
             if bucket is not None:
-                masks = await checked_masks(bucket, "headtail", results)
+                masks, failed = await checked_masks(bucket, "headtail", results)
+                await discard(bucket, failed)
         try:
-            written = await (
-                self._catalog.persist_headtail_predictions(
-                    target.tenant_id, target.mission_id, rows, masks
-                )
-                if masks
-                else self._catalog.persist_headtail_predictions(
-                    target.tenant_id, target.mission_id, rows
-                )
+            written = await self._catalog.persist_headtail_predictions(
+                target.tenant_id,
+                target.mission_id,
+                rows,
+                masks if any(m is not None for m in masks) else [],
             )
         except InvalidPredictions as exc:
             raise ApplicationError(

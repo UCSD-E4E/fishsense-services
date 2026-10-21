@@ -52,7 +52,7 @@ from fishsense_services_contracts.automatic_results import (
 from fishsense_services_contracts.laser_region import point_in_laser_region
 from fishsense_services_contracts.object_store import automatic_jpeg_folder
 from fishsense_services_contracts.masks import KEPT_MASK_STATUSES
-from fishsense_services_processor.masks import MaskSink, Put, store_mask
+from fishsense_services_processor.masks import MaskSink, Put, store_mask_or_none
 from fishsense_services_processor.renders.activities import http_put
 from fishsense_services_processor.slate_detect.frame import DECODE_ERRORS
 from fishsense_services_processor.automatic_results.frames import (
@@ -217,9 +217,12 @@ class AutomaticFramesActivities:  # pylint: disable=too-few-public-methods
             and (result.status in KEPT_MASK_STATUSES)
         ):
             stored = await asyncio.to_thread(
-                store_mask, self._put, frame.mask, sink.mask
+                lambda: store_mask_or_none(
+                    self._put, frame.mask, sink.mask, capture_id=frame.capture_id
+                )
             )
-            result = result.model_copy(update={"mask": stored})
+            if stored is not None:
+                result = result.model_copy(update={"mask": stored})
         if versioned:
             result = result.model_copy(
                 update={

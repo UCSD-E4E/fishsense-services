@@ -291,7 +291,7 @@ async def test_a_frame_whose_render_settled_as_an_abstention_is_one():
               for i, c in enumerate((bad, gone, fine))]  # fmt: skip
     catalog = _Catalog(
         automatic_frames_inputs=AutomaticFramesInputs(K, [0.1] * 5, frames, CAMERA),
-        persist_automatic_head_tails=lambda t, d, rows: len(rows),
+        persist_automatic_head_tails=lambda t, d, rows, *masks: len(rows),
     )
     renders = _Renders(
         _render(bad, f"{0:032x}", status="decode_failed"),
@@ -324,11 +324,14 @@ def _frame_result(status="predicted", **extra):
 
 
 async def test_frame_results_are_written_as_automatic_rows():
-    catalog = _Catalog(persist_automatic_head_tails=lambda t, d, rows: len(rows))
+    catalog = _Catalog(
+        persist_automatic_head_tails=lambda t, d, rows, *masks: len(rows)
+    )
     r = _frame_result("slate_frame", laser_x=1.0, laser_y=2.0, slate_probability=0.8)
 
     assert await _run(_acts(catalog).persist_automatic_frames, TARGET, [r]) == 1
-    ((_, (tenant, mission, rows), _),) = catalog.calls
+    ((_, (tenant, mission, rows, masks), _),) = catalog.calls
+    assert masks == []
     assert (tenant, mission) == (TENANT_A, MISSION)
     assert rows[0].status == "slate_frame" and rows[0].slate_probability == 0.8
 
@@ -366,7 +369,7 @@ async def test_a_rendered_frame_with_no_render_named_is_left_owed():
     renders it (review of #136). The rest of the batch is written."""
     written = []
     catalog = _Catalog(
-        persist_automatic_head_tails=lambda t, d, rows: written.extend(rows)
+        persist_automatic_head_tails=lambda t, d, rows, *masks: written.extend(rows)
         or len(rows)
     )
     good = _frame_result()
@@ -385,7 +388,9 @@ async def test_a_rendered_frame_with_no_render_named_is_left_owed():
 
 @pytest.mark.parametrize("status", ["raw_unavailable", "decode_failed"])
 async def test_a_frame_with_no_render_needs_no_render_version(status):
-    catalog = _Catalog(persist_automatic_head_tails=lambda t, d, rows: len(rows))
+    catalog = _Catalog(
+        persist_automatic_head_tails=lambda t, d, rows, *masks: len(rows)
+    )
     r = _frame_result(status, jpeg_render_version=None, jpeg_camera_calibration_id=None)
     assert await _run(_acts(catalog).persist_automatic_frames, TARGET, [r]) == 1
 
@@ -644,6 +649,10 @@ class _MaskBucket:
 
     def __init__(self, stored=None):
         self.stored = stored or {}
+        self.deleted = []
+
+    def delete(self, key):
+        self.deleted.append(key)
 
     def presign_mask_put(self, key):
         return SimpleNamespace(url=f"https://g/{key}?sig")
@@ -671,12 +680,14 @@ async def test_a_tenant_with_no_bucket_gets_no_mask_uploads():
 
 
 async def test_a_checked_mask_is_written_with_its_prediction_and_left_off_the_row():
-    import gzip
     import hashlib
+
+    import cv2
+    import numpy as np
 
     from fishsense_services_contracts.masks import StoredMask, mask_key
 
-    data = gzip.compress(bytes(4 * 3), mtime=0)
+    data = cv2.imencode(".png", np.zeros((3, 4), np.uint8))[1].tobytes()
     capture = uuid.uuid4()
     key = mask_key("automatic", capture, uuid.uuid4())
     r = _frame_result(capture_id=capture, width=4, height=3, mask_bbox=[0, 0, 1, 1],
@@ -692,6 +703,7 @@ async def test_a_checked_mask_is_written_with_its_prediction_and_left_off_the_ro
     ((_, (_, _, rows, masks), _),) = catalog.calls
     assert not hasattr(rows[0], "mask")
     assert [(m.capture_id, m.key) for m in masks] == [(capture, key)]
+    assert renders.bucket.deleted == []
 
 
 async def test_a_mask_that_fails_its_check_costs_only_itself():
@@ -703,8 +715,33 @@ async def test_a_mask_that_fails_its_check_costs_only_itself():
                       mask=StoredMask(key=key, size=9, sha256="a" * 64, width=4,
                                       height=3))  # fmt: skip
     renders = _Renders()
-    renders.bucket = _MaskBucket({})  # never arrived
-    catalog = _Catalog(persist_automatic_head_tails=lambda t, d, rows: len(rows))
+    renders.bucket = _MaskBucket({key: b"other bytes"})
+    catalog = _Catalog(
+        persist_automatic_head_tails=lambda t, d, rows, *masks: len(rows)
+    )
 
     assert await _run(_acts(catalog, renders=renders).persist_automatic_frames,
                       TARGET, [r]) == 1  # fmt: skip
+    ((_, (_, _, _, masks), _),) = catalog.calls
+    assert masks == [] and renders.bucket.deleted == [key]
+
+
+async def test_a_mask_of_a_frame_left_owed_is_deleted():
+    """A frame that names no render is not written (left owed): its mask
+    would name nothing, so it is deleted (review of #232)."""
+    from fishsense_services_contracts.masks import StoredMask, mask_key
+
+    capture = uuid.uuid4()
+    key = mask_key("automatic", capture, uuid.uuid4())
+    r = _frame_result(capture_id=capture, width=4, height=3, mask_bbox=[0, 0, 1, 1],
+                      jpeg_render_version=None, jpeg_camera_calibration_id=None,
+                      mask=StoredMask(key=key, size=9, sha256="a" * 64, width=4,
+                                      height=3))  # fmt: skip
+    renders = _Renders()
+    renders.bucket = _MaskBucket({})
+    catalog = _Catalog(
+        persist_automatic_head_tails=lambda t, d, rows, *masks: len(rows)
+    )
+
+    await _run(_acts(catalog, renders=renders).persist_automatic_frames, TARGET, [r])
+    assert renders.bucket.deleted == [key]

@@ -3,17 +3,18 @@
 New in v2 (2026-10-21). The kernel (`headtail_predict.predict`) segments a crop
 around the laser dot and used to drop the mask it kept once its head/tail,
 box and area were taken. A `MaskSink` now holds it; the stage places it in a
-frame-sized uint8 array -- the app's ``mask_u8``: width x height, row by row,
-255 on the fish -- gzips it (no timestamp, so the same mask is the same
-bytes), and PUTs it to the key the orchestrator presigned (`store_mask`),
-naming what it stored. The orchestrator reads it back and checks it before
-recording it.
+frame-sized array and encodes it as the app's ``mask_png`` (#230): an 8-bit
+greyscale PNG, width x height, 255 on the fish, lossless (the same mask is
+the same bytes). It PUTs it to the key the orchestrator presigned
+(`store_mask`) and names what it stored; the orchestrator reads it back and
+checks it before recording it. A mask that can't be stored costs only itself
+(`store_mask_or_none`, review of #232).
 """
 
 from __future__ import annotations
 
-import gzip
 import hashlib
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Optional
@@ -26,7 +27,9 @@ from fishsense_services_contracts.masks import (
     StoredMask,
 )
 
-__all__ = ["FrameMask", "MaskSink", "store_mask"]
+__all__ = ["FrameMask", "MaskSink", "store_mask", "store_mask_or_none"]
+
+_log = logging.getLogger(__name__)
 
 #: ``(url, headers, data) -> HTTP status``: `renders.activities.http_put`.
 Put = Callable[[str, dict, bytes], int]
@@ -43,13 +46,19 @@ class FrameMask:
     height: int
 
     def encode(self) -> bytes:
-        """The app's ``mask_u8`` at the frame, gzip'd."""
+        """The app's ``mask_png`` at the frame: 8-bit greyscale, lossless."""
+        # pylint: disable-next=import-outside-toplevel
+        import cv2
+
         frame = np.zeros((self.height, self.width), np.uint8)
         crop = np.asarray(self.crop) > 0
         h = max(0, min(crop.shape[0], self.height - self.y))
         w = max(0, min(crop.shape[1], self.width - self.x))
         frame[self.y : self.y + h, self.x : self.x + w][crop[:h, :w]] = 255
-        return gzip.compress(frame.tobytes(), compresslevel=6, mtime=0)
+        ok, png = cv2.imencode(".png", frame)
+        if not ok:
+            raise RuntimeError("the mask would not encode as a PNG")
+        return png.tobytes()
 
 
 class MaskSink:  # pylint: disable=too-few-public-methods
@@ -76,3 +85,16 @@ def store_mask(put: Put, upload: MaskUpload, mask: FrameMask) -> StoredMask:
         width=mask.width,
         height=mask.height,
     )
+
+
+def store_mask_or_none(
+    put: Put, upload: MaskUpload, mask: FrameMask, *, capture_id
+) -> Optional[StoredMask]:
+    """`store_mask`, or None, logged, when it can't be stored: the mask is an
+    addition, and its frame's prediction must not fail -- nor SAM run again --
+    for it (review of #232)."""
+    try:
+        return store_mask(put, upload, mask)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        _log.warning("capture=%s: mask %s not stored: %s", capture_id, upload.key, exc)
+        return None

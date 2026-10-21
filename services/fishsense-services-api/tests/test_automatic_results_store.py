@@ -1450,9 +1450,9 @@ async def test_failures_at_an_older_version_do_not_count(owner_engine, app_engin
 # -- stored masks (0058, 2026-10-21) ----------------------------------------------
 
 
-def _mask(capture_id, key="masks/automatic/abc/1.u8.gz", **extra) -> PredictionMask:
+def _mask(capture_id, key="masks/automatic/abc/1.png", **extra) -> PredictionMask:
     fields = dict(capture_id=capture_id, bucket="fishsense-tenant-lab", key=key,
-                  sha256="a" * 64, size=900, content_type="application/gzip",
+                  sha256="a" * 64, size=900, content_type="image/png",
                   width=4000, height=3000)  # fmt: skip
     fields.update(extra)
     return PredictionMask(**fields)
@@ -1473,7 +1473,7 @@ async def test_a_prediction_and_its_mask_are_written_together(owner_engine, app_
                       sam_score=None))]  # fmt: skip
 
     await _in(app_engine, lab, persist_automatic_head_tails, mission_id, rows,
-              masks=[_mask(fish)])  # fmt: skip
+              masks=[_mask(fish), None])  # fmt: skip
 
     (row,) = await _rows(owner_engine, """
         SELECT m.object_key, m.width, m.height, m.capture_id, p.capture_id AS of
@@ -1481,7 +1481,7 @@ async def test_a_prediction_and_its_mask_are_written_together(owner_engine, app_
         JOIN automatic_head_tail_predictions p
           ON p.id = m.automatic_head_tail_prediction_id
         """)  # fmt: skip
-    assert row == {"object_key": "masks/automatic/abc/1.u8.gz", "width": 4000,
+    assert row == {"object_key": "masks/automatic/abc/1.png", "width": 4000,
                    "height": 3000, "capture_id": fish, "of": fish}  # fmt: skip
 
 
@@ -1505,23 +1505,30 @@ async def test_a_mask_for_no_prediction_in_the_batch_is_refused(
     )
 
 
-async def test_a_mask_names_one_prediction_and_one_key(owner_engine, app_engine):
+async def test_a_retried_persist_names_each_mask_once(owner_engine, app_engine):
+    """Review of #232: a persist whose completion was lost is retried with the
+    same masks; the key is named once, and the retry is not an error."""
     lab = await tenant(owner_engine)
     mission_id = await _backlog_mission(owner_engine, lab)
     fish = await capture(owner_engine, lab, mission_id)
     camera = await _camera(app_engine, lab, mission_id)
     row = replace(_predicted(fish), jpeg_render_version=1,
                   jpeg_camera_calibration_id=camera)  # fmt: skip
-    await _in(app_engine, lab, persist_automatic_head_tails, mission_id, [row],
-              masks=[_mask(fish)])  # fmt: skip
-
-    with pytest.raises(IntegrityError):  # the same key again
+    for _ in range(2):
         await _in(app_engine, lab, persist_automatic_head_tails, mission_id, [row],
                   masks=[_mask(fish)])  # fmt: skip
+
+    assert len(await _rows(owner_engine, "SELECT id FROM prediction_masks")) == 1
+
+
+async def test_a_mask_names_exactly_one_prediction(owner_engine, app_engine):
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    fish = await capture(owner_engine, lab, mission_id)
     async with owner_engine.begin() as conn:
         with pytest.raises(IntegrityError):  # neither prediction
             await conn.execute(text("""
                 INSERT INTO prediction_masks (tenant_id, capture_id, bucket,
                     object_key, sha256, size_bytes, content_type, width, height)
-                VALUES (:t, :c, 'b', 'masks/x.u8.gz', :s, 1, 'application/gzip', 1, 1)
+                VALUES (:t, :c, 'b', 'masks/x.png', :s, 1, 'image/png', 1, 1)
                 """), {"t": lab, "c": fish, "s": "a" * 64})  # fmt: skip

@@ -129,12 +129,19 @@ class _MaskBucket:
 
     def __init__(self, stored=None):
         self.stored = stored or {}
+        self.deleted = []
 
     def presign_mask_put(self, key):
         return SimpleNamespace(url=f"https://g/{key}?sig")
 
     def get(self, key):
         return self.stored.get(key)
+
+    deleted: list
+
+    def delete(self, key):
+        self.deleted.append(key)
+        self.stored.pop(key, None)
 
 
 class _Stores:
@@ -404,61 +411,36 @@ async def test_a_worker_status_is_never_persisted():
 # -- stored masks (contract 12, 2026-10-21) ------------------------------------------
 
 
-async def test_each_image_gets_a_mask_upload_in_the_tenants_bucket():
-    capture = _capture("a" * 32)
-    jpeg = LAYOUT.processed_jpeg(LAB, "preprocess_headtail_jpeg", "a" * 32)
+async def test_each_capture_of_a_chunk_gets_a_mask_upload_in_the_tenants_bucket():
+    captures = [uuid.uuid4(), uuid.uuid4()]
 
-    inputs = await _run(
-        _activities(FakeCatalog(captures=[capture]), present=[jpeg],
-                    stores=_Stores(_MaskBucket())).resolve_headtail_predict_inputs,
-        HeadtailTarget(LAB, uuid.uuid4()),
+    uploads = await _run(
+        _activities(FakeCatalog(), stores=_Stores(_MaskBucket())).presign_headtail_masks,
+        HeadtailTarget(LAB, uuid.uuid4()), captures,
     )  # fmt: skip
 
-    (image,) = inputs.images
-    assert image.mask.key.startswith(f"masks/headtail/{capture.capture_id}/")
-    assert image.mask.put_url == f"https://g/{image.mask.key}?sig"
+    assert [u.key.split("/")[2] for u in uploads] == [str(c) for c in captures]
+    assert all(u.put_url == f"https://g/{u.key}?sig" for u in uploads)
 
 
-async def test_with_no_bucket_an_image_gets_no_mask_upload():
-    capture = _capture("a" * 32)
-    jpeg = LAYOUT.processed_jpeg(LAB, "preprocess_headtail_jpeg", "a" * 32)
-
-    inputs = await _run(
-        _activities(FakeCatalog(captures=[capture]), present=[jpeg],
-                    stores=_Stores(None)).resolve_headtail_predict_inputs,
-        HeadtailTarget(LAB, uuid.uuid4()),
+async def test_with_no_bucket_a_chunk_gets_no_mask_uploads():
+    uploads = await _run(
+        _activities(FakeCatalog(), stores=_Stores(None)).presign_headtail_masks,
+        HeadtailTarget(LAB, uuid.uuid4()), [uuid.uuid4()],
     )  # fmt: skip
-    assert inputs.images[0].mask is None
-
-
-async def test_a_firing_hands_out_a_page_of_images_and_defers_the_rest():
-    """A presigned PUT is ~650 characters: a whole large mission's would pass
-    Temporal's 2 MB payload limit, so a firing takes a page; the rest wait for
-    the next, as images with no JPEG do."""
-    from fishsense_services_orchestrator.headtail.activities import (
-        HEADTAIL_PREDICT_PAGE,
-    )
-
-    captures = [_capture(f"{n:032x}") for n in range(HEADTAIL_PREDICT_PAGE + 3)]
-    present = [LAYOUT.processed_jpeg(LAB, "preprocess_headtail_jpeg", c.checksum)
-               for c in captures]  # fmt: skip
-
-    inputs = await _run(
-        _activities(FakeCatalog(captures=captures), present=present,
-                    stores=_Stores(_MaskBucket())).resolve_headtail_predict_inputs,
-        HeadtailTarget(LAB, uuid.uuid4()),
-    )  # fmt: skip
-    assert len(inputs.images) == HEADTAIL_PREDICT_PAGE
+    assert uploads == [None]
 
 
 async def test_a_checked_mask_is_persisted_with_its_prediction():
-    import gzip
     import hashlib
+
+    import cv2
+    import numpy as np
 
     from fishsense_services_contracts.masks import StoredMask, mask_key
 
     capture = uuid.uuid4()
-    data = gzip.compress(bytes(4014 * 3016), mtime=0)
+    data = cv2.imencode(".png", np.zeros((3016, 4014), np.uint8))[1].tobytes()
     key = mask_key("headtail", capture, uuid.uuid4())
     result = _result(capture, mask_bbox=[0, 0, 1, 1], mask=StoredMask(
         key=key, size=len(data), sha256=hashlib.sha256(data).hexdigest(),
@@ -473,3 +455,22 @@ async def test_a_checked_mask_is_persisted_with_its_prediction():
 
     (masks,) = [c[1] for c in catalog.calls if c[0] == "masks"]
     assert [(m.capture_id, m.key) for m in masks] == [(capture, key)]
+
+
+async def test_a_mask_that_fails_its_check_is_deleted_and_the_prediction_kept():
+    from fishsense_services_contracts.masks import StoredMask, mask_key
+
+    capture = uuid.uuid4()
+    key = mask_key("headtail", capture, uuid.uuid4())
+    result = _result(capture, mask_bbox=[0, 0, 1, 1], mask=StoredMask(
+        key=key, size=9, sha256="a" * 64, width=4014, height=3016))  # fmt: skip
+    bucket = _MaskBucket({key: b"not the mask"})
+    catalog = FakeCatalog()
+
+    written = await _run(
+        _activities(catalog, stores=_Stores(bucket)).persist_headtail_predictions,
+        HeadtailTarget(LAB, uuid.uuid4()), [result],
+    )  # fmt: skip
+
+    assert written == 1 and not [c for c in catalog.calls if c[0] == "masks"]
+    assert bucket.deleted == [key]
