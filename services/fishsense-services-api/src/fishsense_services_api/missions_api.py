@@ -51,8 +51,6 @@ class MissionDetail(Mission):
     port_note: str | None
     country: str | None
     region: str | None
-    device_name: str | None
-    captures: int
 
 
 class PortStatement(BaseModel):
@@ -112,8 +110,6 @@ def add_mission_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None
             port_note=found.port_note,
             country=found.country,
             region=found.region,
-            device_name=found.device_name,
-            captures=found.captures,
         )
 
     @app.get(

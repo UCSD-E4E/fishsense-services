@@ -79,6 +79,9 @@ class Mission(BaseModel):
     deployment_name: str | None
     #: Whether the pipeline will process it (`camera_sql`, 2b-2).
     processable: bool
+    #: Its camera's name, and how many frames it holds.
+    device_name: str | None
+    captures: int
 
 
 # A dive's number: v1's id for a migrated dive. Non-negative, as v1's web

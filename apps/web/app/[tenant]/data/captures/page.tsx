@@ -48,22 +48,22 @@ export default async function CapturesPage({ params, searchParams }: Props) {
           <h1 className="text-3xl font-semibold tracking-tight">
             Mobile captures
           </h1>
-          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+          <p className="mt-1 text-sm text-fg-2">
             Fish measured with FishSense Mobile and synced from the phone.
           </p>
         </div>
       </header>
 
       {failure ? (
-        <p className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-700 dark:bg-red-950 dark:text-red-300">
+        <p className="rounded-card border border-error/40 bg-error/10 p-3 text-sm text-error">
           Could not load captures: {failure}
         </p>
       ) : !tenant ? (
-        <p className="text-sm text-slate-600 dark:text-slate-400">
+        <p className="text-sm text-fg-2">
           This account isn&apos;t a member of any tenant yet.
         </p>
       ) : page && page.captures.length === 0 ? (
-        <p className="text-sm text-slate-600 dark:text-slate-400">
+        <p className="text-sm text-fg-2">
           No captures from {tenant.name} yet.
         </p>
       ) : (
@@ -73,7 +73,7 @@ export default async function CapturesPage({ params, searchParams }: Props) {
               <li key={c.client_capture_uuid}>
                 <Link
                   href={paths.capture(tenant.slug, c.client_capture_uuid)}
-                  className="block overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xs transition hover:shadow-md dark:border-slate-800 dark:bg-slate-900"
+                  className="block overflow-hidden rounded-card border border-line bg-surface transition hover:border-fg-3"
                 >
                   {c.rgb_url && (
                     // Presigned, short-lived Garage URLs: not for next/image's
@@ -90,7 +90,7 @@ export default async function CapturesPage({ params, searchParams }: Props) {
                     <div className="text-lg font-medium">
                       {formatLength(c.length_m)}
                     </div>
-                    <div className="text-slate-500">
+                    <div className="text-fg-2">
                       {new Date(c.captured_at).toLocaleString()}
                     </div>
                     <Place capture={c} />
@@ -103,7 +103,7 @@ export default async function CapturesPage({ params, searchParams }: Props) {
             <div className="mt-8">
               <Link
                 href={`${paths.captures(tenant.slug)}?before=${encodeURIComponent(page.next)}`}
-                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700"
+                className="rounded-control border border-line px-3 py-1.5 text-sm "
               >
                 Older captures
               </Link>
@@ -119,7 +119,7 @@ function Place({ capture }: { capture: Parameters<typeof placeName>[0] }) {
   const place = placeName(capture);
   if (!place) return null;
   return (
-    <div className="text-slate-500">
+    <div className="text-fg-2">
       {place.name}
       {place.derived ? " (from coordinates)" : ""}
     </div>

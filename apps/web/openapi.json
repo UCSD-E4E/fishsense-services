@@ -1293,6 +1293,10 @@
             ],
             "title": "Calibration Target Number"
           },
+          "captures": {
+            "title": "Captures",
+            "type": "integer"
+          },
           "deployment_name": {
             "anyOf": [
               {
@@ -1314,6 +1318,17 @@
               }
             ],
             "title": "Deployment Number"
+          },
+          "device_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Name"
           },
           "name": {
             "anyOf": [
@@ -1430,7 +1445,9 @@
           "site",
           "deployment_number",
           "deployment_name",
-          "processable"
+          "processable",
+          "device_name",
+          "captures"
         ],
         "title": "Mission",
         "type": "object"
@@ -1660,13 +1677,13 @@
           "deployment_number",
           "deployment_name",
           "processable",
+          "device_name",
+          "captures",
           "source_path",
           "notes",
           "port_note",
           "country",
-          "region",
-          "device_name",
-          "captures"
+          "region"
         ],
         "title": "MissionDetail",
         "type": "object"
