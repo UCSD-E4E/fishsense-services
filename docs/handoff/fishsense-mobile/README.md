@@ -36,7 +36,7 @@ it working.
 
 Newest first. Versions are fishsense-services releases.
 
-- **2026-10-21: the web's capture list (`/captures`) is retired.** A phone's fish are
+- **2026-10-21 (v0.30.0): the web's capture list (`/captures`) is retired.** A phone's fish are
   in Fish, and in their missions: Data → Missions → Phone, where each mission lists
   its fish (an unmeasured capture too, with no length). Old `/captures` links
   redirect there, and a link to one capture goes to its fish's page, which now also
