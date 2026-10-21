@@ -17,6 +17,11 @@ A phone mission is named like a Lite deployment, ``YYYY.MM.DD.FishSense.<place>`
 The day is the phone's local day, from the IANA ``time_zone`` the app sends;
 when it sends none, the day is UTC's. The place is the one the phone named,
 else ``Mobile``.
+
+The mission's place (``site``) is the first one known for any of its captures:
+the phone's own name, or the one the server derives later from the coordinates
+(0041, :func:`place_a_phone_mission`). A mission still named ``…FishSense.Mobile``
+takes that place into its name. A place once known is kept (phase 7b).
 """
 
 from __future__ import annotations
@@ -55,6 +60,27 @@ def local_zone(name: object) -> ZoneInfo | type[UTC]:
 def mission_name(captured_at: datetime, time_zone: object, place: str | None) -> str:
     day = captured_at.astimezone(local_zone(time_zone)).date()
     return f"{day:%Y.%m.%d}.FishSense.{(place or '').strip() or 'Mobile'}"
+
+
+async def place_a_phone_mission(
+    conn: AsyncConnection,
+    tenant_id: uuid.UUID,
+    mission_id: uuid.UUID,
+    place: str | None,
+) -> None:
+    """Give a phone mission with no place yet ``place``, in its name too."""
+    place = (place or "").strip()
+    if not place:
+        return
+    await conn.execute(
+        text("""
+            UPDATE missions
+            SET site = :place,
+                name = regexp_replace(name, '[.]FishSense[.]Mobile$', '.FishSense.' || :place)
+            WHERE tenant_id = :t AND id = :m AND source = 'mobile' AND site IS NULL
+            """),
+        {"t": tenant_id, "m": mission_id, "place": place},
+    )
 
 
 async def assign_phone_mission(
@@ -109,8 +135,9 @@ async def assign_phone_mission(
         mission_id = (
             await conn.execute(
                 text("""
-                    INSERT INTO missions (tenant_id, source, device_id, started_at, name)
-                    VALUES (:t, 'mobile', :d, :at, :name)
+                    INSERT INTO missions (tenant_id, source, device_id, started_at,
+                        name, site)
+                    VALUES (:t, 'mobile', :d, :at, :name, :site)
                     RETURNING id
                     """),
                 {
@@ -118,6 +145,7 @@ async def assign_phone_mission(
                     "d": device_id,
                     "at": captured_at,
                     "name": mission_name(captured_at, time_zone, place),
+                    "site": (place or "").strip() or None,
                 },
             )
         ).scalar_one()
@@ -129,6 +157,7 @@ async def assign_phone_mission(
                 """),
             {"t": tenant_id, "m": mission_id, "at": captured_at},
         )
+        await place_a_phone_mission(conn, tenant_id, mission_id, place)
     await conn.execute(
         text("UPDATE captures SET mission_id = :m WHERE tenant_id = :t AND id = :c"),
         {"t": tenant_id, "m": mission_id, "c": capture_id},

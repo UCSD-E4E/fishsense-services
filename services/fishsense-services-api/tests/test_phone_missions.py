@@ -350,3 +350,93 @@ async def test_a_mission_is_lite_unless_it_says_otherwise(tenants, owner_engine)
         ).scalar_one()
 
     assert source == "lite"
+
+
+async def _site(owner_engine, capture_id):
+    async with owner_engine.connect() as conn:
+        return (
+            await conn.execute(
+                text("""
+                    SELECT m.site, m.name FROM captures c
+                    JOIN missions m ON m.id = c.mission_id WHERE c.id = :id
+                    """),
+                {"id": capture_id},
+            )
+        ).one()
+
+
+async def test_the_mission_is_at_the_place_the_phone_named(
+    tenants, alice, app_engine, owner_engine
+):
+    committed = await _commit(app_engine, tenants["lab"], _capture(alice))
+
+    assert (await _site(owner_engine, committed.capture_id)).site == "La Jolla Cove"
+
+
+async def test_a_later_capture_names_a_mission_that_had_no_place(
+    tenants, alice, app_engine, owner_engine
+):
+    first = await _commit(app_engine, tenants["lab"], _capture(alice, place=None))
+    await _commit(
+        app_engine,
+        tenants["lab"],
+        _capture(alice, at=T0 + timedelta(minutes=20), place="Scripps Pier"),
+    )
+
+    assert tuple(await _site(owner_engine, first.capture_id)) == (
+        "Scripps Pier",
+        "2026.10.11.FishSense.Scripps Pier",
+    )
+
+
+async def test_a_place_once_known_is_kept(tenants, alice, app_engine, owner_engine):
+    first = await _commit(app_engine, tenants["lab"], _capture(alice))
+    await _commit(
+        app_engine,
+        tenants["lab"],
+        _capture(alice, at=T0 + timedelta(minutes=20), place="Somewhere else"),
+    )
+
+    assert tuple(await _site(owner_engine, first.capture_id)) == (
+        "La Jolla Cove",
+        "2026.10.11.FishSense.La Jolla Cove",
+    )
+
+
+async def test_a_derived_place_names_a_mission_that_had_none(
+    tenants, alice, app_engine, owner_engine
+):
+    from fishsense_services_api.place_name_store import record_place_name
+    from fishsense_services_api.place_names import ReverseGeocode
+
+    committed = await _commit(app_engine, tenants["lab"], _capture(alice, place=None))
+    async with tenant_transaction(app_engine, tenants["lab"]) as conn:
+        await record_place_name(
+            conn,
+            tenants["lab"],
+            committed.capture_id,
+            ReverseGeocode(place_name="La Jolla Shores", source="test", properties={}),
+        )
+
+    assert tuple(await _site(owner_engine, committed.capture_id)) == (
+        "La Jolla Shores",
+        "2026.10.11.FishSense.La Jolla Shores",
+    )
+
+
+async def test_a_derived_place_leaves_a_named_mission_alone(
+    tenants, alice, app_engine, owner_engine
+):
+    from fishsense_services_api.place_name_store import record_place_name
+    from fishsense_services_api.place_names import ReverseGeocode
+
+    committed = await _commit(app_engine, tenants["lab"], _capture(alice))
+    async with tenant_transaction(app_engine, tenants["lab"]) as conn:
+        await record_place_name(
+            conn,
+            tenants["lab"],
+            committed.capture_id,
+            ReverseGeocode(place_name="Elsewhere", source="test", properties={}),
+        )
+
+    assert (await _site(owner_engine, committed.capture_id)).site == "La Jolla Cove"

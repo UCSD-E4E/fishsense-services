@@ -42,7 +42,9 @@ export const paths = {
   deployment: (slug: string, number: number) => `/${enc(slug)}/data/deployments/${number}`,
   missions: (slug: string) => `/${enc(slug)}/data/missions`,
   mission: (slug: string, number: number) => `/${enc(slug)}/data/missions/${number}`,
-  captures: (slug: string) => `/${enc(slug)}/data/captures`,
+  /** The phone's missions: where the retired capture list's links land (7b). */
+  phoneMissions: (slug: string) => `/${enc(slug)}/data/missions?source=mobile`,
+  /** An old link to one capture; its page sends it to the capture's fish. */
   capture: (slug: string, uuid: string) => `/${enc(slug)}/data/captures/${enc(uuid)}`,
 };
 
@@ -78,7 +80,7 @@ export function switchHref(pathname: string, slug: string): string {
   const [, section, part] = tenantOf(pathname) ? segments(pathname) : [];
   if (section === "data") {
     return part === "missions" || part === "captures"
-      ? `${paths.data(slug)}/${part}`
+      ? paths.missions(slug)
       : paths.data(slug);
   }
   return paths.fish(slug);
@@ -96,14 +98,19 @@ export function legacyRedirect(
     fish: paths.fish,
     deployments: paths.data,
     missions: paths.missions,
-    captures: paths.captures,
+    captures: paths.phoneMissions,
   };
   if (!root || !(root in section)) return null;
 
   if (slug !== undefined) {
     if (!isTenant(slug)) return null;
     const tail = [slug, ...rest].slice(1).map(enc).join("/");
-    const base = root === "deployments" ? `${paths.data(slug)}/deployments` : section[root](slug);
+    const base =
+      root === "deployments"
+        ? `${paths.data(slug)}/deployments`
+        : root === "captures" && tail
+          ? `${paths.data(slug)}/captures`
+          : section[root](slug);
     return tail ? `${base}/${tail}` : base;
   }
 
@@ -113,6 +120,8 @@ export function legacyRedirect(
   const kept = new URLSearchParams(search);
   kept.delete("tenant");
   const query = kept.toString();
+  // The capture list's paging means nothing on the missions page.
+  if (root === "captures") return paths.phoneMissions(tenant);
   return `${section[root](tenant)}${query ? `?${query}` : ""}`;
 }
 

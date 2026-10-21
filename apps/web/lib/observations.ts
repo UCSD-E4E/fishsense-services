@@ -28,10 +28,16 @@ export function deviceFilter(value: string | undefined): Device | undefined {
 export async function getObservationPage(
   accessToken: string,
   slug: string,
-  options: { device?: Device; before?: string } = {},
+  options: { device?: Device; before?: string; mission?: number } = {},
 ): Promise<ObservationPage> {
-  const query: { device?: Device; before?: string } = {};
+  const query: { device?: Device; before?: string; mission?: number } = {};
   if (options.device) query.device = options.device;
+  if (options.mission !== undefined) {
+    if (!Number.isInteger(options.mission) || options.mission < 0) {
+      throw new Error(`Invalid mission number: ${options.mission}`);
+    }
+    query.mission = options.mission;
+  }
   if (options.before) query.before = options.before;
   const { data, error, response } = await apiClient(accessToken).GET(
     "/tenants/{slug}/observations",
@@ -107,9 +113,11 @@ export function methodLabel(method: string): string {
   }
 }
 
-/** Where the fish was: its mission (Lite), else its place (Mobile). */
+/** Where the fish was: its place (Mobile), else its mission (Lite, which
+ *  has no place of its own). A phone fish is in a mission too since 0057, so
+ *  the place comes first. */
 export function where(o: Observation): string | null {
-  return o.mission?.name ?? o.place_name ?? null;
+  return o.place_name ?? o.mission?.name ?? null;
 }
 
 /** A fish's own page, for Lite and Mobile alike: a mobile fish's page shows

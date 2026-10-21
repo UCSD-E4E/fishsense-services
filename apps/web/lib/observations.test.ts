@@ -66,6 +66,21 @@ function observation(overrides: Partial<Observation> = {}): Observation {
 }
 
 describe("getObservationPage", () => {
+  it("lists one mission's fish (phase 7b)", async () => {
+    const fetchMock = vi.fn<FetchSig>(async () => jsonResponse({ observations: [], next: null }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getObservationPage("t", "lab", { mission: 7 });
+
+    expect(fetchMock.mock.calls[0][0].url).toBe("http://api.test/tenants/lab/observations?mission=7");
+  });
+
+  it("refuses a mission number that isn't one", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+
+    await expect(getObservationPage("t", "lab", { mission: -1 })).rejects.toThrow(/mission/);
+  });
+
   it("lists a tenant's fish as the signed-in user", async () => {
     const fetchMock = vi.fn<FetchSig>(async () =>
       jsonResponse({ observations: [], next: null }),
@@ -250,6 +265,18 @@ describe("where", () => {
       ),
     ).toBe("Scripps Pier");
     expect(where(observation({ mission: null }))).toBeNull();
+  });
+
+  it("is the place for a phone fish in a phone mission (0057), not the mission's name", () => {
+    expect(
+      where(
+        observation({
+          method: "lidar",
+          mission: { number: 4, name: "2026.10.11.FishSense.Scripps Pier" },
+          place_name: "Scripps Pier",
+        }),
+      ),
+    ).toBe("Scripps Pier");
   });
 });
 

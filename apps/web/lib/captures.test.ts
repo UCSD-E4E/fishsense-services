@@ -15,7 +15,7 @@ import {
   formatLength,
   millimetres,
   getCapture,
-  getCapturePage,
+  fishOfCapture,
   measurementOverlay,
   osmLink,
 } from "./captures";
@@ -67,55 +67,13 @@ describe("chooseTenant", () => {
   });
 });
 
-describe("getCapturePage", () => {
-  it("lists a tenant's captures as the signed-in user", async () => {
-    const fetchMock = vi.fn<FetchSig>(async () =>
-      jsonResponse({ captures: [], next: null }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    expect(await getCapturePage("user-token", "conservation-angler")).toEqual({
-      captures: [],
-      next: null,
-    });
-
-    const [request, init] = fetchMock.mock.calls[0];
-    expect(request.url).toBe(
-      "http://api.test/tenants/conservation-angler/mobile/captures",
-    );
-    expect(request.headers.get("Authorization")).toBe("Bearer user-token");
-    expect(request.cache === "no-store" || init?.cache === "no-store").toBe(
-      true,
-    );
+describe("fishOfCapture", () => {
+  it("is the page of the capture's fish, where an old capture link goes (phase 7b)", () => {
+    expect(fishOfCapture("lab", { capture_id: "c1", fish_id: "f1" })).toBe("/lab/fish/c1/f1");
   });
 
-  it("passes the page cursor through", async () => {
-    const fetchMock = vi.fn<FetchSig>(async () =>
-      jsonResponse({ captures: [], next: null }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await getCapturePage("t", "lab", "2026-10-11T17:00:00+00:00~" + CAPTURE);
-
-    const url = new URL(fetchMock.mock.calls[0][0].url);
-    expect(url.searchParams.get("before")).toBe(
-      "2026-10-11T17:00:00+00:00~" + CAPTURE,
-    );
-  });
-
-  it("refuses a tenant slug that could steer the request", async () => {
-    vi.stubGlobal("fetch", vi.fn());
-    await expect(getCapturePage("t", "../admin")).rejects.toThrow(/tenant/);
-  });
-
-  it("throws the API's refusal", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<FetchSig>(async () => jsonResponse({ detail: "down" }, 503)),
-    );
-    const error = await getCapturePage("t", "lab").catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(ApiError);
-    expect((error as ApiError).status).toBe(503);
+  it("is none for a capture without a fish", () => {
+    expect(fishOfCapture("lab", { capture_id: "c1", fish_id: null })).toBeNull();
   });
 });
 

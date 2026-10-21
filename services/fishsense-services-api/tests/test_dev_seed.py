@@ -32,7 +32,7 @@ from fishsense_services_contracts.renders import RENDER_VERSION, render_key
 from fishsense_services_contracts.thumbnails import THUMBNAIL_WIDTH, thumbnail_key
 from fishsense_services_api.cli import main
 from fishsense_services_api.db import tenant_transaction
-from fishsense_services_api.mobile_capture_store import list_mobile_captures
+from fishsense_services_api.observation_store import list_observations
 from fishsense_services_api.tenant_stores import TenantStore, TenantStores
 from garage import ADMIN_TOKEN, REGION, Garage
 
@@ -261,14 +261,54 @@ class TestSeed:
             dev_engine, "SELECT id FROM tenants WHERE slug = 'lab'"
         )
         async with tenant_transaction(app_engine, tenant_id) as conn:
-            captures = await list_mobile_captures(conn, tenant_id, limit=50)
+            captures = await list_observations(
+                conn, tenant_id, limit=50, device="mobile"
+            )
         assert len(captures) == dev_seed.MOBILE_CAPTURES
         assert all(c.length_m is not None for c in captures)
 
         objects = stores.for_tenant("lab")
         for capture in captures:
-            with urllib.request.urlopen(objects.presign_get(capture.rgb_key)) as got:
+            with urllib.request.urlopen(objects.presign_get(capture.photo_key)) as got:
                 assert got.read() in {f.jpeg for f in FRAMES}
+
+    async def test_each_phone_capture_has_its_fish_mask(
+        self, dev_engine, app_engine, stores
+    ):
+        """So the harness draws the phone's evidence: the overlay is sized by
+        the mask, which is the RGB frame's size, nonzero on the fish."""
+        import numpy as np
+
+        from fishsense_services_api.mobile_capture_store import mobile_capture
+
+        await _seed(dev_engine, stores)
+        tenant_id = await _scalar(
+            dev_engine, "SELECT id FROM tenants WHERE slug = 'lab'"
+        )
+        async with tenant_transaction(app_engine, tenant_id) as conn:
+            listed = await list_observations(conn, tenant_id, limit=50, device="mobile")
+            details = [
+                await mobile_capture(conn, tenant_id, o.client_capture_uuid)
+                for o in listed
+            ]
+        objects = stores.for_tenant("lab")
+        by_jpeg = {f.jpeg: f for f in FRAMES}
+        for detail in details:
+            files = {f.role: f for f in detail.files}
+            with urllib.request.urlopen(
+                objects.presign_get(files["rgb_jpeg"].key)
+            ) as got:
+                frame = by_jpeg[got.read()]
+            width, height = dev_seed.jpeg_size(frame.jpeg)
+            assert (detail.mask_width, detail.mask_height) == (width, height)
+            with urllib.request.urlopen(
+                objects.presign_get(files["mask_u8"].key)
+            ) as got:
+                mask = np.frombuffer(got.read(), dtype=np.uint8).reshape(height, width)
+            middle = [(a + b) / 2 for a, b in zip(frame.head, frame.tail)]
+            assert mask[int(middle[1]), int(middle[0])] > 0
+            assert mask[0, 0] == 0
+            assert 0 < np.count_nonzero(mask) < mask.size / 4
 
     async def test_every_lite_frame_has_a_render_in_the_tenants_bucket(
         self, dev_engine, app_engine, stores

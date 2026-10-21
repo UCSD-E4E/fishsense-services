@@ -2,10 +2,10 @@ import Link from "next/link";
 import { unstable_rethrow } from "next/navigation";
 import { requireSignedIn } from "@/app/_shell/guard";
 import { tenantFor } from "@/app/_shell/tenant";
+import { FishGrid } from "@/app/_shell/fish-grid";
 import { WorkSections } from "@/app/_shell/work-sections";
-import { formatLength } from "@/lib/captures";
 import { getDeployments, type Deployment } from "@/lib/mission-facts";
-import { fishName, getObservationPage, observationHref, type Observation } from "@/lib/observations";
+import { getObservationPage, type Observation } from "@/lib/observations";
 import { paths } from "@/lib/tenant-paths";
 import { getTenantSummary, recentDeployments, type TenantSummary } from "@/lib/today";
 import { getIsSystemAdmin } from "@/lib/system-admin";
@@ -103,32 +103,7 @@ export default async function TodayPage({ params }: Props) {
             {fish.length === 0 ? (
               <p className="text-fg-2">No measured fish yet.</p>
             ) : (
-              <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">
-                {fish.map((o) => (
-                  <li key={`${o.capture_id}/${o.fish_id}`}>
-                    <Link
-                      href={observationHref(slug, o)}
-                      className="flex h-full flex-col overflow-hidden rounded-card border border-line bg-surface hover:border-fg-3"
-                    >
-                      {o.photo_url ? (
-                        // Presigned, short-lived Garage URLs: not for next/image's optimizer.
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={o.photo_url} alt={fishName(o).name} loading="lazy" className="aspect-4/3 w-full object-cover" />
-                      ) : (
-                        <div className="flex aspect-4/3 items-center justify-center border-b border-dashed border-line bg-raised text-sm text-fg-2">
-                          No photo yet
-                        </div>
-                      )}
-                      <div className="flex items-baseline justify-between gap-2 px-3.5 py-3">
-                        <span className="text-sm font-semibold">{fishName(o).name}</span>
-                        <span className="whitespace-nowrap font-semibold tabular-nums">
-                          {o.length_m == null ? "—" : formatLength(o.length_m)}
-                        </span>
-                      </div>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+              <FishGrid slug={slug} fish={fish} />
             )}
           </section>
 

@@ -20,6 +20,7 @@ from datetime import timedelta
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api.phone_missions import place_a_phone_mission
 from fishsense_services_api.place_names import ReverseGeocode
 
 __all__ = ["RETRY_NO_NAME_AFTER", "Unnamed", "needing_place_names", "record_place_name"]
@@ -88,3 +89,12 @@ async def record_place_name(
             "properties": json.dumps(found.properties),
         },
     )
+    # A phone mission with no place yet takes the one derived for its capture.
+    mission_id = (
+        await conn.execute(
+            text("SELECT mission_id FROM captures WHERE tenant_id = :t AND id = :c"),
+            {"t": tenant_id, "c": capture_id},
+        )
+    ).scalar_one_or_none()
+    if mission_id is not None:
+        await place_a_phone_mission(conn, tenant_id, mission_id, found.place_name)

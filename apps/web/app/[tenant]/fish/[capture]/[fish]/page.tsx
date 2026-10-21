@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireSignedIn } from "@/app/_shell/guard";
-import { describeOrigin, formatLength, getCapture, millimetres } from "@/lib/captures";
+import { describeOrigin, formatLength, getCapture, millimetres, osmLink } from "@/lib/captures";
 import { fishEvidence, type Overlay } from "@/lib/fish-evidence";
 import { isSlug, isUuid } from "@/lib/ids";
 import {
@@ -26,8 +26,9 @@ type Point = { x: number; y: number } | null | undefined;
  * One measured fish, with its evidence (docs/design/README.md; PLAN.md §4.9):
  * the photo with the measurement drawn on it, the length, how it was measured,
  * every version of the measurement, and every file behind it with its
- * checksum. A mobile fish's evidence is its capture's, so this page replaces
- * the Mobile captures page for it. A Lite fish's photo is its frame's render
+ * checksum. A mobile fish's evidence is its capture's, so this page replaced
+ * the Mobile captures page for it (retired in phase 7b), and shows what the
+ * phone recorded with the capture too. A Lite fish's photo is its frame's render
  * (Phase 4); its labelled points are listed, not drawn, because they were
  * placed on v1's JPEG, not on this render.
  */
@@ -195,6 +196,41 @@ export default async function FishDetailPage({ params }: Props) {
           </div>
         </section>
       </div>
+
+      {phone && (
+        <section className="mt-5 rounded-card border border-line bg-surface px-6 py-5">
+          <h2 className="mb-3 text-lg font-semibold">Recorded with the capture</h2>
+          <dl className="grid grid-cols-[max-content_1fr] gap-x-5 gap-y-2.5 text-sm">
+            <Row label="Phone">{phone.device.model ?? phone.device.info ?? "—"}</Row>
+            <Row label="App">{phone.app_version ?? "not recorded"}</Row>
+            <Row label="Model">{phone.model_version ?? "—"}</Row>
+            <Row label="Location">
+              {phone.location ? (
+                <a
+                  className="text-teal-fg hover:underline"
+                  href={osmLink(phone.location.latitude, phone.location.longitude)}
+                >
+                  {phone.location.latitude.toFixed(5)}, {phone.location.longitude.toFixed(5)}
+                  {phone.location.horizontal_accuracy_m != null
+                    ? ` (±${phone.location.horizontal_accuracy_m.toFixed(0)} m)`
+                    : ""}
+                </a>
+              ) : (
+                "—"
+              )}
+            </Row>
+            <Row label="Orientation">{phone.orientation ?? "—"}</Row>
+            <Row label="Depth">
+              {phone.depth.width}×{phone.depth.height}, {phone.depth.row_bytes} bytes/row
+            </Row>
+            <Row label="Intrinsics (K)">
+              <span className="font-mono text-[13px]">
+                {phone.intrinsics.map((v) => v.toFixed(2)).join(", ")}
+              </span>
+            </Row>
+          </dl>
+        </section>
+      )}
 
       {evidence.files.length > 0 && (
         <section className="mt-5 rounded-card border border-line bg-surface px-6 py-5">

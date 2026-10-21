@@ -135,3 +135,20 @@ async def test_the_public_map_skips_a_mission_without_a_folder(
 
     assert summary.wild_fish == 1
     assert summary.regions == []
+
+
+async def test_a_missions_fish_are_listed_by_its_number(phone, tenants, app_engine):
+    """Phone fish are reached through their missions once /captures is
+    retired (phase 7b)."""
+    from fishsense_services_api.observation_store import list_observations
+
+    async def listed(number):
+        found = await _as_lab(
+            app_engine,
+            tenants,
+            lambda c: list_observations(c, tenants["lab"], limit=10, mission=number),
+        )
+        return [o.mission_number for o in found]
+
+    assert await listed(phone) == [phone]
+    assert await listed(phone + 1000) == []

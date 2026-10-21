@@ -36,6 +36,15 @@ it working.
 
 Newest first. Versions are fishsense-services releases.
 
+- **2026-10-21: the web's capture list (`/captures`) is retired.** A phone's fish are
+  in Fish, and in their missions: Data → Missions → Phone, where each mission lists
+  its fish (an unmeasured capture too, with no length). Old `/captures` links
+  redirect there, and a link to one capture goes to its fish's page, which now also
+  shows what the phone recorded with it. The list endpoint
+  `GET /tenants/{slug}/mobile/captures` is gone; the app never called it. Nothing
+  else in the sync protocol changes. A phone mission now takes its place from the
+  first of its captures that has one, the phone's own name or the one the server
+  derives, so a mission named `…FishSense.Mobile` takes that place once it's known.
 - **2026-10-21 (v0.29.0): phone captures are grouped into missions.** Each capture joins a
   mission as it syncs: a new mission starts after a gap of more than 2 hours, or
   more than 1 km from the capture before. A late sync that falls between two missions
@@ -65,9 +74,6 @@ Newest first. Versions are fishsense-services releases.
 - **Deployments for phone missions.** Phone missions will be linked to trips by
   location and date, as the owner decided for standard mode. An enterprise mode that
   lets a team set these explicitly comes later.
-- **The web's capture list (`/captures`) is being retired.** Phone captures will be
-  reached through their missions. SYNC.md's acceptance check 3 will point there once
-  it's done.
 
 ## Open questions for the app
 

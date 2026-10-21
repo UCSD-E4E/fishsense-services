@@ -26,7 +26,8 @@ The two apps share two top-level places, kept apart:
 
 Both Lite and Mobile fill both places. A phone capture that was never measured
 lives in its mission under Data. That is why the portal's separate Mobile captures
-page (`/captures`) is to be retired.
+page (`/captures`) was retired (2026-10-21): its old links land on the phone's
+missions, and a capture's on its fish.
 
 How the groupings are made, in two steps:
 

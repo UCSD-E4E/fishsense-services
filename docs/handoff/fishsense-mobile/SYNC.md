@@ -185,13 +185,13 @@ Notes on measurement versions:
 - **Captures with no `captured_by_sub`** (taken signed out, or before v8) take the syncing account as their capturer (§1).
 - The latest version is the current length.
 
-**Reading back** (any member): `GET /tenants/{slug}/mobile/captures?limit=50&before=<next>` and `GET /tenants/{slug}/mobile/captures/{uuid}`. Both include presigned links to every file. They're optional for the app; the web shows them at `https://fishsense.e4e.ucsd.edu/captures`.
+**Reading back** (any member): `GET /tenants/{slug}/mobile/captures/{uuid}` returns one capture with presigned links to every file. It's optional for the app. The capture *list* was retired on 2026-10-21 (the app never read it). The web shows a phone's fish in Fish, and in their missions under Data → Missions → Phone.
 
 ## Acceptance checks
 
 1. Signed out, the app captures but offers no sync. Signed in, it captures offline with the network off for at least a day, then syncs.
 2. Every capture row has `client_capture_uuid`, `captured_by_sub`, `tenant_slug`, `install_id`, the three versions, both row strides and the pose, and a lossless PNG on disk.
-3. Sync on Wi-Fi: the capture appears at `/captures` on the web with the same length, and each file downloaded from there has the SHA-256 the app computed.
+3. Sync on Wi-Fi: the fish appears in Fish on the web (`/<tenant>/fish`) with the same length, in a phone mission named for the day and place. Each file downloaded from the fish's page has the SHA-256 the app computed.
 4. Kill the app mid-upload and sync again: there's no duplicate, and the capture syncs.
 5. Edit a measurement after syncing: the web shows both versions, with the edit as current.
 6. Sign in as someone else on the same phone: the first user's captures don't sync (403), and stay on the device.

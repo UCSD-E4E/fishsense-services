@@ -410,23 +410,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/tenants/{slug}/mobile/captures": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Captures */
-        get: operations["list_mobile_captures"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/tenants/{slug}/mobile/captures/{client_capture_uuid}": {
         parameters: {
             query?: never;
@@ -608,44 +591,17 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** CapturePage */
-        CapturePage: {
-            /** Captures */
-            captures: components["schemas"]["CaptureSummaryView"][];
-            /** Next */
-            next: string | null;
-        };
-        /** CaptureSummaryView */
-        CaptureSummaryView: {
-            /**
-             * Captured At
-             * Format: date-time
-             */
-            captured_at: string;
-            /**
-             * Client Capture Uuid
-             * Format: uuid
-             */
-            client_capture_uuid: string;
-            /** Derived Place Name */
-            derived_place_name?: string | null;
-            /** Latitude */
-            latitude: number | null;
-            /** Length M */
-            length_m: number | null;
-            /** Longitude */
-            longitude: number | null;
-            /** Place Name */
-            place_name: string | null;
-            /** Rgb Url */
-            rgb_url: string | null;
-        };
         /** CaptureView */
         CaptureView: {
             /** App Version */
             app_version: string | null;
             /** Camera Pose */
             camera_pose: number[] | null;
+            /**
+             * Capture Id
+             * Format: uuid
+             */
+            capture_id: string;
             /**
              * Captured At
              * Format: date-time
@@ -666,6 +622,8 @@ export interface components {
             device: components["schemas"]["DeviceInfo"];
             /** Files */
             files: components["schemas"]["FileView"][];
+            /** Fish Id */
+            fish_id: string | null;
             /** Intrinsics */
             intrinsics: number[];
             location: components["schemas"]["Location"] | null;
@@ -2020,40 +1978,6 @@ export interface operations {
             };
         };
     };
-    list_mobile_captures: {
-        parameters: {
-            query?: {
-                limit?: number;
-                before?: string | null;
-            };
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CapturePage"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_mobile_capture: {
         parameters: {
             query?: never;
@@ -2216,6 +2140,7 @@ export interface operations {
         parameters: {
             query?: {
                 device?: ("lite" | "mobile" | "other") | null;
+                mission?: number | null;
                 limit?: number;
                 before?: string | null;
             };

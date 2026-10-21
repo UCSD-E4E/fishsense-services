@@ -52,8 +52,8 @@ export default async function DeploymentsPage({ params }: Props) {
                   All missions
                 </Link>
                 {" · "}
-                <Link href={paths.captures(tenant.slug)} className="text-teal-fg hover:underline">
-                  Mobile captures
+                <Link href={paths.phoneMissions(tenant.slug)} className="text-teal-fg hover:underline">
+                  Phone missions
                 </Link>
               </>
             )}

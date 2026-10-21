@@ -26,6 +26,7 @@ import {
   parsePurpose,
   cameraLabel,
   isPhoneMission,
+  sourceFilter,
   portLabel,
   portUnknown,
   purposeLabel,
@@ -222,6 +223,15 @@ describe("the lists", () => {
   it("has the API's purposes and ports", () => {
     expect([...PURPOSES].sort()).toEqual([...enumOf("purpose")].sort());
     expect([...PORTS].sort()).toEqual([...enumOf("port")].sort());
+  });
+});
+
+describe("missions by source (phase 7b)", () => {
+  it("reads the filter from the URL", () => {
+    expect(sourceFilter("mobile")).toBe("mobile");
+    expect(sourceFilter("lite")).toBe("lite");
+    expect(sourceFilter("nonsense")).toBeUndefined();
+    expect(sourceFilter(undefined)).toBeUndefined();
   });
 });
 

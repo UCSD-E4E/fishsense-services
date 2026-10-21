@@ -19,7 +19,7 @@ from dataclasses import asdict
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -31,6 +31,7 @@ from fishsense_services_api.observation_store import (
     list_observations,
     observation,
 )
+from fishsense_services_api.place_naming import PlaceNamer
 from fishsense_services_api.summary_store import tenant_summary
 from fishsense_services_api.tenant_stores import NoTenantStore, TenantStores
 
@@ -143,8 +144,10 @@ def add_observation_routes(
     engine: AsyncEngine,
     membership,
     stores: TenantStores,
+    namer: PlaceNamer | None = None,
 ) -> None:
-    """``membership`` is the app's dependency; ``stores`` signs photo links."""
+    """``membership`` is the app's dependency; ``stores`` signs photo links;
+    ``namer`` names the phone captures on a page that still have no name."""
 
     Member = Annotated[Membership, Depends(membership)]
 
@@ -220,7 +223,9 @@ def add_observation_routes(
     async def list_(
         slug: str,
         member: Member,
+        background: BackgroundTasks,
         device: Literal["lite", "mobile", "other"] | None = None,
+        mission: Annotated[int | None, Query(ge=0)] = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         before: str | None = None,
     ) -> ObservationPage:
@@ -233,8 +238,19 @@ def add_observation_routes(
                 before=cursor,
                 device=device,
                 photo_bucket=bucket(slug),
+                mission=mission,
             )
         page, more = found[:limit], len(found) > limit
+        if namer is not None:
+            namer.later(
+                background,
+                member.tenant_id,
+                [
+                    o.capture_id
+                    for o in page
+                    if o.place_name is None and o.derived_place_name is None
+                ],
+            )
         return ObservationPage(
             observations=[view(slug, o) for o in page],
             next=_cursor(page[-1].cursor) if more else None,
