@@ -20,6 +20,10 @@ fishsense-services-api infer-deployments --tenant <id> [--together 398=400 ...]
                                     # dry run: deployments for legacy missions
                                     # from their folders and dates; --apply
                                     # <the dry run's fingerprint> writes them
+fishsense-services-api serve-tenants [--apply]
+                                    # dry run: make the orchestrator a member
+                                    # of every tenant it isn't yet (add-tenant
+                                    # does it for a new one)
 fishsense-services-api system-admin --user <sub> --grant [--apply]
                                     # dry run: may open any tenant, read-only
                                     # until they unlock it (0056)
@@ -103,8 +107,10 @@ from fishsense_services_api.settings import (
     AuditSettings,
     DevSeedSettings,
     MigrationSettings,
+    ServiceSettings,
     V1MigrationSettings,
 )
+from fishsense_services_api.tenant_service import serve, unserved
 from fishsense_services_api.v1_migration import (
     measurement_parity,
     migrate_v1,
@@ -205,6 +211,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="the partner org (Authentik `org` claim) whose accounts join this "
         "tenant as members; left as it is when omitted",
     )
+    serve_tenants = commands.add_parser(
+        "serve-tenants",
+        help="make the orchestrator a member of every tenant it isn't yet, as "
+        "add-tenant does for a new one; a dry run by default",
+    )
+    serve_tenants.add_argument("--apply", action="store_true", help="write it")
     backfill = commands.add_parser(
         "backfill-mission-facts",
         help="plan (and with --apply, write) the port, deployment and purpose of "
@@ -285,6 +297,8 @@ async def main(argv: Sequence[str]) -> int:
         return await _validate_automatic(args)
     if args.command == "add-tenant":
         return await _add_tenant(args)
+    if args.command == "serve-tenants":
+        return await _serve_tenants(args)
     if args.command == "public-totals":
         return await _public_totals(args)
     if args.command == "system-admin":
@@ -550,6 +564,38 @@ async def _system_admin(args: argparse.Namespace) -> int:
         await engine.dispose()
 
 
+async def _serve_tenants(args: argparse.Namespace) -> int:
+    """Dry run unless --apply; the apply writes exactly the tenants listed."""
+    settings = _settings(MigrationSettings)
+    service = _settings(ServiceSettings)
+    if settings is None or service is None:
+        return 2
+    sub = service.orchestrator_sub
+    engine = create_async_engine(settings.migration_database_url.get_secret_value())
+    try:
+        async with engine.begin() as conn:
+            slugs = await unserved(conn, sub)
+            if not slugs:
+                print(f"every tenant is served by {sub}: nothing to do")
+                return 0
+            if not args.apply:
+                print(f"DRY RUN: nothing written. Would make {sub} a member of:")
+                for slug in slugs:
+                    print(f"  {slug}")
+                print("\nto write it: serve-tenants --apply")
+                return 0
+            granted = await serve(conn, sub, slugs)
+            if granted != len(slugs):
+                raise RuntimeError(
+                    f"granted {granted} of {len(slugs)}: tenants changed meanwhile, "
+                    "nothing written"
+                )
+        print(f"{sub} now serves: {', '.join(slugs)}")
+        return 0
+    finally:
+        await engine.dispose()
+
+
 def format_public_summary(found: PublicSummary) -> str:
     """The signed-out page's numbers, as it would say them."""
     lines = [
@@ -629,7 +675,8 @@ async def _add_tenant(args: argparse.Namespace) -> int:
         )
         return 2
     settings = _settings(MigrationSettings)
-    if settings is None:
+    service = _settings(ServiceSettings)
+    if settings is None or service is None:
         return 2
     engine = create_async_engine(settings.migration_database_url.get_secret_value())
     try:
@@ -644,6 +691,9 @@ async def _add_tenant(args: argparse.Namespace) -> int:
                     """),
                 {"slug": args.slug, "name": args.name, "org": args.org_claim},
             )
+            # Served from the start: the orchestrator runs everything (the
+            # owner, 2026-10-21), as a member (tenant_service).
+            await serve(conn, service.orchestrator_sub, [args.slug])
     except IntegrityError:
         print(
             f"org {args.org_claim!r} is already claimed by another tenant -- "

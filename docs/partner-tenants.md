@@ -39,6 +39,13 @@ One org, one tenant (`org_claim` is unique). The lab claims no org.
    org as the slug unless there's a reason not to. An org already claimed by
    another tenant is refused, and nothing changes.
 
+   It also makes the orchestrator (`FISHSENSE_ORCHESTRATOR_SUB`) a member, so the
+   pipeline serves the tenant from the start (the owner, 2026-10-21). That's a
+   membership, never a bypass: deleting that row stops the pipeline for the tenant.
+   Tenants opened before this are given the same with
+   `dc run --rm migrate fishsense-services-api serve-tenants` (a dry run listing
+   them; `--apply` writes it).
+
 3. Send the org the link. Their people enroll, verify their email, and sign in.
 
 4. **For FishSense Mobile sync,** the tenant also needs its own Garage bucket and key
