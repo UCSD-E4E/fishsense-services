@@ -90,7 +90,8 @@ class DeviceMeasurement:
 @dataclass(frozen=True)
 class MobileCapture:
     client_capture_uuid: uuid.UUID
-    uploaded_by: uuid.UUID
+    #: Who synced it; None for an import, which has ``imported_from`` (0058).
+    uploaded_by: uuid.UUID | None
     captured_at: datetime
     device_install_id: str
     device_model: str | None
@@ -115,6 +116,8 @@ class MobileCapture:
     files: tuple[CaptureFile, ...]
     #: The commit request as received.
     manifest: dict = field(compare=False)
+    #: Where an imported capture came from (0058); None for the app's sync.
+    imported_from: str | None = None
 
     @property
     def rgb(self) -> CaptureFile:
@@ -152,7 +155,8 @@ class Appended:
 class CaptureDetail:
     capture_id: uuid.UUID
     client_capture_uuid: uuid.UUID
-    uploaded_by: uuid.UUID
+    #: None for an imported capture (0058).
+    uploaded_by: uuid.UUID | None
     captured_at: datetime
     device_install_id: str
     device_model: str | None
@@ -182,6 +186,8 @@ class CaptureDetail:
     derived_place_name: str | None = None
     #: The fish the phone measured: with ``capture_id``, its page's address.
     fish_id: uuid.UUID | None = None
+    #: Where an imported capture came from (0058).
+    imported_from: str | None = None
 
     @property
     def current_measurement(self) -> StoredMeasurement | None:
@@ -223,10 +229,10 @@ async def commit_capture(
                 INSERT INTO captures (tenant_id, device_id, raw_object_key,
                     captured_at, checksum, checksum_algorithm, is_canonical,
                     client_capture_uuid, uploaded_by, latitude, longitude,
-                    horizontal_accuracy_m)
+                    horizontal_accuracy_m, imported_from)
                 VALUES (:tenant_id, :device_id, :key, :captured_at, :checksum,
                     'sha256', true, :client_uuid, :uploaded_by, :latitude,
-                    :longitude, :accuracy)
+                    :longitude, :accuracy, :imported_from)
                 RETURNING id
                 """),
             {
@@ -240,6 +246,7 @@ async def commit_capture(
                 "latitude": capture.latitude,
                 "longitude": capture.longitude,
                 "accuracy": capture.horizontal_accuracy_m,
+                "imported_from": capture.imported_from,
             },
         )
     ).scalar_one()
@@ -364,7 +371,7 @@ async def mobile_capture(
         await conn.execute(
             text(f"""
                 SELECT c.id, c.client_capture_uuid, c.uploaded_by, c.captured_at,
-                    d.serial, c.latitude, c.longitude, c.horizontal_accuracy_m,
+                    c.imported_from, d.serial, c.latitude, c.longitude, c.horizontal_accuracy_m,
                     mc.*, pn.place_name AS derived_place_name
                 FROM captures c
                 JOIN mobile_captures mc
@@ -401,6 +408,7 @@ async def mobile_capture(
     return CaptureDetail(
         capture_id=row.id,
         fish_id=row.fish_id,
+        imported_from=row.imported_from,
         client_capture_uuid=row.client_capture_uuid,
         uploaded_by=row.uploaded_by,
         captured_at=row.captured_at,
