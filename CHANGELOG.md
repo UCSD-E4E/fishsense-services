@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.27.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.27.0...v0.27.1) (2026-10-21)
+
+
+### Bug Fixes
+
+* **nrp:** skip the per-image NRP wake when workers already poll the queue ([673958e](https://github.com/UCSD-E4E/fishsense-services/commit/673958e0cca85c88ebdcbfe78139ab4b7d423c67))
+* **nrp:** skip the per-image NRP wake when workers already poll the queue ([3486d34](https://github.com/UCSD-E4E/fishsense-services/commit/3486d346910a18c8cbf65aac99de8018e72571d4)), closes [#158](https://github.com/UCSD-E4E/fishsense-services/issues/158)
+* **thumbnails:** continue the backlog as new before its history fills ([f7b9a3e](https://github.com/UCSD-E4E/fishsense-services/commit/f7b9a3e957d6a201cff2148c6ea4be7cd5262679))
+* **thumbnails:** continue the backlog as new before its history fills ([dc3704d](https://github.com/UCSD-E4E/fishsense-services/commit/dc3704dfd425d87a0e14f7b59c6b8df6378aff94)), closes [#169](https://github.com/UCSD-E4E/fishsense-services/issues/169)
+
 ## [0.27.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.26.1...v0.27.0) (2026-10-21)
 
 
