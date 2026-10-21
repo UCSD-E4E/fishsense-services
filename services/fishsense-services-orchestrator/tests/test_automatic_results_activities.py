@@ -254,6 +254,26 @@ async def test_frames_read_their_captures_render_by_url():
     assert renders.presigners == 1  # one bucket lookup, not one per frame
 
 
+async def test_a_large_mission_heartbeats_a_bounded_number_of_times():
+    """Temporal's worker queues heartbeats (1,000 at most), and a loop that
+    heartbeats per frame without yielding fills it: mission 440 (1,122 frames)
+    failed resolving its frames with asyncio's QueueFull (2026-10-20, after
+    the bucket lookup stopped awaiting per frame). Once per page of frames."""
+    n = 2500
+    frames = [AutomaticFrame(uuid.uuid4(), f"{i:032x}", False, None) for i in range(n)]
+    catalog = _Catalog(
+        automatic_frames_inputs=AutomaticFramesInputs(K, [0.1] * 5, frames, CAMERA)
+    )
+    beats = []
+    env = ActivityEnvironment()
+    env.on_heartbeat = lambda *details: beats.append(details)
+
+    got = await env.run(_acts(catalog).resolve_automatic_frames_inputs, TARGET)
+
+    assert len(got.frames) == n
+    assert len(beats) <= n // 250 + 1
+
+
 async def test_a_frame_whose_render_settled_as_an_abstention_is_one():
     """A raw that would not decode -- or was missing from scratch every time --
     has no render and never will: its frame is recorded as the same
