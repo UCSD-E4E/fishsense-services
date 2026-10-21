@@ -110,7 +110,7 @@ with workflow.unsafe.imports_passed_through():
         raw_scratch_reader_id,
     )
     from fishsense_services_orchestrator.object_store.steps import (
-        STAGE_RAW_TIMEOUT,
+        LONG_STAGE_RAW_TIMEOUT,
         cleanup_raw,
         stage_raw,
     )
@@ -183,13 +183,19 @@ CPU_CHILD_TIMEOUT = timedelta(hours=1)
 #: Above the processor's fit budget (FIT_TIMEOUT, 2 h), so a slow fit is not
 #: cut off by its parent.
 CALIBRATION_CHILD_TIMEOUT = timedelta(hours=2, minutes=15)
-STAGE_TIMEOUT = STAGE_RAW_TIMEOUT
+STAGE_TIMEOUT = LONG_STAGE_RAW_TIMEOUT
 #: How long after its start a run may begin another dive (the hourly schedule
 #: skips a firing while a run is going).
 AUTOMATIC_DRAIN_WINDOW = timedelta(minutes=50)
 #: The schedule's run timeout: the window, then one dive's every step at its
 #: longest (two GPU children, two CPU ones, staging and cleanup, three wakes,
 #: ten database steps).
+#:
+#: **Changing it changes a schedule.** Schedules are created if missing and
+#: never updated in place (CLAUDE.md), so a live ``automatic-results`` schedule
+#: keeps the run timeout it was created with: delete it in Temporal just before
+#: the deploy that changes this, and the restarted worker recreates it (review
+#: of #219; on 2026-10-21 the schedule was off, so nothing held the old one).
 RUN_TIMEOUT = (
     AUTOMATIC_DRAIN_WINDOW
     + 10 * DB_TIMEOUT
@@ -289,7 +295,7 @@ async def _frames(
             # the GPU is woken -- it would sit idle through them (review of
             # #144) -- then read them back by URL.
             staged = True
-            await stage_raw(staging)
+            await stage_raw(staging, timeout=STAGE_TIMEOUT)
             rendered = await render_pages(
                 RenderTarget(target.tenant_id, target.mission_id)
             )
@@ -312,8 +318,17 @@ async def _frames(
             _skip_for_gpu("frames", gpu, report)
             return False
         if not staged:
+            # Every frame rendered: the dot detector reads the owed frames'
+            # raws, and only those are staged (review of #219).
             staged = True
-            await stage_raw(staging)
+            await stage_raw(
+                StagingTarget(
+                    target.tenant_id,
+                    target.mission_id,
+                    capture_ids=[f.capture_id for f in ready],
+                ),
+                timeout=STAGE_TIMEOUT,
+            )
         missing: List[uuid.UUID] = []
         for start in range(0, len(ready), FRAMES_PER_CHILD):
             chunk = ready[start : start + FRAMES_PER_CHILD]

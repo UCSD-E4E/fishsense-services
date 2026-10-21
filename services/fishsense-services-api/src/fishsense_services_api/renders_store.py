@@ -396,15 +396,6 @@ class RendersCatalog(ServicePrincipal):
     """The render stage's database side, as the orchestrator's service
     principal: every call rechecks its membership of the tenant."""
 
-    async def tenant_slug(self, tenant_id: uuid.UUID) -> str:
-        """The tenant's slug, which names its bucket in the tenant stores."""
-        async with self._tenant(tenant_id) as conn:
-            return (
-                await conn.execute(
-                    text("SELECT slug FROM tenants WHERE id = :t"), {"t": tenant_id}
-                )
-            ).scalar_one()
-
     async def render_missions(
         self,
         tenant_id: uuid.UUID,

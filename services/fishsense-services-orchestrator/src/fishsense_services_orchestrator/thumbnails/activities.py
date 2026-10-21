@@ -17,9 +17,11 @@ from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
 from temporalio import activity
+
+from fishsense_services_orchestrator.object_store.tenant_buckets import tenant_objects
 from temporalio.exceptions import ApplicationError
 
-from fishsense_services_api.tenant_stores import RENDER_EXPIRES_SECONDS, NoTenantStore
+from fishsense_services_api.tenant_stores import RENDER_EXPIRES_SECONDS
 from fishsense_services_api.thumbnails_store import ThumbnailRow
 from fishsense_services_contracts.thumbnails import (
     THUMBNAIL_WIDTH,
@@ -81,14 +83,11 @@ class ThumbnailActivities:
         self._stores = stores
 
     async def _objects(self, tenant_id: uuid.UUID):
-        slug = await self._catalog.tenant_slug(tenant_id)
-        try:
-            return self._stores.for_tenant(slug)
-        except NoTenantStore:
-            activity.logger.warning(
-                "tenant %s has no bucket: its renders wait for their thumbnails", slug
-            )
-            return None
+        """The tenant's bucket, or None when it has none."""
+        return await tenant_objects(
+            self._catalog, self._stores, tenant_id,
+            waiting="its renders wait for their thumbnails",
+        )  # fmt: skip
 
     @activity.defn(name="select_thumbnail_tenants")
     async def select_thumbnail_tenants(self) -> List[uuid.UUID]:

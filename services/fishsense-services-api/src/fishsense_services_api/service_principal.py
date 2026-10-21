@@ -50,6 +50,16 @@ class ServicePrincipal:
             )
             return list(rows.scalars())
 
+    async def tenant_slug(self, tenant_id: uuid.UUID) -> str:
+        """The tenant's slug, which names its bucket in the tenant stores
+        (one copy for every catalog that needs it; review of #219)."""
+        async with self._tenant(tenant_id) as conn:
+            return (
+                await conn.execute(
+                    text("SELECT slug FROM tenants WHERE id = :t"), {"t": tenant_id}
+                )
+            ).scalar_one()
+
     @asynccontextmanager
     async def _tenant(self, tenant_id: uuid.UUID) -> AsyncIterator[AsyncConnection]:
         async with principal_transaction(self._engine, self._sub) as conn:

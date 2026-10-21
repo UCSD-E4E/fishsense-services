@@ -36,6 +36,7 @@ v2 changes:
 """
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from sqlalchemy import text
@@ -85,19 +86,27 @@ class CaptureChecksum:
 
 
 async def captures_to_stage(
-    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
+    conn: AsyncConnection,
+    tenant_id: uuid.UUID,
+    mission_id: uuid.UUID,
+    capture_ids: Sequence[uuid.UUID] | None = None,
 ) -> list[StagingCapture]:
-    """The dive's canonical captures, with their NAS paths and checksums."""
+    """The dive's canonical captures, with their NAS paths and checksums;
+    only `capture_ids` of them when given (the frames a step owes, review of
+    #219)."""
+    only = "" if capture_ids is None else " AND id = ANY(:ids)"
     rows = (
         await conn.execute(
-            text("""
+            text(f"""
                 SELECT id, source_path, checksum FROM captures
                 WHERE tenant_id = :tenant AND mission_id = :mission AND is_canonical
+                {only}
                 ORDER BY source_path NULLS LAST, id
                 """),
-            {"tenant": tenant_id, "mission": mission_id},
+            {"tenant": tenant_id, "mission": mission_id,
+             "ids": list(capture_ids or [])},
         )
-    ).all()
+    ).all()  # fmt: skip
     copies: dict[uuid.UUID, list[RawCopy]] = {}
     for r in await conn.execute(
         text("""
@@ -164,20 +173,14 @@ async def capture_checksum(
 class RawStagingCatalog(ServicePrincipal):
     """Raw staging's database side, as the orchestrator's service principal."""
 
-    async def tenant_slug(self, tenant_id: uuid.UUID) -> str:
-        """The tenant's slug, which names its bucket in the tenant stores."""
-        async with self._tenant(tenant_id) as conn:
-            return (
-                await conn.execute(
-                    text("SELECT slug FROM tenants WHERE id = :t"), {"t": tenant_id}
-                )
-            ).scalar_one()
-
     async def captures_to_stage(
-        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
+        self,
+        tenant_id: uuid.UUID,
+        mission_id: uuid.UUID,
+        capture_ids: Sequence[uuid.UUID] | None = None,
     ) -> list[StagingCapture]:
         async with self._tenant(tenant_id) as conn:
-            return await captures_to_stage(conn, tenant_id, mission_id)
+            return await captures_to_stage(conn, tenant_id, mission_id, capture_ids)
 
     async def checksums_to_clean(
         self, tenant_id: uuid.UUID, mission_id: uuid.UUID

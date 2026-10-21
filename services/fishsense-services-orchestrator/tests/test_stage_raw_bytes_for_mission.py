@@ -61,6 +61,7 @@ from fishsense_services_orchestrator.object_store.contracts import (
     StagingTarget,
 )
 from fishsense_services_orchestrator.object_store.steps import (
+    LONG_STAGE_RAW_TIMEOUT,
     STAGE_RAW_RETRY_POLICY,
     STAGE_RAW_TIMEOUT,
 )
@@ -92,15 +93,22 @@ def _raw_key(checksum: str, tenant=TENANT) -> str:
 
 
 class _Catalog:
-    def __init__(self, captures):
+    def __init__(self, captures, slug_error=None):
         self._captures = captures
+        self._slug_error = slug_error
         self.asked = []
+        self.asked_slug = 0
+        self.asked_ids = []
 
     async def tenant_slug(self, tenant_id):
+        self.asked_slug += 1
+        if self._slug_error is not None:
+            raise self._slug_error
         return "lab"
 
-    async def captures_to_stage(self, tenant_id, mission_id):
+    async def captures_to_stage(self, tenant_id, mission_id, capture_ids=None):
         self.asked.append((tenant_id, mission_id))
+        self.asked_ids.append(capture_ids)
         return list(self._captures)
 
 
@@ -162,9 +170,9 @@ def _store(s3) -> OrchestratorObjectStore:
     return OrchestratorObjectStore(s3, ObjectLayout(settings))
 
 
-def _activities(s3, captures, nas, *, concurrency=1, stores=None):
+def _activities(s3, captures, nas, *, concurrency=1, stores=None, catalog=None):
     return sut.RawStagingActivities(
-        catalog=_Catalog(captures),
+        catalog=catalog or _Catalog(captures),
         store=_store(s3),
         nas_settings=_nas_settings(),
         nas_client_factory=lambda: nas,
@@ -178,9 +186,9 @@ def _raw_keys(s3) -> set[str]:
     return {o["Key"] for o in resp.get("Contents", [])}
 
 
-async def _stage(activities) -> StageRawBytesResult:
+async def _stage(activities, target=TARGET) -> StageRawBytesResult:
     return await ActivityEnvironment().run(
-        activities.stage_raw_bytes_for_mission, TARGET
+        activities.stage_raw_bytes_for_mission, target
     )
 
 
@@ -446,22 +454,36 @@ COPY = b"raw-bytes-from-the-bucket"
 
 
 class _Objects:
-    def __init__(self, bucket, objects, error=None):
+    def __init__(self, bucket, objects, error=None, delay=0.0):
         self.bucket = bucket
         self._objects = objects
         self._error = error
+        self._delay = delay
         self.read: list[str] = []
+        self._lock = threading.Lock()
+        self.in_flight = 0
+        self.most_in_flight = 0
 
     def get(self, key):
-        self.read.append(key)
-        if self._error is not None:
-            raise self._error
-        return self._objects.get(key)
+        with self._lock:
+            self.read.append(key)
+            self.in_flight += 1
+            self.most_in_flight = max(self.most_in_flight, self.in_flight)
+        try:
+            if self._delay:
+                time.sleep(self._delay)
+            if self._error is not None:
+                raise self._error
+            return self._objects.get(key)
+        finally:
+            with self._lock:
+                self.in_flight -= 1
 
 
 class _Stores:
-    def __init__(self, objects=None):
+    def __init__(self, objects=None, tenants=("lab",)):
         self._objects = objects
+        self.tenants = set(tenants)
 
     def for_tenant(self, slug):
         if self._objects is None:
@@ -469,24 +491,33 @@ class _Stores:
         return self._objects
 
 
-def _copied(n, data=COPY, *, bucket=TENANT_BUCKET, md5=None, size=None):
+def _copied(n, data=COPY, *, bucket=TENANT_BUCKET, md5=None, size=None,
+            path=REL, checksum=None):  # fmt: skip
+    """A capture whose copy is `data`; its checksum is the data's MD5, as for
+    every copy in production (2026-10-21: 57,462 of 57,462)."""
+    digest = hashlib.md5(data).hexdigest()
     return StagingCapture(
-        uuid.UUID(int=n), REL, _md5(n),
+        uuid.UUID(int=n), path, checksum or digest,
         (RawCopy(bucket=bucket, key=f"raws/{n}.ORF",
                  bytes=len(data) if size is None else size,
-                 md5=md5 or hashlib.md5(data).hexdigest()),),
+                 md5=md5 or digest),),
     )  # fmt: skip
+
+
+def _key_of(capture) -> str:
+    return _raw_key(capture.checksum)
 
 
 async def test_a_raw_copied_to_the_tenants_bucket_is_staged_from_it_not_the_nas(s3):
     nas = _Nas(payload=b"from-the-nas")
     objects = _Objects(TENANT_BUCKET, {"raws/1.ORF": COPY})
 
-    result = await _stage(_activities(s3, [_copied(1)], nas, stores=_Stores(objects)))
+    capture = _copied(1)
+    result = await _stage(_activities(s3, [capture], nas, stores=_Stores(objects)))
 
     assert nas.calls == []
     assert objects.read == ["raws/1.ORF"]
-    assert s3.get_object(Bucket=BUCKET, Key=_raw_key(_md5(1)))["Body"].read() == COPY
+    assert s3.get_object(Bucket=BUCKET, Key=_key_of(capture))["Body"].read() == COPY
     assert (result.staged, result.from_bucket) == (1, 1)
 
 
@@ -503,8 +534,9 @@ async def test_frames_with_and_without_a_copy_are_staged_each_from_its_source(s3
 
 @pytest.mark.parametrize(
     "case",
-    ["other_bytes", "other_size", "missing", "error", "other_bucket", "no_store"],
-)
+    ["other_bytes", "other_size", "missing", "error", "other_bucket", "no_store",
+     "not_the_captures_checksum", "slug_unknown"],
+)  # fmt: skip
 async def test_a_copy_that_cannot_be_trusted_or_read_falls_back_to_the_nas(s3, case):
     """Never a frame staged from bytes that aren't the ones recorded."""
     nas = _Nas(payload=b"from-the-nas")
@@ -520,19 +552,30 @@ async def test_a_copy_that_cannot_be_trusted_or_read_falls_back_to_the_nas(s3, c
         objects = _Objects(TENANT_BUCKET, {}, error=RuntimeError("garage down"))
     elif case == "other_bucket":
         capture = _copied(1, bucket="some-other-bucket")
+    elif case == "not_the_captures_checksum":
+        # Review of #219: the copy is checked against what it recorded, and
+        # that against the capture it is staged as.
+        capture = _copied(1, checksum=_md5(1))
     stores = _Stores(None if case == "no_store" else objects)
+    catalog = (
+        _Catalog([capture], slug_error=RuntimeError("no such tenant row"))
+        if case == "slug_unknown"
+        else None
+    )
 
-    result = await _stage(_activities(s3, [capture], nas, stores=stores))
+    result = await _stage(
+        _activities(s3, [capture], nas, stores=stores, catalog=catalog)
+    )
 
     assert nas.calls == [f"{ROOT}/{REL}"]
-    assert s3.get_object(Bucket=BUCKET, Key=_raw_key(_md5(1)))["Body"].read() == (
+    assert s3.get_object(Bucket=BUCKET, Key=_key_of(capture))["Body"].read() == (
         b"from-the-nas"
     )
     assert (result.staged, result.from_bucket) == (1, 0)
 
 
 async def test_an_already_staged_frame_reads_neither_source(s3):
-    s3.put_object(Bucket=BUCKET, Key=_raw_key(_md5(1)), Body=b"old")
+    s3.put_object(Bucket=BUCKET, Key=_key_of(_copied(1)), Body=b"old")
     nas = _Nas()
     objects = _Objects(TENANT_BUCKET, {"raws/1.ORF": COPY})
 
@@ -542,11 +585,15 @@ async def test_an_already_staged_frame_reads_neither_source(s3):
     assert result.skipped_already_present == 1
 
 
-def test_staging_has_hours_not_one_hour_and_a_stall_is_still_caught():
+def test_staging_has_hours_where_the_parent_budgets_them_and_an_hour_elsewhere():
     """B (2026-10-21): 440's 1,201 raws didn't fit in an hour from the NAS.
     The staging activity heartbeats per file, so a stall is still caught in
-    minutes; the ceiling only has to cover a large mission's honest pace."""
-    assert STAGE_RAW_TIMEOUT >= timedelta(hours=6)
+    minutes; the long ceiling only has to cover a large mission's honest
+    pace. Review of #219: parents whose own run timeout is an hour or less
+    keep the hour, so their staging still ends in a failure they clean up
+    after, not in their run's timeout."""
+    assert LONG_STAGE_RAW_TIMEOUT >= timedelta(hours=6)
+    assert STAGE_RAW_TIMEOUT == timedelta(hours=1)
 
 
 from temporalio import workflow as _workflow  # noqa: E402
@@ -564,9 +611,9 @@ class _StageOnce:  # pylint: disable=too-few-public-methods
 
 
 async def test_the_staging_step_schedules_the_whole_ceiling_and_the_run_budgets_it():
-    """What `stage_raw` schedules is `STAGE_RAW_TIMEOUT`, and the automatic
-    run's timeout sums the same figure, so a long staging isn't cut short by
-    its parent instead."""
+    """What `stage_raw` schedules by default is `STAGE_RAW_TIMEOUT`, and the
+    automatic run's timeout sums the long figure it stages with, so a long
+    staging isn't cut short by its parent instead."""
     from temporalio import activity
     from temporalio.testing import WorkflowEnvironment
     from temporalio.worker import UnsandboxedWorkflowRunner, Worker
@@ -594,4 +641,114 @@ async def test_the_staging_step_schedules_the_whole_ceiling_and_the_run_budgets_
             )
 
     assert seen == [STAGE_RAW_TIMEOUT]
-    assert automatic.STAGE_TIMEOUT == STAGE_RAW_TIMEOUT
+    assert automatic.STAGE_TIMEOUT == LONG_STAGE_RAW_TIMEOUT
+
+
+# -- review of #219 ----------------------------------------------------------------
+
+
+async def test_a_capture_with_no_nas_path_but_a_bucket_copy_is_staged_from_it(s3):
+    """Its bytes are in the tenant's bucket: it is not `no_path`."""
+    nas = _Nas()
+    capture = _copied(1, path=None)
+    objects = _Objects(TENANT_BUCKET, {"raws/1.ORF": COPY})
+
+    result = await _stage(_activities(s3, [capture], nas, stores=_Stores(objects)))
+
+    assert (result.staged, result.from_bucket, result.no_path) == (1, 1, 0)
+    assert nas.calls == []
+
+
+async def test_a_capture_with_no_path_and_no_usable_copy_is_still_no_path(s3):
+    nas = _Nas()
+    capture = _copied(1, path=None)
+    objects = _Objects(TENANT_BUCKET, {})
+
+    result = await _stage(_activities(s3, [capture], nas, stores=_Stores(objects)))
+
+    assert (result.staged, result.no_path) == (0, 1)
+    assert nas.calls == []
+
+
+async def test_with_no_tenant_stores_configured_the_slug_is_never_asked(s3):
+    """An empty stores file (or none) is the NAS, with no database round trip
+    that could fail a staging the NAS would have done."""
+    catalog = _Catalog([_copied(1)])
+
+    await _stage(_activities(s3, [], _Nas(), stores=_Stores(None, tenants=()),
+                             catalog=catalog))  # fmt: skip
+
+    assert catalog.asked_slug == 0
+
+
+async def test_a_bucket_that_errors_is_given_up_on_after_the_first_read(s3, caplog):
+    """A rotated key or a missing bucket fails every read alike: one warning,
+    then the NAS for the rest -- not a failed read and a warning per frame.
+    Reads already in flight when the first fails may finish failing too: at
+    most the worker's bucket slots, never the mission's every frame."""
+    nas = _Nas(payload=b"from-the-nas")
+    captures = [_copied(n, data=bytes([n]) * 8) for n in range(1, 41)]
+    objects = _Objects(TENANT_BUCKET, {}, error=RuntimeError("AccessDenied"))
+
+    result = await _stage(_activities(s3, captures, nas, stores=_Stores(objects)))
+
+    assert 1 <= len(objects.read) <= sut.BUCKET_CONCURRENCY
+    assert len(nas.calls) == 40
+    assert (result.staged, result.from_bucket) == (40, 0)
+    assert sum("AccessDenied" in r.getMessage() for r in caplog.records) == 1
+
+
+async def test_a_frame_falling_back_to_the_nas_is_checked_in_scratch_once(s3):
+    nas = _Nas()
+    activities = _activities(s3, [_copied(1)], nas,
+                             stores=_Stores(_Objects(TENANT_BUCKET, {})))  # fmt: skip
+    heads = []
+    real = activities._store.has_raw
+
+    async def counting(tenant_id, checksum):
+        heads.append(checksum)
+        return await real(tenant_id, checksum)
+
+    activities._store.has_raw = counting
+
+    await _stage(activities)
+
+    assert len(heads) == 1
+
+
+async def test_bucket_reads_are_limited_across_every_staging_on_the_worker(s3):
+    """Each read holds a whole raw (~15 MB) in memory: the limit is the
+    worker's, not each staging's, or three runs hold three times as many."""
+    captures = [_copied(n, data=bytes([n]) * 8) for n in range(1, 13)]
+    objects = _Objects(
+        TENANT_BUCKET,
+        {f"raws/{c.capture_id.int}.ORF": bytes([c.capture_id.int]) * 8
+         for c in captures},
+        delay=0.05,
+    )  # fmt: skip
+    activities = _activities(s3, [], _Nas(), stores=_Stores(objects))
+    first, second = captures[:6], captures[6:]
+    other = StagingTarget(tenant_id=TENANT, mission_id=uuid.uuid4())
+
+    class _Split(_Catalog):
+        async def captures_to_stage(self, tenant_id, mission_id, capture_ids=None):
+            return list(first if mission_id == MISSION else second)
+
+    activities._catalog = _Split([])
+
+    await asyncio.gather(_stage(activities), _stage(activities, other))
+
+    assert len(objects.read) == 12
+    assert objects.most_in_flight <= sut.BUCKET_CONCURRENCY
+
+
+async def test_a_target_naming_captures_stages_only_those(s3):
+    """The frames step stages the frames it owes (review of #219)."""
+    catalog = _Catalog([_capture(1)])
+    ids = [uuid.UUID(int=1)]
+
+    await _stage(_activities(s3, [], _Nas(), catalog=catalog),
+                 StagingTarget(tenant_id=TENANT, mission_id=MISSION,
+                               capture_ids=ids))  # fmt: skip
+
+    assert catalog.asked_ids == [ids]

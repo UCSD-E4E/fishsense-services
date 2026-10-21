@@ -30,10 +30,11 @@ from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
 from temporalio import activity
+
+from fishsense_services_orchestrator.object_store.tenant_buckets import tenant_objects
 from temporalio.exceptions import ApplicationError
 
 from fishsense_services_api.renders_store import RawRow, RenderRow
-from fishsense_services_api.tenant_stores import NoTenantStore
 from fishsense_services_contracts.renders import (
     RENDER_VERSION,
     RenderCapturesInput,
@@ -125,14 +126,10 @@ class RenderActivities:
 
     async def _objects(self, tenant_id: uuid.UUID):
         """The tenant's bucket, or None when it has none."""
-        slug = await self._catalog.tenant_slug(tenant_id)
-        try:
-            return self._stores.for_tenant(slug)
-        except NoTenantStore:
-            activity.logger.warning(
-                "tenant %s has no bucket: its captures wait for their renders", slug
-            )
-            return None
+        return await tenant_objects(
+            self._catalog, self._stores, tenant_id,
+            waiting="its captures wait for their renders",
+        )  # fmt: skip
 
     @activity.defn(name="select_render_missions")
     async def select_render_missions(
