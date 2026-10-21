@@ -6,6 +6,7 @@
  * see. A tenant slug, capture id, fish id and device filter that came from
  * the URL are validated before they go into an API path.
  */
+import { paths } from "./tenant-paths";
 import { apiClient, failure, type Schemas } from "./api/client";
 import { safeSlug, safeUuid } from "./ids";
 
@@ -113,6 +114,6 @@ export function where(o: Observation): string | null {
 
 /** A fish's page: a mobile fish's is its capture's, a Lite fish's its own. */
 export function observationHref(slug: string, o: Observation): string {
-  if (o.client_capture_uuid) return `/captures/${slug}/${o.client_capture_uuid}`;
-  return `/fish/${slug}/${o.capture_id}/${o.fish_id}`;
+  if (o.client_capture_uuid) return paths.capture(slug, o.client_capture_uuid);
+  return paths.fishDetail(slug, o.capture_id, o.fish_id);
 }

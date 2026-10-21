@@ -59,6 +59,7 @@ from fishsense_services_api.automatic_validation_store import (
     validation_frames,
 )
 from fishsense_services_api.db import tenant_transaction
+from fishsense_services_api.tenant_slugs import RESERVED_TENANT_SLUGS
 from fishsense_services_api.deployment_inference import (
     InferencePlan,
     apply_inference,
@@ -478,6 +479,13 @@ async def _add_tenant(args: argparse.Namespace) -> int:
         if value is not None and not SLUG.fullmatch(value):
             print(f"not a valid {label}: {value!r}", file=sys.stderr)
             return 2
+    if args.slug in RESERVED_TENANT_SLUGS:
+        print(
+            f"tenant slug {args.slug!r} is reserved: the web serves tenants under "
+            "their slug, and this one is its own route",
+            file=sys.stderr,
+        )
+        return 2
     settings = _settings(MigrationSettings)
     if settings is None:
         return 2

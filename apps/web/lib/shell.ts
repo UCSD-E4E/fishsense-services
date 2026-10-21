@@ -11,9 +11,15 @@ import { unstable_rethrow } from "next/navigation";
 import type { Session } from "next-auth";
 import { isPortalAuthorized } from "./authz";
 
-export type ShellState = { signedIn: boolean; name: string | null; staff: boolean };
+export type ShellState = {
+  signedIn: boolean;
+  name: string | null;
+  staff: boolean;
+  /** For asking the API the user's tenants, for the switcher. */
+  accessToken: string | null;
+};
 
-const SIGNED_OUT: ShellState = { signedIn: false, name: null, staff: false };
+const SIGNED_OUT: ShellState = { signedIn: false, name: null, staff: false, accessToken: null };
 
 export async function shellState(load: () => Promise<Session | null>): Promise<ShellState> {
   let session: Session | null;
@@ -31,6 +37,7 @@ export async function shellState(load: () => Promise<Session | null>): Promise<S
     signedIn: true,
     name: session.user.name ?? session.user.email ?? null,
     staff: isPortalAuthorized(session),
+    accessToken: session.accessToken ?? null,
   };
 }
 

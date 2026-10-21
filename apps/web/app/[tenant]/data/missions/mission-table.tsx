@@ -1,13 +1,9 @@
 import Link from "next/link";
 import { portLabel, purposeLabel, type MissionRow } from "@/lib/mission-facts";
+import { paths } from "@/lib/tenant-paths";
 
-export function missionHref(slug: string, number: number): string {
-  return `/missions/${slug}/${number}`;
-}
-
-export function deploymentHref(slug: string, number: number): string {
-  return `/deployments/${slug}/${number}`;
-}
+export const missionHref = paths.mission;
+export const deploymentHref = paths.deployment;
 
 /** Missions as rows: what each is for, its port and what said so, its trip. */
 export function MissionTable({

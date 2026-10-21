@@ -8,7 +8,8 @@ import {
   osmLink,
   placeName,
 } from "@/lib/captures";
-import { requireSignedIn } from "../../guard";
+import { requireSignedIn } from "@/app/_shell/guard";
+import { paths } from "@/lib/tenant-paths";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,7 @@ const FILE_LABELS: Record<string, string> = {
  */
 export default async function CapturePage({ params }: Props) {
   const { tenant, capture: captureId } = await params;
-  const session = await requireSignedIn(`/captures/${tenant}/${captureId}`);
+  const session = await requireSignedIn(paths.capture(tenant, captureId));
   const capture = await getCapture(
     session.accessToken ?? "",
     tenant,
@@ -64,7 +65,7 @@ export default async function CapturePage({ params }: Props) {
           </p>
         </div>
         <Link
-          href={`/captures?tenant=${encodeURIComponent(tenant)}`}
+          href={paths.captures(tenant)}
           className="shrink-0 rounded-md border border-slate-300 px-3 py-1 text-sm dark:border-slate-700"
         >
           All captures
