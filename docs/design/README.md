@@ -97,6 +97,9 @@ inferred one.
 - **The length is the hero.** It is set at 56 px on the web and 44 px on the phone,
   with tabular figures and a smaller, quieter unit. Its method (laser or LiDAR)
   always sits one line below it.
+- **Lengths are in millimetres,** whole numbers with thousands grouped
+  (`424 mm`, `1,235 mm`; the owner, 2026-10-21). Data is stored and served in
+  metres, and distances (laser range, how far away) stay in metres.
 - **Type:** Inter for everything a person reads. JetBrains Mono only for what a
   person copies: object keys, checksums, paths, ids.
 - **Shape:** cards 12 px, sheets 16, controls 10, chips round. Touch targets are

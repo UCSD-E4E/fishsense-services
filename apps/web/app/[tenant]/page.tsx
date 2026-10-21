@@ -3,6 +3,7 @@ import { unstable_rethrow } from "next/navigation";
 import { requireSignedIn } from "@/app/_shell/guard";
 import { tenantFor } from "@/app/_shell/tenant";
 import { WorkSections } from "@/app/_shell/work-sections";
+import { formatLength } from "@/lib/captures";
 import { getDeployments, type Deployment } from "@/lib/mission-facts";
 import { fishName, getObservationPage, observationHref, type Observation } from "@/lib/observations";
 import { paths } from "@/lib/tenant-paths";
@@ -121,7 +122,7 @@ export default async function TodayPage({ params }: Props) {
                       <div className="flex items-baseline justify-between gap-2 px-3.5 py-3">
                         <span className="text-sm font-semibold">{fishName(o).name}</span>
                         <span className="whitespace-nowrap font-semibold tabular-nums">
-                          {o.length_m == null ? "—" : `${o.length_m.toFixed(3)} m`}
+                          {o.length_m == null ? "—" : formatLength(o.length_m)}
                         </span>
                       </div>
                     </Link>

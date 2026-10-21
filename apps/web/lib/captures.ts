@@ -68,8 +68,17 @@ export async function getCapture(
   throw failure("fishsense-api capture failed", response, error);
 }
 
+/**
+ * A fish's length in whole millimetres, the unit every length is shown in
+ * (the owner, 2026-10-21; docs/design/README.md). Stored and served in metres;
+ * distances (laser range, GPS accuracy) stay in metres.
+ */
+export function millimetres(lengthM: number | null | undefined): string {
+  return lengthM == null ? "—" : Math.round(lengthM * 1000).toLocaleString("en-US");
+}
+
 export function formatLength(lengthM: number | null | undefined): string {
-  return lengthM == null ? "not measured" : `${(lengthM * 100).toFixed(1)} cm`;
+  return lengthM == null ? "not measured" : `${millimetres(lengthM)} mm`;
 }
 
 export function osmLink(latitude: number, longitude: number): string {

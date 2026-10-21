@@ -55,6 +55,8 @@ bottom tab bar all stay. These are the changes.
 - On the result screen, the length is 44 px semibold, with its unit at 20 px in
   `#9AA8B1`. The method and distance go one line below it, as chips
   ("LiDAR · 0.8 m away").
+- The length is in whole millimetres (`424 mm`), as on the web (2026-10-21).
+  The sync payload stays in metres; only what a person reads changes.
 - Scale: title 28, heading 20, body 16, label 13.
 
 ## 5. Small things
