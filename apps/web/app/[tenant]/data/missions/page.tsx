@@ -5,6 +5,7 @@ import { tenantFor } from "@/app/_shell/tenant";
 import { type TenantMembership } from "@/lib/fishsense-api";
 import { paths } from "@/lib/tenant-paths";
 import {
+  portUnknown,
   getTenantMissions,
   PURPOSES,
   purposeLabel,
@@ -35,7 +36,7 @@ function href(tenant: string, purpose?: PurposeFilter, unknownPort?: boolean): s
 }
 
 function keep(m: MissionRow, purpose: PurposeFilter, unknownPort: boolean): boolean {
-  if (unknownPort && m.port !== "unknown") return false;
+  if (unknownPort && !portUnknown(m)) return false;
   if (purpose === "none") return m.purpose == null;
   return purpose === undefined || m.purpose === purpose;
 }
@@ -67,7 +68,7 @@ export default async function MissionsPage({ params, searchParams }: Props) {
     failure = error instanceof Error ? error.message : "unavailable";
   }
   const shown = missions.filter((m) => keep(m, purpose, unknownPort));
-  const unknownCount = missions.filter((m) => m.port === "unknown").length;
+  const unknownCount = missions.filter(portUnknown).length;
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-12">

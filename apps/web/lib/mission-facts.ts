@@ -77,6 +77,21 @@ export function portLabel(port: Port, source: PortSource | null | undefined): st
   return source ? `${PORT_NAMES[port]} (${SOURCE_NAMES[source]})` : PORT_NAMES[port];
 }
 
+/** A phone's outing rather than a folder off a Lite camera (0057). */
+export function isPhoneMission(m: Pick<MissionRow, "source">): boolean {
+  return m.source === "mobile";
+}
+
+/** A Lite mission nothing has said the port of. A phone has no camera port. */
+export function portUnknown(m: Pick<MissionRow, "source" | "port">): boolean {
+  return !isPhoneMission(m) && m.port === "unknown";
+}
+
+/** What took the mission: the phone, or the Lite camera by its name. */
+export function cameraLabel(m: Pick<MissionRow, "source" | "device_name">): string {
+  return isPhoneMission(m) ? "Phone" : (m.device_name ?? "—");
+}
+
 export function purposeLabel(purpose: Purpose | null | undefined): string {
   if (!purpose) return "Not stated";
   const words = purpose.replace(/_/g, " ");

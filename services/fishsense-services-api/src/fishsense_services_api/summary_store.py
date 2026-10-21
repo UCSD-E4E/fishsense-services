@@ -45,7 +45,8 @@ _SUMMARY = """
       (SELECT count(*) FROM captures c
         WHERE c.tenant_id = :t AND c.is_canonical) AS frames,
       (SELECT count(*) FROM missions m
-        WHERE m.tenant_id = :t AND m.port = 'unknown') AS unknown_ports,
+        WHERE m.tenant_id = :t AND m.port = 'unknown'
+          AND m.source = 'lite') AS unknown_ports,
       (SELECT max(c.created_at) FROM captures c WHERE c.tenant_id = :t)
         AS latest_activity
 """

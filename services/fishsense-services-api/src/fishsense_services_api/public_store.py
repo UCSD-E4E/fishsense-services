@@ -78,7 +78,8 @@ async def public_summary(conn: AsyncConnection) -> PublicSummary:
     totals = (await conn.execute(text("SELECT * FROM public_totals()"))).one()
     by_region: dict[str, int] = defaultdict(int)
     for row in await conn.execute(text("SELECT * FROM public_wild_fish_by_folder()")):
-        region = _REGION_OF.get(place_of(row.source_path) or "")
+        # A phone mission has no folder to place it by (0057).
+        region = row.source_path and _REGION_OF.get(place_of(row.source_path) or "")
         if region:
             by_region[region] += row.wild_fish
     regions = sorted(

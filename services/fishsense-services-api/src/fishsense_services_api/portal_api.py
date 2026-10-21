@@ -71,6 +71,8 @@ class Cleared(BaseModel):
 class Mission(BaseModel):
     number: int
     name: str | None
+    #: A folder off a Lite camera, or a phone's outing (0057).
+    source: Literal["lite", "mobile"]
     started_at: datetime
     priority: Literal["low", "high", "none"]
     slate_template_number: int | None

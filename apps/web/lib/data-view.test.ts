@@ -39,6 +39,17 @@ describe("what a deployment holds", () => {
   });
 });
 
+describe("a deployment holding a phone's mission (0057)", () => {
+  it("lists the phone among its cameras", () => {
+    const phone = { ...mission(5, "2024-06-24T11:00:00Z", null, 2), source: "mobile" } as MissionRow;
+
+    expect(deploymentFacts([mission(1, "2024-06-23T08:00:00Z", "FSL-06", 9), phone]).cameras).toEqual([
+      "FSL-06",
+      "Phone",
+    ]);
+  });
+});
+
 describe("how a deployment was made", () => {
   it("names an e4edm dataset by its folder", () => {
     expect(provenance({ source_path: "/fishsense_data/2025.01.17.FishSense.San Diego", notes: null })).toEqual({

@@ -247,7 +247,8 @@ class Deployment(Base):
 
 
 class Mission(Base):
-    """A Lite offload session; ``priority`` is v1's commit/park flag."""
+    """A Lite offload session, or a phone's outing (``source``, 0057);
+    ``priority`` is v1's commit/park flag."""
 
     __tablename__ = "missions"
     __table_args__ = (
@@ -284,6 +285,11 @@ class Mission(Base):
             "END",
             name="missions_port_source_check",
         ),
+        CheckConstraint("source IN ('lite', 'mobile')", name="missions_source_check"),
+        CheckConstraint(
+            "(source = 'lite') = (source_path IS NOT NULL)",
+            name="missions_folder_is_lites",
+        ),
     )
 
     id: Mapped[uuid.UUID] = _id()
@@ -291,7 +297,10 @@ class Mission(Base):
     v1_id: Mapped[int | None] = _v1_id()
     number: Mapped[int] = _number()
     name: Mapped[str | None] = mapped_column(Text)
-    source_path: Mapped[str] = mapped_column(Text)
+    #: ``lite`` (a folder of photos) or ``mobile`` (a phone's outing, 0057).
+    source: Mapped[str] = mapped_column(Text, server_default=text("'lite'::text"))
+    #: The Lite folder; a phone mission has none.
+    source_path: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     priority: Mapped[str] = mapped_column(Text, server_default=text("'low'::text"))
     notes: Mapped[str | None] = mapped_column(Text)
@@ -362,6 +371,8 @@ class Capture(Base):
         ),
         # A dive's captures, per dive (0029).
         Index("captures_tenant_id_mission_id_idx", "tenant_id", "mission_id"),
+        # A phone's captures near a time, for grouping them into missions (0057).
+        Index("captures_device_time_idx", "tenant_id", "device_id", "captured_at"),
         # A mobile capture's id from the app: the sync's idempotency key (0038).
         UniqueConstraint(
             "tenant_id",

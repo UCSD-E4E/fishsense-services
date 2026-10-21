@@ -87,7 +87,7 @@ async def _locked_port(conn, tenant_id, number):
     row = (
         await conn.execute(
             text(
-                "SELECT port, port_source FROM missions "
+                "SELECT port, port_source, source FROM missions "
                 "WHERE tenant_id = :t AND number = :n FOR UPDATE"
             ),
             {"t": tenant_id, "n": number},
@@ -109,6 +109,10 @@ async def set_port(
     """State mission ``number``'s port as an operator, or withdraw it with
     ``unknown``. Refused (`PortIsRuled`) where the owner's rules have spoken."""
     current = await _locked_port(conn, tenant_id, number)
+    if current.source == "mobile":
+        raise PortIsRuled(
+            f"mission {number} is a phone's: a phone has no camera port (0057)"
+        )
     if current.port_source in RULED:
         if current.port == port:
             return

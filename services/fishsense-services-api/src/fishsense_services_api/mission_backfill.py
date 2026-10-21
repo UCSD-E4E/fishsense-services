@@ -173,7 +173,8 @@ async def plan_backfill(
             text("""
                 SELECT number, name, source_path, port, purpose, deployment_id,
                        created_at, started_at
-                FROM missions WHERE tenant_id = :t ORDER BY number
+                FROM missions WHERE tenant_id = :t AND source = 'lite'
+                ORDER BY number
                 """ + (" FOR UPDATE" if _lock else "")),
             {"t": tenant_id},
         )

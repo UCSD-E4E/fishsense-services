@@ -176,7 +176,8 @@ async def test_the_capture_row_names_its_rgb_by_checksum_and_device(
     assert (
         row.raw_object_key == f"mobile/captures/{capture.client_capture_uuid}/rgb_jpeg"
     )
-    assert row.is_canonical and row.mission_id is None
+    # A phone capture is in its phone mission (0057; test_phone_missions).
+    assert row.is_canonical and row.mission_id is not None
     assert (row.kind, row.serial) == ("mobile", "install-1")
 
 

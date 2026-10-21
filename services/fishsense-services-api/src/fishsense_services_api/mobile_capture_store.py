@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from sqlalchemy import text
+
+from fishsense_services_api.phone_missions import assign_phone_mission
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 __all__ = [
@@ -325,6 +327,17 @@ async def commit_capture(
         )
     for measurement in sorted(measurements, key=_measured_order):
         await _append(conn, tenant_id, capture_id, measurement)
+    await assign_phone_mission(
+        conn,
+        tenant_id,
+        capture_id=capture_id,
+        device_id=device_id,
+        captured_at=capture.captured_at,
+        latitude=capture.latitude,
+        longitude=capture.longitude,
+        place=capture.place_name,
+        time_zone=capture.manifest.get("time_zone"),
+    )
     return Committed(capture_id=capture_id, created=True)
 
 

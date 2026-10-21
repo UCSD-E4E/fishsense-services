@@ -12,6 +12,7 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./api/client";
+import type { MissionRow } from "./mission-facts";
 import {
   createDeployment,
   getDeployment,
@@ -23,7 +24,10 @@ import {
   parseMissionNumber,
   parsePort,
   parsePurpose,
+  cameraLabel,
+  isPhoneMission,
   portLabel,
+  portUnknown,
   purposeLabel,
   setMissionDeployment,
   setMissionPort,
@@ -218,5 +222,27 @@ describe("the lists", () => {
   it("has the API's purposes and ports", () => {
     expect([...PURPOSES].sort()).toEqual([...enumOf("purpose")].sort());
     expect([...PORTS].sort()).toEqual([...enumOf("port")].sort());
+  });
+});
+
+describe("a phone's mission (0057)", () => {
+  const phone = { source: "mobile", port: "unknown", device_name: null } as MissionRow;
+  const lite = { source: "lite", port: "unknown", device_name: "FSL-03" } as MissionRow;
+
+  it("is told apart from a Lite one", () => {
+    expect(isPhoneMission(phone)).toBe(true);
+    expect(isPhoneMission(lite)).toBe(false);
+  });
+
+  it("has no camera port to be unknown", () => {
+    expect(portUnknown(phone)).toBe(false);
+    expect(portUnknown(lite)).toBe(true);
+    expect(portUnknown({ ...lite, port: "flat" })).toBe(false);
+  });
+
+  it("names its camera as the phone, a Lite one by its name", () => {
+    expect(cameraLabel(phone)).toBe("Phone");
+    expect(cameraLabel(lite)).toBe("FSL-03");
+    expect(cameraLabel({ ...lite, device_name: null })).toBe("—");
   });
 });

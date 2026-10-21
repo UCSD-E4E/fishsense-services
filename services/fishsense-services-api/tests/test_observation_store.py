@@ -177,7 +177,7 @@ class TestList:
         assert (found.latitude, found.longitude) == (32.8665, -117.2546)
         assert found.length_m == pytest.approx(0.42)
         assert found.photo_key == f"mobile/captures/{client_uuid}/rgb_jpeg"
-        assert found.mission_number is None
+        assert found.mission_number is not None  # its phone mission (0057)
 
     async def test_both_are_listed_together_newest_first_and_filter_by_device(
         self, owner_engine, app_engine, tenants

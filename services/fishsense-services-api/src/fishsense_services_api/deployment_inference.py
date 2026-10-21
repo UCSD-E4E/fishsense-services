@@ -249,7 +249,7 @@ async def _missions(conn, tenant_id, lock: bool) -> list[_Mission]:
                     FROM captures c
                     WHERE c.tenant_id = m.tenant_id AND c.mission_id = m.id
                 ) c ON true
-                WHERE m.tenant_id = :t ORDER BY m.number
+                WHERE m.tenant_id = :t AND m.source = 'lite' ORDER BY m.number
                 """ + (" FOR UPDATE OF m" if lock else "")),
             {"t": tenant_id},
         )

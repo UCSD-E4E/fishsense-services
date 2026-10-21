@@ -1,5 +1,11 @@
 import Link from "next/link";
-import { portLabel, purposeLabel, type MissionRow } from "@/lib/mission-facts";
+import {
+  cameraLabel,
+  isPhoneMission,
+  portLabel,
+  purposeLabel,
+  type MissionRow,
+} from "@/lib/mission-facts";
 import { paths } from "@/lib/tenant-paths";
 
 export const missionHref = paths.mission;
@@ -50,9 +56,13 @@ export function MissionTable({
                 </span>
               </td>
               <td className="px-3 py-2">
-                <PortBadge port={m.port} source={m.port_source} />
+                {isPhoneMission(m) ? (
+                  <span className="text-fg-3">—</span>
+                ) : (
+                  <PortBadge port={m.port} source={m.port_source} />
+                )}
               </td>
-              <td className="px-3 py-2 text-fg-2">{m.device_name ?? "—"}</td>
+              <td className="px-3 py-2 text-fg-2">{cameraLabel(m)}</td>
               <td className="px-3 py-2 text-right tabular-nums text-fg-2">
                 {m.captures.toLocaleString()}
               </td>
