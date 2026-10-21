@@ -9,7 +9,7 @@ device: ``{pid}@{host}/{role}/{device}``. Not a payload: no contract version.
 
 from __future__ import annotations
 
-__all__ = ["CUDA", "CPU", "is_cuda_worker", "worker_identity"]
+__all__ = ["CUDA", "CPU", "is_cuda_worker", "is_per_image_worker", "worker_identity"]
 
 CUDA = "cuda"
 CPU = "cpu"
@@ -25,3 +25,11 @@ def is_cuda_worker(identity: str) -> bool:
     as it always did."""
     parts = identity.split("/")
     return len(parts) == 3 and parts[1] == "gpu" and parts[2] == CUDA
+
+
+def is_per_image_worker(identity: str) -> bool:
+    """A per-image-role worker on any device: an NRP pod or a lab render
+    worker (#158). A pre-convention identity is not counted, so the wake
+    stands NRP up as it always did."""
+    parts = identity.split("/")
+    return len(parts) == 3 and parts[1] == "per_image"

@@ -17,6 +17,7 @@ from __future__ import annotations
 import pytest
 from temporalio.testing import ActivityEnvironment
 
+from fishsense_services_contracts import PROCESSOR_TASK_QUEUE
 from fishsense_services_orchestrator.nrp.activities import NrpActivities
 
 from ._nrp import (
@@ -150,3 +151,118 @@ async def test_a_wake_before_the_first_cert_sync_stamps_nothing():
     await ActivityEnvironment().run(_activities(cluster).ensure_light_processor_running)
 
     assert LEAF not in cluster.template_annotations(LIGHT)
+
+
+# -- workers already polling (#158) --------------------------------------------
+
+
+async def test_a_per_image_worker_already_polling_leaves_nrp_alone():
+    """#158: the lab render workers poll the per-image queue with up to 102
+    slots, and a mission failed (2026-10-20, mission 422) because the NRP
+    stand-up it didn't need timed out. With a per-image worker live, the queue
+    is served: no stand-up."""
+    asked = []
+
+    async def pollers(task_queue):
+        asked.append(task_queue)
+        return 2
+
+    activities = NrpActivities(
+        config=config(), kubernetes=_must_not_touch_kubernetes,
+        per_image_pollers=pollers,
+    )  # fmt: skip
+
+    assert (
+        await ActivityEnvironment().run(activities.ensure_per_image_processor_running)
+        == 0
+    )
+    assert asked == [PROCESSOR_TASK_QUEUE]
+
+
+async def test_no_per_image_worker_polling_stands_nrp_up_as_before():
+    cluster = FakeCluster()
+
+    async def none_polling(task_queue):
+        return 0
+
+    activities = NrpActivities(config=config(active_replicas=2),
+                               kubernetes=cluster.kubernetes,
+                               per_image_pollers=none_polling)  # fmt: skip
+
+    assert (
+        await ActivityEnvironment().run(activities.ensure_per_image_processor_running)
+        == 2
+    )
+    assert cluster.replicas(PER_IMAGE) == 2
+
+
+async def test_a_poller_check_that_fails_stands_nrp_up_rather_than_fail_the_wake():
+    """The check is an optimisation: when Temporal can't answer it, the wake
+    does what it always did."""
+    cluster = FakeCluster()
+
+    async def broken(task_queue):
+        raise RuntimeError("describe_task_queue failed")
+
+    activities = NrpActivities(config=config(), kubernetes=cluster.kubernetes,
+                               per_image_pollers=broken)  # fmt: skip
+
+    assert (
+        await ActivityEnvironment().run(activities.ensure_per_image_processor_running)
+        == 1
+    )
+    assert cluster.replicas(PER_IMAGE) == 1
+
+
+async def test_count_per_image_pollers_counts_the_processor_queue():
+    """The wake step asks this after a failed wake: is anyone serving the
+    queue anyway? It answers with scaling off too (the lab workers don't
+    depend on NRP)."""
+    asked = []
+
+    async def pollers(task_queue):
+        asked.append(task_queue)
+        return 3
+
+    activities = NrpActivities(
+        config=None, kubernetes=_must_not_touch_kubernetes, per_image_pollers=pollers
+    )
+
+    assert await ActivityEnvironment().run(activities.count_per_image_pollers) == 3
+    assert asked == [PROCESSOR_TASK_QUEUE]
+
+
+@pytest.mark.integration
+async def test_per_image_pollers_counts_a_live_per_image_worker_on_a_real_server():
+    """Against a real Temporal (the dev server): a worker polling as
+    `.../per_image/cpu` counts; a GPU-role one on the same queue does not."""
+    import asyncio
+    import uuid as _uuid
+
+    from temporalio import activity as _activity
+    from temporalio.client import Client
+    from temporalio.testing import WorkflowEnvironment
+    from temporalio.worker import Worker
+
+    from fishsense_services_orchestrator.nrp.activities import per_image_pollers
+
+    @_activity.defn(name="noop")
+    async def noop() -> None:
+        return None
+
+    queue = f"per-image-{_uuid.uuid4()}"
+    async with await WorkflowEnvironment.start_local() as env:
+        lab = Worker(env.client, task_queue=queue, activities=[noop],
+                     identity="1@kastner-ml/per_image/cpu")  # fmt: skip
+        other = await Client.connect(
+            env.client.service_client.config.target_host,
+            namespace=env.client.namespace,
+        )  # one worker per queue per client
+        gpu = Worker(other, task_queue=queue, activities=[noop],
+                     identity="2@waiter/gpu/cuda")  # fmt: skip
+        async with lab, gpu:
+            for _ in range(50):
+                if await per_image_pollers(env.client, queue):
+                    break
+                await asyncio.sleep(0.2)
+            assert await per_image_pollers(env.client, queue) == 1

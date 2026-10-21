@@ -22,3 +22,15 @@ def test_only_a_cuda_gpu_worker_counts_as_a_gpu():
     assert not is_cuda_worker(
         "1@fishsense-processor-gpu-8454f69974-nnmlg"
     )  # pre-identity
+
+
+def test_a_per_image_worker_is_known_by_its_role_on_any_device():
+    """The per-image wake (#158) asks whether a per-image worker -- an NRP
+    pod or a lab render worker -- already polls the processor queue."""
+    from fishsense_services_contracts.workers import is_per_image_worker
+
+    assert is_per_image_worker("1@kastner-ml/per_image/cpu")
+    assert is_per_image_worker("1@waiter/per_image/cuda")
+    assert not is_per_image_worker("7@waiter/gpu/cuda")
+    assert not is_per_image_worker("7@pod/light/cpu")
+    assert not is_per_image_worker("1@fishsense-processor-per-image-abc")

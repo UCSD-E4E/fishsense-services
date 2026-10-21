@@ -20,6 +20,7 @@ def _activities(_deps: Deps):
     nrp = NrpActivities(config=resolve_scaling_config())
     return [
         nrp.ensure_per_image_processor_running,
+        nrp.count_per_image_pollers,
         nrp.ensure_light_processor_running,
         nrp.ensure_gpu_processor_running,
         nrp.tear_down_idle_processors,

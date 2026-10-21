@@ -36,8 +36,11 @@ from temporalio.api.enums.v1 import TaskQueueType
 from temporalio.api.taskqueue.v1 import TaskQueue
 from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
 
-from fishsense_services_contracts import PROCESSOR_GPU_TASK_QUEUE
-from fishsense_services_contracts.workers import is_cuda_worker
+from fishsense_services_contracts import (
+    PROCESSOR_GPU_TASK_QUEUE,
+    PROCESSOR_TASK_QUEUE,
+)
+from fishsense_services_contracts.workers import is_cuda_worker, is_per_image_worker
 from temporalio.client import Client, WorkflowExecutionStatus
 from temporalio.service import RPCError, RPCStatusCode
 
@@ -76,16 +79,19 @@ UsedSinceCheck = Callable[[str, datetime], Awaitable[bool]]
 WakerRunningCheck = Callable[[str, str], Awaitable[bool]]
 #: (task queue) -> how many CUDA workers polled it lately.
 CudaPollersCheck = Callable[[str], Awaitable[int]]
+#: (task queue) -> how many per-image workers polled it lately.
+PerImagePollersCheck = Callable[[str], Awaitable[int]]
 
 #: A poller seen this recently is live: Temporal's long poll renews it at
 #: least every minute while the worker waits.
 LIVE_POLLER = timedelta(minutes=2)
 
 
-async def cuda_pollers(client: Client, task_queue: str) -> int:
-    """How many CUDA GPU workers (`contracts.workers`) polled `task_queue`'s
-    activities within `LIVE_POLLER`: on NRP or off it (lab machines,
-    2026-10-19), a GPU is a GPU."""
+async def _live_pollers(
+    client: Client, task_queue: str, counts: Callable[[str], bool]
+) -> int:
+    """How many workers whose identity ``counts`` polled ``task_queue``'s
+    activities within `LIVE_POLLER`."""
     response = await client.workflow_service.describe_task_queue(
         DescribeTaskQueueRequest(
             namespace=client.namespace,
@@ -97,9 +103,22 @@ async def cuda_pollers(client: Client, task_queue: str) -> int:
     return sum(
         1
         for poller in response.pollers
-        if is_cuda_worker(poller.identity)
+        if counts(poller.identity)
         and now - poller.last_access_time.ToDatetime(tzinfo=timezone.utc) < LIVE_POLLER
     )
+
+
+async def cuda_pollers(client: Client, task_queue: str) -> int:
+    """How many CUDA GPU workers (`contracts.workers`) polled `task_queue`'s
+    activities within `LIVE_POLLER`: on NRP or off it (lab machines,
+    2026-10-19), a GPU is a GPU."""
+    return await _live_pollers(client, task_queue, is_cuda_worker)
+
+
+async def per_image_pollers(client: Client, task_queue: str) -> int:
+    """How many per-image workers polled `task_queue` within `LIVE_POLLER`:
+    NRP pods and the lab render workers alike (#158)."""
+    return await _live_pollers(client, task_queue, is_per_image_worker)
 
 
 async def _cuda_pollers_through_the_worker_client(task_queue: str) -> int:
@@ -108,6 +127,14 @@ async def _cuda_pollers_through_the_worker_client(task_queue: str) -> int:
     except RuntimeError:  # no worker client (a bare test environment)
         return 0
     return await cuda_pollers(client, task_queue)
+
+
+async def _per_image_pollers_through_the_worker_client(task_queue: str) -> int:
+    try:
+        client = activity.client()
+    except RuntimeError:  # no worker client (a bare test environment)
+        return 0
+    return await per_image_pollers(client, task_queue)
 
 
 def build_busy_query(cooldown_minutes: int, task_queue: str) -> str:
@@ -198,6 +225,9 @@ class NrpActivities:
         queue_used_since: UsedSinceCheck = _used_through_the_worker_client,
         waker_running: WakerRunningCheck = _waker_running_through_the_worker_client,
         cuda_pollers: CudaPollersCheck = _cuda_pollers_through_the_worker_client,
+        per_image_pollers: PerImagePollersCheck = (
+            _per_image_pollers_through_the_worker_client
+        ),
         poll_interval_seconds: float = 10,
     ) -> None:
         #: None when scaling is off: every activity no-ops.
@@ -207,6 +237,7 @@ class NrpActivities:
         self._queue_used_since = queue_used_since
         self._waker_running = waker_running
         self._cuda_pollers = cuda_pollers
+        self._per_image_pollers = per_image_pollers
         #: How often the GPU wake re-reads a Deployment while waiting for a
         #: pod to go Ready. Tests set it to 0.
         self._poll_interval_seconds = poll_interval_seconds
@@ -249,16 +280,42 @@ class NrpActivities:
     @activity.defn(name="ensure_per_image_processor_running")
     async def ensure_per_image_processor_running(self) -> int:
         """Stand the per-image processor up at ``active_replicas``. Returns the
-        target, or 0 when scaling is off."""
+        target, or 0 when scaling is off or a per-image worker already polls.
+
+        #158 (2026-10-20): mission 422 failed when this stand-up timed out
+        while the lab render workers polled the queue with ~100 slots between
+        them. As the GPU wake does for CUDA workers, a live per-image worker
+        -- on NRP or off it -- serves the queue, so NRP is left alone. A check
+        that fails stands NRP up, as before.
+        """
         if self.config is None:
             activity.logger.info(
                 "NRP scaling not configured; assuming the per-image processor is up"
+            )
+            return 0
+        try:
+            live = await self._per_image_pollers(PROCESSOR_TASK_QUEUE)
+        except Exception:  # pylint: disable=broad-exception-caught
+            activity.logger.warning(
+                "could not count per-image pollers; standing NRP up", exc_info=True
+            )
+            live = 0
+        if live:
+            activity.logger.info(
+                "per-image capacity: %d worker(s) polling; not standing NRP up", live
             )
             return 0
         await self._stand_up(
             self.config.per_image_deployment, self.config.active_replicas
         )
         return self.config.active_replicas
+
+    @activity.defn(name="count_per_image_pollers")
+    async def count_per_image_pollers(self) -> int:
+        """How many per-image workers poll the processor queue now. The wake
+        step asks after a failed wake (#158): with one live, the parent
+        proceeds. Answers with scaling off too -- lab workers aren't NRP's."""
+        return await self._per_image_pollers(PROCESSOR_TASK_QUEUE)
 
     @activity.defn(name="ensure_light_processor_running")
     async def ensure_light_processor_running(self) -> int:

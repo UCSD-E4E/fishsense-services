@@ -13,6 +13,8 @@ import uuid
 
 import pytest
 from temporalio import activity, workflow
+from temporalio.client import WorkflowFailureError
+from temporalio.exceptions import ApplicationError
 from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
@@ -115,3 +117,64 @@ async def test_each_wake_budgets_what_its_constant_says():
         "ensure_light_processor_running": WAKE_TIMEOUT,
         "ensure_gpu_processor_running": GPU_WAKE_TIMEOUT,
     }
+
+
+# -- a failed per-image wake with workers live (#158) ---------------------------
+
+
+@workflow.defn(name="WakePerImage")
+class _WakePerImage:
+    # pylint: disable=too-few-public-methods
+    @workflow.run
+    async def run(self) -> str:
+        await wake_per_image_processor()
+        return "dispatched"
+
+
+async def _wake_per_image_with(pollers: int) -> tuple[str, list[str]]:
+    calls: list[str] = []
+
+    @activity.defn(name="ensure_per_image_processor_running")
+    async def failing_wake() -> int:
+        calls.append("wake")
+        raise ApplicationError("NRP stand-up timed out", non_retryable=True)
+
+    @activity.defn(name="count_per_image_pollers")
+    async def count() -> int:
+        calls.append("count")
+        return pollers
+
+    async with await WorkflowEnvironment.start_time_skipping(
+        data_converter=DATA_CONVERTER
+    ) as env:
+        async with Worker(
+            env.client,
+            task_queue="test-wake-per-image",
+            workflows=[_WakePerImage],
+            activities=[failing_wake, count],
+            workflow_runner=UnsandboxedWorkflowRunner(),
+        ):
+            result = await env.client.execute_workflow(
+                "WakePerImage",
+                id=f"test-wake-per-image-{uuid.uuid4()}",
+                task_queue="test-wake-per-image",
+                result_type=str,
+            )
+    return result, calls
+
+
+async def test_a_failed_wake_with_per_image_workers_live_lets_the_parent_proceed():
+    """#158, mission 422 (2026-10-20): the NRP stand-up timed out while the
+    lab workers polled the queue, and the error failed the mission and threw
+    away its staged raws. With workers live, the work gets served: go on."""
+    result, calls = await _wake_per_image_with(pollers=2)
+
+    assert result == "dispatched"
+    assert calls == ["wake", "count"]
+
+
+async def test_a_failed_wake_with_no_worker_anywhere_fails_as_before():
+    """Nobody serves the queue: a child dispatched now would hang until its
+    timeout, so the wake's failure stands."""
+    with pytest.raises(WorkflowFailureError):
+        await _wake_per_image_with(pollers=0)
