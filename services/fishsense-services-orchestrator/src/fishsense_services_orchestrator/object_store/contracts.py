@@ -38,6 +38,9 @@ class StageRawBytesResult:
     staged: int  # newly downloaded and uploaded
     skipped_already_present: int
     no_path: int  # frames with no NAS path (or checksum): counted, not staged
+    #: Of `staged`, those copied from the tenant's bucket, not the NAS
+    #: (2026-10-21).
+    from_bucket: int = 0
 
 
 @dataclass

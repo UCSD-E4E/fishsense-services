@@ -165,6 +165,16 @@ def test_a_raw_put_is_unsigned_bytes_checked_after(stores):
     assert (stored.size, stored.md5) == (len(BODY), hashlib.md5(BODY).hexdigest())
 
 
+def test_a_stored_object_reads_back_whole_and_a_missing_one_is_none(stores):
+    """Raw staging reads a capture's bucket copy instead of the NAS
+    (2026-10-21: NAS staging timed mission 440 out after an hour)."""
+    lab = stores.for_tenant("lab")
+    assert _put(lab.presign_raw_put("raws/g.ORF"), BODY) == 200
+
+    assert lab.get("raws/g.ORF") == BODY
+    assert lab.get("raws/not-there.ORF") is None
+
+
 def test_urls_are_signed_for_the_public_endpoint(garage):
     """Phones and browsers reach Garage at its public address; the API's own
     checks use the internal one. A signature covers the host, so presigning

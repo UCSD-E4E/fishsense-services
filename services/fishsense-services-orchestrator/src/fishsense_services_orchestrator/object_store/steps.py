@@ -33,6 +33,7 @@ from fishsense_services_orchestrator.object_store.contracts import (
 __all__ = [
     "CLEANUP_RAW_RETRY_POLICY",
     "STAGE_RAW_RETRY_POLICY",
+    "STAGE_RAW_TIMEOUT",
     "cleanup_raw",
     "stage_raw",
 ]
@@ -54,18 +55,27 @@ STAGE_RAW_RETRY_POLICY = RetryPolicy(
 )
 
 
+#: Staging's whole budget. v1's hour did not cover a large mission from the
+#: NAS: mission 440's 1,201 raws timed out at it (2026-10-21), with three
+#: missions staging at once. The activity heartbeats per file (5 minutes), so
+#: a stalled staging is still caught in minutes; this ceiling only has to
+#: cover a large mission's honest pace. A parent's run timeout sums it.
+STAGE_RAW_TIMEOUT = timedelta(hours=6)
+
+
 #: v1 gave cleanup no retry policy: retry within its window. A revoked
 #: membership (`NotAMember`) is the exception -- no retry can fix it.
 CLEANUP_RAW_RETRY_POLICY = RetryPolicy(non_retryable_error_types=["NotAMember"])
 
 
 async def stage_raw(target: StagingTarget) -> StageRawBytesResult:
-    """Copy the dive's canonical raw frames from the NAS into Garage scratch.
+    """Copy the dive's canonical raw frames into Garage scratch: from the
+    tenant's bucket where the render stage copied them, else from the NAS.
     Cheap to repeat: frames already staged are HEAD-skipped."""
     return await workflow.execute_activity(
         "stage_raw_bytes_for_dive",
         target,
-        schedule_to_close_timeout=timedelta(hours=1),
+        schedule_to_close_timeout=STAGE_RAW_TIMEOUT,
         heartbeat_timeout=timedelta(minutes=5),
         retry_policy=STAGE_RAW_RETRY_POLICY,
         result_type=StageRawBytesResult,

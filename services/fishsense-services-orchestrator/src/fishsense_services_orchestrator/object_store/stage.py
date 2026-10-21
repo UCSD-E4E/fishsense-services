@@ -15,17 +15,23 @@ from fishsense_services_orchestrator.object_store.store import (
     OrchestratorObjectStore,
 )
 from fishsense_services_orchestrator.registry import Deps, Stage
+from fishsense_services_orchestrator.renders.settings import RenderSettings
+from fishsense_services_orchestrator.renders.stage import tenant_stores
 
 
 def _activities(deps: Deps):
     # Read here, at the worker's start: a missing setting fails the start.
-    store = OrchestratorObjectStore.from_settings(ObjectStoreConnection())
+    connection = ObjectStoreConnection()
+    store = OrchestratorObjectStore.from_settings(connection)
     catalog = RawStagingCatalog(deps.engine, sub=deps.sub)
     staging = RawStagingActivities(
         catalog=catalog,
         store=store,
         nas_settings=NasSettings(),
         staging_settings=RawStagingSettings(),
+        # The tenant buckets, where the render stage copies raws: staging
+        # reads them before the NAS (2026-10-21).
+        stores=tenant_stores(RenderSettings(), connection),
     )
     cleanup = RawCleanupActivities(catalog=catalog, store=store)
     jpegs = ProcessedJpegActivities(catalog=catalog, store=store)

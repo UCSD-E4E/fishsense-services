@@ -20,6 +20,16 @@ activities/stage_raw_bytes_for_dive_activity.py. Behaviour is v1's:
 * **one download at a time** by default: FileStation's shared download
   backend (DSM nginx -> synoscgi) 502s under concurrent large transfers.
 
+**From the tenant's bucket first** (2026-10-21). The render stage copies each
+raw into the tenant's bucket and records the copy (``capture_raws``, 0052,
+checked against the capture's checksum). Mission 440's staging hit its hour
+copying 1,201 raws from the NAS, every one already in the bucket. So a
+capture with a copy in the tenant's current bucket is staged from there, its
+bytes checked against the recorded size and MD5 first; a copy that is missing,
+in another bucket, holds other bytes or can't be read falls back to the NAS,
+logged. Bucket reads don't take the NAS's slots: they run `BUCKET_CONCURRENCY`
+at a time beside them.
+
 v2 changes: activities are methods of a class given its catalog, object store
 and NAS client factory; the target is (tenant, dive) and each frame is staged
 under the tenant's key; the concurrency is ``FISHSENSE_NAS_STAGE_CONCURRENCY``,
@@ -30,9 +40,11 @@ rather than (as in v1) silently falling back to one.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -40,6 +52,8 @@ from synology_filestation import FileStationError
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+from fishsense_services_api.raw_staging_store import RawCopy
+from fishsense_services_api.tenant_stores import NoTenantStore
 from fishsense_services_orchestrator.ingest.nas import NasClient
 from fishsense_services_orchestrator.ingest.nas_errors import (
     NAS_FILE_NOT_FOUND_TYPE,
@@ -62,11 +76,18 @@ from fishsense_services_orchestrator.object_store.store import (
     OrchestratorObjectStore,
 )
 
-__all__ = ["DEFAULT_STAGE_CONCURRENCY", "RawStagingActivities", "RawStagingSettings"]
+__all__ = [
+    "BUCKET_CONCURRENCY",
+    "DEFAULT_STAGE_CONCURRENCY",
+    "RawStagingActivities",
+    "RawStagingSettings",
+]
 
 # One serial stream by default; ramp up (1 -> 2 -> 3) through the setting while
 # watching the NAS, without a redeploy. v1 had 8, then 3, then 1.
 DEFAULT_STAGE_CONCURRENCY = 1
+#: Bucket copies read at once: Garage, not the NAS, so not its limit.
+BUCKET_CONCURRENCY = 8
 
 
 class RawStagingSettings(BaseSettings):
@@ -138,14 +159,48 @@ class RawStagingActivities:
         nas_settings: NasSettings,
         staging_settings: RawStagingSettings,
         nas_client_factory: Callable[[], NasClient] | None = None,
+        stores: Any = None,
     ) -> None:
         self._catalog = catalog
+        #: The tenant stores (`TenantStores`); None: everything from the NAS.
+        self._stores = stores
         self._store = store
         self._nas_settings = nas_settings
         self._concurrency = staging_settings.stage_concurrency
         self._nas_client_factory = nas_client_factory or (
             lambda: build_nas_client(nas_settings)
         )
+
+    async def _tenant_objects(self, tenant_id) -> Any:
+        """The tenant's bucket, or None (no stores, or none for the tenant)."""
+        if self._stores is None:
+            return None
+        slug = await self._catalog.tenant_slug(tenant_id)
+        try:
+            return self._stores.for_tenant(slug)
+        except NoTenantStore:
+            return None
+
+    @staticmethod
+    async def _read_copy(
+        objects: Any, capture: StagingCapture
+    ) -> tuple[bytes | None, str]:
+        """The capture's raw from its copy in `objects`' bucket, checked
+        against what was recorded, or None and why not."""
+        copy: RawCopy | None = next(
+            (c for c in capture.copies if c.bucket == objects.bucket), None
+        )
+        if copy is None:
+            return None, "no copy in the tenant's bucket"
+        try:
+            data = await asyncio.to_thread(objects.get, copy.key)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            return None, f"reading {copy.key} failed: {exc}"
+        if data is None:
+            return None, f"{copy.key} is not there"
+        if len(data) != copy.bytes or hashlib.md5(data).hexdigest() != copy.md5:
+            return None, f"{copy.key} is not the recorded copy"
+        return data, ""
 
     @activity.defn(name="stage_raw_bytes_for_dive")
     async def stage_raw_bytes_for_mission(
@@ -163,8 +218,31 @@ class RawStagingActivities:
         )
 
         nas = self._nas_client_factory()
+        objects = await self._tenant_objects(target.tenant_id)
         sem = asyncio.Semaphore(self._concurrency)
-        staged = skipped = no_path = 0
+        bucket_sem = asyncio.Semaphore(BUCKET_CONCURRENCY)
+        staged = skipped = no_path = from_bucket = 0
+
+        async def _from_bucket(capture: StagingCapture) -> bool:
+            """Staged from the tenant's bucket (or already staged)."""
+            nonlocal staged, skipped, from_bucket
+            async with bucket_sem:
+                if await self._store.has_raw(target.tenant_id, capture.checksum):
+                    skipped += 1
+                    activity.heartbeat()
+                    return True
+                data, why = await self._read_copy(objects, capture)
+                if data is None:
+                    activity.logger.warning(
+                        "capture=%s: %s; staging it from the NAS",
+                        capture.capture_id, why,
+                    )  # fmt: skip
+                    return False
+                await self._store.upload_raw(target.tenant_id, capture.checksum, data)
+                staged += 1
+                from_bucket += 1
+                activity.heartbeat()
+                return True
 
         async def _stage_one(capture: StagingCapture) -> None:
             nonlocal staged, skipped, no_path
@@ -172,6 +250,10 @@ class RawStagingActivities:
                 no_path += 1
                 activity.heartbeat()
                 return
+
+            if objects is not None and capture.copies:
+                if await _from_bucket(capture):
+                    return
 
             async with sem:
                 if await self._store.has_raw(target.tenant_id, capture.checksum):
@@ -207,13 +289,18 @@ class RawStagingActivities:
             raise
 
         activity.logger.info(
-            "staged tenant=%s dive=%s staged=%d skipped=%d no_path=%d",
+            "staged tenant=%s dive=%s staged=%d (from the bucket %d) skipped=%d "
+            "no_path=%d",
             target.tenant_id,
             target.mission_id,
             staged,
+            from_bucket,
             skipped,
             no_path,
         )
         return StageRawBytesResult(
-            staged=staged, skipped_already_present=skipped, no_path=no_path
+            staged=staged,
+            skipped_already_present=skipped,
+            no_path=no_path,
+            from_bucket=from_bucket,
         )

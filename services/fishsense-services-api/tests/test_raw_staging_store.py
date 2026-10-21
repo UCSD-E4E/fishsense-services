@@ -38,6 +38,7 @@ from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.ingest_store import create_mission, register_capture
 from fishsense_services_api.raw_staging_store import (
     CaptureChecksum,
+    RawCopy,
     RawStagingCatalog,
     StagingCapture,
     capture_checksum,
@@ -164,6 +165,60 @@ async def test_staging_sees_only_the_tenants_own_mission(owner_engine, app_engin
 
     assert await _stage(app_engine, reef, mission) == []
     assert await _clean(app_engine, reef, mission) == []
+
+
+async def _copied(owner_engine, tenant, capture, bucket, key, *, size=10, md5=None):
+    async with owner_engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO capture_raws (tenant_id, capture_id, bucket, key, bytes, "
+                "md5) VALUES (:t, :c, :b, :k, :n, :m)"
+            ),
+            {"t": tenant, "c": capture, "b": bucket, "k": key, "n": size,
+             "m": md5 or _md5(9)},
+        )  # fmt: skip
+
+
+async def test_a_capture_with_a_bucket_copy_says_where_it_is(owner_engine, app_engine):
+    """Staging copies from the tenant's bucket rather than the NAS where the
+    render stage already copied the raw (2026-10-21: NAS staging timed mission
+    440 out after an hour, with every raw already in the bucket)."""
+    lab = await _tenant(owner_engine)
+    mission = await _dive(app_engine, lab, "d")
+    copied = await _capture(app_engine, lab, mission, "P1.ORF", _md5(1))
+    bare = await _capture(app_engine, lab, mission, "P2.ORF", _md5(2))
+    await _copied(owner_engine, lab, copied, "fishsense-tenant-lab", "raws/1.ORF",
+                  size=42, md5=_md5(7))  # fmt: skip
+
+    staged = {c.capture_id: c for c in await _stage(app_engine, lab, mission)}
+
+    assert staged[copied].copies == (
+        RawCopy(bucket="fishsense-tenant-lab", key="raws/1.ORF", bytes=42,
+                md5=_md5(7)),
+    )  # fmt: skip
+    assert staged[bare].copies == ()
+
+
+async def test_a_capture_copied_to_two_buckets_names_each(owner_engine, app_engine):
+    """A copy per bucket (0052's unique key): staging reads the one in the
+    tenant's current bucket, so it is given them all."""
+    lab = await _tenant(owner_engine)
+    mission = await _dive(app_engine, lab, "d")
+    capture = await _capture(app_engine, lab, mission, "P1.ORF", _md5(1))
+    await _copied(owner_engine, lab, capture, "old-bucket", "raws/old.ORF")
+    await _copied(owner_engine, lab, capture, "new-bucket", "raws/new.ORF")
+
+    (staged,) = await _stage(app_engine, lab, mission)
+
+    assert sorted(c.bucket for c in staged.copies) == ["new-bucket", "old-bucket"]
+
+
+async def test_the_catalog_names_the_tenants_slug(app_engine, seed_memberships):
+    """The slug names the tenant's bucket in the tenant stores."""
+    lab = (await seed_memberships({ORCHESTRATOR: {"lab": "member"}}))["lab"]
+    catalog = RawStagingCatalog(app_engine, sub=ORCHESTRATOR)
+
+    assert await catalog.tenant_slug(lab) == "lab"
 
 
 # -- cleanup ---------------------------------------------------------------------

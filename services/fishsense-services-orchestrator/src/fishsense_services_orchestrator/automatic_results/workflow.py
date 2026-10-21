@@ -110,6 +110,7 @@ with workflow.unsafe.imports_passed_through():
         raw_scratch_reader_id,
     )
     from fishsense_services_orchestrator.object_store.steps import (
+        STAGE_RAW_TIMEOUT,
         cleanup_raw,
         stage_raw,
     )
@@ -182,7 +183,7 @@ CPU_CHILD_TIMEOUT = timedelta(hours=1)
 #: Above the processor's fit budget (FIT_TIMEOUT, 2 h), so a slow fit is not
 #: cut off by its parent.
 CALIBRATION_CHILD_TIMEOUT = timedelta(hours=2, minutes=15)
-STAGE_TIMEOUT = timedelta(hours=1)
+STAGE_TIMEOUT = STAGE_RAW_TIMEOUT
 #: How long after its start a run may begin another dive (the hourly schedule
 #: skips a firing while a run is going).
 AUTOMATIC_DRAIN_WINDOW = timedelta(minutes=50)
