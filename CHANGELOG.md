@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.21.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.20.0...v0.21.0) (2026-10-21)
+
+
+### Features
+
+* **web:** the Deep water theme and the app shell ([bce333d](https://github.com/UCSD-E4E/fishsense-services/commit/bce333d6e9b45df59de02598f9a01081edb26c3d))
+* **web:** the Deep water theme and the app shell ([7afdc1f](https://github.com/UCSD-E4E/fishsense-services/commit/7afdc1f46f1ff92812e152fb2d18dcdc9be47a35))
+
+
+### Bug Fixes
+
+* **web:** address the review of the app shell ([a6627bc](https://github.com/UCSD-E4E/fishsense-services/commit/a6627bccb8118952d113ab7b3680403922a1df0c))
+
+
+### Documentation
+
+* **design:** make the tokens keep the README's promises ([5a869cd](https://github.com/UCSD-E4E/fishsense-services/commit/5a869cdbe7f564ad142d08c8c0952ca6345e57a7))
+* **design:** the Deep water design language for web and mobile ([b03bf54](https://github.com/UCSD-E4E/fishsense-services/commit/b03bf548920c0c10a271653b9076bd438dc1aaeb))
+* **design:** the Deep water design language for web and mobile ([e2203c1](https://github.com/UCSD-E4E/fishsense-services/commit/e2203c19353401264a41c3deb38cf2387f692a46))
+
 ## [0.20.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.19.0...v0.20.0) (2026-10-20)
 
 
