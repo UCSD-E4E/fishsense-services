@@ -2,7 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isSlug } from "@/lib/ids";
 import {
+  cameraLabel,
   getDeployments,
+  isPhoneMission,
   getMission,
   purposeLabel,
   type Deployment,
@@ -34,32 +36,35 @@ export default async function MissionPage({ params }: Props) {
   if (!mission) notFound();
   const deployments: Deployment[] = isAdmin ? await getDeployments(token, tenant) : [];
   const place = [mission.site, mission.region, mission.country].filter(Boolean).join(", ");
+  const phone = isPhoneMission(mission);
+  const portFact: [string, React.ReactNode] = [
+    "Camera port",
+    <span key="port" className="space-y-1">
+      <PortBadge port={mission.port} source={mission.port_source} />
+      {mission.port_note && (
+        <span className="block text-xs text-fg-2">{mission.port_note}</span>
+      )}
+      {mission.port === "unknown" && (
+        <span className="block text-xs text-warn">
+          Nothing says which port this camera was behind. A missing D does not mean flat.
+        </span>
+      )}
+      {!mission.processable && (
+        <span className="block text-xs text-warn">
+          The pipeline won&apos;t process this mission: it needs the corrective optic and a
+          pinhole camera calibration, and a borrowed calibration from a mission that has
+          them too.
+        </span>
+      )}
+    </span>,
+  ];
 
   const facts: [string, React.ReactNode][] = [
     ["Started", new Date(mission.started_at).toLocaleString()],
-    ["Device", mission.device_name ?? "—"],
+    ["Device", cameraLabel(mission)],
     ["Purpose", purposeLabel(mission.purpose)],
-    [
-      "Camera port",
-      <span key="port" className="space-y-1">
-        <PortBadge port={mission.port} source={mission.port_source} />
-        {mission.port_note && (
-          <span className="block text-xs text-fg-2">{mission.port_note}</span>
-        )}
-        {mission.port === "unknown" && (
-          <span className="block text-xs text-warn">
-            Nothing says which port this camera was behind. A missing D does not mean flat.
-          </span>
-        )}
-        {!mission.processable && (
-          <span className="block text-xs text-warn">
-            The pipeline won&apos;t process this mission: it needs the corrective optic and a
-            pinhole camera calibration, and a borrowed calibration from a mission that has
-            them too.
-          </span>
-        )}
-      </span>,
-    ],
+    // A phone has no camera port and no folder (0057).
+    ...(phone ? [] : [portFact]),
     [
       "Deployment",
       mission.deployment_number != null ? (
@@ -75,9 +80,13 @@ export default async function MissionPage({ params }: Props) {
       ),
     ],
     ["Place", place || "—"],
-    ["Frames", mission.captures.toLocaleString()],
-    ["Priority", mission.priority],
-    ["Folder", <code key="folder" className="break-all text-xs">{mission.source_path}</code>],
+    [phone ? "Captures" : "Frames", mission.captures.toLocaleString()],
+    ...(phone
+      ? []
+      : ([
+          ["Priority", mission.priority],
+          ["Folder", <code key="folder" className="break-all text-xs">{mission.source_path}</code>],
+        ] as [string, React.ReactNode][])),
   ];
 
   return (

@@ -46,7 +46,8 @@ DeploymentNumber = Annotated[int, Path(ge=1)]
 
 
 class MissionDetail(Mission):
-    source_path: str
+    #: The Lite folder; a phone mission has none (0057).
+    source_path: str | None
     notes: str | None
     port_note: str | None
     country: str | None

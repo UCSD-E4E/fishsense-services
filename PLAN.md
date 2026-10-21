@@ -1274,11 +1274,17 @@ overridable)*
   identity** (a privacy question for partner tenants). None exist in v1. Mobile already
   produces masks, and they are synced since 2026-10-11 (§9.6).
 
-**9.23 — How phone captures form missions** (§4.9) — *open*
-- *Options:* inferred server-side from device + a time gap (+ distance), or opened
-  explicitly in the app using the e4edm `metadata.json` fields (then the app ships an
-  update).
-- *Blocks:* mobile captures entering mission-scoped stages and views.
+**9.23 — How phone captures form missions** (§4.9) — *decided 2026-10-21*
+- Inferred on the server as each capture syncs (0057, `phone_missions.py`). A capture
+  joins the same phone's mission whose capture is nearest in time, if at most 2 hours
+  and 1 km off; otherwise it starts one. The owner set both thresholds. A late sync
+  that falls between two missions joins the nearer and merges nothing.
+- A phone mission has `source = 'mobile'` and no folder. It is named for the phone's
+  local day (the app's `time_zone`, else UTC) and place. The folder-reading code (the
+  port and purpose backfill, deployment inference, automatic results, the public map)
+  skips it, and it has no camera port.
+- Opening missions explicitly in the app (e4edm `metadata.json`) is left for the
+  enterprise mode.
 
 **9.24 — Re-measure mobile captures on the server?** (§4.4, §4.9) — *open*
 - The raw files are kept for this. A `source='server'` LiDAR measurement next to the

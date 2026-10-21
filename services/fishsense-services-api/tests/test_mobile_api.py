@@ -480,6 +480,7 @@ async def test_a_version_for_an_unknown_capture_is_404(tenants, client):
         pytest.param(
             {"measurements": [_version(length=0.0)]}, id="a-length-that-is-not-positive"
         ),
+        pytest.param({"time_zone": "Mars/Olympus_Mons"}, id="an-unknown-time-zone"),
     ],
 )
 async def test_a_capture_that_does_not_add_up_is_refused(tenants, client, change):
@@ -495,6 +496,23 @@ async def test_a_capture_that_does_not_add_up_is_refused(tenants, client, change
     )
 
     assert response.status_code == 422
+
+
+async def test_the_phones_time_zone_names_its_missions_day(tenants, client):
+    """The app sends the IANA zone it was in (0057): 03:30 UTC on the 12th
+    was the evening of the 11th in San Diego, so that is its mission's day."""
+    capture = uuid.uuid4()
+
+    committed = await _sync(
+        client,
+        capture,
+        captured_at="2026-10-12T03:30:00Z",
+        time_zone="America/Los_Angeles",
+    )
+
+    assert committed.status_code == 201, committed.text
+    listed = (await client.get("/tenants/lab/missions", headers=_bearer(ALICE))).json()
+    assert [m["name"] for m in listed] == ["2026.10.11.FishSense.La Jolla Cove"]
 
 
 async def test_an_oversized_file_is_refused_before_any_upload(tenants, client):

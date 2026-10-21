@@ -98,7 +98,8 @@ class TestList:
         assert phone["photo_url"].startswith(
             "http://garage.test:3900/fishsense-tenant-lab/mobile/captures/"
         )
-        assert phone["mission"] is None
+        # Its phone mission (0057), named for the day and the place.
+        assert phone["mission"]["name"] == "2025.03.07.FishSense.Scripps Pier"
 
         assert (decoy["capture_id"], decoy["fish_id"]) == (
             str(lite_capture),

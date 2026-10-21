@@ -37,6 +37,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import (
     BackgroundTasks,
@@ -47,7 +48,7 @@ from fastapi import (
     Response,
     status,
 )
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from fishsense_services_api.auth import Principal
@@ -221,6 +222,9 @@ class CaptureCommit(_Finite):
     model_config = ConfigDict(extra="allow", allow_inf_nan=False)
 
     captured_at: datetime
+    #: The IANA zone the phone was in ("America/Los_Angeles"): its mission is
+    #: named for the local day (0057). Without it, the day is UTC's.
+    time_zone: str | None = None
     #: Who was signed in on the phone when it took the capture.
     captured_by_sub: str
     device: DeviceInfo
@@ -239,6 +243,16 @@ class CaptureCommit(_Finite):
     mask: MaskGeometry | None = None
     files: list[DeclaredFile]
     measurements: list[MeasurementVersion] = []
+
+    @field_validator("time_zone")
+    @classmethod
+    def _a_known_zone(cls, value: str | None) -> str | None:
+        if value is not None:
+            try:
+                ZoneInfo(value)
+            except (ZoneInfoNotFoundError, ValueError):
+                raise ValueError(f"not an IANA time zone: {value!r}") from None
+        return value
 
     @model_validator(mode="after")
     def _adds_up(self) -> "CaptureCommit":

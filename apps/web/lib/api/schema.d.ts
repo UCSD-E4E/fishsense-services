@@ -603,6 +603,8 @@ export interface components {
             model_version?: string | null;
             /** Orientation */
             orientation?: ("portrait" | "landscape") | null;
+            /** Time Zone */
+            time_zone?: string | null;
         } & {
             [key: string]: unknown;
         };
@@ -966,6 +968,11 @@ export interface components {
             /** Slate Template Number */
             slate_template_number: number | null;
             /**
+             * Source
+             * @enum {string}
+             */
+            source: "lite" | "mobile";
+            /**
              * Started At
              * Format: date-time
              */
@@ -1017,8 +1024,13 @@ export interface components {
             site: string | null;
             /** Slate Template Number */
             slate_template_number: number | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "lite" | "mobile";
             /** Source Path */
-            source_path: string;
+            source_path: string | null;
             /**
              * Started At
              * Format: date-time

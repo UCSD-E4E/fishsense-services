@@ -118,6 +118,8 @@ class MissionSummary:
 
     number: int
     name: str | None
+    #: ``lite``, a folder off a camera, or ``mobile``, a phone's outing (0057).
+    source: str
     started_at: datetime
     priority: str
     slate_template_number: int | None
@@ -211,7 +213,7 @@ async def label_studio_project_ids(
 
 
 _MISSION_COLUMNS = f"""
-    d.number, d.name, d.started_at, d.priority,
+    d.number, d.name, d.source, d.started_at, d.priority,
     t.number AS slate_template_number,
     g.number AS calibration_target_number,
     s.number AS calibration_source_number,
@@ -280,7 +282,8 @@ class MissionDetail:
     """A mission's page: its summary and the rest of the row (0047)."""
 
     summary: MissionSummary
-    source_path: str
+    #: A phone mission has no folder (0057).
+    source_path: str | None
     notes: str | None
     port_note: str | None
     country: str | None

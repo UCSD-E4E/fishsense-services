@@ -8,12 +8,13 @@ portal together (2026-10-20). The full system is
 the canvas with every screen drawn.
 
 **What depends on the server.** Sections 2 to 5 are app-only and can start now.
-Section 1's Data tab needs server work that is **not built yet**. The server will
-group a phone's captures into missions and deployments by location and time, and
-an API will return that grouping. The thresholds aren't decided (proposed: 2 h and
-1 km for a mission). We'll hand over that endpoint's contract when it exists. Until
-then, build the Data tab grouped by day on the phone. It should switch to the
-server's grouping without changing the tab's layout.
+Section 1's Data tab needs the server's missions. Since 2026-10-21 the server
+groups each phone's captures into missions as they sync: a new mission after a gap
+of more than 2 hours, or more than 1 km from the capture before. Missions are named
+for the phone's local day, so send `time_zone` with each commit (SYNC.md). The
+endpoint for the app to read its missions isn't handed over yet. Until it is, build
+the Data tab grouped by day on the phone. It should switch to the server's grouping
+without changing the tab's layout.
 
 The app is already close: the black ground, teal `#00AAA5`, 12 px corners and a
 bottom tab bar all stay. These are the changes.

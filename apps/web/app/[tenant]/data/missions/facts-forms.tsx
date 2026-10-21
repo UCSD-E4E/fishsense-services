@@ -6,6 +6,7 @@
 
 import { useState, useTransition } from "react";
 import {
+  isPhoneMission,
   PORTS,
   PURPOSES,
   portLabel,
@@ -67,41 +68,44 @@ export function FactsForms({
     <section className="space-y-6 rounded-card border border-line bg-surface p-5">
       <h2 className="text-lg font-semibold">Edit (admin)</h2>
 
-      <div className="space-y-2">
-        <label className="block text-sm font-medium" htmlFor="port">
-          Camera port
-        </label>
-        {ruled ? (
-          <p className="text-sm text-fg-2">
-            {portLabel(mission.port, mission.port_source)} is the owner&apos;s rule for this
-            mission and can&apos;t be changed here.
-          </p>
-        ) : (
-          <div className="flex flex-wrap items-center gap-2">
-            <select id="port" className={field} value={port} onChange={(e) => setPort(e.target.value)}>
-              {PORTS.map((p) => (
-                <option key={p} value={p}>
-                  {portLabel(p, null)}
-                </option>
-              ))}
-            </select>
-            <input
-              className={`${field} min-w-64 flex-1`}
-              placeholder="How you know (kept with the port)"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-            />
-            <button
-              className={button}
-              disabled={portSave.pending}
-              onClick={() => portSave.save(() => setPortAction(slug, mission.number, port, note))}
-            >
-              Save port
-            </button>
-          </div>
-        )}
-        <Status error={portSave.error} saved={portSave.saved} />
-      </div>
+      {/* A phone has no camera port (0057). */}
+      {!isPhoneMission(mission) && (
+        <div className="space-y-2">
+          <label className="block text-sm font-medium" htmlFor="port">
+            Camera port
+          </label>
+          {ruled ? (
+            <p className="text-sm text-fg-2">
+              {portLabel(mission.port, mission.port_source)} is the owner&apos;s rule for this
+              mission and can&apos;t be changed here.
+            </p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <select id="port" className={field} value={port} onChange={(e) => setPort(e.target.value)}>
+                {PORTS.map((p) => (
+                  <option key={p} value={p}>
+                    {portLabel(p, null)}
+                  </option>
+                ))}
+              </select>
+              <input
+                className={`${field} min-w-64 flex-1`}
+                placeholder="How you know (kept with the port)"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+              />
+              <button
+                className={button}
+                disabled={portSave.pending}
+                onClick={() => portSave.save(() => setPortAction(slug, mission.number, port, note))}
+              >
+                Save port
+              </button>
+            </div>
+          )}
+          <Status error={portSave.error} saved={portSave.saved} />
+        </div>
+      )}
 
       <div className="space-y-2">
         <label className="block text-sm font-medium" htmlFor="purpose">

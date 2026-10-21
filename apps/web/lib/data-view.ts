@@ -3,7 +3,7 @@
  * "Web · Data" board): a deployment's missions by day, what it holds, and how
  * it was made -- an inferred trip must never pass for a planned one.
  */
-import type { MissionRow } from "./mission-facts";
+import { isPhoneMission, type MissionRow } from "./mission-facts";
 
 export type Day = { date: string; label: string; missions: MissionRow[] };
 
@@ -35,7 +35,9 @@ export function deploymentFacts(missions: MissionRow[]): {
   frames: number;
   cameras: string[];
 } {
-  const cameras = new Set(missions.map((m) => m.device_name).filter((n): n is string => !!n));
+  const cameras = new Set(
+    missions.map((m) => (isPhoneMission(m) ? "Phone" : m.device_name)).filter((n): n is string => !!n),
+  );
   return {
     missions: missions.length,
     frames: missions.reduce((sum, m) => sum + m.captures, 0),

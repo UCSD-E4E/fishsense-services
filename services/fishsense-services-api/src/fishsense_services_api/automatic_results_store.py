@@ -514,6 +514,7 @@ async def automatic_run_plan(
                           AND (NOT {_SESSION} OR {_DETECTOR_SLATE})) AS frames_owed
                 FROM missions d
                 WHERE d.tenant_id = :t AND d.number = ANY(:numbers)
+                  AND d.source = 'lite'
                 """),
             {"t": tenant_id, "numbers": list(numbers), "hv": headtail_version},
         )

@@ -148,6 +148,17 @@
               }
             ],
             "title": "Orientation"
+          },
+          "time_zone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Zone"
           }
         },
         "required": [
@@ -1456,6 +1467,14 @@
             ],
             "title": "Slate Template Number"
           },
+          "source": {
+            "enum": [
+              "lite",
+              "mobile"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
           "started_at": {
             "format": "date-time",
             "title": "Started At",
@@ -1465,6 +1484,7 @@
         "required": [
           "number",
           "name",
+          "source",
           "started_at",
           "priority",
           "slate_template_number",
@@ -1683,9 +1703,24 @@
             ],
             "title": "Slate Template Number"
           },
-          "source_path": {
-            "title": "Source Path",
+          "source": {
+            "enum": [
+              "lite",
+              "mobile"
+            ],
+            "title": "Source",
             "type": "string"
+          },
+          "source_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Path"
           },
           "started_at": {
             "format": "date-time",
@@ -1696,6 +1731,7 @@
         "required": [
           "number",
           "name",
+          "source",
           "started_at",
           "priority",
           "slate_template_number",

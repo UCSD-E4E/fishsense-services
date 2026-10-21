@@ -129,6 +129,7 @@ Base URL: `https://api.fishsense.e4e.ucsd.edu`, with `Authorization: Bearer <acc
 ```json
 {
   "captured_at": "2026-10-11T17:30:00.123Z",
+  "time_zone": "America/Los_Angeles",
   "captured_by_sub": "<the ID token's sub at capture time>",
   "device": { "install_id": "<uuid>", "model": "iPhone16,1",
               "info": "Apple iPhone (iOS 17.5 - LiDAR Enabled)" },
@@ -152,6 +153,7 @@ Base URL: `https://api.fishsense.e4e.ucsd.edu`, with `Authorization: Bearer <acc
 Notes on the commit body:
 
 - `location`, `orientation`, `camera_pose`, `mask` and `measurements` are optional.
+- **`time_zone`** is the IANA zone the phone was in when it took the capture (`TimeZone.current.identifier`). It is optional, but please send it. The server groups each phone's captures into missions as they sync: a new mission starts after a gap of more than 2 hours, or more than 1 km from the capture before. Each mission is named for its local day, `2026.10.11.FishSense.La Jolla Cove`, and without `time_zone` that day is UTC's, so an evening in San Diego is named for the next day. A zone the server doesn't know is refused (422).
 - `app_version`, `core_version` and `model_version` may be null, for a capture from before the app recorded them (v7). Send null, never a made-up value.
 - `location.place_name` may be null. The app does what it can before the first commit, but in the field it often can't. The server then derives a name from `latitude` and `longitude` on our own geocoder, keeps it apart from what the app sent, and shows it on the web as derived (fishsense-mobile #72).
 - **Any other field you add is kept.** The server stores the whole body as the capture's manifest, so send anything the app records, even if this list doesn't name it.
