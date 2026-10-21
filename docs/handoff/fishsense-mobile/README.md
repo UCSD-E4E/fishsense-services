@@ -1,7 +1,7 @@
 # Handoff to fishsense-mobile
 
 **From:** fishsense-services. **For:** the FishSense Mobile (Flutter/iOS) developers.
-**Last updated:** 2026-10-21.
+**Last updated:** 2026-10-21 (the fish mask as a PNG, proposed).
 
 This is the running handoff from the server to the app. It lists what we need from
 the app, what changed on the server that affects the app, and what is coming. The
@@ -23,6 +23,7 @@ it working.
 
 | Ask | Since | Where | Status |
 |---|---|---|---|
+| **Send the fish mask as a PNG** (role `mask_png`): 8-bit greyscale, lossless, the same width × height as the mask geometry, nonzero = fish | 2026-10-21 | "Coming from the server" below | **Proposed; don't send it yet.** The server doesn't accept `mask_png` until the change below lands. Keep sending `mask_u8` until then. |
 | **Send `time_zone` with each commit**, the IANA zone the phone was in (`TimeZone.current.identifier`) | 2026-10-21 | [SYNC.md §5](SYNC.md#5-api-reference) | **Open.** Optional, but without it a mission's day is taken in UTC, so an evening in San Diego is named for the next day. A zone the server doesn't know is refused (422). |
 | **Show lengths in whole millimetres** (`424 mm`) | 2026-10-21 | [DESIGN.md §4](DESIGN.md#4-type-and-the-length) | **Open.** Display only: the sync payload stays in metres (`length_m`). |
 | **Adopt the shared design language**: tabs Camera · Fish · Data · Settings, colour tokens, the blue/orange overlay, type | 2026-10-20 | [DESIGN.md](DESIGN.md) | **Open.** Build the Data tab grouped by day for now (see "Coming from the server"). |
@@ -67,6 +68,22 @@ Newest first. Versions are fishsense-services releases.
 - **2026-10-11: the sync contract** ([SYNC.md](SYNC.md)) and per-tenant storage.
 
 ## Coming from the server
+
+- **Accepting the fish mask as a PNG** (role `mask_png`). Today's `mask_u8` is raw bytes,
+  one per pixel: about 2.8 MB at 1920 × 1440, the largest file in a capture, bigger than
+  the JPEG (~0.8 MB) and the depth map (~0.2 MB). A mask is almost all 0 and 255, so a
+  lossless PNG is a small fraction of that, and a browser can show it as it is, which
+  the web's fish page needs to draw the mask over the photo.
+  - The server can't compress the mask after upload: it keeps every file byte-for-byte
+    under the SHA-256 the app computed. So the PNG is made on the phone.
+  - **The contract:** an 8-bit greyscale PNG, exactly `mask.width` × `mask.height`
+    pixels, nonzero on the fish, declared and committed like any other file. Its
+    SHA-256 and size are those of the PNG bytes. The server will check its dimensions
+    against the mask geometry, as it checks `mask_u8`'s size today.
+  - `mask_u8` stays accepted, so app 1.1.0 keeps syncing. Send one or the other for a
+    capture, not both.
+  - We'll mark this done here, with the release, when the server accepts it. Until
+    then a `mask_png` upload is refused as an unknown role.
 
 - **An endpoint for the app to read its missions,** for the Data tab. The grouping
   exists on the server (above), but the app can't read it yet. We'll add the contract
