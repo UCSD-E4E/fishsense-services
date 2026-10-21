@@ -54,6 +54,7 @@ def test_the_stage_builds_every_wake_and_the_sweeper(monkeypatch):
     }
     assert names == {
         "ensure_per_image_processor_running",
+        "count_per_image_pollers",
         "ensure_light_processor_running",
         "ensure_gpu_processor_running",
         "tear_down_idle_processors",

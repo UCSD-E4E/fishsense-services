@@ -20,6 +20,7 @@ from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
+from temporalio.exceptions import ActivityError
 
 __all__ = [
     "GPU_WAKE_TIMEOUT",
@@ -58,12 +59,30 @@ async def wake_per_image_processor() -> None:
     Idempotent -- converges on the configured replica count, never
     accumulates. Returns immediately, so the pod's cold start overlaps the
     parent's staging steps.
+
+    #158 (2026-10-20): a wake that fails while some per-image worker polls
+    the queue -- the lab render workers -- is logged, not fatal: the work
+    gets served. With no worker anywhere, the failure stands, since a child
+    dispatched now would hang until its timeout.
     """
-    await workflow.execute_activity(
-        "ensure_per_image_processor_running",
-        schedule_to_close_timeout=WAKE_TIMEOUT,
-        retry_policy=SCALING_RETRY_POLICY,
-    )
+    try:
+        await workflow.execute_activity(
+            "ensure_per_image_processor_running",
+            schedule_to_close_timeout=WAKE_TIMEOUT,
+            retry_policy=SCALING_RETRY_POLICY,
+        )
+    except ActivityError:
+        live = await workflow.execute_activity(
+            "count_per_image_pollers",
+            schedule_to_close_timeout=timedelta(minutes=1),
+            retry_policy=SCALING_RETRY_POLICY,
+            result_type=int,
+        )
+        if not live:
+            raise
+        workflow.logger.warning(
+            "per-image wake failed; %d worker(s) polling, proceeding", live
+        )
 
 
 async def wake_light_processor() -> None:
