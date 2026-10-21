@@ -681,7 +681,7 @@ async def persist_headtail_predictions(
             {"tenant": tenant_id, **r.__dict__},
         )).scalar_one())  # fmt: skip
     if masks:
-        # Each stored mask, named against its row's prediction (0058).
+        # Each stored mask, named against its row's prediction (0059).
         await insert_prediction_masks(conn, tenant_id, "headtail", rows, ids, masks)
     return len(rows)
 

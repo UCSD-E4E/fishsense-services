@@ -1,4 +1,4 @@
-"""SAM masks named against their predictions (0058, 2026-10-21).
+"""SAM masks named against their predictions (0059, 2026-10-21).
 
 A kept mask is stored in the tenant's bucket the way FishSense Mobile stores
 its mask (an 8-bit greyscale PNG, the app's ``mask_png``; `contracts.masks`,

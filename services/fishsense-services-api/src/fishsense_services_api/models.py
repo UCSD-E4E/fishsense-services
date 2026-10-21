@@ -1459,7 +1459,7 @@ class CaptureRaw(Base):
 
 class PredictionMask(Base):
     """A SAM mask a prediction kept, stored in the tenant's bucket the way
-    FishSense Mobile stores its mask_u8, gzip'd (0058); append-only."""
+    FishSense Mobile stores its mask, as the app's mask_png (0059); append-only."""
 
     __tablename__ = "prediction_masks"
     __table_args__ = (

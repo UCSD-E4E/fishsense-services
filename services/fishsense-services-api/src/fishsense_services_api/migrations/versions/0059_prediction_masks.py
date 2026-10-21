@@ -14,8 +14,8 @@ One row per stored mask, naming exactly one prediction -- automatic
 SHA-256, size, content type, and the frame it is in (``width x height`` once
 gunzipped). Append-only, tenant RLS; the research role reads the lab's rows.
 
-Revision ID: 0058
-Revises: 0057
+Revision ID: 0059
+Revises: 0058
 """
 
 from alembic import context, op
@@ -26,8 +26,8 @@ from fishsense_services_api.schema_audit import (
     RESEARCH_ROLE,
 )
 
-revision = "0058"
-down_revision = "0057"
+revision = "0059"
+down_revision = "0058"
 
 TABLE = "prediction_masks"
 ACTIVE_TENANT = "NULLIF(current_setting('app.tenant_id', true), '')::uuid"

@@ -1596,7 +1596,7 @@ async def test_a_human_path_prediction_and_its_mask_are_written_together(
     owner_engine, app_engine
 ):
     """The head/tail predictor's SAM mask, stored like the app's mask_u8,
-    named against its prediction (0058, 2026-10-21)."""
+    named against its prediction (0059, 2026-10-21)."""
     from fishsense_services_api.prediction_masks_store import PredictionMask
 
     lab = await _tenant(owner_engine)

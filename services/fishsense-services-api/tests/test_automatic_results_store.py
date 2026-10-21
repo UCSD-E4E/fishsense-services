@@ -1447,7 +1447,7 @@ async def test_failures_at_an_older_version_do_not_count(owner_engine, app_engin
     assert await _owed(app_engine, lab, mission_id) == {c}
 
 
-# -- stored masks (0058, 2026-10-21) ----------------------------------------------
+# -- stored masks (0059, 2026-10-21) ----------------------------------------------
 
 
 def _mask(capture_id, key="masks/automatic/abc/1.png", **extra) -> PredictionMask:

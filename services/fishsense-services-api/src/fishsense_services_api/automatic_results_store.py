@@ -725,7 +725,7 @@ async def persist_automatic_head_tails(
 ) -> int:
     """Append the dive's automatic head/tails, abstentions included, all or
     nothing, in the caller's transaction, and name each stored mask -- `masks`
-    parallel to `rows`, or empty -- against its row's prediction (0058).
+    parallel to `rows`, or empty -- against its row's prediction (0059).
     Returns how many rows were written."""
     rows = list(rows)
     if not rows:

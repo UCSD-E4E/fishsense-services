@@ -1,4 +1,4 @@
-"""Checking a stored SAM mask before it is recorded (contract 12, 0058).
+"""Checking a stored SAM mask before it is recorded (contract 12, 0059).
 
 New in v2 (2026-10-21). The processor PUTs each kept mask -- the app's
 ``mask_png`` (#230): 8-bit greyscale PNG at the frame -- to a key the

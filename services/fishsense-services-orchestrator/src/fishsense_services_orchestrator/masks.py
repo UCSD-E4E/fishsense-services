@@ -1,5 +1,5 @@
 """Stored SAM masks: presigning their PUTs, checking them before they are
-recorded, and deleting those that never are (contract 12, migration 0058).
+recorded, and deleting those that never are (contract 12, migration 0059).
 
 New in v2 (2026-10-21). Both stages that segment -- the automatic track and
 the human-path head/tail predictor -- PUT each kept mask to a key the

@@ -155,7 +155,7 @@ class TenantObjects:
     def presign_mask_put(
         self, key: str, *, expires_seconds: int = RENDER_EXPIRES_SECONDS
     ) -> PresignedUpload:
-        """A SAM mask's PUT (0058, 2026-10-21): the app's ``mask_png``, read
+        """A SAM mask's PUT (0059, 2026-10-21): the app's ``mask_png``, read
         back and checked after against the size and SHA-256 reported."""
         return self.presign_unsigned_put(
             key, "image/png", expires_seconds=expires_seconds

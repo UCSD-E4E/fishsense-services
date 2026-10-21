@@ -176,7 +176,7 @@ def test_a_stored_object_reads_back_whole_and_a_missing_one_is_none(stores):
 
 
 def test_a_mask_put_is_read_back_whole_and_an_unrecorded_one_deleted(stores):
-    """A SAM mask (0058, 2026-10-21): PUT unsigned, as a render, then read
+    """A SAM mask (0059, 2026-10-21): PUT unsigned, as a render, then read
     back by the orchestrator and checked against what the processor said; one
     that is never recorded is deleted rather than left behind (review of
     #232)."""
