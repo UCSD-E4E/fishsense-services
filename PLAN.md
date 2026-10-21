@@ -1346,6 +1346,17 @@ the UI as it lands (decided 2026-10-17)*
        the rule.
 3. Direct e4edm ingest (the never-ingested Canyonview / Scripps Pier / Sealab / NIWC
    datasets are the first users).
+   - ***2026-10-21, the owner's first pick instead: CCFRP's summer 2025 FishSense Mobile
+     data only***, into the new `ccfrp-ucsd` tenant. It isn't Lite data: the phones ran an
+     app from before sync, and each day folder holds that day's photos plus a copy of the
+     phone's whole database (photo, time, depth, confidence; no length, points, mask or
+     intrinsics). `ImportFsmExportWorkflow` (ops) is a dry run by default and applies
+     only the reviewed plan. A capture is a row whose photo is in its folder, taken in
+     the window by local date. Imports have no uploader and say where they came from
+     (`imported_from`, 0058). The intrinsics come from the OCEANS 2025 paper's notebook,
+     per device, with their source kept on every capture. The dry run on the real NAS
+     plans 546 captures (iPad 258, iPhone 288; 27 rows have no photo). Fishtechy's
+     files in the same folders stay where they are.
 4. **Lite photos** (the owner's direction, 2026-10-18).
    - ***Built 2026-10-20:*** a Lite fish's photo on `/fish` is its capture's newest render
      in the tenant's own bucket (0051, written by the render stage of #144; one rule,

@@ -275,6 +275,17 @@
             ],
             "title": "Fish Id"
           },
+          "imported_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imported From"
+          },
           "intrinsics": {
             "items": {
               "type": "number"

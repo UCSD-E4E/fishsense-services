@@ -12,7 +12,9 @@ from temporalio.client import ScheduleOverlapPolicy
 
 from fishsense_services_api.capture_path_store import CapturePathCatalog
 from fishsense_services_api.checksum_store import ChecksumCatalog
+from fishsense_services_api.mobile_import_store import MobileImportCatalog
 from fishsense_services_api.regroup_store import RegroupCatalog
+from fishsense_services_contracts.object_store import ObjectStoreConnection
 from fishsense_services_orchestrator.ingest.nas_frames import NasSettings
 from fishsense_services_orchestrator.labels.label_studio import (
     LabelStudioClient,
@@ -40,9 +42,17 @@ from fishsense_services_orchestrator.ops.paths.activities import (
 from fishsense_services_orchestrator.ops.paths.workflow import (
     RepairMovedCapturePathsWorkflow,
 )
+from fishsense_services_orchestrator.ops.mobile_import.activities import (
+    FsmImportActivities,
+)
+from fishsense_services_orchestrator.ops.mobile_import.workflow import (
+    ImportFsmExportWorkflow,
+)
 from fishsense_services_orchestrator.ops.regroup.activities import RegroupActivities
 from fishsense_services_orchestrator.ops.regroup.workflow import RegroupMissionWorkflow
 from fishsense_services_orchestrator.registry import Deps, ScheduledWorkflow, Stage
+from fishsense_services_orchestrator.renders.settings import RenderSettings
+from fishsense_services_orchestrator.renders.stage import tenant_stores
 
 
 def _activities(deps: Deps):
@@ -54,6 +64,11 @@ def _activities(deps: Deps):
         catalog=CapturePathCatalog(deps.engine, sub=deps.sub), nas_settings=nas
     )
     regroup = RegroupActivities(catalog=RegroupCatalog(deps.engine, sub=deps.sub))
+    fsm_import = FsmImportActivities(
+        catalog=MobileImportCatalog(deps.engine, sub=deps.sub),
+        nas_settings=nas,
+        stores=tenant_stores(RenderSettings(), ObjectStoreConnection()),
+    )
     label_studio = LabelStudioSettings()
     reconcile = LabelingConfigActivities(
         label_studio_factory=lambda: LabelStudioClient.from_settings(label_studio),
@@ -68,6 +83,8 @@ def _activities(deps: Deps):
         reconcile.reconcile_labeling_configs,
         paths.repair_moved_capture_paths,
         regroup.regroup_mission,
+        fsm_import.plan_fsm_import,
+        fsm_import.import_fsm_captures,
     ]
 
 
@@ -79,6 +96,7 @@ STAGE = Stage(
         ReconcileLabelingConfigsWorkflow,
         RepairMovedCapturePathsWorkflow,
         RegroupMissionWorkflow,
+        ImportFsmExportWorkflow,
     ],
     build_activities=_activities,
     schedules=[

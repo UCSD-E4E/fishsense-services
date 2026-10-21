@@ -30,6 +30,16 @@ NOT_OWNERS = [
 
 DRIVERS = ("asyncpg", "psycopg", "psycopg2", "alembic")
 
+#: Files with SQL for a file that is not our database, and why. The SQL check
+#: skips them; the driver and SQLAlchemy checks still apply. Keep it to files
+#: that only read someone else's file.
+FOREIGN_SQL = {
+    ROOT
+    / "services/fishsense-services-orchestrator/src/fishsense_services_orchestrator"
+    "/ops/mobile_import/fsm_export.py": "reads a phone's own SQLite export (FishSense "
+    "Mobile before sync), copied off the NAS, read-only (2026-10-21)",
+}
+
 #: Opening the connection the API's catalogs run on is the one thing a
 #: non-owner may do with SQLAlchemy.
 ALLOWED_SQLALCHEMY = {("sqlalchemy.ext.asyncio", "create_async_engine")}
@@ -84,6 +94,7 @@ def violations(path: Path) -> list[str]:
             isinstance(node, ast.Constant)
             and isinstance(node.value, str)
             and id(node) not in docstrings
+            and path not in FOREIGN_SQL
         ):
             if SQL.search(node.value):
                 found.append(f"line {node.lineno}: SQL {node.value[:60]!r}")
@@ -108,6 +119,16 @@ def test_the_rule_sees_a_query(tmp_path):
         "from sqlalchemy.ext.asyncio import create_async_engine\n"
     )
     assert len(violations(breach)) == 3
+
+
+def test_the_foreign_sql_allowance_is_narrow():
+    """Each allowed file exists, opens its file read-only, and imports no
+    database driver or SQLAlchemy: it can't reach our database."""
+    for path in FOREIGN_SQL:
+        source = path.read_text()
+        assert "mode=ro" in source
+        assert violations(path) == []
+        assert "sqlalchemy" not in source and not any(d in source for d in DRIVERS)
 
 
 def test_every_non_owner_package_is_scanned():

@@ -300,6 +300,8 @@ class CaptureView(BaseModel):
     #: them: a fish's page is addressed by both (phase 7b).
     capture_id: uuid.UUID
     fish_id: uuid.UUID | None
+    #: Where an imported capture came from (0058); None for the app's sync.
+    imported_from: str | None = None
     captured_at: datetime
     device: DeviceInfo
     app_version: str | None
@@ -607,6 +609,7 @@ def _view(detail: CaptureDetail, objects: TenantObjects | None) -> CaptureView:
         client_capture_uuid=detail.client_capture_uuid,
         capture_id=detail.capture_id,
         fish_id=detail.fish_id,
+        imported_from=detail.imported_from,
         captured_at=detail.captured_at,
         device=DeviceInfo(
             install_id=detail.device_install_id,
