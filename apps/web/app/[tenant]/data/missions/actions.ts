@@ -6,14 +6,16 @@
 // an access token refreshed before it is spent (as the calibration portal's
 // actions do), and an admin of the tenant the URL names -- these pages span
 // a user's tenants, so the session's own role says nothing about this one.
+// The API says how the caller is in it: its admin, or a system admin who has
+// unlocked it (0056); read-only, a member or a stranger is refused.
 // Values are checked before any request. The API checks the role again and
 // refuses a port the owner's rules fix; its words come back to the page.
 
 import { revalidatePath } from "next/cache";
 import { auth, unstable_update } from "@/auth";
 import { accessTokenIsFresh } from "@/lib/authz";
-import { getMyTenants } from "@/lib/fishsense-api";
 import { safeSlug } from "@/lib/ids";
+import { getTenantAccess } from "@/lib/system-admin";
 import { paths } from "@/lib/tenant-paths";
 import {
   createDeployment,
@@ -49,8 +51,8 @@ async function requireTenantAdmin(slug: string): Promise<string> {
     }
   }
   const token = session.accessToken!;
-  const tenants = await getMyTenants(token);
-  if (!tenants.some((t) => t.slug === slug && t.isAdmin)) {
+  const access = await getTenantAccess(token, slug);
+  if (!access?.isAdmin) {
     throw new Refused("Not authorized");
   }
   return token;

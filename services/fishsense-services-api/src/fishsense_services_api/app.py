@@ -14,6 +14,7 @@ Each request goes through the same four steps before touching tenant data:
 
 import math
 import uuid
+from datetime import datetime
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
@@ -49,6 +50,27 @@ from fishsense_services_api.tenant_stores import TenantStores
 from fishsense_services_api.users import provision_user
 
 UNIQUE_VIOLATION = "23505"  # Postgres SQLSTATE
+
+
+class Me(BaseModel):
+    #: May open any tenant (0056): read-only, or after an unlock its admin.
+    is_system_admin: bool
+
+
+class AdminTenant(BaseModel):
+    slug: str
+    name: str
+
+
+class Unlocked(BaseModel):
+    #: When the unlock ends: the system admin is the tenant's admin until then.
+    until: datetime
+
+
+#: How long a system admin's unlock lasts, unless they ask for less.
+UNLOCK_MINUTES = 60
+#: Methods a read-only system admin may use.
+_READS = {"GET", "HEAD", "OPTIONS"}
 
 
 class MyTenant(BaseModel):
@@ -119,7 +141,7 @@ def create_app(
 
     Caller = Annotated[Principal, Depends(authenticate)]
 
-    async def membership(slug: str, principal: Caller) -> Membership:
+    async def membership(slug: str, principal: Caller, request: Request) -> Membership:
         # Provision and resolve in one transaction that *commits* before any
         # 404 is raised, so a newcomer's user row survives the refusal.
         async with principal_transaction(
@@ -129,6 +151,13 @@ def create_app(
             found = await resolve_membership(conn, principal.sub, slug)
         if found is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND)
+        # One place for every route: a system admin who has not unlocked this
+        # tenant reads it, and writes nothing (0056).
+        if found.read_only and request.method not in _READS:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "read-only: a system admin must unlock this tenant to change it",
+            )
         return found
 
     Member = Annotated[Membership, Depends(membership)]
@@ -137,6 +166,56 @@ def create_app(
     @app.get("/healthz", include_in_schema=False)
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/me", operation_id="get_me", response_model=Me)
+    async def me(principal: Caller) -> Me:
+        async with principal_transaction(
+            engine, principal.sub, org=principal.org
+        ) as conn:
+            await _first_sight(conn, principal)
+            admin = (
+                await conn.execute(text("SELECT caller_is_system_admin()"))
+            ).scalar_one()
+        return Me(is_system_admin=admin)
+
+    @app.get(
+        "/admin/tenants",
+        operation_id="list_all_tenants",
+        response_model=list[AdminTenant],
+    )
+    async def all_tenants(principal: Caller) -> list[AdminTenant]:
+        """Every tenant, for a system admin's switcher; 404 for anyone else."""
+        async with principal_transaction(
+            engine, principal.sub, org=principal.org
+        ) as conn:
+            if not (
+                await conn.execute(text("SELECT caller_is_system_admin()"))
+            ).scalar_one():
+                raise HTTPException(status.HTTP_404_NOT_FOUND)
+            rows = await conn.execute(text("SELECT * FROM system_admin_tenants()"))
+            return [AdminTenant(**row._mapping) for row in rows]
+
+    @app.post(
+        "/tenants/{slug}/system-admin/unlock",
+        operation_id="unlock_tenant",
+        response_model=Unlocked,
+    )
+    async def unlock(slug: str, principal: Caller) -> Unlocked:
+        """A system admin, deliberately, becomes the admin of a tenant they are
+        not in, for `UNLOCK_MINUTES`; recorded. 404 for anyone else, and for a
+        tenant they are already a member of."""
+        async with principal_transaction(
+            engine, principal.sub, org=principal.org
+        ) as conn:
+            until = (
+                await conn.execute(
+                    text("SELECT system_admin_unlock(:slug, :minutes)"),
+                    {"slug": slug, "minutes": UNLOCK_MINUTES},
+                )
+            ).scalar_one()
+        if until is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND)
+        return Unlocked(until=until)
 
     @app.get(
         "/me/memberships",

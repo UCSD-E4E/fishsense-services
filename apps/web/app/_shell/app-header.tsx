@@ -8,11 +8,28 @@ import { LAST_TENANT_COOKIE } from "@/lib/tenant-paths";
 import { Mark } from "./mark";
 import { MainNav } from "./main-nav";
 import { SignInFallback, SignInLink } from "./sign-in-link";
-import { myTenants } from "./tenant";
+import { otherTenants } from "@/lib/system-admin";
+import { allTenants, myTenants } from "./tenant";
 import { TenantSwitcher, type SwitcherTenant } from "./tenant-switcher";
 
 /** The user's tenants for the switcher; none when they can't be read, so a
  *  failing API costs the switcher, not the page. */
+/** For a system admin, every tenant they are not in; none for anyone else, or
+ *  when they can't be read (the switcher, not the page, pays for a failure). */
+async function systemAdminTenants(
+  accessToken: string | null,
+  mine: SwitcherTenant[],
+): Promise<SwitcherTenant[]> {
+  if (!accessToken) return [];
+  try {
+    return otherTenants(mine, await allTenants(accessToken)).map((t) => ({ ...t, role: null }));
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("app shell: reading every tenant failed", error);
+    return [];
+  }
+}
+
 async function switcherTenants(accessToken: string | null): Promise<SwitcherTenant[]> {
   if (!accessToken) return [];
   try {
@@ -33,6 +50,7 @@ async function switcherTenants(accessToken: string | null): Promise<SwitcherTena
 export async function AppHeader() {
   const state = await shellState(() => auth());
   const tenants = await switcherTenants(state.accessToken);
+  const others = await systemAdminTenants(state.accessToken, tenants);
   // The cookie is only a preference: it counts while the user is still in it
   // (the middleware remembers any tenant-shaped path, a 404 included), and
   // otherwise their first tenant stands in.
@@ -52,7 +70,7 @@ export async function AppHeader() {
         {/* Signed out there is nothing to navigate: every section needs a tenant. */}
         {state.signedIn && (
           <>
-            <TenantSwitcher tenants={tenants} lastTenant={lastTenant} />
+            <TenantSwitcher tenants={tenants} others={others} lastTenant={lastTenant} />
             <MainNav staff={state.staff} lastTenant={lastTenant} />
           </>
         )}

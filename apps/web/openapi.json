@@ -1,6 +1,24 @@
 {
   "components": {
     "schemas": {
+      "AdminTenant": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "name"
+        ],
+        "title": "AdminTenant",
+        "type": "object"
+      },
       "CaptureCommit": {
         "additionalProperties": true,
         "description": "Everything the app recorded about one capture. Fields this API doesn't\nmodel are allowed, and kept in the manifest.",
@@ -1095,6 +1113,19 @@
         "title": "MaskGeometry",
         "type": "object"
       },
+      "Me": {
+        "properties": {
+          "is_system_admin": {
+            "title": "Is System Admin",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "is_system_admin"
+        ],
+        "title": "Me",
+        "type": "object"
+      },
       "MeasurementVersion": {
         "properties": {
           "algorithm": {
@@ -1722,6 +1753,11 @@
       },
       "MyMembership": {
         "properties": {
+          "access": {
+            "default": "member",
+            "title": "Access",
+            "type": "string"
+          },
           "is_admin": {
             "title": "Is Admin",
             "type": "boolean"
@@ -1729,6 +1765,18 @@
           "role": {
             "title": "Role",
             "type": "string"
+          },
+          "unlocked_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unlocked Until"
           }
         },
         "required": [
@@ -2321,6 +2369,20 @@
         "title": "TenantSummaryView",
         "type": "object"
       },
+      "Unlocked": {
+        "properties": {
+          "until": {
+            "format": "date-time",
+            "title": "Until",
+            "type": "string"
+          }
+        },
+        "required": [
+          "until"
+        ],
+        "title": "Unlocked",
+        "type": "object"
+      },
       "Upload": {
         "properties": {
           "headers": {
@@ -2452,6 +2514,57 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/admin/tenants": {
+      "get": {
+        "description": "Every tenant, for a system admin's switcher; 404 for anyone else.",
+        "operationId": "list_all_tenants",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AdminTenant"
+                  },
+                  "title": "Response List All Tenants",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "All Tenants"
+      }
+    },
+    "/me": {
+      "get": {
+        "operationId": "get_me",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Me"
+      }
+    },
     "/me/memberships": {
       "get": {
         "description": "The tenants the caller belongs to (a partner's is their org's).",
@@ -4206,6 +4319,51 @@
           }
         ],
         "summary": "Summary"
+      }
+    },
+    "/tenants/{slug}/system-admin/unlock": {
+      "post": {
+        "description": "A system admin, deliberately, becomes the admin of a tenant they are\nnot in, for `UNLOCK_MINUTES`; recorded. 404 for anyone else, and for a\ntenant they are already a member of.",
+        "operationId": "unlock_tenant",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unlocked"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Unlock"
       }
     }
   }

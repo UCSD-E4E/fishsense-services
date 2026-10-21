@@ -4,6 +4,43 @@
  */
 
 export interface paths {
+    "/admin/tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * All Tenants
+         * @description Every tenant, for a system admin's switcher; 404 for anyone else.
+         */
+        get: operations["list_all_tenants"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Me */
+        get: operations["get_me"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/me/memberships": {
         parameters: {
             query?: never;
@@ -496,10 +533,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{slug}/system-admin/unlock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unlock
+         * @description A system admin, deliberately, becomes the admin of a tenant they are
+         *     not in, for `UNLOCK_MINUTES`; recorded. 404 for anyone else, and for a
+         *     tenant they are already a member of.
+         */
+        post: operations["unlock_tenant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AdminTenant */
+        AdminTenant: {
+            /** Name */
+            name: string;
+            /** Slug */
+            slug: string;
+        };
         /**
          * CaptureCommit
          * @description Everything the app recorded about one capture. Fields this API doesn't
@@ -799,6 +865,11 @@ export interface components {
             /** Width */
             width: number;
         };
+        /** Me */
+        Me: {
+            /** Is System Admin */
+            is_system_admin: boolean;
+        };
         /** MeasurementVersion */
         MeasurementVersion: {
             /** Algorithm */
@@ -963,10 +1034,17 @@ export interface components {
         };
         /** MyMembership */
         MyMembership: {
+            /**
+             * Access
+             * @default member
+             */
+            access: string;
             /** Is Admin */
             is_admin: boolean;
             /** Role */
             role: string;
+            /** Unlocked Until */
+            unlocked_until?: string | null;
         };
         /** MyTenant */
         MyTenant: {
@@ -1132,6 +1210,14 @@ export interface components {
             /** Wild Fish */
             wild_fish: number;
         };
+        /** Unlocked */
+        Unlocked: {
+            /**
+             * Until
+             * Format: date-time
+             */
+            until: string;
+        };
         /** Upload */
         Upload: {
             /** Headers */
@@ -1186,6 +1272,46 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_all_tenants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminTenant"][];
+                };
+            };
+        };
+    };
+    get_me: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Me"];
+                };
+            };
+        };
+    };
     list_my_memberships: {
         parameters: {
             query?: never;
@@ -2160,6 +2286,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TenantSummaryView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unlock_tenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unlocked"];
                 };
             };
             /** @description Validation Error */
