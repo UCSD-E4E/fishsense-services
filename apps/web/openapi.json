@@ -2090,6 +2090,104 @@
         "title": "PortStatement",
         "type": "object"
       },
+      "PublicRegionView": {
+        "properties": {
+          "count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count"
+          },
+          "latitude": {
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "title": "Longitude",
+            "type": "number"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "under": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Under"
+          }
+        },
+        "required": [
+          "name",
+          "latitude",
+          "longitude",
+          "count",
+          "under"
+        ],
+        "title": "PublicRegionView",
+        "type": "object"
+      },
+      "PublicSummaryView": {
+        "properties": {
+          "deployments": {
+            "title": "Deployments",
+            "type": "integer"
+          },
+          "lengths": {
+            "title": "Lengths",
+            "type": "integer"
+          },
+          "minimum": {
+            "title": "Minimum",
+            "type": "integer"
+          },
+          "missions": {
+            "title": "Missions",
+            "type": "integer"
+          },
+          "model_lengths": {
+            "title": "Model Lengths",
+            "type": "integer"
+          },
+          "regions": {
+            "items": {
+              "$ref": "#/components/schemas/PublicRegionView"
+            },
+            "title": "Regions",
+            "type": "array"
+          },
+          "species": {
+            "title": "Species",
+            "type": "integer"
+          },
+          "wild_fish": {
+            "title": "Wild Fish",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "lengths",
+          "wild_fish",
+          "model_lengths",
+          "species",
+          "missions",
+          "deployments",
+          "minimum",
+          "regions"
+        ],
+        "title": "PublicSummaryView",
+        "type": "object"
+      },
       "PurposeStatement": {
         "properties": {
           "purpose": {
@@ -2363,6 +2461,24 @@
           }
         ],
         "summary": "My Memberships"
+      }
+    },
+    "/public/summary": {
+      "get": {
+        "operationId": "get_public_summary",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicSummaryView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Summary"
       }
     },
     "/tenants/{slug}/deployments": {

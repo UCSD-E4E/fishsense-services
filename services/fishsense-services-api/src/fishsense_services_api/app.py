@@ -43,6 +43,7 @@ from fishsense_services_api.mobile_api import add_mobile_routes
 from fishsense_services_api.place_names import Geocoder
 from fishsense_services_api.missions_api import add_mission_routes
 from fishsense_services_api.observations_api import add_observation_routes
+from fishsense_services_api.public_api import add_public_routes
 from fishsense_services_api.portal_api import add_portal_routes
 from fishsense_services_api.tenant_stores import TenantStores
 from fishsense_services_api.users import provision_user
@@ -202,6 +203,7 @@ def create_app(
     add_portal_routes(app, engine=engine, membership=membership)
     add_mission_routes(app, engine=engine, membership=membership)
     add_observation_routes(app, engine=engine, membership=membership, stores=stores)
+    add_public_routes(app, engine=engine)
     add_mobile_routes(
         app,
         engine=engine,

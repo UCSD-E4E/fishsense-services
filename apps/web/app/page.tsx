@@ -4,14 +4,14 @@ import { auth } from "@/auth";
 import { shellState } from "@/lib/shell";
 import { LAST_TENANT_COOKIE, paths } from "@/lib/tenant-paths";
 import { myTenants } from "./_shell/tenant";
-import { WorkSections } from "./_shell/work-sections";
+import { PublicHome } from "./_shell/public-home";
 
 export const dynamic = "force-dynamic";
 
 /**
  * Signed in, home is the tenant's Today (`/lab`): the one used last, if the
- * user is still in it, else their first. Signed out, it is the labelling and
- * dashboard links until the public page replaces them (the design's 5b).
+ * user is still in it, else their first. Signed out, it is the public page:
+ * what FishSense does, and what opted-in tenants have measured, by region.
  */
 export default async function HomePage() {
   const state = await shellState(() => auth());
@@ -27,10 +27,5 @@ export default async function HomePage() {
     }
     if (slug) redirect(paths.tenant(slug));
   }
-  return (
-    <main className="mx-auto max-w-6xl px-6 py-12">
-      <h1 className="mb-8 text-3xl font-bold tracking-tight">FishSense</h1>
-      <WorkSections />
-    </main>
-  );
+  return <PublicHome />;
 }

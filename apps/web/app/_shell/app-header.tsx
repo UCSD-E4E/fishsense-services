@@ -49,8 +49,13 @@ export async function AppHeader() {
           <Mark />
           FishSense
         </Link>
-        <TenantSwitcher tenants={tenants} lastTenant={lastTenant} />
-        <MainNav staff={state.staff} lastTenant={lastTenant} />
+        {/* Signed out there is nothing to navigate: every section needs a tenant. */}
+        {state.signedIn && (
+          <>
+            <TenantSwitcher tenants={tenants} lastTenant={lastTenant} />
+            <MainNav staff={state.staff} lastTenant={lastTenant} />
+          </>
+        )}
         <div className="ml-auto flex items-center gap-3">
           {state.signedIn ? (
             <>

@@ -18,6 +18,7 @@ RESERVED_TENANT_SLUGS = frozenset(
         "portal",
         "favicon",
         "logo",
+        "world",
         # Routes the design adds next.
         "admin",
         "map",

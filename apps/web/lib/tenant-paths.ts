@@ -21,6 +21,7 @@ export const RESERVED_SLUGS = [
   "portal",
   "favicon",
   "logo",
+  "world",
   "admin",
   "map",
   "settings",
