@@ -401,6 +401,9 @@ class Capture(Base):
     latitude: Mapped[float | None] = mapped_column(Double)
     longitude: Mapped[float | None] = mapped_column(Double)
     horizontal_accuracy_m: Mapped[float | None] = mapped_column(Double)
+    #: Where an imported phone capture came from (0058); a synced one has
+    #: its uploader instead.
+    imported_from: Mapped[str | None] = mapped_column(Text)
 
 
 class CameraCalibration(Base):

@@ -624,6 +624,8 @@ export interface components {
             files: components["schemas"]["FileView"][];
             /** Fish Id */
             fish_id: string | null;
+            /** Imported From */
+            imported_from?: string | null;
             /** Intrinsics */
             intrinsics: number[];
             location: components["schemas"]["Location"] | null;
