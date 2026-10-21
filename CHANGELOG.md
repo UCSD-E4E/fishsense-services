@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.24.0...v0.25.0) (2026-10-21)
+
+
+### Features
+
+* **web:** Today, each tenant's home ([75b8b8d](https://github.com/UCSD-E4E/fishsense-services/commit/75b8b8d3133d4b54b23975d5edb3f27b9430357d))
+
 ## [0.24.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.23.0...v0.24.0) (2026-10-21)
 
 
