@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.22.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.21.0...v0.22.0) (2026-10-21)
+
+
+### Features
+
+* **web:** every tenant page lives under its slug ([aea1bc4](https://github.com/UCSD-E4E/fishsense-services/commit/aea1bc432a86adf17624cda7f98d0fcac7fec93f))
+* **web:** every tenant page lives under its slug ([29d708f](https://github.com/UCSD-E4E/fishsense-services/commit/29d708f85342d72c675c860e32208a8d0f7a6774))
+
 ## [0.21.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.20.0...v0.21.0) (2026-10-21)
 
 
