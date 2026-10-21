@@ -13,6 +13,7 @@ import {
   describeOrigin,
   placeName,
   formatLength,
+  millimetres,
   getCapture,
   getCapturePage,
   measurementOverlay,
@@ -150,12 +151,32 @@ describe("getCapture", () => {
 });
 
 describe("formatLength", () => {
-  it("shows centimetres to one place", () => {
-    expect(formatLength(0.4237)).toBe("42.4 cm");
+  it("shows whole millimetres (the owner, 2026-10-21)", () => {
+    expect(formatLength(0.4237)).toBe("424 mm");
+  });
+
+  it("rounds to the nearest millimetre", () => {
+    expect(formatLength(0.3125)).toBe("313 mm");
+    expect(formatLength(0.31249)).toBe("312 mm");
+  });
+
+  it("groups the thousands of a fish over a metre", () => {
+    expect(formatLength(1.2346)).toBe("1,235 mm");
   });
 
   it("says when the phone did not measure", () => {
     expect(formatLength(null)).toBe("not measured");
+  });
+});
+
+describe("millimetres", () => {
+  it("is the number alone, for a display that sets its unit apart", () => {
+    expect(millimetres(0.4237)).toBe("424");
+  });
+
+  it("is a dash when there is no length", () => {
+    expect(millimetres(null)).toBe("—");
+    expect(millimetres(undefined)).toBe("—");
   });
 });
 

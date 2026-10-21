@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireSignedIn } from "@/app/_shell/guard";
-import { describeOrigin, formatLength, getCapture } from "@/lib/captures";
+import { describeOrigin, formatLength, getCapture, millimetres } from "@/lib/captures";
 import { fishEvidence, type Overlay } from "@/lib/fish-evidence";
 import { isSlug, isUuid } from "@/lib/ids";
 import {
@@ -177,8 +177,8 @@ export default async function FishDetailPage({ params }: Props) {
                 {evidence.history.map((h) => (
                   <tr key={h.key} className={`border-t border-line ${h.current ? "" : "text-fg-2"}`}>
                     <td className="py-2.5 pr-2">{new Date(h.when).toLocaleString()}</td>
-                    <td className={`px-2 py-2.5 tabular-nums ${h.current ? "font-semibold" : ""}`}>
-                      {h.lengthM == null ? "—" : `${h.lengthM.toFixed(3)} m`}
+                    <td className={`whitespace-nowrap px-2 py-2.5 tabular-nums ${h.current ? "font-semibold" : ""}`}>
+                      {h.lengthM == null ? "—" : formatLength(h.lengthM)}
                     </td>
                     <td className="py-2.5 pl-2">
                       {h.how}
@@ -283,8 +283,8 @@ function Length({ metres }: { metres: number | null | undefined }) {
   if (metres == null) return <>—</>;
   return (
     <>
-      {metres.toFixed(3)}
-      <span className="text-2xl font-medium text-fg-2"> m</span>
+      {millimetres(metres)}
+      <span className="text-2xl font-medium text-fg-2"> mm</span>
     </>
   );
 }

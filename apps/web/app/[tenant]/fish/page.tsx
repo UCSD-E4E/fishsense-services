@@ -2,7 +2,7 @@ import Link from "next/link";
 import { unstable_rethrow } from "next/navigation";
 import { requireSignedIn } from "@/app/_shell/guard";
 import { tenantFor } from "@/app/_shell/tenant";
-import { formatLength } from "@/lib/captures";
+import { formatLength, millimetres } from "@/lib/captures";
 import { type TenantMembership } from "@/lib/fishsense-api";
 import { paths } from "@/lib/tenant-paths";
 import {
@@ -148,8 +148,8 @@ function FishCard({ slug, observation: o }: { slug: string; observation: Observa
         <div className="flex items-baseline justify-between gap-3">
           <span className="font-semibold">{fish.name}</span>
           <span className="whitespace-nowrap text-[22px] font-semibold tabular-nums">
-            {o.length_m == null ? "—" : o.length_m.toFixed(3)}
-            <span className="text-sm font-medium text-fg-2"> m</span>
+            {millimetres(o.length_m)}
+            {o.length_m != null && <span className="text-sm font-medium text-fg-2"> mm</span>}
           </span>
         </div>
         {fish.detail && (
