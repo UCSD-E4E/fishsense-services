@@ -1,6 +1,7 @@
 # Handoff to fishsense-mobile: one design language
 
 **From:** fishsense-services. **For:** the FishSense Mobile (Flutter/iOS) developers.
+**What's open and what changed:** [`README.md`](README.md), kept current.
 **What this is:** the design language the owner agreed for the app and the web
 portal together (2026-10-20). The full system is
 [`docs/design/README.md`](../../design/README.md), the values are in

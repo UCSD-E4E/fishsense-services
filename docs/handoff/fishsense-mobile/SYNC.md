@@ -1,6 +1,7 @@
 # Handoff to fishsense-mobile: sign-in and sync
 
 **From:** fishsense-services. **For:** the FishSense Mobile (Flutter/iOS) developers.
+**What's open and what changed:** [`README.md`](README.md), kept current.
 **What's ready:** the API side is built and deployed behind the steps in `docs/handoff/krg-infra/MOBILE_SYNC.md`. It has an upload/commit/measurement protocol, per-tenant storage, and a web page where every member of a tenant sees the tenant's captures. This document is the contract the app has to meet.
 
 **The requirement behind every rule below:** FishSense collects scientific data, so a synced capture must hold **everything the app saved**, and enough to **reproduce the measurement** on the server. Please treat "what the phone measured on" as data, not just the photo.
