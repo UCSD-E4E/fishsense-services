@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.26.0...v0.26.1) (2026-10-21)
+
+
+### Bug Fixes
+
+* **orchestrator:** heartbeat once per 250 frames, not per frame ([78b1fe5](https://github.com/UCSD-E4E/fishsense-services/commit/78b1fe57a59979732ed67dfaf372bdd9b01db892))
+
 ## [0.26.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.25.0...v0.26.0) (2026-10-21)
 
 
