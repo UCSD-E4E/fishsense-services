@@ -1,6 +1,6 @@
 /**
- * The portal's main navigation (docs/design/README.md, Navigation): Today,
- * Fish, Data, and Labelling for staff. Map and Settings join when their pages
+ * The portal's main navigation (docs/design/README.md, Navigation): Today
+ * (`/lab`), Fish, Data, and Labelling for staff. Map and Settings join when their pages
  * exist, so the nav never links to a page that is not there.
  *
  * Fish and Data are a tenant's (`/lab/fish`, `/lab/data`): they link into the
@@ -22,7 +22,11 @@ export function navItems(pathname: string, { staff, lastTenant }: Context): NavI
   const tenant = here ?? lastTenant;
   const section = here ? segments(pathname)[1] : undefined;
   const items: NavItem[] = [
-    { label: "Today", href: "/", active: pathname === "/" },
+    {
+      label: "Today",
+      href: tenant ? paths.tenant(tenant) : "/",
+      active: pathname === "/" || (here !== null && section === undefined),
+    },
     {
       label: "Fish",
       href: tenant ? paths.fish(tenant) : "/fish",

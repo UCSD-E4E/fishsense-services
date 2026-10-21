@@ -2166,6 +2166,63 @@
         "title": "SpeciesView",
         "type": "object"
       },
+      "TenantSummaryView": {
+        "description": "A tenant's numbers (docs/design/README.md, Home pages).",
+        "properties": {
+          "deployments": {
+            "title": "Deployments",
+            "type": "integer"
+          },
+          "frames": {
+            "title": "Frames",
+            "type": "integer"
+          },
+          "latest_activity": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Activity"
+          },
+          "lengths": {
+            "title": "Lengths",
+            "type": "integer"
+          },
+          "missions": {
+            "title": "Missions",
+            "type": "integer"
+          },
+          "species": {
+            "title": "Species",
+            "type": "integer"
+          },
+          "unknown_ports": {
+            "title": "Unknown Ports",
+            "type": "integer"
+          },
+          "wild_fish": {
+            "title": "Wild Fish",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "lengths",
+          "wild_fish",
+          "species",
+          "missions",
+          "deployments",
+          "frames",
+          "unknown_ports",
+          "latest_activity"
+        ],
+        "title": "TenantSummaryView",
+        "type": "object"
+      },
       "Upload": {
         "properties": {
           "headers": {
@@ -3988,6 +4045,51 @@
           }
         ],
         "summary": "Get"
+      }
+    },
+    "/tenants/{slug}/summary": {
+      "get": {
+        "description": "The tenant's numbers, for its Today page (`summary_store`).",
+        "operationId": "get_tenant_summary",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantSummaryView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Summary"
       }
     }
   }

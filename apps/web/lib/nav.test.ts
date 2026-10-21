@@ -24,6 +24,7 @@ describe("the main navigation (docs/design/README.md, Navigation)", () => {
   it("links into the tenant the page is in", () => {
     const items = navItems("/lab/data/missions/383", { staff: false, lastTenant: "angler" });
 
+    expect(items.find((i) => i.label === "Today")?.href).toBe("/lab");
     expect(items.find((i) => i.label === "Fish")?.href).toBe("/lab/fish");
     expect(items.find((i) => i.label === "Data")?.href).toBe("/lab/data");
   });
@@ -49,6 +50,7 @@ describe("the main navigation (docs/design/README.md, Navigation)", () => {
         .map((i) => i.label);
 
     expect(active("/")).toEqual(["Today"]);
+    expect(active("/lab")).toEqual(["Today"]);
     expect(active("/lab/fish")).toEqual(["Fish"]);
     expect(active("/lab/fish/c/f")).toEqual(["Fish"]);
     expect(active("/lab/data")).toEqual(["Data"]);

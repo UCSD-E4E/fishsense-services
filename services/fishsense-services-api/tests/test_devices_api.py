@@ -242,6 +242,7 @@ async def test_every_operation_has_an_explicit_operation_id(offline_client):
         "get_mobile_capture",
         "get_my_membership",
         "get_observation",
+        "get_tenant_summary",
         "list_deployments",
         "list_devices",
         "list_label_studio_project_ids",
