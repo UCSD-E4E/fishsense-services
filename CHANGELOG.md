@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.30.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.30.0...v0.30.1) (2026-10-21)
+
+
+### Bug Fixes
+
+* **staging:** address the review of [#219](https://github.com/UCSD-E4E/fishsense-services/issues/219) ([cfed735](https://github.com/UCSD-E4E/fishsense-services/commit/cfed735ba622419b06077b8459f2f949dc726085))
+
+
+### Documentation
+
+* **handoff:** the capture list retired in v0.30.0 ([42edcff](https://github.com/UCSD-E4E/fishsense-services/commit/42edcff26fc26edd92e2859571f4971d777b9b61))
+* **handoff:** the capture list retired in v0.30.0 ([280b782](https://github.com/UCSD-E4E/fishsense-services/commit/280b782d69a3fbf4b59fee51b8b1863469bdf0ec))
+
 ## [0.30.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.29.0...v0.30.0) (2026-10-21)
 
 
