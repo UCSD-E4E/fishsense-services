@@ -99,6 +99,12 @@ VERSIONS = {
 }
 
 
+#: A loop over a mission's frames heartbeats once per this many, not per
+#: frame: the worker queues heartbeats (1,000 at most), and a loop with nothing
+#: to await between them fills the queue -- mission 440's 1,122 frames failed
+#: with asyncio's QueueFull (2026-10-20).
+HEARTBEAT_EVERY = 250
+
 #: The frame statuses with no render: the raw was not there, or would not decode.
 _NO_RENDER = frozenset({"raw_unavailable", "decode_failed"})
 
@@ -381,7 +387,8 @@ class AutomaticResultsActivities:
                     is_slate=f.is_slate,
                 )
             )
-            activity.heartbeat()
+            if len(frames) % HEARTBEAT_EVERY == 0:
+                activity.heartbeat()
         activity.logger.info(
             "automatic frames dive=%s frames=%d slate=%d",
             target.mission_id, len(frames), sum(f.is_slate for f in frames),
