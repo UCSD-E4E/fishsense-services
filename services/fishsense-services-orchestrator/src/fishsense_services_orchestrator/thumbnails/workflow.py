@@ -6,8 +6,11 @@ through its presigned GET, scales it and PUTs the thumbnail; what the stored
 objects confirm is recorded. The per-image processor is woken only when a page
 is owed. A page that records nothing -- every thumbnail failing its tries,
 left owed -- stops its tenant for this run, or it would be handed out again
-forever. Hourly when enabled (`RenderSettings.thumbnails_enabled`), on demand
-otherwise::
+forever. A run hands on to a fresh one (continue-as-new) after
+`PAGES_PER_RUN` pages, carrying its tenants, tally and wake: #169
+(2026-10-20), every page's presigned URLs stayed in one history and Temporal
+terminated the backlog about 15,000 thumbnails in. Hourly when enabled
+(`RenderSettings.thumbnails_enabled`), on demand otherwise::
 
     temporal workflow start --task-queue fishsense_orchestrator \\
         --type ThumbnailBacklogWorkflow --workflow-id thumbnail-backlog-<date>
@@ -41,7 +44,17 @@ with workflow.unsafe.imports_passed_through():
         ThumbnailPersistReport,
     )
 
-__all__ = ["ThumbnailBacklogReport", "ThumbnailBacklogWorkflow"]
+__all__ = [
+    "PAGES_PER_RUN",
+    "ThumbnailBacklogCarry",
+    "ThumbnailBacklogReport",
+    "ThumbnailBacklogWorkflow",
+]
+
+#: Pages one run makes before it continues as new. A page's input and result
+#: carry up to 500 presigned URLs (~600 characters each), so a page adds over
+#: a megabyte of history; #169's run was terminated near page 30.
+PAGES_PER_RUN = 10
 
 _DB_RETRY = RetryPolicy(
     initial_interval=timedelta(seconds=1),
@@ -61,6 +74,17 @@ class ThumbnailBacklogReport:
     failed_tenants: List[str] = field(default_factory=list)
 
 
+@dataclass
+class ThumbnailBacklogCarry:
+    """What a run hands the next: the tenants still to page through (the
+    first one part-way), the tally so far, and whether it woke the
+    processor."""
+
+    tenants: Optional[List[uuid.UUID]] = None
+    report: ThumbnailBacklogReport = field(default_factory=ThumbnailBacklogReport)
+    woke: bool = False
+
+
 async def _db(name: str, *args, result_type=None):
     return await workflow.execute_activity(
         name,
@@ -75,14 +99,28 @@ async def _db(name: str, *args, result_type=None):
 class ThumbnailBacklogWorkflow:
     # pylint: disable=too-few-public-methods
     @workflow.run
-    async def run(self, _args: Optional[dict] = None) -> ThumbnailBacklogReport:
-        report = ThumbnailBacklogReport()
-        tenants: List[uuid.UUID] = await _db(
-            "select_thumbnail_tenants", result_type=List[uuid.UUID]
+    async def run(
+        self, carry: Optional[ThumbnailBacklogCarry] = None
+    ) -> ThumbnailBacklogReport:
+        carry = carry or ThumbnailBacklogCarry()
+        report = carry.report
+        tenants: List[uuid.UUID] = (
+            carry.tenants
+            if carry.tenants is not None
+            else await _db("select_thumbnail_tenants", result_type=List[uuid.UUID])
         )
-        woke = False
-        for tenant_id in tenants:
+        woke = carry.woke
+        pages_this_run = 0
+        for at, tenant_id in enumerate(tenants):
             while True:
+                if pages_this_run >= PAGES_PER_RUN and workflow.patched(
+                    "thumbnail-backlog-continue-as-new"
+                ):
+                    workflow.continue_as_new(
+                        ThumbnailBacklogCarry(
+                            tenants=tenants[at:], report=report, woke=woke
+                        )
+                    )
                 page: ThumbnailPage = await _db(
                     "resolve_thumbnails",
                     tenant_id,
@@ -95,6 +133,7 @@ class ThumbnailBacklogWorkflow:
                     await wake_per_image_processor()
                     woke = True
                 report.pages += 1
+                pages_this_run += 1
                 try:
                     results = await workflow.execute_child_workflow(
                         "MakeThumbnailsWorkflow",

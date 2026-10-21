@@ -47,6 +47,7 @@ from fishsense_services_orchestrator.thumbnails.activities import (
 )
 from fishsense_services_orchestrator.thumbnails.stage import thumbnail_schedules
 from fishsense_services_orchestrator.thumbnails.workflow import (
+    PAGES_PER_RUN,
     ThumbnailBacklogReport,
     ThumbnailBacklogWorkflow,
 )
@@ -202,6 +203,9 @@ async def test_a_result_for_a_render_not_asked_for_is_refused():
 # -- the backlog ------------------------------------------------------------------------
 
 EVENTS: list = []
+#: The run each resolve was asked from: a backlog that continues as new
+#: resolves from more than one.
+RUNS: list = []
 QUEUE = "test-thumbnails"
 
 
@@ -215,6 +219,7 @@ def _stubs(*, pages, record=True):
     @activity.defn(name="resolve_thumbnails")
     async def resolve(tenant_id: uuid.UUID, limit: int) -> ThumbnailPage:
         EVENTS.append(("resolve", tenant_id))
+        RUNS.append(activity.info().workflow_run_id)
         queue = pages[tenant_id]
         return queue.pop(0) if queue else ThumbnailPage(payload=None)
 
@@ -253,6 +258,7 @@ def _page(n, tenant_id=LAB):
 
 async def _execute(pages, record=True):
     EVENTS.clear()
+    RUNS.clear()
     async with await WorkflowEnvironment.start_time_skipping(
         data_converter=DATA_CONVERTER
     ) as env:
@@ -322,3 +328,24 @@ async def test_one_tenants_failing_child_does_not_end_the_run():
 
     assert report.made == 3
     assert report.failed_tenants == [str(LAB)]
+
+
+async def test_a_long_backlog_continues_as_new_rather_than_grow_one_history():
+    """#169 (2026-10-20): every page's 500 presigned URLs stayed in one
+    history, and Temporal terminated the backlog ("Workflow history size
+    exceeds limit") about 15,000 thumbnails in. A run now hands on after
+    `PAGES_PER_RUN` pages, carrying its tenants, its tally and its wake."""
+    other = uuid.uuid4()
+    lab_pages = 2 * PAGES_PER_RUN + 3
+    report = await _execute(
+        {LAB: [_page(1) for _ in range(lab_pages)], other: [_page(2, other)]}
+    )
+
+    assert report.pages == lab_pages + 1
+    assert report.made == lab_pages + 2
+    kinds = [e[0] for e in EVENTS]
+    assert kinds.count("wake") == 1
+    per_run = [RUNS.count(run) for run in dict.fromkeys(RUNS)]
+    assert len(per_run) >= 3
+    # Each run resolves at most its pages, plus the empty page ending a tenant.
+    assert max(per_run) <= PAGES_PER_RUN + 2
