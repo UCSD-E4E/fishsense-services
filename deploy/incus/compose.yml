@@ -121,6 +121,9 @@ services:
     command: ["fishsense-services-api", "migrate"]
     environment:
       FISHSENSE_APP_ROLE: fishsense_app
+      # add-tenant / serve-tenants make the orchestrator a member of every
+      # tenant (the owner, 2026-10-21): the same subject it signs in as.
+      FISHSENSE_ORCHESTRATOR_SUB: service:fishsense-orchestrator
     # FISHSENSE_MIGRATION_DATABASE_URL (owner) and FISHSENSE_V1_DATABASE_URL
     # (v1's database, read-only, for migrate-v1).
     env_file:

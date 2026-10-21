@@ -659,3 +659,15 @@ def test_every_nas_client_signs_in_to_smb_on_the_krg_domain():
     assert set(nas_clients) == {"orchestrator", "backup"}
     for name, env in nas_clients.items():
         assert env.get("SYNOLOGY_FS_SMB_DOMAIN") == "KRG", name
+
+
+def test_the_migrations_name_the_orchestrator_as_it_names_itself():
+    """`add-tenant` and `serve-tenants` run in `migrate` and make the
+    orchestrator a member of every tenant (the owner, 2026-10-21). They must
+    name the same subject the orchestrator signs in as, or the grant would go
+    to nobody."""
+    env = {name: service_env(s) for name, s in services().items()}
+
+    assert env["migrate"]["FISHSENSE_ORCHESTRATOR_SUB"] == (
+        env["orchestrator"]["FISHSENSE_ORCHESTRATOR_SUB"]
+    )
