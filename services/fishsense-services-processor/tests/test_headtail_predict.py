@@ -644,14 +644,17 @@ def _payload(**overrides):
     return PredictHeadtailImage(**values)
 
 
-def _activities(store, *, sam3_fetches=None):
+def _activities(store, *, sam3_fetches=None, put=None):
     async def fetch():
         if sam3_fetches is not None:
             sam3_fetches.append(1)
         return Path("/cache/sam3/3.1/sam3.1_multiplex.pt"), "sam3/3.1@0123456789ab"
 
+    def _no_put(url, headers, data):
+        raise AssertionError("no mask was to be stored")
+
     return act.HeadtailPredictActivities(
-        store_factory=lambda: store, sam3_checkpoint=fetch
+        store_factory=lambda: store, sam3_checkpoint=fetch, put=put or _no_put
     )
 
 
@@ -842,3 +845,67 @@ async def test_workflow_fans_out_one_prediction_per_image_and_returns_them():
 
     assert [r.capture_id for r in results] == captures
     assert sorted(seen) == sorted((c, timedelta(minutes=15)) for c in captures)
+
+
+# -- the stored mask (contract 12, 2026-10-21) ------------------------------------
+
+
+def _fallback_fish(monkeypatch):
+    """The fallback backend, stubbed at its loader: one fish under the dot."""
+
+    def inference(image):
+        labels = np.zeros(image.shape[:2], dtype=np.int32)
+        h, w = labels.shape
+        cv2.ellipse(labels, (w // 2, h // 2), (300, 80), 0, 0, 360, 1, -1)
+        return labels
+
+    monkeypatch.setattr(act, "get_fallback_segmenter",
+                        lambda: types.SimpleNamespace(inference=inference))  # fmt: skip
+
+
+async def test_a_kept_mask_is_stored_and_named(no_gpu, monkeypatch):
+    from fishsense_services_contracts.masks import MaskUpload, mask_key
+
+    _fallback_fish(monkeypatch)
+    puts = []
+
+    def put(url, headers, data):
+        puts.append(data)
+        return 200
+
+    key = mask_key("headtail", CAPTURE, uuid.UUID(int=9))
+    result = await ActivityEnvironment().run(
+        _activities(_FakeStore(_jpeg()), put=put).predict_headtail_image,
+        _payload(mask=MaskUpload(key=key, put_url="https://g/m")),
+    )
+
+    (data,) = puts
+    pixels = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED)
+    assert result.status in ("predicted", "headtail_failed")
+    assert result.mask.key == key and result.mask.size == len(data)
+    assert result.mask.sha256 == hashlib.sha256(data).hexdigest()
+    assert pixels.size == result.mask.width * result.mask.height
+    assert np.count_nonzero(pixels) == result.mask_area_px
+
+
+async def test_no_upload_slot_or_no_fish_stores_nothing(no_gpu, fallback_stub):
+    from fishsense_services_contracts.masks import MaskUpload, mask_key
+
+    key = mask_key("headtail", CAPTURE, uuid.UUID(int=9))
+    result = await ActivityEnvironment().run(
+        _activities(_FakeStore(_jpeg())).predict_headtail_image,
+        _payload(mask=MaskUpload(key=key, put_url="https://g/m")),
+    )
+    assert result.mask is None
+
+
+async def test_a_mask_that_cannot_be_stored_leaves_the_prediction(no_gpu, monkeypatch):
+    from fishsense_services_contracts.masks import MaskUpload, mask_key
+
+    _fallback_fish(monkeypatch)
+    key = mask_key("headtail", CAPTURE, uuid.UUID(int=9))
+    result = await ActivityEnvironment().run(
+        _activities(_FakeStore(_jpeg()), put=lambda *a: 500).predict_headtail_image,
+        _payload(mask=MaskUpload(key=key, put_url="https://g/m")),
+    )
+    assert result.status in ("predicted", "headtail_failed") and result.mask is None

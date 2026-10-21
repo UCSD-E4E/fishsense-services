@@ -42,6 +42,8 @@ from fishsense_services_orchestrator.labels.populate import (
 from fishsense_services_orchestrator.object_store.store import (
     OrchestratorObjectStore,
 )
+from fishsense_services_orchestrator.renders.settings import RenderSettings
+from fishsense_services_orchestrator.renders.stage import tenant_stores
 from fishsense_services_orchestrator.registry import Deps, ScheduledWorkflow, Stage
 
 
@@ -62,7 +64,12 @@ def _activities(deps: Deps):
             storage=storage,
         )
 
-    headtail = HeadtailActivities(catalog=catalog, store=store)
+    # The tenant buckets, where each kept SAM mask is stored (contract 12).
+    headtail = HeadtailActivities(
+        catalog=catalog,
+        store=store,
+        stores=tenant_stores(RenderSettings(), ObjectStoreConnection()),
+    )
     labels = HeadtailLabelActivities(
         catalog=catalog,
         store=store,
@@ -79,6 +86,7 @@ def _activities(deps: Deps):
         headtail.clear_headtail_reprocess_flags,
         headtail.select_next_mission_for_headtail_prediction,
         headtail.resolve_headtail_predict_inputs,
+        headtail.presign_headtail_masks,
         headtail.persist_headtail_predictions,
         labels.select_missions_needing_headtail_population,
         labels.create_headtail_label_studio_project,

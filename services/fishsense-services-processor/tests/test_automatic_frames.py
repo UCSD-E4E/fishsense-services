@@ -44,6 +44,12 @@ from fishsense_services_contracts.automatic_results import (
     PredictAutomaticFramesInput,
 )
 from fishsense_services_contracts.object_store import ObjectRef, automatic_jpeg_folder
+import hashlib
+
+from fishsense_services_contracts.masks import MaskUpload, mask_key
+from fishsense_services_processor.automatic_frames import (
+    activities as automatic_frames_module,
+)
 from fishsense_services_processor.automatic_frames.activities import (
     AutomaticFramesActivities,
     LaserDot,
@@ -217,8 +223,10 @@ def _corrupt_raw(*args):
 
 
 def _activities(
-    store, *, gpu=True, dot=DOT, segmenter=None, predict_dot=None, render=None
-):
+    store, *, gpu=True, dot=DOT, segmenter=None, predict_dot=None, render=None,
+    put=None,
+):  # fmt: skip
+
     async def checkpoint():
         return Path("/w/sam3.pt"), "sam3/3.1@abc"
 
@@ -234,7 +242,12 @@ def _activities(
         ),
         render_jpeg=render or (lambda raw_bytes, camera, dist: _jpeg()),
         segmenter=lambda path: segmenter or _Scored([(_mask_at(*DOT), 0.8)]),
+        put=put or _no_put,
     )
+
+
+def _no_put(url, headers, data):
+    raise AssertionError("no mask was to be stored")
 
 
 CAMERA = uuid.UUID(int=11)
@@ -559,3 +572,95 @@ async def test_any_other_failure_leaves_the_worker_running():
     with pytest.raises(RuntimeError, match="shapes"):
         await ActivityEnvironment().run(acts.predict_automatic_frame, _payload())
     assert exits == []
+
+
+# -- the stored mask (contract 12, 2026-10-21) ------------------------------------
+
+
+MASK_KEY = mask_key("automatic", CAPTURE, uuid.UUID(int=5))
+
+
+def _with_mask(**frame) -> PredictAutomaticFrameInput:
+    return _rendered(mask=MaskUpload(key=MASK_KEY, put_url="https://g/mask"), **frame)
+
+
+async def test_a_kept_mask_is_stored_in_the_apps_encoding_and_named():
+    puts = []
+
+    def put(url, headers, data):
+        puts.append((url, data))
+        return 200
+
+    r = await ActivityEnvironment().run(
+        _activities(_Store(), put=put).predict_automatic_frame, _with_mask()
+    )
+
+    ((url, data),) = puts
+    pixels = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED)
+    ox, oy = crop_origin(*DOT, FRAME_W, FRAME_H, CROP_W, CROP_H)
+    expected = np.zeros((FRAME_H, FRAME_W), np.uint8)
+    expected[oy : oy + CROP_H, ox : ox + CROP_W] = _mask_at(*DOT) * 255
+    assert url == "https://g/mask" and (pixels == expected).all()
+    assert r.status == "predicted"
+    assert (r.mask.key, r.mask.size, r.mask.sha256) == (
+        MASK_KEY, len(data), hashlib.sha256(data).hexdigest(),
+    )  # fmt: skip
+    assert (r.mask.width, r.mask.height) == (FRAME_W, FRAME_H)
+    assert np.count_nonzero(pixels) == r.mask_area_px
+
+
+async def test_a_frame_with_no_upload_slot_stores_nothing():
+    r = await ActivityEnvironment().run(
+        _activities(_Store()).predict_automatic_frame, _rendered()
+    )
+    assert r.status == "predicted" and r.mask is None
+
+
+@pytest.mark.parametrize(
+    "segmenter, status",
+    [(_Scored([]), "no_detections"),
+     (_Scored([(_mask_at(*DOT), 0.3)]), "no_detections")],
+)  # fmt: skip
+async def test_a_frame_that_kept_no_mask_stores_nothing(segmenter, status):
+    r = await ActivityEnvironment().run(
+        _activities(_Store(), segmenter=segmenter).predict_automatic_frame,
+        _with_mask(),
+    )
+    assert r.status == status and r.mask is None
+
+
+async def test_an_unscored_mask_passed_no_gate_and_is_not_stored():
+    class _Unscorable(_Scored):
+        def segment_scored(self, image):
+            return [(_mask_at(*DOT), 0.8)]
+
+    acts = _activities(_Store(), segmenter=_Unscorable([]))
+    original = automatic_frames_module.automatic_frame_result
+
+    def unscored(**kwargs):
+        r = original(**kwargs)
+        return r.model_copy(update={"status": "mask_unscored", "sam_score": None})
+
+    automatic_frames_module.automatic_frame_result = unscored
+    try:
+        r = await ActivityEnvironment().run(acts.predict_automatic_frame, _with_mask())
+    finally:
+        automatic_frames_module.automatic_frame_result = original
+    assert r.status == "mask_unscored" and r.mask is None
+
+
+@pytest.mark.parametrize("failure", ["refused", "unreachable"])
+async def test_a_mask_that_cannot_be_stored_costs_only_itself(failure):
+    """Review of #232: the mask is an addition. A PUT the store refuses, or
+    can't be reached for, is logged; the frame's prediction stands, with no
+    mask named -- not failed, and SAM not run again."""
+
+    def put(url, headers, data):
+        if failure == "unreachable":
+            raise OSError("connection refused")
+        return 403
+
+    r = await ActivityEnvironment().run(
+        _activities(_Store(), put=put).predict_automatic_frame, _with_mask()
+    )
+    assert r.status == "predicted" and r.mask is None

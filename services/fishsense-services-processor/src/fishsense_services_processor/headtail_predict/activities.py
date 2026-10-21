@@ -41,6 +41,9 @@ from fishsense_services_contracts.headtail import (
     HeadtailPredictionResult,
     PredictHeadtailImage,
 )
+from fishsense_services_contracts.masks import KEPT_MASK_STATUSES
+from fishsense_services_processor.masks import MaskSink, Put, store_mask_or_none
+from fishsense_services_processor.renders.activities import http_put
 from fishsense_services_processor.headtail_predict.predict import (
     FALLBACK_CHECKPOINT,
     PredictOptions,
@@ -83,10 +86,13 @@ class HeadtailPredictActivities:  # pylint: disable=too-few-public-methods
         *,
         store_factory: Callable[[], Any],
         sam3_checkpoint: Callable[[], Awaitable[tuple[Path, str]]],
+        put: Put = http_put,
     ) -> None:
         self._store_factory = store_factory
         self._store: Any = None
         self._sam3_checkpoint = sam3_checkpoint
+        #: PUTs a kept mask to its presigned key (contract 12).
+        self._put = put
 
     def _object_store(self) -> Any:
         if self._store is None:
@@ -152,6 +158,8 @@ class HeadtailPredictActivities:  # pylint: disable=too-few-public-methods
             )
 
         jpeg = await self._object_store().download_processed_jpeg(payload.jpeg)
+        # Contract 12: an image with an upload slot keeps its mask, to store.
+        sink = MaskSink() if payload.mask is not None else None
         result = await asyncio.to_thread(
             predict_from_jpeg,
             jpeg,
@@ -160,7 +168,20 @@ class HeadtailPredictActivities:  # pylint: disable=too-few-public-methods
             payload.capture_id,
             payload.laser_label_ids,
             options,
+            sink,
         )
+        if (
+            sink is not None
+            and sink.mask is not None
+            and (result.status in KEPT_MASK_STATUSES)
+        ):
+            stored = await asyncio.to_thread(
+                lambda: store_mask_or_none(
+                    self._put, payload.mask, sink.mask, capture_id=payload.capture_id
+                )
+            )
+            if stored is not None:
+                result = result.model_copy(update={"mask": stored})
         activity.logger.info(
             "predicted headtail capture=%s status=%s crop=(%s,%s) ratio=%s",
             result.capture_id,

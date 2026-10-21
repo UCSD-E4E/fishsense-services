@@ -76,6 +76,8 @@ from fishsense_services_contracts.species_prediction import (
     PredictSpeciesImagesInput,
     SpeciesPredictionResult,
 )
+from fishsense_services_contracts.masks import MaskUpload
+from fishsense_services_orchestrator.masks import checked_masks, discard, mask_upload
 from fishsense_services_orchestrator.species_predict.candidates import (
     species_candidates,
 )
@@ -403,6 +405,19 @@ class AutomaticResultsActivities:
             frames=frames,
         )
 
+    @activity.defn(name="presign_automatic_masks")
+    async def presign_automatic_masks(
+        self, target: AutomaticTarget, capture_ids: List[uuid.UUID]
+    ) -> List[Optional[MaskUpload]]:
+        """A mask upload for each of a GPU chunk's frames (contract 12): a new
+        key in the tenant's bucket and its presigned PUT; none for a tenant
+        with no bucket. Per chunk, not at resolve: a URL per frame of a whole
+        large mission would pass Temporal's 2 MB payload limit."""
+        objects = await self._renders.objects(target.tenant_id)
+        if objects is None:
+            return [None] * len(capture_ids)
+        return [mask_upload(objects, "automatic", c) for c in capture_ids]
+
     @activity.defn(name="persist_automatic_frames")
     async def persist_automatic_frames(
         self, target: AutomaticTarget, results: List[AutomaticFrameResult]
@@ -439,13 +454,29 @@ class AutomaticResultsActivities:
                 target.mission_id,
                 len(unnamed),
             )
-        rows = [
-            AutomaticHeadTailRow(**r.model_dump())
+        kept = [
+            r
             for r in results
             if r.status in _NO_RENDER or r.jpeg_render_version is not None
         ]
+        rows = [AutomaticHeadTailRow(**r.model_dump(exclude={"mask"})) for r in kept]
+        # Contract 12: each stored mask, read back and checked, is named
+        # against its row's prediction in the same transaction; one that fails,
+        # or whose frame is not written, is deleted rather than left unnamed.
+        masks: list = []
+        if any(r.mask is not None for r in results):
+            objects = await self._renders.objects(target.tenant_id)
+            if objects is not None:
+                masks, failed = await checked_masks(objects, "automatic", kept)
+                written_ids = {id(r) for r in kept}
+                dropped = [r.mask.key for r in results
+                           if r.mask is not None and id(r) not in written_ids]  # fmt: skip
+                await discard(objects, failed + dropped)
         written = await self._write(
-            target, self._catalog.persist_automatic_head_tails, rows
+            target,
+            self._catalog.persist_automatic_head_tails,
+            rows,
+            masks if any(m is not None for m in masks) else [],
         )
         activity.logger.info(
             "dive=%s automatic frames written=%d", target.mission_id, written

@@ -41,6 +41,10 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api.prediction_masks_store import (
+    PredictionMask,
+    insert_prediction_masks,
+)
 from fishsense_services_api.camera_sql import RECTIFIABLE_MISSION
 from fishsense_services_api.service_principal import ServicePrincipal
 from fishsense_services_api.slate_presence_store import detector_slate_frame
@@ -717,14 +721,22 @@ async def persist_automatic_head_tails(
     tenant_id: uuid.UUID,
     mission_id: uuid.UUID,
     rows: Sequence[AutomaticHeadTailRow],
+    masks: Sequence[PredictionMask | None] = (),
 ) -> int:
     """Append the dive's automatic head/tails, abstentions included, all or
-    nothing, in the caller's transaction. Returns how many were written."""
+    nothing, in the caller's transaction, and name each stored mask -- `masks`
+    parallel to `rows`, or empty -- against its row's prediction (0059).
+    Returns how many rows were written."""
     rows = list(rows)
     if not rows:
+        if masks:
+            raise ValueError("masks with no prediction to name them against")
         return 0
     await _check_captures(conn, tenant_id, mission_id, [r.capture_id for r in rows])
-    return len(await _insert(conn, "automatic_head_tail_predictions", tenant_id, rows))
+    ids = await _insert(conn, "automatic_head_tail_predictions", tenant_id, rows)
+    if masks:
+        await insert_prediction_masks(conn, tenant_id, "automatic", rows, ids, masks)
+    return len(ids)
 
 
 # -- species ------------------------------------------------------------------------
@@ -1142,10 +1154,12 @@ class AutomaticResultsCatalog(ServicePrincipal):
             )  # fmt: skip
 
     async def persist_automatic_head_tails(
-        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, rows
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, rows, masks=()
     ) -> int:
         async with self._tenant(tenant_id) as conn:
-            return await persist_automatic_head_tails(conn, tenant_id, mission_id, rows)
+            return await persist_automatic_head_tails(
+                conn, tenant_id, mission_id, rows, masks
+            )
 
     async def automatic_species_captures(
         self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, species_version: int

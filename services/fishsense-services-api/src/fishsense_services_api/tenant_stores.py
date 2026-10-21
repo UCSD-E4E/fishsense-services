@@ -116,32 +116,50 @@ class TenantObjects:
         }
         return PresignedUpload(url=url, headers=headers)
 
-    def presign_render_put(
-        self, key: str, *, expires_seconds: int = RENDER_EXPIRES_SECONDS
+    def presign_unsigned_put(
+        self,
+        key: str,
+        content_type: str,
+        *,
+        expires_seconds: int = RENDER_EXPIRES_SECONDS,
     ) -> PresignedUpload:
-        """A PUT of a render: its bytes are not known yet, so no checksum or
-        size is signed -- the uploader reports the MD5, checked with `head`
-        (2026-10-19)."""
-        url = self._public.generate_presigned_url(
-            "put_object",
-            Params={"Bucket": self.bucket, "Key": key, "ContentType": "image/jpeg"},
-            ExpiresIn=expires_seconds,
-        )
-        return PresignedUpload(url=url, headers={"Content-Type": "image/jpeg"})
-
-    def presign_raw_put(
-        self, key: str, *, expires_seconds: int = RENDER_EXPIRES_SECONDS
-    ) -> PresignedUpload:
-        """A PUT of a capture's raw, copied by the render stage (2026-10-20):
-        unsigned bytes, as a render's, checked after with `head` against the
-        MD5 the uploader reports and the capture's checksum."""
-        content_type = "application/octet-stream"
+        """A PUT whose bytes are not known when it is signed, so no checksum
+        or size is signed: the uploader reports them, and they are checked
+        after against the stored object (`head`, `get`). Renders (2026-10-19),
+        raw copies and thumbnails (2026-10-20), SAM masks (2026-10-21)."""
         url = self._public.generate_presigned_url(
             "put_object",
             Params={"Bucket": self.bucket, "Key": key, "ContentType": content_type},
             ExpiresIn=expires_seconds,
         )
         return PresignedUpload(url=url, headers={"Content-Type": content_type})
+
+    def presign_render_put(
+        self, key: str, *, expires_seconds: int = RENDER_EXPIRES_SECONDS
+    ) -> PresignedUpload:
+        """A render's PUT, checked after with `head` against its MD5."""
+        return self.presign_unsigned_put(
+            key, "image/jpeg", expires_seconds=expires_seconds
+        )
+
+    def presign_raw_put(
+        self, key: str, *, expires_seconds: int = RENDER_EXPIRES_SECONDS
+    ) -> PresignedUpload:
+        """A capture's raw copied by the render stage (2026-10-20), checked
+        after with `head` against the MD5 the uploader reports and the
+        capture's checksum."""
+        return self.presign_unsigned_put(
+            key, "application/octet-stream", expires_seconds=expires_seconds
+        )
+
+    def presign_mask_put(
+        self, key: str, *, expires_seconds: int = RENDER_EXPIRES_SECONDS
+    ) -> PresignedUpload:
+        """A SAM mask's PUT (0059, 2026-10-21): the app's ``mask_png``, read
+        back and checked after against the size and SHA-256 reported."""
+        return self.presign_unsigned_put(
+            key, "image/png", expires_seconds=expires_seconds
+        )
 
     def presign_get(
         self, key: str, *, expires_seconds: int = DEFAULT_EXPIRES_SECONDS
@@ -162,6 +180,12 @@ class TenantObjects:
                 return None
             raise
         return found["Body"].read()
+
+    def delete(self, key: str) -> None:
+        """Delete ``key`` (nothing there is not an error). Blocking. Only for
+        an object this service wrote and never recorded: a SAM mask that did
+        not check out (review of #232)."""
+        self._internal.delete_object(Bucket=self.bucket, Key=key)
 
     def head(self, key: str) -> StoredObject | None:
         """What is stored at ``key``, or None if nothing is. Blocking."""

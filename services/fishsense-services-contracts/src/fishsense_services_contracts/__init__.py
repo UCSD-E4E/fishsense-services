@@ -32,6 +32,12 @@ from fishsense_services_contracts.task_queues import (
     PROCESSOR_TASK_QUEUE,
 )
 
+#: v12 (2026-10-21): SAM masks stored as 8-bit greyscale PNGs in the tenant's
+#: bucket, as the app's ``mask_png`` (`masks`):
+#: a frame to predict may carry a mask's key and PUT (`AutomaticFrame.mask`,
+#: `PredictHeadtailImage.mask`), and a result that kept a mask names it as
+#: stored (`AutomaticFrameResult.mask`, `HeadtailPredictionResult.mask`). All
+#: optional, so v11 payloads still parse.
 #: v11 (2026-10-20): thumbnails -- each render scaled for /fish's cards, made
 #: from the stored render (`thumbnails`). New models only; v10 parses.
 #: v10 (2026-10-20): a render frame may also carry its raw's copy into the
@@ -51,7 +57,7 @@ from fishsense_services_contracts.task_queues import (
 #: JSON is unchanged -- each renamed field keeps its old name on the wire
 #: (`renamed.py`) -- so a v6 processor and a v7 orchestrator interoperate; only
 #: the published schema's model names differ.
-CONTRACT_VERSION = 11
+CONTRACT_VERSION = 12
 
 
 def _discover_models() -> tuple[type[BaseModel], ...]:

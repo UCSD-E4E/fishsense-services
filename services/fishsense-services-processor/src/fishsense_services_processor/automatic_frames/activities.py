@@ -51,6 +51,9 @@ from fishsense_services_contracts.automatic_results import (
 )
 from fishsense_services_contracts.laser_region import point_in_laser_region
 from fishsense_services_contracts.object_store import automatic_jpeg_folder
+from fishsense_services_contracts.masks import KEPT_MASK_STATUSES
+from fishsense_services_processor.masks import MaskSink, Put, store_mask_or_none
+from fishsense_services_processor.renders.activities import http_put
 from fishsense_services_processor.slate_detect.frame import DECODE_ERRORS
 from fishsense_services_processor.automatic_results.frames import (
     LaserDot,
@@ -78,8 +81,11 @@ class AutomaticFramesActivities:  # pylint: disable=too-few-public-methods
         predict_dot: Callable[[Path, list, list], Optional[LaserDot]],
         render_jpeg: Callable[[bytes, list, list], bytes],
         segmenter: Callable[[str], Any],
+        put: Put = http_put,
     ) -> None:
         self._store_factory = store_factory
+        #: PUTs a kept mask to its presigned key (contract 12).
+        self._put = put
         self._store: Any = None
         self._sam3_checkpoint = sam3_checkpoint
         self._cuda_available = cuda_available
@@ -171,6 +177,8 @@ class AutomaticFramesActivities:  # pylint: disable=too-few-public-methods
         path, model_id = await self._sam3_checkpoint()
         segmenter = await asyncio.to_thread(self._segmenter, str(path))
         _reset_gpu_peak()
+        # Contract 12: a frame with an upload slot keeps its mask, to store.
+        sink = MaskSink() if frame.mask is not None else None
         try:
             result = await asyncio.to_thread(
                 lambda: automatic_frame_result(
@@ -182,6 +190,7 @@ class AutomaticFramesActivities:  # pylint: disable=too-few-public-methods
                     core_version=version("fishsense-core"),
                     is_slate=frame.is_slate,
                     slate_probability=frame.slate_probability,
+                    mask_sink=sink,
                 )
             )
         except RuntimeError as exc:
@@ -202,6 +211,18 @@ class AutomaticFramesActivities:  # pylint: disable=too-few-public-methods
             result.sam_score,
             "-" if peak is None else f"{peak / 2**30:.2f}",
         )
+        if (
+            sink is not None
+            and sink.mask is not None
+            and (result.status in KEPT_MASK_STATUSES)
+        ):
+            stored = await asyncio.to_thread(
+                lambda: store_mask_or_none(
+                    self._put, frame.mask, sink.mask, capture_id=frame.capture_id
+                )
+            )
+            if stored is not None:
+                result = result.model_copy(update={"mask": stored})
         if versioned:
             result = result.model_copy(
                 update={

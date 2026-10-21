@@ -93,6 +93,7 @@ def automatic_frame_result(
     is_slate: bool = False,
     slate_probability: Optional[float] = None,
     gate: float = AUTOMATIC_SAM_SCORE_GATE,
+    mask_sink: Any = None,
 ) -> AutomaticFrameResult:
     """One frame's automatic dot and head/tail (or which abstention)."""
     base = {
@@ -125,6 +126,7 @@ def automatic_frame_result(
             core_version=core_version,
             predictor_version=AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
         ),
+        mask_sink=mask_sink,
     )
     kept = r.status in ("predicted", "headtail_failed")
     score = (

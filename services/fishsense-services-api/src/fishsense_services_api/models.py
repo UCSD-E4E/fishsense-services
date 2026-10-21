@@ -1457,6 +1457,49 @@ class CaptureRaw(Base):
     created_at: Mapped[datetime] = _created_at()
 
 
+class PredictionMask(Base):
+    """A SAM mask a prediction kept, stored in the tenant's bucket the way
+    FishSense Mobile stores its mask, as the app's mask_png (0059); append-only."""
+
+    __tablename__ = "prediction_masks"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        UniqueConstraint("bucket", "object_key"),
+        _fk(("tenant_id", "capture_id"), "captures"),
+        _fk(("tenant_id", "automatic_head_tail_prediction_id"),
+            "automatic_head_tail_predictions"),
+        _fk(("tenant_id", "head_tail_prediction_id"), "head_tail_predictions"),
+        Index(None, "tenant_id", "capture_id"),
+        CheckConstraint("sha256 ~ '^[0-9a-f]{64}$'",
+                        name="prediction_masks_sha256_check"),
+        CheckConstraint("size_bytes > 0", name="prediction_masks_size_check"),
+        CheckConstraint("width > 0", name="prediction_masks_width_check"),
+        CheckConstraint("height > 0", name="prediction_masks_height_check"),
+        CheckConstraint(
+            "(automatic_head_tail_prediction_id IS NULL) "
+            "<> (head_tail_prediction_id IS NULL)",
+            name="prediction_masks_one_prediction_check",
+        ),
+    )  # fmt: skip
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    automatic_head_tail_prediction_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, unique=True
+    )
+    head_tail_prediction_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, unique=True)
+    bucket: Mapped[str] = mapped_column(Text)
+    object_key: Mapped[str] = mapped_column(Text)
+    sha256: Mapped[str] = mapped_column(Text)
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
+    content_type: Mapped[str] = mapped_column(Text)
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = _created_at()
+
+
 class CaptureThumbnail(Base):
     """A render's thumbnail for /fish's cards, or that the render was not
     there to read (0053); append-only."""

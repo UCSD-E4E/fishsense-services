@@ -175,6 +175,21 @@ def test_a_stored_object_reads_back_whole_and_a_missing_one_is_none(stores):
     assert lab.get("raws/not-there.ORF") is None
 
 
+def test_a_mask_put_is_read_back_whole_and_an_unrecorded_one_deleted(stores):
+    """A SAM mask (0059, 2026-10-21): PUT unsigned, as a render, then read
+    back by the orchestrator and checked against what the processor said; one
+    that is never recorded is deleted rather than left behind (review of
+    #232)."""
+    lab = stores.for_tenant("lab")
+    upload = lab.presign_mask_put("masks/automatic/abc/1.png")
+
+    assert upload.headers == {"Content-Type": "image/png"}
+    assert _put(upload, BODY) == 200
+    assert lab.get("masks/automatic/abc/1.png") == BODY
+    lab.delete("masks/automatic/abc/1.png")
+    assert lab.get("masks/automatic/abc/1.png") is None
+
+
 def test_urls_are_signed_for_the_public_endpoint(garage):
     """Phones and browsers reach Garage at its public address; the API's own
     checks use the internal one. A signature covers the host, so presigning

@@ -56,6 +56,7 @@ with workflow.unsafe.imports_passed_through():
     import annotated_types  # noqa: F401  pylint: disable=unused-import
     import pydantic  # noqa: F401  pylint: disable=unused-import
 
+    from fishsense_services_contracts.masks import MaskUpload
     from fishsense_services_contracts import (
         PROCESSOR_GPU_TASK_QUEUE,
         PROCESSOR_TASK_QUEUE,
@@ -114,6 +115,12 @@ PREDICT_SELECT_TIMEOUT = timedelta(minutes=5)
 PREDICT_RESOLVE_TIMEOUT = timedelta(minutes=5)
 #: Generous enough for the CPU fallback, which runs far slower per image.
 PREDICT_CHILD_TIMEOUT = timedelta(hours=6)
+#: Images per GPU child (contract 12, review of #232): each carries its mask's
+#: presigned PUT (~650 characters), presigned for its chunk.
+PREDICT_CHUNK = 500
+#: The change that stores each image's SAM mask: a run started before it
+#: replays as one child.
+MASKS_PATCH = "headtail-predict-store-masks"
 PREDICT_PERSIST_TIMEOUT = timedelta(minutes=15)
 PREDICT_BACKFILL_TIMEOUT = timedelta(minutes=15)
 #: The predict parent's schedule run timeout: every step at its longest.
@@ -268,41 +275,31 @@ class PredictHeadtailImagesParentWorkflow:
             return None
         workflow.logger.info("headtail predict running on %s capacity", mode)
 
-        try:
-            results: List[HeadtailPredictionResult] = (
-                await workflow.execute_child_workflow(
-                    "PredictHeadtailImagesWorkflow",
-                    inputs,
-                    id=f"predict-headtail-{target.mission_id}",
-                    task_queue=PROCESSOR_GPU_TASK_QUEUE,
-                    execution_timeout=PREDICT_CHILD_TIMEOUT,
-                    id_reuse_policy=CHILD_ID_REUSE,
-                    result_type=List[HeadtailPredictionResult],
+        if workflow.patched(MASKS_PATCH):
+            # Contract 12: GPU chunks, each with its images' mask uploads
+            # presigned (a whole mission's URLs would pass the 2 MB limit).
+            for n, at in enumerate(range(0, len(inputs.images), PREDICT_CHUNK)):
+                chunk = inputs.images[at : at + PREDICT_CHUNK]
+                uploads = await workflow.execute_activity(
+                    "presign_headtail_masks",
+                    args=(target, [i.capture_id for i in chunk]),
+                    schedule_to_close_timeout=PREDICT_RESOLVE_TIMEOUT,
+                    retry_policy=_DB_FAIL_FAST,
+                    result_type=List[Optional[MaskUpload]],
                 )
-            )
-        except WorkflowAlreadyStartedError:
-            workflow.logger.info(
-                "predict-headtail-%s is still running; it persists and backfills",
-                target.mission_id,
-            )
+                chunk = [i.model_copy(update={"mask": u})
+                         for i, u in zip(chunk, uploads)]  # fmt: skip
+                child_id = f"predict-headtail-{target.mission_id}" + (
+                    f"-{n}" if n else ""
+                )
+                if not await _predict_and_persist(
+                    target, inputs.model_copy(update={"images": chunk}), child_id
+                ):
+                    return target
+        elif not await _predict_and_persist(
+            target, inputs, f"predict-headtail-{target.mission_id}"
+        ):
             return target
-
-        # A skip is about the worker, not the image: persisting it would
-        # blank a good row.
-        persistable = [
-            r for r in results if r.status != HEADTAIL_STATUS_NO_UPGRADE_AVAILABLE
-        ]
-        if persistable:
-            await workflow.execute_activity(
-                "persist_headtail_predictions",
-                args=(target, persistable),
-                schedule_to_close_timeout=PREDICT_PERSIST_TIMEOUT,
-                retry_policy=RetryPolicy(
-                    initial_interval=timedelta(seconds=1),
-                    maximum_attempts=2,
-                    non_retryable_error_types=["InvalidPredictions", "NotAMember"],
-                ),
-            )
 
         # Unconditional, last, on purpose (v1, 2026-09-10): it also points the
         # project's model_version at the dive's tier, without which attached
@@ -315,6 +312,46 @@ class PredictHeadtailImagesParentWorkflow:
             retry_policy=_DB_FAIL_FAST,
         )
         return target
+
+
+async def _predict_and_persist(
+    target: HeadtailTarget, inputs: PredictHeadtailImagesInput, child_id: str
+) -> bool:
+    """One GPU child over `inputs`, then its predictions persisted. False
+    when the child is already running under another firing, which persists
+    and backfills."""
+    try:
+        results: List[HeadtailPredictionResult] = await workflow.execute_child_workflow(
+            "PredictHeadtailImagesWorkflow",
+            inputs,
+            id=child_id,
+            task_queue=PROCESSOR_GPU_TASK_QUEUE,
+            execution_timeout=PREDICT_CHILD_TIMEOUT,
+            id_reuse_policy=CHILD_ID_REUSE,
+            result_type=List[HeadtailPredictionResult],
+        )
+    except WorkflowAlreadyStartedError:
+        workflow.logger.info("%s is still running; it persists and backfills", child_id)
+        return False
+
+    # A skip is about the worker, not the image: persisting it would
+    # blank a good row.
+    persistable = [
+        r for r in results if r.status != HEADTAIL_STATUS_NO_UPGRADE_AVAILABLE
+    ]
+    if persistable:
+        await workflow.execute_activity(
+            "persist_headtail_predictions",
+            args=(target, persistable),
+            schedule_to_close_timeout=PREDICT_PERSIST_TIMEOUT,
+            retry_policy=RetryPolicy(
+                initial_interval=timedelta(seconds=1),
+                maximum_attempts=2,
+                non_retryable_error_types=["InvalidPredictions", "NotAMember"],
+            ),
+        )
+
+    return True
 
 
 # -- Label Studio ---------------------------------------------------------------------

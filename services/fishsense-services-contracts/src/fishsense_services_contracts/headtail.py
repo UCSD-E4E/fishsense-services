@@ -42,6 +42,7 @@ from uuid import UUID
 from pydantic import BaseModel, field_validator, model_validator, ConfigDict
 
 from fishsense_services_contracts._boxes import check_box
+from fishsense_services_contracts.masks import MaskUpload, StoredMask, check_mask
 from fishsense_services_contracts.object_store import ObjectRef
 from fishsense_services_contracts.renamed import renamed_from
 
@@ -157,6 +158,8 @@ class PredictHeadtailImage(BaseModel):
     #: ...unless the dot behind that row has since been superseded: the row
     #: may be of the wrong fish, and any backend fixes that.
     existing_laser_superseded: bool = False
+    #: Where to PUT the image's mask, should it keep one (v12, `masks`).
+    mask: Optional[MaskUpload] = None
 
     @model_validator(mode="after")
     def _parallel(self) -> "PredictHeadtailImage":
@@ -210,8 +213,15 @@ class HeadtailPredictionResult(BaseModel):
     #: y_max)`` in rectified-frame pixels -- what the species stage crops by.
     #: None where no mask was kept, and from a processor older than the field.
     mask_bbox: Optional[List[int]] = None
+    #: The kept mask, as stored (v12, `masks`); never recorded on the row.
+    mask: Optional[StoredMask] = None
 
     @field_validator("mask_bbox")
     @classmethod
     def _box(cls, value: Optional[List[int]]) -> Optional[List[int]]:
         return check_box(value)
+
+    @model_validator(mode="after")
+    def _mask_kept(self) -> "HeadtailPredictionResult":
+        check_mask(self.status, self.mask)
+        return self

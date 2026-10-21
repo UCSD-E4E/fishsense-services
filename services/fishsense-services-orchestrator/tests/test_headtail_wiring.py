@@ -131,7 +131,7 @@ class _Catalog:
             )
         ]  # fmt: skip
 
-    async def persist_headtail_predictions(self, tenant_id, mission_id, rows):
+    async def persist_headtail_predictions(self, tenant_id, mission_id, rows, masks=()):
         self.persisted.extend(rows)
         return len(rows)
 

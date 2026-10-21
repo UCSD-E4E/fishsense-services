@@ -94,6 +94,8 @@ QUEUE = "test-automatic-results"
 K = [[1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0]]
 REF = ObjectRef(bucket="b", key="k")
 EVENTS: list[tuple] = []
+#: Per GPU child, whether each frame came with a mask upload (contract 12).
+MASKED: list[list] = []
 #: Each staging: its schedule-to-close and the captures it asked for.
 STAGED: list[tuple] = []
 #: What each cohort query was told to exclude, in turn.
@@ -263,14 +265,27 @@ def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET,
         EVENTS.append(("cleanup",))
         return CleanupRawBytesResult(deleted=1)
 
+    @activity.defn(name="presign_automatic_masks")
+    async def masks_out(t: AutomaticTarget, ids: List[uuid.UUID]) -> list:
+        from fishsense_services_contracts.masks import MaskUpload, mask_key
+
+        return [MaskUpload(key=mask_key("automatic", i, uuid.uuid4()),
+                           put_url="https://g/m").model_dump(mode="json")
+                for i in ids]  # fmt: skip
+
     return [select, failed, frames_failed, frames_in, frames_out, species_in, species_out, cal_in,
             cal_out, measure_in, measure_out, wake_gpu, wake_per_image, wake_light,
-            stage, cleanup, render_in, render_out]  # fmt: skip
+            stage, cleanup, render_in, render_out, masks_out]  # fmt: skip
 
 
 @activity.defn(name="_record")
 async def _record(event: List[str]) -> None:
     EVENTS.append(tuple(event))
+
+
+@activity.defn(name="_record_masks")
+async def _record_masks(flags: List[bool]) -> None:
+    MASKED.append(list(flags))
 
 
 def _frame_results(payload):
@@ -318,6 +333,11 @@ class _Frames:  # pylint: disable=too-few-public-methods
     @workflow.run
     async def run(self, payload: dict) -> list:
         await _record_child()
+        await workflow.execute_activity(
+            "_record_masks",
+            [f.get("mask") is not None for f in payload["frames"]],
+            start_to_close_timeout=timedelta(seconds=10),
+        )
         return _frame_results(payload)
 
 
@@ -396,6 +416,7 @@ async def _run(
 ):  # fmt: skip
     EVENTS.clear()
     SELECTS.clear()
+    MASKED.clear()
     STAGED.clear()
     async with await WorkflowEnvironment.start_time_skipping(
         data_converter=DATA_CONVERTER
@@ -405,7 +426,7 @@ async def _run(
                    workflows=[AutomaticResultsForMissionWorkflow,
                               AutomaticResultsParentWorkflow]),
             Worker(env.client, task_queue=PROCESSOR_GPU_TASK_QUEUE,
-                   activities=[_record],
+                   activities=[_record, _record_masks],
                    workflows=[_FailingFrames if frames_fail
                               else _PartialFrames if frames_partial else _Frames,
                               _FailingSpecies if species_fails else _Species]),
@@ -703,3 +724,11 @@ async def test_frames_owing_renders_stage_the_whole_mission_for_the_renders():
     await _run(AutomaticResultsForMissionWorkflow, TARGET, renders="after")
 
     assert STAGED == [(LONG_STAGE_RAW_TIMEOUT, None)]
+
+
+async def test_each_gpu_chunk_carries_its_frames_mask_uploads():
+    """Contract 12: presigned per chunk, not at resolve -- a URL per frame of
+    a whole large mission would pass Temporal's 2 MB payload limit."""
+    await _run(AutomaticResultsForMissionWorkflow, TARGET)
+
+    assert MASKED == [[True, True]]

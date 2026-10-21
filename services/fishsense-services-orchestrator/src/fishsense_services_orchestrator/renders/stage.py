@@ -28,10 +28,25 @@ from fishsense_services_orchestrator.renders.workflow import (
 __all__ = ["STAGE", "render_schedules", "tenant_stores"]
 
 
+_SHARED: dict[tuple, TenantStores] = {}
+
+
 def tenant_stores(
     settings: RenderSettings, connection: ObjectStoreConnection
 ) -> TenantStores:
-    """The tenant stores the API reads; none configured is no bucket at all."""
+    """The tenant stores the API reads; none configured is no bucket at all.
+    One instance per worker for a given file and endpoints, shared by every
+    stage that asks (review of #232: each built its own)."""
+    key = (settings.tenant_stores_file, settings.object_store_public_url,
+           connection.endpoint_url, connection.region)  # fmt: skip
+    if key not in _SHARED:
+        _SHARED[key] = _build_tenant_stores(settings, connection)
+    return _SHARED[key]
+
+
+def _build_tenant_stores(
+    settings: RenderSettings, connection: ObjectStoreConnection
+) -> TenantStores:
     if settings.tenant_stores_file is None:
         return TenantStores(
             endpoint_url=connection.endpoint_url,
