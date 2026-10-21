@@ -28,7 +28,11 @@ v2 changes:
   could not see;
 * **a capture says whether it came from v1** (it has a ``v1_id``), so the
   processed-JPEG check may find the JPEG v1 wrote for it -- and never for a
-  frame v2 ingested, since v1's keys carry no tenant.
+  frame v2 ingested, since v1's keys carry no tenant;
+* **a capture names its bucket copies** (``capture_raws``, 0052), so staging
+  reads the copy in the tenant's bucket rather than the NAS (2026-10-21: NAS
+  staging timed mission 440 out after an hour, with all 1,201 of its raws
+  already copied).
 """
 
 import uuid
@@ -41,6 +45,7 @@ from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
     "CaptureChecksum",
+    "RawCopy",
     "RawStagingCatalog",
     "StagingCapture",
     "capture_checksum",
@@ -50,12 +55,26 @@ __all__ = [
 
 
 @dataclass(frozen=True)
+class RawCopy:
+    """A capture's raw, copied into a tenant bucket by the render stage and
+    checked there against the capture's checksum (0052)."""
+
+    bucket: str
+    key: str
+    bytes: int
+    md5: str
+
+
+@dataclass(frozen=True)
 class StagingCapture:
     capture_id: uuid.UUID
     #: Share-relative NAS path (v1's convention); None for a frame held only
     #: in the object store, which staging counts as ``no_path``.
     source_path: str | None
     checksum: str
+    #: Its bucket copies, one per bucket; staging reads the one in the
+    #: tenant's bucket, if any, before the NAS.
+    copies: tuple[RawCopy, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -69,15 +88,35 @@ async def captures_to_stage(
     conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> list[StagingCapture]:
     """The dive's canonical captures, with their NAS paths and checksums."""
-    rows = await conn.execute(
+    rows = (
+        await conn.execute(
+            text("""
+                SELECT id, source_path, checksum FROM captures
+                WHERE tenant_id = :tenant AND mission_id = :mission AND is_canonical
+                ORDER BY source_path NULLS LAST, id
+                """),
+            {"tenant": tenant_id, "mission": mission_id},
+        )
+    ).all()
+    copies: dict[uuid.UUID, list[RawCopy]] = {}
+    for r in await conn.execute(
         text("""
-            SELECT id, source_path, checksum FROM captures
-            WHERE tenant_id = :tenant AND mission_id = :mission AND is_canonical
-            ORDER BY source_path NULLS LAST, id
+            SELECT w.capture_id, w.bucket, w.key, w.bytes, w.md5
+            FROM capture_raws w
+            JOIN captures c ON c.tenant_id = w.tenant_id AND c.id = w.capture_id
+            WHERE c.tenant_id = :tenant AND c.mission_id = :mission
+              AND c.is_canonical
+            ORDER BY w.seq
             """),
         {"tenant": tenant_id, "mission": mission_id},
-    )
-    return [StagingCapture(r.id, r.source_path, r.checksum) for r in rows]
+    ):
+        copies.setdefault(r.capture_id, []).append(
+            RawCopy(bucket=r.bucket, key=r.key, bytes=r.bytes, md5=r.md5)
+        )
+    return [
+        StagingCapture(r.id, r.source_path, r.checksum, tuple(copies.get(r.id, ())))
+        for r in rows
+    ]
 
 
 async def checksums_to_clean(
@@ -124,6 +163,15 @@ async def capture_checksum(
 
 class RawStagingCatalog(ServicePrincipal):
     """Raw staging's database side, as the orchestrator's service principal."""
+
+    async def tenant_slug(self, tenant_id: uuid.UUID) -> str:
+        """The tenant's slug, which names its bucket in the tenant stores."""
+        async with self._tenant(tenant_id) as conn:
+            return (
+                await conn.execute(
+                    text("SELECT slug FROM tenants WHERE id = :t"), {"t": tenant_id}
+                )
+            ).scalar_one()
 
     async def captures_to_stage(
         self, tenant_id: uuid.UUID, mission_id: uuid.UUID

@@ -152,6 +152,17 @@ class TenantObjects:
             ExpiresIn=expires_seconds,
         )
 
+    def get(self, key: str) -> bytes | None:
+        """The bytes stored at ``key``, or None if nothing is. Blocking; read
+        through the internal endpoint (raw staging, 2026-10-21)."""
+        try:
+            found = self._internal.get_object(Bucket=self.bucket, Key=key)
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") in {"404", "NoSuchKey"}:
+                return None
+            raise
+        return found["Body"].read()
+
     def head(self, key: str) -> StoredObject | None:
         """What is stored at ``key``, or None if nothing is. Blocking."""
         try:

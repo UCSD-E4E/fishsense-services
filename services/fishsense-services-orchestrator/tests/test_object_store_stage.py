@@ -98,6 +98,28 @@ def test_the_stage_builds_its_three_activities(env):
     ]
 
 
+def test_staging_is_given_the_tenant_buckets(env, tmp_path):
+    """Staging reads a raw's copy in its tenant's bucket before the NAS
+    (2026-10-21); without the stores wired in, every frame would quietly
+    still come from the NAS."""
+    import json
+
+    stores_file = tmp_path / "stores.json"
+    stores_file.write_text(json.dumps({"lab": {
+        "bucket": "fishsense-tenant-lab", "access_key_id": "GKlab",
+        "secret_access_key": secrets.token_hex(16)}}))  # fmt: skip
+    env.setenv("FISHSENSE_TENANT_STORES_FILE", str(stores_file))
+
+    activities = _stage().build_activities(Deps(engine=None, sub="svc"))
+    (staging,) = [
+        a for a in activities
+        if a.__temporal_activity_definition.name == "stage_raw_bytes_for_dive"
+    ]  # fmt: skip
+
+    # pylint: disable-next=protected-access
+    assert staging.__self__._stores.for_tenant("lab").bucket == "fishsense-tenant-lab"
+
+
 @pytest.mark.parametrize("missing", sorted(OBJECT_STORE))
 def test_a_missing_object_store_setting_fails_the_build(env, missing):
     env.delenv(missing)
