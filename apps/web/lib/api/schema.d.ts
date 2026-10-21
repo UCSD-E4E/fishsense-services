@@ -459,6 +459,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{slug}/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Summary
+         * @description The tenant's numbers, for its Today page (`summary_store`).
+         */
+        get: operations["get_tenant_summary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1036,6 +1056,28 @@ export interface components {
             common_name: string | null;
             /** Scientific Name */
             scientific_name: string | null;
+        };
+        /**
+         * TenantSummaryView
+         * @description A tenant's numbers (docs/design/README.md, Home pages).
+         */
+        TenantSummaryView: {
+            /** Deployments */
+            deployments: number;
+            /** Frames */
+            frames: number;
+            /** Latest Activity */
+            latest_activity: string | null;
+            /** Lengths */
+            lengths: number;
+            /** Missions */
+            missions: number;
+            /** Species */
+            species: number;
+            /** Unknown Ports */
+            unknown_ports: number;
+            /** Wild Fish */
+            wild_fish: number;
         };
         /** Upload */
         Upload: {
@@ -2014,6 +2056,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ObservationDetailView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_tenant_summary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantSummaryView"];
                 };
             };
             /** @description Validation Error */

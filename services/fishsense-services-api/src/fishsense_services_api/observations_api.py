@@ -15,6 +15,7 @@ tenant's bucket as Mobile's do (a later phase).
 """
 
 import uuid
+from dataclasses import asdict
 from datetime import datetime
 from typing import Annotated, Literal
 
@@ -30,6 +31,7 @@ from fishsense_services_api.observation_store import (
     list_observations,
     observation,
 )
+from fishsense_services_api.summary_store import tenant_summary
 from fishsense_services_api.tenant_stores import NoTenantStore, TenantStores
 
 __all__ = ["add_observation_routes"]
@@ -118,6 +120,23 @@ class ObservationDetailView(BaseModel):
     device_points: DevicePointsView | None
 
 
+class TenantSummaryView(BaseModel):
+    """A tenant's numbers (docs/design/README.md, Home pages)."""
+
+    lengths: int
+    #: Lengths of a species, not of a fish model (a decoy of known length).
+    wild_fish: int
+    species: int
+    missions: int
+    deployments: int
+    #: Canonical captures: a frame copied into several dumps counts once.
+    frames: int
+    #: Missions whose camera port nobody has stated: the stages refuse them.
+    unknown_ports: int
+    #: The newest capture's arrival: an ingest or a sync.
+    latest_activity: datetime | None
+
+
 def add_observation_routes(
     app: FastAPI,
     *,
@@ -181,6 +200,17 @@ def add_observation_routes(
             client_capture_uuid=found.client_capture_uuid,
             photo_url=photo_url(slug, found),
         )
+
+    @app.get(
+        "/tenants/{slug}/summary",
+        operation_id="get_tenant_summary",
+        response_model=TenantSummaryView,
+    )
+    async def summary(member: Member) -> TenantSummaryView:
+        """The tenant's numbers, for its Today page (`summary_store`)."""
+        async with tenant_transaction(engine, member.tenant_id) as conn:
+            found = await tenant_summary(conn, member.tenant_id)
+        return TenantSummaryView(**asdict(found))
 
     @app.get(
         "/tenants/{slug}/observations",

@@ -316,3 +316,23 @@ class TestKindsOfFish:
         assert [len(p) for p in parts] == [1, 1, 1]
         assert set().union(*parts) == everything
         assert str(scout) in parts[2]
+
+
+class TestSummary:
+    async def test_a_member_reads_their_tenants_numbers(
+        self, client, owner_engine, tenants
+    ):
+        await lite(owner_engine, tenants["lab"], species=("Scarus coeruleus", "Blue"))
+
+        response = await _get(client, "/tenants/lab/summary")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert (body["lengths"], body["wild_fish"], body["species"]) == (1, 1, 1)
+        assert body["missions"] == 1 and body["frames"] == 1
+        assert body["latest_activity"] is not None
+
+    async def test_someone_elses_tenant_is_not_found(self, client, tenants):
+        response = await _get(client, "/tenants/lab/summary", sub=OUTSIDER)
+
+        assert response.status_code == 404
