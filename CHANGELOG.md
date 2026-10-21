@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.29.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.28.0...v0.29.0) (2026-10-21)
+
+
+### Features
+
+* group phone captures into missions as they sync ([5d21f87](https://github.com/UCSD-E4E/fishsense-services/commit/5d21f87e109c69e6cb675cd6f53d6997daee061c))
+* group phone captures into missions as they sync ([942c857](https://github.com/UCSD-E4E/fishsense-services/commit/942c857afeada283185ffeefb8779e7225f174f3))
+
 ## [0.28.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.27.1...v0.28.0) (2026-10-21)
 
 
