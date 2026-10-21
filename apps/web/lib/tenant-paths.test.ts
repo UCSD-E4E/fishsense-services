@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   RESERVED_SLUGS,
+  isTenantSlug,
   legacyRedirect,
   routeRequest,
   paths,
@@ -132,5 +133,17 @@ describe("what the middleware does with a request", () => {
     expect(route("/portal")).toEqual({});
     expect(route("/")).toEqual({});
     expect(route("/favicon.ico", "lab")).toEqual({});
+  });
+});
+
+describe("a tenant route takes only a tenant's slug", () => {
+  it("refuses a file a browser asks for, a reserved word, or a malformed slug", () => {
+    expect(isTenantSlug("lab")).toBe(true);
+    expect(isTenantSlug("conservation-angler")).toBe(true);
+    // Each would render the tenant layout, and redirect into a tenant page.
+    expect(isTenantSlug("favicon.ico")).toBe(false);
+    expect(isTenantSlug("portal")).toBe(false);
+    expect(isTenantSlug("Lab")).toBe(false);
+    expect(isTenantSlug("_next")).toBe(false);
   });
 });

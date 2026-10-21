@@ -254,14 +254,12 @@ describe("where", () => {
 });
 
 describe("observationHref", () => {
-  it("sends a mobile fish to its capture's page", () => {
+  it("sends a mobile fish to its own page, which carries its capture's evidence", () => {
     const o = observation({
       method: "lidar",
       client_capture_uuid: "7ceaecf8-2eab-5bb9-a429-c4b68ae38e76",
     });
-    expect(observationHref("lab", o)).toBe(
-      "/lab/data/captures/7ceaecf8-2eab-5bb9-a429-c4b68ae38e76",
-    );
+    expect(observationHref("lab", o)).toBe(`/lab/fish/${CAPTURE}/${FISH}`);
   });
 
   it("sends a Lite fish to its own page", () => {

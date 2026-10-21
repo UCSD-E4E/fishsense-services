@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { describeOrigin, formatLength } from "@/lib/captures";
+import { requireSignedIn } from "@/app/_shell/guard";
+import { describeOrigin, formatLength, getCapture } from "@/lib/captures";
+import { fishEvidence, type Overlay } from "@/lib/fish-evidence";
 import { isSlug, isUuid } from "@/lib/ids";
 import {
   fishName,
@@ -10,7 +12,6 @@ import {
   methodLabel,
   where,
 } from "@/lib/observations";
-import { requireSignedIn } from "@/app/_shell/guard";
 import { paths } from "@/lib/tenant-paths";
 
 export const dynamic = "force-dynamic";
@@ -22,152 +23,294 @@ type Props = {
 type Point = { x: number; y: number } | null | undefined;
 
 /**
- * One measured fish (PLAN.md §4.9, Phase 1 of §9.26): its length, what it
- * is, and the evidence its method rests on. A Lite fish's photo is its
- * frame's render, when it has one (Phase 4). The labelled points are listed,
- * not drawn: they were placed on v1's JPEG, not on this render.
+ * One measured fish, with its evidence (docs/design/README.md; PLAN.md §4.9):
+ * the photo with the measurement drawn on it, the length, how it was measured,
+ * every version of the measurement, and every file behind it with its
+ * checksum. A mobile fish's evidence is its capture's, so this page replaces
+ * the Mobile captures page for it. A Lite fish's photo is its frame's render
+ * (Phase 4); its labelled points are listed, not drawn, because they were
+ * placed on v1's JPEG, not on this render.
  */
 export default async function FishDetailPage({ params }: Props) {
   const { tenant, capture, fish } = await params;
   // A malformed address names no fish: 404, like an unknown one.
   if (!isSlug(tenant) || !isUuid(capture) || !isUuid(fish)) notFound();
   const session = await requireSignedIn(paths.fishDetail(tenant, capture, fish));
-  const detail = await getObservation(session.accessToken ?? "", tenant, capture, fish);
+  const token = session.accessToken ?? "";
+  const detail = await getObservation(token, tenant, capture, fish);
   if (!detail) notFound();
 
   const o = detail.observation;
+  const phone = o.client_capture_uuid
+    ? await getCapture(token, tenant, o.client_capture_uuid)
+    : null;
+  const evidence = fishEvidence(detail, phone);
+  const photo = phone?.files.find((f) => f.role === "rgb_jpeg")?.url ?? o.photo_url;
   const name = fishName(o);
   const error = knownLengthError(o);
   const place = where(o);
 
   return (
-    <main className="mx-auto max-w-4xl px-6 py-12">
-      <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">
-            {formatLength(o.length_m)}
-          </h1>
-          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-            {name.name}
-            {name.detail ? ` · ${name.detail}` : ""} ·{" "}
-            {new Date(o.captured_at).toLocaleString()}
-            {place ? ` · ${place}` : ""}
-          </p>
-        </div>
-        <Link
-          href={paths.fish(tenant)}
-          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700"
-        >
-          All fish
-        </Link>
-      </header>
+    <main className="mx-auto max-w-7xl px-6 py-8">
+      <nav aria-label="Breadcrumb" className="mb-6 text-sm text-fg-2">
+        <Link href={paths.fish(tenant)} className="text-teal-fg hover:underline">
+          Fish
+        </Link>{" "}
+        <span aria-hidden>›</span> {name.name}
+      </nav>
 
-      {o.photo_url && (
-        // Presigned, short-lived Garage URLs: not for next/image's optimizer.
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={o.photo_url}
-          alt={name.name}
-          className="mb-8 w-full rounded-lg border border-slate-200 dark:border-slate-800"
-        />
-      )}
-
-      {error !== null && (
-        <p className="mb-8 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-800 dark:bg-slate-900">
-          {o.fish_model?.name} is a fish model of known length{" "}
-          {formatLength(o.fish_model?.known_length_m)}: this measurement is{" "}
-          <strong>{formatError(error)}</strong>{" "}
-          against it.
-        </p>
-      )}
-
-      <section className="mb-8">
-        <h2 className="mb-3 text-lg font-medium">
-          How it was measured: {methodLabel(o.method)}
-        </h2>
-        <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1 text-sm">
-          {detail.laser && (
-            <>
-              <Row label="Laser depth" value={metres(detail.laser.depth_m)} />
-              <Row label="Laser range" value={metres(detail.laser.range_m)} />
-              <Row
-                label="Calibration"
-                value={detail.laser.calibration_producer ?? "—"}
-              />
-              <Row label="Laser dot" value={pixels(detail.laser.dot)} />
-              <Row label="Head" value={pixels(detail.laser.head)} />
-              <Row label="Tail" value={pixels(detail.laser.tail)} />
-            </>
+      <div className="flex flex-wrap items-start gap-7">
+        <figure className="m-0 min-w-0 flex-[999_1_560px]">
+          {photo ? (
+            <div className="relative overflow-hidden rounded-card bg-raised">
+              {/* Presigned, short-lived Garage URLs: not for next/image's optimizer. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={photo} alt={name.name} className="block w-full" />
+              {evidence.overlay && <MeasurementOverlay overlay={evidence.overlay} />}
+            </div>
+          ) : (
+            <div className="flex aspect-4/3 items-center justify-center rounded-card border border-dashed border-line bg-raised text-sm text-fg-2">
+              No photo of this frame is available yet
+            </div>
           )}
-          {detail.device_points && (
-            <>
-              <Row label="Snout" value={pixels(detail.device_points.snout)} />
-              <Row label="Fork" value={pixels(detail.device_points.fork)} />
-              <Row
-                label="Points"
-                value={describeOrigin(detail.device_points.origin)}
-              />
-            </>
+          {evidence.overlay && (
+            <figcaption className="mt-2.5 flex flex-wrap gap-4 text-sm text-fg-2">
+              <Key className="bg-snout">Snout</Key>
+              <Key className="bg-fork">Fork</Key>
+              {phone?.current_measurement && (
+                <span>Points {describeOrigin(phone.current_measurement.origin)}</span>
+              )}
+            </figcaption>
           )}
-          <Row
-            label="Algorithm"
-            value={[detail.algorithm, detail.algorithm_version]
-              .filter(Boolean)
-              .join(" ") || "—"}
-          />
-          <Row label="fishsense-core" value={detail.core_version ?? "—"} />
-          <Row
-            label="Measured"
-            value={new Date(detail.measured_at).toLocaleString()}
-          />
-        </dl>
-      </section>
+        </figure>
 
-      <section className="mb-8">
-        <h2 className="mb-3 text-lg font-medium">Recorded with</h2>
-        <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1 text-sm">
-          <Row
-            label="Device"
-            value={[o.device.name, o.device.kind && `(${o.device.kind})`]
-              .filter(Boolean)
-              .join(" ") || "—"}
-          />
-          {o.mission && (
-            <Row
-              label="Mission"
-              value={`${o.mission.name ?? "—"}${o.mission.number != null ? ` #${o.mission.number}` : ""}`}
-            />
-          )}
-          {o.client_capture_uuid && (
-            <Row
-              label="Capture"
-              value={
-                <Link
-                  className="underline"
-                  href={paths.capture(tenant, o.client_capture_uuid)}
-                >
-                  photo, depth and files
-                </Link>
-              }
-            />
-          )}
-        </dl>
-      </section>
+        <aside className="flex min-w-0 flex-[1_1_360px] flex-col gap-5">
+          <div className="flex flex-col gap-2 rounded-card border border-line bg-surface p-6">
+            <span className="text-sm font-medium uppercase tracking-wide text-fg-2">
+              Fork length
+            </span>
+            <span className="text-[56px] font-semibold leading-none tracking-tight tabular-nums">
+              <Length metres={o.length_m} />
+            </span>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              <Chip>{methodLabel(o.method)}</Chip>
+            </div>
+            <h1 className="mt-3 text-2xl font-semibold">{name.name}</h1>
+            {name.detail && (
+              <p className="text-fg-2">{o.species ? <i>{name.detail}</i> : name.detail}</p>
+            )}
+            {error !== null && (
+              <p className="mt-2 rounded-control bg-raised p-3 text-sm">
+                A fish model of known length {formatLength(o.fish_model?.known_length_m)}: this
+                measurement is <strong>{formatError(error)}</strong> against it.
+              </p>
+            )}
+          </div>
 
-      {!o.photo_url && (
-        <p className="text-sm text-slate-500">
-          No photo of this frame is available.
-        </p>
+          <section className="rounded-card border border-line bg-surface px-6 py-5">
+            <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-fg-2">
+              Recorded with
+            </h2>
+            <dl className="grid grid-cols-[max-content_1fr] gap-x-5 gap-y-2.5">
+              {o.mission && (
+                <Row label="Mission">
+                  {o.mission.number != null ? (
+                    <Link
+                      href={paths.mission(tenant, o.mission.number)}
+                      className="text-teal-fg hover:underline"
+                    >
+                      {o.mission.number} · {o.mission.name ?? "unnamed"}
+                    </Link>
+                  ) : (
+                    (o.mission.name ?? "—")
+                  )}
+                </Row>
+              )}
+              <Row label="Device">
+                {[o.device.name, o.device.kind && `(${o.device.kind})`].filter(Boolean).join(" ") ||
+                  "—"}
+              </Row>
+              <Row label="Taken">{new Date(o.captured_at).toLocaleString()}</Row>
+              {place && <Row label="Where">{place}</Row>}
+            </dl>
+          </section>
+        </aside>
+      </div>
+
+      <div className="mt-7 grid gap-5 [grid-template-columns:repeat(auto-fit,minmax(340px,1fr))]">
+        <section className="rounded-card border border-line bg-surface px-6 py-5">
+          <h2 className="mb-3 text-lg font-semibold">How it was measured</h2>
+          <dl className="grid grid-cols-[max-content_1fr] gap-x-5 gap-y-2.5">
+            {detail.laser && (
+              <>
+                <Row label="Laser depth">{metres(detail.laser.depth_m)}</Row>
+                <Row label="Laser range">{metres(detail.laser.range_m)}</Row>
+                <Row label="Calibration">{detail.laser.calibration_producer ?? "—"}</Row>
+                <Row label="Laser dot">{pixels(detail.laser.dot)}</Row>
+                <Row label="Head">{pixels(detail.laser.head)}</Row>
+                <Row label="Tail">{pixels(detail.laser.tail)}</Row>
+              </>
+            )}
+            {detail.device_points && (
+              <>
+                <Row label="Snout">{pixels(detail.device_points.snout)}</Row>
+                <Row label="Fork">{pixels(detail.device_points.fork)}</Row>
+                <Row label="Points">{describeOrigin(detail.device_points.origin)}</Row>
+              </>
+            )}
+            <Row label="fishsense-core">{detail.core_version ?? "—"}</Row>
+          </dl>
+        </section>
+
+        <section className="rounded-card border border-line bg-surface px-6 py-5">
+          <h2 className="mb-3 text-lg font-semibold">Measurement history</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="text-left text-fg-2">
+                  <th className="py-1.5 pr-2 font-medium">When</th>
+                  <th className="px-2 py-1.5 font-medium">Length</th>
+                  <th className="py-1.5 pl-2 font-medium">How</th>
+                </tr>
+              </thead>
+              <tbody>
+                {evidence.history.map((h) => (
+                  <tr key={h.key} className={`border-t border-line ${h.current ? "" : "text-fg-2"}`}>
+                    <td className="py-2.5 pr-2">{new Date(h.when).toLocaleString()}</td>
+                    <td className={`px-2 py-2.5 tabular-nums ${h.current ? "font-semibold" : ""}`}>
+                      {h.lengthM == null ? "—" : `${h.lengthM.toFixed(3)} m`}
+                    </td>
+                    <td className="py-2.5 pl-2">
+                      {h.how}
+                      {h.current && (
+                        <span className="ml-2 inline-flex h-5.5 items-center rounded-chip bg-teal-tint px-2 text-xs font-semibold text-teal-fg">
+                          Current
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      {evidence.files.length > 0 && (
+        <section className="mt-5 rounded-card border border-line bg-surface px-6 py-5">
+          <div className="mb-3 flex flex-wrap items-baseline gap-3">
+            <h2 className="text-lg font-semibold">Files</h2>
+            <span className="text-sm text-fg-2">
+              Everything needed to reproduce this length, each with its checksum.
+            </span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="text-left text-fg-2">
+                  <th className="py-1.5 pr-3 font-medium">File</th>
+                  <th className="px-3 py-1.5 font-medium">Size</th>
+                  <th className="py-1.5 pl-3 font-medium">Checksum</th>
+                </tr>
+              </thead>
+              <tbody>
+                {evidence.files.map((f) => (
+                  <tr key={f.label} className="border-t border-line">
+                    <td className="py-2.5 pr-3">
+                      {f.url ? (
+                        <a href={f.url} className="text-teal-fg hover:underline">
+                          {f.label}
+                        </a>
+                      ) : (
+                        f.label
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 tabular-nums">{f.size}</td>
+                    <td className="break-all py-2.5 pl-3 font-mono text-[13px] text-fg-2">
+                      {f.checksum}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
     </main>
   );
 }
 
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
+/** Snout and fork in the design's overlay colours, each ringed so it stands
+ *  out on any photo, joined by a dashed line. */
+function MeasurementOverlay({ overlay }: { overlay: Overlay }) {
+  const r = overlay.width / 110;
+  return (
+    <svg
+      viewBox={`0 0 ${overlay.width} ${overlay.height}`}
+      preserveAspectRatio="none"
+      className="absolute inset-0 h-full w-full"
+      role="img"
+      aria-label="The measurement: snout and fork points joined by a line"
+    >
+      <line
+        x1={overlay.snout.x}
+        y1={overlay.snout.y}
+        x2={overlay.fork.x}
+        y2={overlay.fork.y}
+        stroke="#FFFFFF"
+        strokeWidth={overlay.width / 400}
+        strokeDasharray={`${overlay.width / 120} ${overlay.width / 150}`}
+      />
+      <circle
+        cx={overlay.snout.x}
+        cy={overlay.snout.y}
+        r={r}
+        className="fill-snout stroke-ground"
+        strokeWidth={r / 2.5}
+      />
+      <circle
+        cx={overlay.fork.x}
+        cy={overlay.fork.y}
+        r={r}
+        className="fill-fork stroke-ground"
+        strokeWidth={r / 2.5}
+      />
+    </svg>
+  );
+}
+
+function Length({ metres }: { metres: number | null | undefined }) {
+  if (metres == null) return <>—</>;
   return (
     <>
-      <dt className="text-slate-500">{label}</dt>
-      <dd>{value}</dd>
+      {metres.toFixed(3)}
+      <span className="text-2xl font-medium text-fg-2"> m</span>
+    </>
+  );
+}
+
+function Chip({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex h-7 items-center rounded-chip bg-raised px-2.5 text-sm font-medium">
+      {children}
+    </span>
+  );
+}
+
+function Key({ className, children }: { className: string; children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className={`size-2.5 rounded-full ${className}`} aria-hidden />
+      {children}
+    </span>
+  );
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <>
+      <dt className="text-fg-2">{label}</dt>
+      <dd>{children}</dd>
     </>
   );
 }

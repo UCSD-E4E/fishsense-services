@@ -49,7 +49,13 @@ export function isReserved(slug: string): boolean {
   return (RESERVED_SLUGS as readonly string[]).includes(slug) || slug.startsWith("_");
 }
 
-/** A string that can be a tenant: well formed, and not the web's own. */
+/** A string that can be a tenant: well formed, and not the web's own. The
+ *  `[tenant]` layout 404s anything else, so a browser's `/favicon.ico` is not
+ *  taken for a tenant and sent into its pages. */
+export function isTenantSlug(slug: string): boolean {
+  return isTenant(slug);
+}
+
 function isTenant(slug: string): boolean {
   return isSlug(slug) && !isReserved(slug);
 }

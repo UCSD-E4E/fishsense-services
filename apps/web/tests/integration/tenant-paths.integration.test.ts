@@ -26,6 +26,12 @@ describe("old links redirect to the tenant's path (against the running container
     });
   });
 
+  it("does not take a file a browser asks for as a tenant", async () => {
+    // v0.22.0 sent /favicon.ico to /favicon.ico/fish, and on to sign-in.
+    expect((await location("/favicon.ico")).status).toBe(404);
+    expect((await location("/portal.ico/fish")).status).toBe(404);
+  });
+
   it("sends a signed-out visitor to a tenant page to sign in, coming back there", async () => {
     const { status, to } = await location("/lab/fish");
 
