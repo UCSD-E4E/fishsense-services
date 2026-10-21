@@ -13,7 +13,8 @@ API's job (mobile_api.py); this module only keeps what it is given, once.
   is a :class:`CaptureConflict`, since a committed capture is immutable.
 * :func:`append_device_measurement` -- a later version (a redone two-point
   selection), idempotent on the app's measurement uuid.
-* :func:`list_mobile_captures`, :func:`mobile_capture` -- the reads.
+* :func:`mobile_capture` -- the read. Lists of captures are the Fish list's
+  (observations) since /captures was retired (phase 7b).
 """
 
 from __future__ import annotations
@@ -34,7 +35,6 @@ __all__ = [
     "CaptureConflict",
     "CaptureDetail",
     "CaptureFile",
-    "CaptureSummary",
     "Committed",
     "DeviceMeasurement",
     "MobileCapture",
@@ -43,7 +43,6 @@ __all__ = [
     "append_device_measurement",
     "committed_by",
     "commit_capture",
-    "list_mobile_captures",
     "mobile_capture",
 ]
 
@@ -150,25 +149,6 @@ class Appended:
 
 
 @dataclass(frozen=True)
-class CaptureSummary:
-    client_capture_uuid: uuid.UUID
-    captured_at: datetime
-    latitude: float | None
-    longitude: float | None
-    place_name: str | None
-    length_m: float | None
-    rgb_key: str
-    capture_id: uuid.UUID
-    #: The name the server derived from the coordinates (0041), if any.
-    derived_place_name: str | None = None
-
-    @property
-    def cursor(self) -> tuple[datetime, uuid.UUID]:
-        """Where the next page starts (pass as ``before``)."""
-        return (self.captured_at, self.capture_id)
-
-
-@dataclass(frozen=True)
 class CaptureDetail:
     capture_id: uuid.UUID
     client_capture_uuid: uuid.UUID
@@ -200,6 +180,8 @@ class CaptureDetail:
     measurements: tuple[StoredMeasurement, ...]
     #: The name the server derived from the coordinates (0041), if any.
     derived_place_name: str | None = None
+    #: The fish the phone measured: with ``capture_id``, its page's address.
+    fish_id: uuid.UUID | None = None
 
     @property
     def current_measurement(self) -> StoredMeasurement | None:
@@ -375,55 +357,6 @@ async def committed_by(
     ).scalar_one_or_none()
 
 
-async def list_mobile_captures(
-    conn: AsyncConnection,
-    tenant_id: uuid.UUID,
-    *,
-    limit: int,
-    before: tuple[datetime, uuid.UUID] | None = None,
-) -> list[CaptureSummary]:
-    """Newest first; ``before`` is the previous page's last ``cursor``."""
-    rows = await conn.execute(
-        text(f"""
-            SELECT c.id AS capture_id, c.client_capture_uuid, c.captured_at,
-                c.latitude, c.longitude, mc.place_name, c.raw_object_key,
-                cm.length_m, pn.place_name AS derived_place_name
-            FROM captures c
-            JOIN mobile_captures mc
-              ON mc.tenant_id = c.tenant_id AND mc.capture_id = c.id
-            LEFT JOIN current_measurements cm
-              ON cm.tenant_id = c.tenant_id AND cm.capture_id = c.id
-             AND cm.fish_id = mc.fish_id AND cm.source = 'device'
-            {_DERIVED_PLACE_NAME}
-            WHERE c.tenant_id = :tenant_id
-              AND (CAST(:before_at AS timestamptz) IS NULL
-                   OR (c.captured_at, c.id) < (:before_at, :before_id))
-            ORDER BY c.captured_at DESC, c.id DESC
-            LIMIT :limit
-            """),
-        {
-            "tenant_id": tenant_id,
-            "before_at": before[0] if before else None,
-            "before_id": before[1] if before else None,
-            "limit": limit,
-        },
-    )
-    return [
-        CaptureSummary(
-            client_capture_uuid=row.client_capture_uuid,
-            captured_at=row.captured_at,
-            latitude=row.latitude,
-            longitude=row.longitude,
-            place_name=row.place_name,
-            length_m=row.length_m,
-            rgb_key=row.raw_object_key,
-            capture_id=row.capture_id,
-            derived_place_name=row.derived_place_name,
-        )
-        for row in rows
-    ]
-
-
 async def mobile_capture(
     conn: AsyncConnection, tenant_id: uuid.UUID, client_capture_uuid: uuid.UUID
 ) -> CaptureDetail | None:
@@ -467,6 +400,7 @@ async def mobile_capture(
     )
     return CaptureDetail(
         capture_id=row.id,
+        fish_id=row.fish_id,
         client_capture_uuid=row.client_capture_uuid,
         uploaded_by=row.uploaded_by,
         captured_at=row.captured_at,

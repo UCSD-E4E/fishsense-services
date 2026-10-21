@@ -30,7 +30,6 @@ from fishsense_services_api.mobile_capture_store import (
     NoSuchCapture,
     append_device_measurement,
     commit_capture,
-    list_mobile_captures,
     mobile_capture,
 )
 
@@ -326,75 +325,11 @@ async def test_a_version_for_an_unknown_capture_is_refused(
             )
 
 
-async def test_captures_list_newest_first_with_their_current_length(
-    tenants, app_engine, owner_engine
-):
-    alice = await _user_id(owner_engine, ALICE)
-    older = _capture(
-        alice,
-        at=T0,
-        files=(
-            _file("rgb_jpeg", "1"),
-            _file("depth_f32", "b"),
-            _file("confidence_u8", "c"),
-        ),
-    )
-    newer = _capture(
-        alice,
-        at=T0 + timedelta(hours=1),
-        files=(
-            _file("rgb_jpeg", "2"),
-            _file("depth_f32", "b"),
-            _file("confidence_u8", "c"),
-        ),
-    )
-    await _commit(app_engine, tenants["lab"], older, [_measurement(length=0.3)])
-    await _commit(app_engine, tenants["lab"], newer)
-
-    async with tenant_transaction(app_engine, tenants["lab"]) as conn:
-        listed = await list_mobile_captures(conn, tenants["lab"], limit=10)
-
-    assert [c.client_capture_uuid for c in listed] == [
-        newer.client_capture_uuid,
-        older.client_capture_uuid,
-    ]
-    assert [c.length_m for c in listed] == [None, 0.3]
-    assert listed[1].rgb_key == f"mobile/captures/{older.client_capture_uuid}/rgb_jpeg"
-
-
-async def test_listing_pages_by_time(tenants, app_engine, owner_engine):
-    alice = await _user_id(owner_engine, ALICE)
-    for hour in range(3):
-        files = (
-            _file("rgb_jpeg", str(hour)),
-            _file("depth_f32", "b"),
-            _file("confidence_u8", "c"),
-        )
-        await _commit(
-            app_engine,
-            tenants["lab"],
-            _capture(alice, at=T0 + timedelta(hours=hour), files=files),
-        )
-
-    async with tenant_transaction(app_engine, tenants["lab"]) as conn:
-        first = await list_mobile_captures(conn, tenants["lab"], limit=2)
-        rest = await list_mobile_captures(
-            conn, tenants["lab"], limit=2, before=first[-1].cursor
-        )
-
-    assert [c.captured_at for c in first + rest] == [
-        T0 + timedelta(hours=2),
-        T0 + timedelta(hours=1),
-        T0,
-    ]
-
-
 async def test_another_tenant_sees_none_of_them(tenants, app_engine, owner_engine):
     capture = _capture(await _user_id(owner_engine, ALICE))
     await _commit(app_engine, tenants["lab"], capture)
 
     async with tenant_transaction(app_engine, tenants["partner"]) as conn:
-        assert await list_mobile_captures(conn, tenants["partner"], limit=10) == []
         assert (
             await mobile_capture(conn, tenants["partner"], capture.client_capture_uuid)
             is None
@@ -548,7 +483,7 @@ async def test_current_is_the_latest_measured_not_the_latest_received(
     tenants, app_engine, owner_engine
 ):
     """A version that arrives late (a stale retry) doesn't displace a newer
-    one: everywhere "current" is read -- the capture, the list, and the
+    one: everywhere "current" is read -- the capture and the
     shared `current_measurements` view (§9.13)."""
     alice = await _user_id(owner_engine, ALICE)
     capture = _capture(alice)
@@ -561,7 +496,6 @@ async def test_current_is_the_latest_measured_not_the_latest_received(
             conn, tenants["lab"], capture.client_capture_uuid, alice, older
         )
         found = await mobile_capture(conn, tenants["lab"], capture.client_capture_uuid)
-        listed = await list_mobile_captures(conn, tenants["lab"], limit=10)
         view = (
             await conn.execute(
                 text(
@@ -574,5 +508,4 @@ async def test_current_is_the_latest_measured_not_the_latest_received(
 
     assert [m.length_m for m in found.measurements] == [0.42, 0.45]
     assert found.current_measurement.length_m == 0.45
-    assert listed[0].length_m == 0.45
     assert view == 0.45

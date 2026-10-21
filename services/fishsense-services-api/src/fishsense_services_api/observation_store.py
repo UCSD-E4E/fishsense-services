@@ -157,9 +157,12 @@ async def list_observations(
     before: tuple[datetime, uuid.UUID, uuid.UUID] | None = None,
     device: str | None = None,
     photo_bucket: str | None = None,
+    mission: int | None = None,
 ) -> list[Observation]:
     """Newest first; ``before`` is the previous page's last ``cursor``;
     ``device`` keeps one of :data:`DEVICE_GROUPS` or ``other`` (None: all);
+    ``mission`` keeps one mission's, by number (phase 7b: how a phone's fish
+    are reached once /captures is retired);
     ``photo_bucket`` is the tenant's current bucket (None: no Lite photos)."""
     if device is not None and device != "other" and device not in DEVICE_GROUPS:
         raise ValueError(f"no device group {device!r}")
@@ -176,6 +179,7 @@ async def list_observations(
                            AND (o.device_kind IS NULL
                                 OR o.device_kind <> ALL(CAST(:named AS text[]))))
                        OR o.device_kind = ANY(CAST(:kinds AS text[])))
+                  AND (CAST(:mission AS integer) IS NULL OR o.mission_number = :mission)
                   AND (CAST(:before_at AS timestamptz) IS NULL
                        OR (o.captured_at, o.capture_id, o.fish_id)
                           < (:before_at, :before_capture, :before_fish))
@@ -190,6 +194,7 @@ async def list_observations(
         {
             "tenant_id": tenant_id,
             "device": device,
+            "mission": mission,
             "named": _NAMED_KINDS,
             "kinds": list(DEVICE_GROUPS.get(device, ())),
             "before_at": before[0] if before else None,

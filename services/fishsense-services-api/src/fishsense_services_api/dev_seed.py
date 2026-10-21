@@ -667,12 +667,14 @@ async def _mobile(
         return 0
 
     width, height = DEPTH_SIZE
+    mask_width, mask_height = jpeg_size(frame.jpeg)
     length = DECOY_LENGTH_M * (1 + SCATTER[(i + 3) % len(SCATTER)])
     contents = {
         "rgb_jpeg": frame.jpeg,
         "rgb_lossless": _png_gray(64, 48),
         "depth_f32": np.full((height, width), 0.6 + 0.1 * i, dtype="<f4").tobytes(),
         "confidence_u8": np.full((height, width), 2, dtype=np.uint8).tobytes(),
+        "mask_u8": _fish_mask(mask_width, mask_height, frame.head, frame.tail),
     }
     objects = stores.for_tenant(TENANT)
     files = []
@@ -725,8 +727,8 @@ async def _mobile(
         depth_row_bytes=width * 4,
         confidence_width=width,
         confidence_height=height,
-        mask_width=None,
-        mask_height=None,
+        mask_width=mask_width,
+        mask_height=mask_height,
         files=tuple(files),
         manifest={"dev_seed": True},
     )
@@ -744,6 +746,25 @@ async def _mobile(
     )
     committed = await commit_capture(conn, tenant_id, capture, [measurement])
     return int(committed.created)
+
+
+def _fish_mask(
+    width: int,
+    height: int,
+    head: tuple[float, float],
+    tail: tuple[float, float],
+) -> bytes:
+    """A phone's fish mask stand-in, at the RGB frame's size: an ellipse along
+    snout to fork, a fifth as wide as it is long (uint8, 255 on the fish)."""
+    (hx, hy), (tx, ty) = head, tail
+    length = max(((tx - hx) ** 2 + (ty - hy) ** 2) ** 0.5, 1.0)
+    ux, uy = (tx - hx) / length, (ty - hy) / length
+    ys, xs = np.mgrid[0:height, 0:width]
+    dx, dy = xs - (hx + tx) / 2, ys - (hy + ty) / 2
+    along = dx * ux + dy * uy
+    across = -dx * uy + dy * ux
+    inside = (along / (length / 2)) ** 2 + (across / (length / 10)) ** 2 <= 1
+    return np.where(inside, 255, 0).astype(np.uint8).tobytes()
 
 
 def _png_gray(width: int, height: int) -> bytes:

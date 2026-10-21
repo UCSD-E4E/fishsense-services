@@ -230,6 +230,27 @@ async def test_a_capture_syncs_and_reads_back_byte_for_byte(tenants, client):
     assert detail["manifest"]["arkit_timestamp"] == 81234.5
 
 
+async def test_a_capture_names_its_fish_as_the_fish_list_does(tenants, client):
+    """Phase 7b: an old /captures/<uuid> link is sent to its fish's page,
+    which the Fish list addresses by capture and fish id."""
+    capture = uuid.uuid4()
+    await _sync(client, capture)
+
+    detail = (
+        await client.get(
+            f"/tenants/lab/mobile/captures/{capture}", headers=_bearer(BOB)
+        )
+    ).json()
+    (fish,) = (
+        await client.get("/tenants/lab/observations", headers=_bearer(BOB))
+    ).json()["observations"]
+
+    assert (detail["capture_id"], detail["fish_id"]) == (
+        fish["capture_id"],
+        fish["fish_id"],
+    )
+
+
 async def test_uploads_go_into_the_tenants_own_bucket(tenants, client, stores):
     capture = uuid.uuid4()
     granted = await _upload(client, capture)
@@ -351,63 +372,21 @@ async def test_a_non_member_sees_nothing(tenants, client):
     capture = uuid.uuid4()
     await _sync(client, capture)
 
-    listed = await client.get("/tenants/lab/mobile/captures", headers=_bearer(OUTSIDER))
     one = await client.get(
         f"/tenants/lab/mobile/captures/{capture}", headers=_bearer(OUTSIDER)
     )
 
-    assert (listed.status_code, one.status_code) == (404, 404)
+    assert one.status_code == 404
 
 
-async def test_the_list_shows_newest_first_with_a_thumbnail_link(tenants, client):
-    first, second = uuid.uuid4(), uuid.uuid4()
-    await _sync(client, first, captured_at="2026-10-11T17:00:00Z")
-    files = {**FILES, "rgb_jpeg": RGB + b"2"}
-    await _upload(client, second, files=files)
-    await client.put(
-        f"/tenants/lab/mobile/captures/{second}",
-        json=_commit_body(
-            files=files, captured_at="2026-10-11T18:00:00Z", measurements=[]
-        ),
-        headers=_bearer(ALICE),
-    )
+async def test_the_capture_list_is_retired(tenants, client):
+    """Phase 7b: the app never read it, and the web reaches a phone's fish
+    through the Fish list and their missions."""
+    await _sync(client, uuid.uuid4())
 
-    page = (
-        await client.get("/tenants/lab/mobile/captures", headers=_bearer(BOB))
-    ).json()
+    listed = await client.get("/tenants/lab/mobile/captures", headers=_bearer(BOB))
 
-    assert [c["client_capture_uuid"] for c in page["captures"]] == [
-        str(second),
-        str(first),
-    ]
-    assert [c["length_m"] for c in page["captures"]] == [None, 0.42]
-    assert urllib.request.urlopen(page["captures"][1]["rgb_url"]).read() == RGB
-
-
-async def test_the_list_pages(tenants, client):
-    for hour in range(3):
-        capture = uuid.uuid4()
-        files = {**FILES, "rgb_jpeg": RGB + str(hour).encode()}
-        await _upload(client, capture, files=files)
-        await client.put(
-            f"/tenants/lab/mobile/captures/{capture}",
-            json=_commit_body(files=files, captured_at=f"2026-10-11T1{hour}:00:00Z"),
-            headers=_bearer(ALICE),
-        )
-
-    first = (
-        await client.get("/tenants/lab/mobile/captures?limit=2", headers=_bearer(ALICE))
-    ).json()
-    rest = (
-        await client.get(
-            "/tenants/lab/mobile/captures",
-            params={"limit": 2, "before": first["next"]},
-            headers=_bearer(ALICE),
-        )
-    ).json()
-
-    assert len(first["captures"]) == 2 and first["next"]
-    assert len(rest["captures"]) == 1 and rest["next"] is None
+    assert listed.status_code in (404, 405)
 
 
 async def test_a_redone_selection_becomes_the_current_length(tenants, client):
@@ -796,21 +775,22 @@ class TestDerivedPlaceNames:
 
         assert len(geocoder.calls) == 1
 
-    async def test_the_list_shows_derived_names_and_fills_missing_ones(
+    async def test_the_fish_list_shows_derived_names_and_fills_missing_ones(
         self, tenants, client, geocoder
     ):
+        """The retry the capture list made until it was retired (phase 7b):
+        the geocoder was down at commit, and a later read names the capture."""
         capture = uuid.uuid4()
         geocoder.answer = GeocoderUnavailable("down")
         await _sync(client, capture, location=_unnamed())
         geocoder.answer = ReverseGeocode(place_name="Scripps Pier", source="photon")
 
-        await client.get("/tenants/lab/mobile/captures", headers=_bearer(BOB))
+        await client.get("/tenants/lab/observations", headers=_bearer(BOB))
         page = (
-            await client.get("/tenants/lab/mobile/captures", headers=_bearer(BOB))
+            await client.get("/tenants/lab/observations", headers=_bearer(BOB))
         ).json()
 
-        assert page["captures"][0]["derived_place_name"] == "Scripps Pier"
-        assert page["captures"][0]["place_name"] is None
+        assert page["observations"][0]["place_name"] == "Scripps Pier"
 
     async def test_no_name_is_asked_again_once_it_is_old(
         self, tenants, client, geocoder, owner_engine

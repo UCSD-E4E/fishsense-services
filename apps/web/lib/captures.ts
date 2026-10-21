@@ -10,9 +10,8 @@
 import { apiClient, failure, type Schemas } from "./api/client";
 import type { TenantMembership } from "./fishsense-api";
 import { safeSlug, safeUuid } from "./ids";
+import { paths } from "./tenant-paths";
 
-export type CapturePage = Schemas["CapturePage"];
-export type CaptureSummary = Schemas["CaptureSummaryView"];
 export type Capture = Schemas["CaptureView"];
 export type Measurement = Schemas["MeasurementView"];
 
@@ -25,24 +24,13 @@ export function chooseTenant(
   return tenants.find((t) => t.slug === requested) ?? tenants[0] ?? null;
 }
 
-/** One page of the tenant's captures, newest first. */
-export async function getCapturePage(
-  accessToken: string,
+/** Where an old link to a capture goes: its fish's page (phase 7b, when the
+ *  capture list was retired); null for a capture without a fish. */
+export function fishOfCapture(
   slug: string,
-  before?: string,
-): Promise<CapturePage> {
-  const { data, error, response } = await apiClient(accessToken).GET(
-    "/tenants/{slug}/mobile/captures",
-    {
-      params: {
-        path: { slug: safeSlug(slug) },
-        query: before ? { before } : {},
-      },
-    },
-  );
-  if (data === undefined)
-    throw failure("fishsense-api captures failed", response, error);
-  return data;
+  capture: { capture_id: string; fish_id?: string | null },
+): string | null {
+  return capture.fish_id ? paths.fishDetail(slug, capture.capture_id, capture.fish_id) : null;
 }
 
 /** One capture with everything the phone saved; null when there is none

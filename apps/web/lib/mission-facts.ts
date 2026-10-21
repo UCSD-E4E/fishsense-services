@@ -77,6 +77,14 @@ export function portLabel(port: Port, source: PortSource | null | undefined): st
   return source ? `${PORT_NAMES[port]} (${SOURCE_NAMES[source]})` : PORT_NAMES[port];
 }
 
+export type Source = MissionRow["source"];
+
+/** The missions page's `?source=` (phase 7b: "Phone" is where the capture
+ *  list's old links land); anything else shows every mission. */
+export function sourceFilter(value: string | undefined): Source | undefined {
+  return value === "lite" || value === "mobile" ? value : undefined;
+}
+
 /** A phone's outing rather than a folder off a Lite camera (0057). */
 export function isPhoneMission(m: Pick<MissionRow, "source">): boolean {
   return m.source === "mobile";

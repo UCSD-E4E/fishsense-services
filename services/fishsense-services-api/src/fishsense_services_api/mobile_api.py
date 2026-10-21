@@ -30,7 +30,6 @@ field this API doesn't model yet isn't lost.
 """
 
 import asyncio
-import logging
 import base64
 import math
 import uuid
@@ -44,7 +43,6 @@ from fastapi import (
     Depends,
     FastAPI,
     HTTPException,
-    Query,
     Response,
     status,
 )
@@ -54,11 +52,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from fishsense_services_api.auth import Principal
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.memberships import Membership
-from fishsense_services_api.place_name_store import (
-    needing_place_names,
-    record_place_name,
-)
-from fishsense_services_api.place_names import Geocoder, GeocoderUnavailable
+from fishsense_services_api.place_names import Geocoder
+from fishsense_services_api.place_naming import PlaceNamer
 from fishsense_services_api.mobile_capture_store import (
     CaptureConflict,
     CaptureDetail,
@@ -70,7 +65,6 @@ from fishsense_services_api.mobile_capture_store import (
     append_device_measurement,
     commit_capture,
     committed_by,
-    list_mobile_captures,
     mobile_capture,
 )
 from fishsense_services_api.tenant_stores import (
@@ -82,9 +76,6 @@ from fishsense_services_api.tenant_stores import (
 MB = 1 << 20
 #: At most this many captures are named per request, so one page view can't
 #: hand the geocoder a backlog.
-MAX_PLACE_NAMES_PER_REQUEST = 20
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -305,6 +296,10 @@ class MeasurementView(BaseModel):
 
 class CaptureView(BaseModel):
     client_capture_uuid: uuid.UUID
+    #: The server's ids for the capture and its fish, as the Fish list gives
+    #: them: a fish's page is addressed by both (phase 7b).
+    capture_id: uuid.UUID
+    fish_id: uuid.UUID | None
     captured_at: datetime
     device: DeviceInfo
     app_version: str | None
@@ -327,23 +322,6 @@ class CaptureView(BaseModel):
     derived_place_name: str | None = None
 
 
-class CaptureSummaryView(BaseModel):
-    client_capture_uuid: uuid.UUID
-    captured_at: datetime
-    latitude: float | None
-    longitude: float | None
-    place_name: str | None
-    length_m: float | None
-    rgb_url: str | None
-    derived_place_name: str | None = None
-
-
-class CapturePage(BaseModel):
-    captures: list[CaptureSummaryView]
-    #: Pass as ``before`` for the next page; None at the end.
-    next: str | None
-
-
 def add_mobile_routes(
     app: FastAPI,
     *,
@@ -352,35 +330,13 @@ def add_mobile_routes(
     authenticate,
     stores: TenantStores,
     geocoder: Geocoder | None = None,
+    namer: PlaceNamer | None = None,
 ) -> None:
     """``membership`` and ``authenticate`` are the app's dependencies;
-    ``geocoder`` names captures the app couldn't (None: no derived names)."""
+    ``geocoder`` names captures the app couldn't (None: no derived names), by
+    way of ``namer`` when the app shares one."""
 
-    async def fill_place_names(
-        tenant_id: uuid.UUID, capture_ids: list[uuid.UUID]
-    ) -> None:
-        """Derive a place name for each capture that needs one. Runs after the
-        response; an outage is logged and retried on a later read."""
-        async with tenant_transaction(engine, tenant_id) as conn:
-            unnamed = await needing_place_names(conn, tenant_id, capture_ids)
-        for capture in unnamed[:MAX_PLACE_NAMES_PER_REQUEST]:
-            try:
-                found = await geocoder.reverse(capture.latitude, capture.longitude)
-            except GeocoderUnavailable as error:
-                logger.warning("geocoder unavailable; place names wait: %s", error)
-                return
-            async with tenant_transaction(engine, tenant_id) as conn:
-                # Another request may have named it meanwhile.
-                if await needing_place_names(conn, tenant_id, [capture.capture_id]):
-                    await record_place_name(conn, tenant_id, capture.capture_id, found)
-
-    def name_later(
-        background: BackgroundTasks,
-        tenant_id: uuid.UUID,
-        capture_ids: list[uuid.UUID],
-    ) -> None:
-        if geocoder is not None and capture_ids:
-            background.add_task(fill_place_names, tenant_id, capture_ids)
+    name_later = (namer or PlaceNamer(engine, geocoder)).later
 
     Member = Annotated[Membership, Depends(membership)]
     Caller = Annotated[Principal, Depends(authenticate)]
@@ -532,51 +488,6 @@ def add_mobile_routes(
         return _measurement_view(appended.measurement)
 
     @app.get(
-        "/tenants/{slug}/mobile/captures",
-        operation_id="list_mobile_captures",
-        response_model=CapturePage,
-    )
-    async def list_captures(
-        slug: str,
-        member: Member,
-        background: BackgroundTasks,
-        limit: Annotated[int, Query(ge=1, le=200)] = 50,
-        before: str | None = None,
-    ) -> CapturePage:
-        cursor = _parse_cursor(before) if before else None
-        async with tenant_transaction(engine, member.tenant_id) as conn:
-            found = await list_mobile_captures(
-                conn, member.tenant_id, limit=limit + 1, before=cursor
-            )
-        objects = readable(slug)
-        page, more = found[:limit], len(found) > limit
-        name_later(
-            background,
-            member.tenant_id,
-            [
-                c.capture_id
-                for c in page
-                if c.place_name is None and c.derived_place_name is None
-            ],
-        )
-        return CapturePage(
-            captures=[
-                CaptureSummaryView(
-                    client_capture_uuid=c.client_capture_uuid,
-                    captured_at=c.captured_at,
-                    latitude=c.latitude,
-                    longitude=c.longitude,
-                    place_name=c.place_name,
-                    length_m=c.length_m,
-                    rgb_url=objects.presign_get(c.rgb_key) if objects else None,
-                    derived_place_name=c.derived_place_name,
-                )
-                for c in page
-            ],
-            next=_cursor(page[-1].cursor) if more else None,
-        )
-
-    @app.get(
         "/tenants/{slug}/mobile/captures/{client_capture_uuid}",
         operation_id="get_mobile_capture",
         response_model=CaptureView,
@@ -694,6 +605,8 @@ def _view(detail: CaptureDetail, objects: TenantObjects | None) -> CaptureView:
     )
     return CaptureView(
         client_capture_uuid=detail.client_capture_uuid,
+        capture_id=detail.capture_id,
+        fish_id=detail.fish_id,
         captured_at=detail.captured_at,
         device=DeviceInfo(
             install_id=detail.device_install_id,
@@ -737,17 +650,3 @@ def _view(detail: CaptureDetail, objects: TenantObjects | None) -> CaptureView:
         manifest=detail.manifest,
         derived_place_name=detail.derived_place_name,
     )
-
-
-def _cursor(position: tuple[datetime, uuid.UUID]) -> str:
-    return f"{position[0].isoformat()}~{position[1]}"
-
-
-def _parse_cursor(value: str) -> tuple[datetime, uuid.UUID]:
-    try:
-        at, _, capture_id = value.partition("~")
-        return datetime.fromisoformat(at), uuid.UUID(capture_id)
-    except ValueError:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT, "not a page cursor"
-        ) from None

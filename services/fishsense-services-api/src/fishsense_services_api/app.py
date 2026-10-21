@@ -44,6 +44,7 @@ from fishsense_services_api.mobile_api import add_mobile_routes
 from fishsense_services_api.place_names import Geocoder
 from fishsense_services_api.missions_api import add_mission_routes
 from fishsense_services_api.observations_api import add_observation_routes
+from fishsense_services_api.place_naming import PlaceNamer
 from fishsense_services_api.public_api import add_public_routes
 from fishsense_services_api.portal_api import add_portal_routes
 from fishsense_services_api.tenant_stores import TenantStores
@@ -281,7 +282,12 @@ def create_app(
 
     add_portal_routes(app, engine=engine, membership=membership)
     add_mission_routes(app, engine=engine, membership=membership)
-    add_observation_routes(app, engine=engine, membership=membership, stores=stores)
+    # One namer for the capture page and the Fish list, the reads that retry
+    # naming the phone captures the app couldn't name.
+    namer = PlaceNamer(engine, geocoder)
+    add_observation_routes(
+        app, engine=engine, membership=membership, stores=stores, namer=namer
+    )
     add_public_routes(app, engine=engine)
     add_mobile_routes(
         app,
@@ -290,6 +296,7 @@ def create_app(
         authenticate=authenticate,
         stores=stores,
         geocoder=geocoder,
+        namer=namer,
     )
     return app
 

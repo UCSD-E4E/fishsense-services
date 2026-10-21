@@ -173,125 +173,6 @@
         "title": "CaptureCommit",
         "type": "object"
       },
-      "CapturePage": {
-        "properties": {
-          "captures": {
-            "items": {
-              "$ref": "#/components/schemas/CaptureSummaryView"
-            },
-            "title": "Captures",
-            "type": "array"
-          },
-          "next": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next"
-          }
-        },
-        "required": [
-          "captures",
-          "next"
-        ],
-        "title": "CapturePage",
-        "type": "object"
-      },
-      "CaptureSummaryView": {
-        "properties": {
-          "captured_at": {
-            "format": "date-time",
-            "title": "Captured At",
-            "type": "string"
-          },
-          "client_capture_uuid": {
-            "format": "uuid",
-            "title": "Client Capture Uuid",
-            "type": "string"
-          },
-          "derived_place_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Derived Place Name"
-          },
-          "latitude": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Latitude"
-          },
-          "length_m": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Length M"
-          },
-          "longitude": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Longitude"
-          },
-          "place_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Place Name"
-          },
-          "rgb_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rgb Url"
-          }
-        },
-        "required": [
-          "client_capture_uuid",
-          "captured_at",
-          "latitude",
-          "longitude",
-          "place_name",
-          "length_m",
-          "rgb_url"
-        ],
-        "title": "CaptureSummaryView",
-        "type": "object"
-      },
       "CaptureView": {
         "properties": {
           "app_version": {
@@ -318,6 +199,11 @@
               }
             ],
             "title": "Camera Pose"
+          },
+          "capture_id": {
+            "format": "uuid",
+            "title": "Capture Id",
+            "type": "string"
           },
           "captured_at": {
             "format": "date-time",
@@ -376,6 +262,18 @@
             },
             "title": "Files",
             "type": "array"
+          },
+          "fish_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fish Id"
           },
           "intrinsics": {
             "items": {
@@ -441,6 +339,8 @@
         },
         "required": [
           "client_capture_uuid",
+          "capture_id",
+          "fish_id",
           "captured_at",
           "device",
           "app_version",
@@ -3819,78 +3719,6 @@
         "summary": "Set Mission Purpose"
       }
     },
-    "/tenants/{slug}/mobile/captures": {
-      "get": {
-        "operationId": "list_mobile_captures",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "before",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Before"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CapturePage"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "List Captures"
-      }
-    },
     "/tenants/{slug}/mobile/captures/{client_capture_uuid}": {
       "get": {
         "operationId": "get_mobile_capture",
@@ -4187,6 +4015,23 @@
                 }
               ],
               "title": "Device"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mission",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Mission"
             }
           },
           {

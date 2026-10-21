@@ -17,7 +17,7 @@ describe("every tenant page lives under its slug (docs/design/README.md, Tenants
     expect(paths.deployment("lab", 4)).toBe("/lab/data/deployments/4");
     expect(paths.missions("lab")).toBe("/lab/data/missions");
     expect(paths.mission("lab", 383)).toBe("/lab/data/missions/383");
-    expect(paths.captures("lab")).toBe("/lab/data/captures");
+    expect(paths.phoneMissions("lab")).toBe("/lab/data/missions?source=mobile");
     expect(paths.capture("lab", "u1")).toBe("/lab/data/captures/u1");
   });
 
@@ -44,6 +44,7 @@ describe("switching tenants keeps the section, not the record", () => {
     expect(switchHref("/lab/data/missions/383", "angler")).toBe("/angler/data/missions");
     expect(switchHref("/lab/data/deployments/4", "angler")).toBe("/angler/data");
     expect(switchHref("/lab/data", "angler")).toBe("/angler/data");
+    expect(switchHref("/lab/data/captures/u1", "angler")).toBe("/angler/data/missions");
   });
 
   it("goes to the tenant's fish from anywhere else", () => {
@@ -69,7 +70,8 @@ describe("old links redirect to the tenant's path", () => {
     expect(go("/fish?tenant=lab&device=mobile")).toBe("/lab/fish?device=mobile");
     expect(go("/deployments?tenant=lab")).toBe("/lab/data");
     expect(go("/missions?tenant=lab")).toBe("/lab/data/missions");
-    expect(go("/captures?tenant=lab&before=x")).toBe("/lab/data/captures?before=x");
+    // The capture list is retired (phase 7b): phone fish are in their missions.
+    expect(go("/captures?tenant=lab&before=x")).toBe("/lab/data/missions?source=mobile");
   });
 
   it("uses the last tenant when the link names none", () => {
