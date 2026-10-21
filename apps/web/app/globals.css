@@ -1,4 +1,35 @@
 @import "tailwindcss";
+@import "./tokens.css";
+
+/* The Deep water tokens (docs/design/README.md) as Tailwind's theme: `bg-surface`,
+   `text-fg-2`, `border-line`, `bg-teal text-on-teal`. Each is a variable from
+   tokens.css, so the theme follows the system without `dark:` variants. */
+@theme inline {
+  --color-ground: var(--fs-ground);
+  --color-surface: var(--fs-surface);
+  --color-raised: var(--fs-raised);
+  --color-line: var(--fs-line);
+  --color-fg: var(--fs-text);
+  --color-fg-2: var(--fs-text2);
+  --color-fg-3: var(--fs-text3);
+  --color-teal: var(--fs-teal);
+  --color-teal-fg: var(--fs-teal-text);
+  --color-teal-tint: var(--fs-teal-tint);
+  --color-on-teal: var(--fs-on-teal);
+  --color-warn: var(--fs-warn);
+  --color-error: var(--fs-error);
+  --color-snout: var(--fs-overlay-snout);
+  --color-fork: var(--fs-overlay-fork);
+  --color-laser: var(--fs-overlay-laser);
+  --color-mask: var(--fs-overlay-mask);
+  --color-mask-edge: var(--fs-overlay-mask-edge);
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+  --radius-card: var(--fs-radius-card);
+  --radius-sheet: var(--fs-radius-sheet);
+  --radius-control: var(--fs-radius-control);
+  --radius-chip: var(--fs-radius-chip);
+}
 
 /* v4 scopes `hover:` to `@media (hover: hover)`, which drops the tap feedback
    v3 gave on phones -- and triage is used one-handed on one. Keep v3's. */

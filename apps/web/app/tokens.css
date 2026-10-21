@@ -1,0 +1,44 @@
+/* Generated from docs/design/tokens.json by `npm run tokens:generate`. Do not edit. */
+
+:root {
+  --fs-ground: #F6F8F9;
+  --fs-surface: #FFFFFF;
+  --fs-raised: #EEF2F4;
+  --fs-line: #DDE3E7;
+  --fs-text: #0E1418;
+  --fs-text2: #4A5862;
+  --fs-text3: #56646E;
+  --fs-teal: #00AAA5;
+  --fs-teal-text: #00706C;
+  --fs-teal-tint: #E3F5F4;
+  --fs-on-teal: #001A19;
+  --fs-warn: #875800;
+  --fs-error: #B42318;
+  --fs-overlay-snout: #2563EB;
+  --fs-overlay-fork: #FFB547;
+  --fs-overlay-mask: rgba(0, 170, 165, 0.35);
+  --fs-overlay-mask-edge: #00AAA5;
+  --fs-overlay-laser: #E51717;
+  --fs-radius-card: 12px;
+  --fs-radius-sheet: 16px;
+  --fs-radius-control: 10px;
+  --fs-radius-chip: 9999px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fs-ground: #0B0F12;
+    --fs-surface: #141A1F;
+    --fs-raised: #1C242B;
+    --fs-line: #2A343C;
+    --fs-text: #E8EEF1;
+    --fs-text2: #9AA8B1;
+    --fs-text3: #84939D;
+    --fs-teal: #00AAA5;
+    --fs-teal-text: #2CCBC5;
+    --fs-teal-tint: #0E2B2A;
+    --fs-on-teal: #001A19;
+    --fs-warn: #F2B544;
+    --fs-error: #FF7A6E;
+  }
+}

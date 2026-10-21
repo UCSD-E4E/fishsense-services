@@ -48,9 +48,15 @@ export default async function DeploymentsPage({ searchParams }: Props) {
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
             Field trips, each holding the missions recorded on it.{" "}
             {tenant && (
-              <Link href={`/missions?tenant=${tenant.slug}`} className="text-sky-700 hover:underline dark:text-sky-400">
-                All missions
-              </Link>
+              <>
+                <Link href={`/missions?tenant=${tenant.slug}`} className="text-sky-700 hover:underline dark:text-sky-400">
+                  All missions
+                </Link>
+                {" · "}
+                <Link href={`/captures?tenant=${tenant.slug}`} className="text-sky-700 hover:underline dark:text-sky-400">
+                  Mobile captures
+                </Link>
+              </>
             )}
           </p>
         </div>

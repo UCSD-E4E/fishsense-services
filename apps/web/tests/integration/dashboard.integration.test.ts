@@ -37,8 +37,8 @@ describe("fishsense-web SSR (against the running container)", () => {
   });
 
   it("renders the dashboard title", () => {
-    // Both the <title> head element and the <h1> body header carry it.
-    expect(body).toContain("E4E FishSense");
+    // The <title> head element; the <h1> and the shell's mark say it too.
+    expect(body).toContain("<title>FishSense</title>");
   });
 
   it("renders the static Results section with both Superset cards", () => {
