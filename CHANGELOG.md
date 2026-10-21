@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.23.0...v0.24.0) (2026-10-21)
+
+
+### Features
+
+* **web:** the Data pages in Deep water, each mission's camera and frames ([f4aa338](https://github.com/UCSD-E4E/fishsense-services/commit/f4aa3381f1248df8d9c43a90449eabfb83d58111))
+
 ## [0.23.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.22.0...v0.23.0) (2026-10-21)
 
 
