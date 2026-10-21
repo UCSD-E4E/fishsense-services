@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.31.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.30.1...v0.31.0) (2026-10-21)
+
+
+### Features
+
+* import FishSense Mobile exports from the NAS (CCFRP summer 2025) ([f812080](https://github.com/UCSD-E4E/fishsense-services/commit/f812080a6533a068cb0ed08be153576ab89f6f4b))
+* import FishSense Mobile exports from the NAS (CCFRP summer 2025) ([5add8d7](https://github.com/UCSD-E4E/fishsense-services/commit/5add8d79e5449301b31596bf966956bca7b29f0d))
+
+
+### Documentation
+
+* **handoff:** propose the fish mask as a PNG ([ed93237](https://github.com/UCSD-E4E/fishsense-services/commit/ed93237e50927a673856a6c3ac7f81a004044c1b))
+* **handoff:** propose the fish mask as a PNG ([70a1c39](https://github.com/UCSD-E4E/fishsense-services/commit/70a1c3996a5a1eaf244d4459a1849ab660184e72))
+
 ## [0.30.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.30.0...v0.30.1) (2026-10-21)
 
 
