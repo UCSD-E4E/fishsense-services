@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.27.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.26.1...v0.27.0) (2026-10-21)
+
+
+### Features
+
+* system admins open any tenant, read-only until a recorded unlock ([cf02025](https://github.com/UCSD-E4E/fishsense-services/commit/cf02025a4caed1e2cbc1a1ee4bcfea5784f475ca))
+* system admins open any tenant, read-only until a recorded unlock ([8862b53](https://github.com/UCSD-E4E/fishsense-services/commit/8862b53c339221acbcbdf3cd84bdb43bc54e67cf))
+
 ## [0.26.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.26.0...v0.26.1) (2026-10-21)
 
 
