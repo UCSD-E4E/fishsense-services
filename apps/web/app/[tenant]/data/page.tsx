@@ -44,15 +44,15 @@ export default async function DeploymentsPage({ params }: Props) {
       <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Deployments</h1>
-          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+          <p className="mt-1 text-sm text-fg-2">
             Field trips, each holding the missions recorded on it.{" "}
             {tenant && (
               <>
-                <Link href={paths.missions(tenant.slug)} className="text-sky-700 hover:underline dark:text-sky-400">
+                <Link href={paths.missions(tenant.slug)} className="text-teal-fg hover:underline">
                   All missions
                 </Link>
                 {" · "}
-                <Link href={paths.captures(tenant.slug)} className="text-sky-700 hover:underline dark:text-sky-400">
+                <Link href={paths.captures(tenant.slug)} className="text-teal-fg hover:underline">
                   Mobile captures
                 </Link>
               </>
@@ -62,27 +62,27 @@ export default async function DeploymentsPage({ params }: Props) {
       </header>
 
       {failure ? (
-        <p className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-700 dark:bg-red-950 dark:text-red-300">
+        <p className="rounded-card border border-error/40 bg-error/10 p-3 text-sm text-error">
           Could not load deployments: {failure}
         </p>
       ) : !tenant ? (
-        <p className="text-sm text-slate-600 dark:text-slate-400">
+        <p className="text-sm text-fg-2">
           This account isn&apos;t a member of any tenant yet.
         </p>
       ) : (
         <div className="space-y-8">
           {deployments.length === 0 ? (
-            <p className="text-sm text-slate-600 dark:text-slate-400">No deployments yet.</p>
+            <p className="text-sm text-fg-2">No deployments yet.</p>
           ) : (
-            <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+            <ul className="divide-y divide-line overflow-hidden rounded-card border border-line bg-surface">
               {deployments.map((d) => (
                 <li key={d.number}>
                   <Link
                     href={deploymentHref(tenant.slug, d.number)}
-                    className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-900"
+                    className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3 hover:bg-raised"
                   >
                     <span className="font-medium">{d.name}</span>
-                    <span className="text-sm text-slate-500">
+                    <span className="text-sm text-fg-2">
                       {dates(d)} · {d.missions} {d.missions === 1 ? "mission" : "missions"}
                     </span>
                   </Link>

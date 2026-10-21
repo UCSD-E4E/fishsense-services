@@ -7,7 +7,7 @@ import { useState, useTransition } from "react";
 import { createDeploymentAction } from "./missions/actions";
 
 const field =
-  "rounded-md border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900";
+  "rounded-control border border-line bg-surface px-2 py-1 text-sm";
 
 export function NewDeploymentForm({ slug }: { slug: string }) {
   const [form, setForm] = useState({ name: "", started_on: "", ended_on: "", notes: "" });
@@ -32,7 +32,7 @@ export function NewDeploymentForm({ slug }: { slug: string }) {
   return (
     <form
       onSubmit={submit}
-      className="space-y-3 rounded-lg border border-slate-200 p-5 dark:border-slate-800"
+      className="space-y-3 rounded-card border border-line bg-surface p-5"
     >
       <h2 className="text-lg font-semibold">New deployment</h2>
       <div className="flex flex-wrap gap-2">
@@ -58,11 +58,11 @@ export function NewDeploymentForm({ slug }: { slug: string }) {
         <button
           type="submit"
           disabled={pending}
-          className="rounded-md bg-slate-900 px-3 py-1 text-sm font-medium text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
+          className="inline-flex h-10 items-center rounded-control bg-teal px-4 text-sm font-semibold text-on-teal disabled:opacity-50"
         >
           Create
         </button>
-        {error && <p className="text-sm text-red-700 dark:text-red-400">{error}</p>}
+        {error && <p className="text-sm text-error">{error}</p>}
       </div>
     </form>
   );

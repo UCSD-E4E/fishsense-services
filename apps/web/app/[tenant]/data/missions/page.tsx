@@ -41,7 +41,7 @@ function keep(m: MissionRow, purpose: PurposeFilter, unknownPort: boolean): bool
 }
 
 const chip =
-  "rounded-full border border-slate-300 px-3 py-1 text-sm aria-[current=page]:border-slate-900 aria-[current=page]:bg-slate-900 aria-[current=page]:text-white dark:border-slate-700 dark:aria-[current=page]:border-slate-100 dark:aria-[current=page]:bg-slate-100 dark:aria-[current=page]:text-slate-900";
+  "inline-flex h-11 items-center rounded-chip border border-line bg-surface px-4 text-sm font-medium aria-[current=page]:border-teal aria-[current=page]:bg-teal-tint aria-[current=page]:font-semibold aria-[current=page]:text-teal-fg";
 
 /**
  * Every mission in a tenant -- Lite dives and calibration sessions alike --
@@ -74,10 +74,10 @@ export default async function MissionsPage({ params, searchParams }: Props) {
       <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Missions</h1>
-          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+          <p className="mt-1 text-sm text-fg-2">
             Every recording session: dives, calibrations and known-length runs.{" "}
             {tenant && (
-              <Link href={paths.data(tenant.slug)} className="text-sky-700 hover:underline dark:text-sky-400">
+              <Link href={paths.data(tenant.slug)} className="text-teal-fg hover:underline">
                 Deployments
               </Link>
             )}
@@ -109,18 +109,18 @@ export default async function MissionsPage({ params, searchParams }: Props) {
       )}
 
       {failure ? (
-        <p className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-700 dark:bg-red-950 dark:text-red-300">
+        <p className="rounded-card border border-error/40 bg-error/10 p-3 text-sm text-error">
           Could not load missions: {failure}
         </p>
       ) : !tenant ? (
-        <p className="text-sm text-slate-600 dark:text-slate-400">
+        <p className="text-sm text-fg-2">
           This account isn&apos;t a member of any tenant yet.
         </p>
       ) : shown.length === 0 ? (
-        <p className="text-sm text-slate-600 dark:text-slate-400">No missions match.</p>
+        <p className="text-sm text-fg-2">No missions match.</p>
       ) : (
         <>
-          <p className="mb-2 text-sm text-slate-500">
+          <p className="mb-2 text-sm text-fg-2">
             {shown.length} of {missions.length} missions
           </p>
           <MissionTable slug={tenant.slug} missions={shown} />
