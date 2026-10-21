@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.28.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.27.1...v0.28.0) (2026-10-21)
+
+
+### Features
+
+* **web:** show fish lengths in millimetres ([a89dc78](https://github.com/UCSD-E4E/fishsense-services/commit/a89dc78e673a4897e13da0e98b9279ab9459706a))
+* **web:** show fish lengths in millimetres ([4ecf34d](https://github.com/UCSD-E4E/fishsense-services/commit/4ecf34de8cf64ac68504d5380b8eefcbbbe3d240))
+
 ## [0.27.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.27.0...v0.27.1) (2026-10-21)
 
 
