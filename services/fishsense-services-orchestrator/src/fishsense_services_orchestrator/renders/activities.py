@@ -52,6 +52,12 @@ __all__ = [
 ]
 
 
+#: A loop over a mission's frames heartbeats once per this many, not per
+#: frame: the worker queues heartbeats (1,000 at most), and a loop with nothing
+#: to await between them fills the queue -- mission 440's 1,122 frames failed
+#: with asyncio's QueueFull (2026-10-20).
+HEARTBEAT_EVERY = 250
+
 #: Owed captures per page: each carries a presigned PUT of ~600 characters, and
 #: a page rides as an activity result, a child's input and the record's
 #: argument -- a whole large mission at once would pass Temporal's 2 MB
@@ -194,7 +200,8 @@ class RenderActivities:
                     **owed,
                 )
             )
-            activity.heartbeat()
+            if len(frames) % HEARTBEAT_EVERY == 0:
+                activity.heartbeat()
         payload = RenderCapturesInput(
             tenant_id=target.tenant_id,
             mission_id=target.mission_id,
