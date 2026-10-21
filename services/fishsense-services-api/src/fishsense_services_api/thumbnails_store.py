@@ -151,14 +151,6 @@ class ThumbnailsCatalog(ServicePrincipal):
     """The thumbnail stage's database side, as the orchestrator's service
     principal: every call rechecks its membership of the tenant."""
 
-    async def tenant_slug(self, tenant_id: uuid.UUID) -> str:
-        async with self._tenant(tenant_id) as conn:
-            return (
-                await conn.execute(
-                    text("SELECT slug FROM tenants WHERE id = :t"), {"t": tenant_id}
-                )
-            ).scalar_one()
-
     async def owed_thumbnails(
         self, tenant_id: uuid.UUID, **kwargs
     ) -> list[OwedThumbnail]:

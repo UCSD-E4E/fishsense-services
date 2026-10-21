@@ -146,7 +146,7 @@ class _Catalog:
     def __init__(self, captures):
         self._captures = captures
 
-    async def captures_to_stage(self, tenant_id, mission_id):
+    async def captures_to_stage(self, tenant_id, mission_id, capture_ids=None):
         return list(self._captures)
 
     async def checksums_to_clean(self, tenant_id, mission_id):

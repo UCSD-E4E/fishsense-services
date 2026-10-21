@@ -17,10 +17,17 @@ __all__ = ["CaptureChecksum", "RawStagingCatalog", "StagingCapture"]
 
 
 class RawStagingCatalog(Protocol):
+    async def tenant_slug(self, tenant_id: uuid.UUID) -> str:
+        """The tenant's slug, which names its bucket in the tenant stores."""
+
     async def captures_to_stage(
-        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
+        self,
+        tenant_id: uuid.UUID,
+        mission_id: uuid.UUID,
+        capture_ids: list[uuid.UUID] | None = None,
     ) -> list[StagingCapture]:
-        """The dive's canonical captures, with NAS paths and checksums."""
+        """The dive's canonical captures (only `capture_ids`, when given),
+        with NAS paths, checksums and bucket copies."""
 
     async def checksums_to_clean(
         self, tenant_id: uuid.UUID, mission_id: uuid.UUID

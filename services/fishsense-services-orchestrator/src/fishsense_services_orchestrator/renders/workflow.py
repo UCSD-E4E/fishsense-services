@@ -46,6 +46,7 @@ with workflow.unsafe.imports_passed_through():
         raw_scratch_reader_id,
     )
     from fishsense_services_orchestrator.object_store.steps import (
+        LONG_STAGE_RAW_TIMEOUT,
         cleanup_raw,
         stage_raw,
     )
@@ -198,7 +199,9 @@ class RenderMissionWorkflow:
         staging = StagingTarget(target.tenant_id, target.mission_id)
         report: Optional[RenderMissionReport] = None
         try:
-            await stage_raw(staging)
+            # The NAS at its pace for the captures with no bucket copy yet; the
+            # mission has no run timeout of its own to cut it short.
+            await stage_raw(staging, timeout=LONG_STAGE_RAW_TIMEOUT)
             report = await render_pages(target, first)
             return report
         finally:

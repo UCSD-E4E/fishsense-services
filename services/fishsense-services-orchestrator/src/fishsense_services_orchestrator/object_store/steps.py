@@ -32,6 +32,7 @@ from fishsense_services_orchestrator.object_store.contracts import (
 
 __all__ = [
     "CLEANUP_RAW_RETRY_POLICY",
+    "LONG_STAGE_RAW_TIMEOUT",
     "STAGE_RAW_RETRY_POLICY",
     "STAGE_RAW_TIMEOUT",
     "cleanup_raw",
@@ -55,12 +56,18 @@ STAGE_RAW_RETRY_POLICY = RetryPolicy(
 )
 
 
-#: Staging's whole budget. v1's hour did not cover a large mission from the
-#: NAS: mission 440's 1,201 raws timed out at it (2026-10-21), with three
-#: missions staging at once. The activity heartbeats per file (5 minutes), so
-#: a stalled staging is still caught in minutes; this ceiling only has to
-#: cover a large mission's honest pace. A parent's run timeout sums it.
-STAGE_RAW_TIMEOUT = timedelta(hours=6)
+#: Staging's budget by default: v1's hour. Most parents run under an hour's
+#: run timeout of their own (laser calibration, 30 minutes), so a longer
+#: staging would end in their run's timeout -- with no cleanup -- not in a
+#: failure they clean up after (review of #219).
+STAGE_RAW_TIMEOUT = timedelta(hours=1)
+#: For a parent whose own budget covers it (the automatic run, the render
+#: mission). An hour did not cover a large mission from the NAS: mission 440's
+#: 1,201 raws timed out at it (2026-10-21), with three missions staging at
+#: once. The activity heartbeats per file (5 minutes), so a stalled staging is
+#: still caught in minutes; this only has to cover a large mission's honest
+#: pace. The parent's run timeout must sum it.
+LONG_STAGE_RAW_TIMEOUT = timedelta(hours=6)
 
 
 #: v1 gave cleanup no retry policy: retry within its window. A revoked
@@ -68,14 +75,16 @@ STAGE_RAW_TIMEOUT = timedelta(hours=6)
 CLEANUP_RAW_RETRY_POLICY = RetryPolicy(non_retryable_error_types=["NotAMember"])
 
 
-async def stage_raw(target: StagingTarget) -> StageRawBytesResult:
+async def stage_raw(
+    target: StagingTarget, *, timeout: timedelta = STAGE_RAW_TIMEOUT
+) -> StageRawBytesResult:
     """Copy the dive's canonical raw frames into Garage scratch: from the
     tenant's bucket where the render stage copied them, else from the NAS.
     Cheap to repeat: frames already staged are HEAD-skipped."""
     return await workflow.execute_activity(
         "stage_raw_bytes_for_dive",
         target,
-        schedule_to_close_timeout=STAGE_RAW_TIMEOUT,
+        schedule_to_close_timeout=timeout,
         heartbeat_timeout=timedelta(minutes=5),
         retry_policy=STAGE_RAW_RETRY_POLICY,
         result_type=StageRawBytesResult,

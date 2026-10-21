@@ -296,6 +296,8 @@ async def test_a_result_that_is_not_the_render_asked_for_is_refused(bad):
 # -- workflows ---------------------------------------------------------------------------
 
 EVENTS: list = []
+#: Each staging's schedule-to-close.
+STAGE_BUDGETS: list = []
 SELECTED: list = []
 QUEUE = "test-renders"
 
@@ -322,6 +324,7 @@ def _stubs(*, payload, results=None, page=None, fail=None):
     @activity.defn(name="stage_raw_bytes_for_dive")
     async def stage(target: StagingTarget) -> StageRawBytesResult:
         EVENTS.append(("stage", target.mission_id))
+        STAGE_BUDGETS.append(activity.info().schedule_to_close_timeout)
         if target.mission_id == fail:
             raise ApplicationError("NAS down", non_retryable=True)
         return StageRawBytesResult(staged=1, skipped_already_present=0, no_path=0)
@@ -561,3 +564,19 @@ async def test_a_raw_owed_but_not_answered_is_refused_as_an_older_processor():
     assert error.value.type == "InvalidRenders"
     assert "contract 10" in str(error.value)
     assert catalog.persisted == [] and catalog.raws == []
+
+
+async def test_a_render_mission_stages_with_hours_not_the_default_hour():
+    """Review of #219: the render mission stages captures with no bucket copy
+    yet -- the NAS, at its pace -- and has no run timeout of its own to cut it
+    short, so it takes the long ceiling."""
+    from fishsense_services_orchestrator.object_store.steps import (
+        LONG_STAGE_RAW_TIMEOUT,
+    )
+
+    STAGE_BUDGETS.clear()
+    await _execute(RenderMissionWorkflow.run, RenderTarget(LAB, MISSION),
+                   payload=_payload(_Catalog(captures=2)),
+                   result_type=RenderMissionReport)  # fmt: skip
+
+    assert STAGE_BUDGETS == [LONG_STAGE_RAW_TIMEOUT]

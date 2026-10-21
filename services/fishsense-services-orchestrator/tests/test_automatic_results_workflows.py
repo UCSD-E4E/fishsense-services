@@ -94,6 +94,8 @@ QUEUE = "test-automatic-results"
 K = [[1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0]]
 REF = ObjectRef(bucket="b", key="k")
 EVENTS: list[tuple] = []
+#: Each staging: its schedule-to-close and the captures it asked for.
+STAGED: list[tuple] = []
 #: What each cohort query was told to exclude, in turn.
 SELECTS: list[tuple] = []
 
@@ -253,6 +255,7 @@ def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET,
     @activity.defn(name="stage_raw_bytes_for_dive")
     async def stage(t: StagingTarget) -> StageRawBytesResult:
         EVENTS.append(("stage",))
+        STAGED.append((activity.info().schedule_to_close_timeout, t.capture_ids))
         return StageRawBytesResult(staged=1, skipped_already_present=0, no_path=0)
 
     @activity.defn(name="cleanup_raw_bytes_for_dive")
@@ -393,6 +396,7 @@ async def _run(
 ):  # fmt: skip
     EVENTS.clear()
     SELECTS.clear()
+    STAGED.clear()
     async with await WorkflowEnvironment.start_time_skipping(
         data_converter=DATA_CONVERTER
     ) as env:
@@ -671,3 +675,31 @@ def test_a_gpu_child_has_time_for_every_frame_it_was_given():
     assert sut.gpu_child_timeout(10**6) == sut.GPU_CHILD_MAX
     assert sut.RUN_TIMEOUT >= 2 * sut.GPU_CHILD_MAX + sut.AUTOMATIC_DRAIN_WINDOW
     assert run_missions.MISSION_TIMEOUT >= sut.RUN_TIMEOUT
+
+
+async def test_rendered_frames_stage_only_the_frames_owed_with_hours():
+    """Review of #219: staging copied every canonical capture of the mission
+    when the frames step owes only some; with every frame rendered, only the
+    owed frames' raws are staged (the dot detector reads them), under the
+    long ceiling the run budgets."""
+    from fishsense_services_orchestrator.object_store.steps import (
+        LONG_STAGE_RAW_TIMEOUT,
+    )
+
+    await _run(AutomaticResultsForMissionWorkflow, TARGET)
+
+    ((timeout, staged),) = STAGED
+    assert timeout == LONG_STAGE_RAW_TIMEOUT
+    assert staged is not None and len(staged) == 2  # the two frames owed
+
+
+async def test_frames_owing_renders_stage_the_whole_mission_for_the_renders():
+    """The render step renders every capture owing a render, not only the
+    owed frames, so its staging is the mission's."""
+    from fishsense_services_orchestrator.object_store.steps import (
+        LONG_STAGE_RAW_TIMEOUT,
+    )
+
+    await _run(AutomaticResultsForMissionWorkflow, TARGET, renders="after")
+
+    assert STAGED == [(LONG_STAGE_RAW_TIMEOUT, None)]

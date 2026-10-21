@@ -213,6 +213,20 @@ async def test_a_capture_copied_to_two_buckets_names_each(owner_engine, app_engi
     assert sorted(c.bucket for c in staged.copies) == ["new-bucket", "old-bucket"]
 
 
+async def test_staging_can_be_asked_for_some_captures_only(owner_engine, app_engine):
+    """The frames step stages the frames it owes, not the whole mission
+    (review of #219)."""
+    lab = await _tenant(owner_engine)
+    mission = await _dive(app_engine, lab, "d")
+    a = await _capture(app_engine, lab, mission, "P1.ORF", _md5(1))
+    await _capture(app_engine, lab, mission, "P2.ORF", _md5(2))
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        staged = await captures_to_stage(conn, lab, mission, capture_ids=[a])
+
+    assert [c.capture_id for c in staged] == [a]
+
+
 async def test_the_catalog_names_the_tenants_slug(app_engine, seed_memberships):
     """The slug names the tenant's bucket in the tenant stores."""
     lab = (await seed_memberships({ORCHESTRATOR: {"lab": "member"}}))["lab"]

@@ -15,7 +15,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from fishsense_services_contracts.renamed import renamed_from
-from typing import Annotated
+from typing import Annotated, List, Optional
 
 __all__ = [
     "CleanupRawBytesResult",
@@ -29,6 +29,9 @@ __all__ = [
 class StagingTarget:
     tenant_id: uuid.UUID
     mission_id: Annotated[uuid.UUID, renamed_from("dive_id", "mission_id")]
+    #: Only these of the mission's captures (the frames a step owes, review
+    #: of #219); None, every canonical capture, as before.
+    capture_ids: Optional[List[uuid.UUID]] = None
 
 
 @dataclass
