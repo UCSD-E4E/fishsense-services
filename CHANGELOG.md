@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.32.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.31.0...v0.32.0) (2026-10-21)
+
+
+### Features
+
+* store each kept SAM mask as a file, the way the app stores its mask ([8654d7c](https://github.com/UCSD-E4E/fishsense-services/commit/8654d7c7cefebe9c7090474dffc0e97c5367ef89))
+* the orchestrator serves every tenant by default ([83ad794](https://github.com/UCSD-E4E/fishsense-services/commit/83ad79442287607fb9642f5067f5561a0056ccd2))
+
 ## [0.31.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.30.1...v0.31.0) (2026-10-21)
 
 
