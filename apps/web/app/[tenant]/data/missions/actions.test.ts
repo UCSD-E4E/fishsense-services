@@ -133,7 +133,7 @@ describe("the writes", () => {
       "flat",
       "pool test",
     );
-    expect(revalidatePath).toHaveBeenCalledWith("/missions/lab/7");
+    expect(revalidatePath).toHaveBeenCalledWith("/lab/data/missions/7");
   });
 
   it("brings back the API's refusal in its words", async () => {
@@ -180,7 +180,7 @@ describe("the writes", () => {
       ended_on: null,
       notes: null,
     });
-    expect(revalidatePath).toHaveBeenCalledWith("/deployments");
+    expect(revalidatePath).toHaveBeenCalledWith("/lab/data");
   });
 
   it("refuses a deployment without a name or with a malformed date", async () => {

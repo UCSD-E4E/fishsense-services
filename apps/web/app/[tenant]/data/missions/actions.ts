@@ -14,6 +14,7 @@ import { auth, unstable_update } from "@/auth";
 import { accessTokenIsFresh } from "@/lib/authz";
 import { getMyTenants } from "@/lib/fishsense-api";
 import { safeSlug } from "@/lib/ids";
+import { paths } from "@/lib/tenant-paths";
 import {
   createDeployment,
   parseMissionNumber,
@@ -91,7 +92,7 @@ export async function setPortAction(
     const value = parsePort(port);
     const token = await requireTenantAdmin(tenant);
     await setMissionPort(token, tenant, mission, value, optional(note));
-    revalidatePath(`/missions/${tenant}/${mission}`);
+    revalidatePath(paths.mission(tenant, mission));
   });
 }
 
@@ -106,7 +107,7 @@ export async function setPurposeAction(
     const value = parsePurpose(purpose);
     const token = await requireTenantAdmin(tenant);
     await setMissionPurpose(token, tenant, mission, value);
-    revalidatePath(`/missions/${tenant}/${mission}`);
+    revalidatePath(paths.mission(tenant, mission));
   });
 }
 
@@ -122,7 +123,7 @@ export async function setDeploymentAction(
     const target = deployment === "" ? null : parseMissionNumber(deployment);
     const token = await requireTenantAdmin(tenant);
     await setMissionDeployment(token, tenant, mission, target);
-    revalidatePath(`/missions/${tenant}/${mission}`);
+    revalidatePath(paths.mission(tenant, mission));
   });
 }
 
@@ -142,6 +143,6 @@ export async function createDeploymentAction(
     };
     const token = await requireTenantAdmin(tenant);
     await createDeployment(token, tenant, body);
-    revalidatePath("/deployments");
+    revalidatePath(paths.data(tenant));
   });
 }

@@ -17,6 +17,7 @@ describe("the shell's view of the session", () => {
       signedIn: false,
       name: null,
       staff: false,
+      accessToken: null,
     });
   });
 
@@ -25,6 +26,7 @@ describe("the shell's view of the session", () => {
       signedIn: true,
       name: "Dev Admin",
       staff: true,
+      accessToken: "t",
     });
   });
 
@@ -43,7 +45,7 @@ describe("the shell's view of the session", () => {
       throw new Error("AUTH_SECRET missing");
     });
 
-    expect(state).toEqual({ signedIn: false, name: null, staff: false });
+    expect(state).toEqual({ signedIn: false, name: null, staff: false, accessToken: null });
     expect(error).toHaveBeenCalled();
   });
 });

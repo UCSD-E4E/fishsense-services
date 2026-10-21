@@ -3,30 +3,43 @@
  * Fish, Data, and Labelling for staff. Map and Settings join when their pages
  * exist, so the nav never links to a page that is not there.
  *
- * Data holds deployments, missions and (until missions hold them) mobile
- * captures; they keep their own routes until the tenant moves into the path.
+ * Fish and Data are a tenant's (`/lab/fish`, `/lab/data`): they link into the
+ * tenant the page is in, else the one used last, else the old index pages,
+ * which sign the user in and take their first tenant.
  */
+import { paths, tenantOf } from "./tenant-paths";
 
 export type NavItem = { label: string; href: string; active: boolean };
 
-type Section = { label: string; href: string; owns: string[]; staff?: boolean };
+type Context = { staff: boolean; lastTenant: string | null };
 
-const SECTIONS: Section[] = [
-  { label: "Today", href: "/", owns: [] },
-  { label: "Fish", href: "/fish", owns: ["/fish"] },
-  // Mobile captures stay here until missions hold them (the design's phase 7).
-  { label: "Data", href: "/deployments", owns: ["/deployments", "/missions", "/captures"] },
-  { label: "Labelling", href: "/portal", owns: ["/portal"], staff: true },
-];
-
-function within(pathname: string, prefix: string): boolean {
-  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+function segments(pathname: string): string[] {
+  return pathname.split("/").filter(Boolean);
 }
 
-export function navItems(pathname: string, { staff }: { staff: boolean }): NavItem[] {
-  return SECTIONS.filter((s) => !s.staff || staff).map((s) => ({
-    label: s.label,
-    href: s.href,
-    active: s.owns.length === 0 ? pathname === "/" : s.owns.some((p) => within(pathname, p)),
-  }));
+export function navItems(pathname: string, { staff, lastTenant }: Context): NavItem[] {
+  const here = tenantOf(pathname);
+  const tenant = here ?? lastTenant;
+  const section = here ? segments(pathname)[1] : undefined;
+  const items: NavItem[] = [
+    { label: "Today", href: "/", active: pathname === "/" },
+    {
+      label: "Fish",
+      href: tenant ? paths.fish(tenant) : "/fish",
+      active: section === "fish",
+    },
+    {
+      label: "Data",
+      href: tenant ? paths.data(tenant) : "/deployments",
+      active: section === "data",
+    },
+  ];
+  if (staff) {
+    items.push({
+      label: "Labelling",
+      href: "/portal",
+      active: pathname === "/portal" || pathname.startsWith("/portal/"),
+    });
+  }
+  return items;
 }

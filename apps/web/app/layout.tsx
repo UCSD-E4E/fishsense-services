@@ -2,7 +2,7 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import pkg from "../package.json";
-import { AppHeader } from "./shell/app-header";
+import { AppHeader } from "./_shell/app-header";
 import "./globals.css";
 
 // The design's two families (docs/design/README.md): Inter for what a person

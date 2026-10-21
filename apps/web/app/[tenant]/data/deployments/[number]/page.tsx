@@ -2,8 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isSlug } from "@/lib/ids";
 import { getDeployment } from "@/lib/mission-facts";
-import { requireSignedIn } from "../../../captures/guard";
-import { MissionTable } from "../../../missions/mission-table";
+import { requireSignedIn } from "@/app/_shell/guard";
+import { MissionTable } from "@/app/[tenant]/data/missions/mission-table";
+import { paths } from "@/lib/tenant-paths";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,7 @@ export default async function DeploymentPage({ params }: Props) {
   const { tenant, number: rawNumber } = await params;
   if (!isSlug(tenant) || !/^\d+$/.test(rawNumber)) notFound();
   const number = Number(rawNumber);
-  const session = await requireSignedIn(`/deployments/${tenant}/${number}`);
+  const session = await requireSignedIn(`${paths.data(tenant)}/deployments/${number}`);
   const deployment = await getDeployment(session.accessToken ?? "", tenant, number);
   if (!deployment) notFound();
 
@@ -41,7 +42,7 @@ export default async function DeploymentPage({ params }: Props) {
           )}
         </div>
         <Link
-          href={`/deployments?tenant=${encodeURIComponent(tenant)}`}
+          href={paths.data(tenant)}
           className="rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700"
         >
           All deployments

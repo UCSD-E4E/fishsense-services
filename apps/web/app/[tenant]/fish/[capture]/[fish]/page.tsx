@@ -10,7 +10,8 @@ import {
   methodLabel,
   where,
 } from "@/lib/observations";
-import { requireSignedIn } from "../../../../captures/guard";
+import { requireSignedIn } from "@/app/_shell/guard";
+import { paths } from "@/lib/tenant-paths";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export default async function FishDetailPage({ params }: Props) {
   const { tenant, capture, fish } = await params;
   // A malformed address names no fish: 404, like an unknown one.
   if (!isSlug(tenant) || !isUuid(capture) || !isUuid(fish)) notFound();
-  const session = await requireSignedIn(`/fish/${tenant}/${capture}/${fish}`);
+  const session = await requireSignedIn(paths.fishDetail(tenant, capture, fish));
   const detail = await getObservation(session.accessToken ?? "", tenant, capture, fish);
   if (!detail) notFound();
 
@@ -54,7 +55,7 @@ export default async function FishDetailPage({ params }: Props) {
           </p>
         </div>
         <Link
-          href={`/fish?tenant=${encodeURIComponent(tenant)}`}
+          href={paths.fish(tenant)}
           className="rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700"
         >
           All fish
@@ -143,7 +144,7 @@ export default async function FishDetailPage({ params }: Props) {
               value={
                 <Link
                   className="underline"
-                  href={`/captures/${tenant}/${o.client_capture_uuid}`}
+                  href={paths.capture(tenant, o.client_capture_uuid)}
                 >
                   photo, depth and files
                 </Link>

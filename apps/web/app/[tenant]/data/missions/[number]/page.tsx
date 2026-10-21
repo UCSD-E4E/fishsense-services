@@ -8,9 +8,10 @@ import {
   purposeLabel,
   type Deployment,
 } from "@/lib/mission-facts";
-import { requireSignedIn } from "../../../captures/guard";
-import { FactsForms } from "../../facts-forms";
-import { deploymentHref, PortBadge } from "../../mission-table";
+import { requireSignedIn } from "@/app/_shell/guard";
+import { FactsForms } from "@/app/[tenant]/data/missions/facts-forms";
+import { deploymentHref, PortBadge } from "@/app/[tenant]/data/missions/mission-table";
+import { paths } from "@/lib/tenant-paths";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,7 @@ export default async function MissionPage({ params }: Props) {
   const { tenant, number: rawNumber } = await params;
   if (!isSlug(tenant) || !/^\d+$/.test(rawNumber)) notFound();
   const number = Number(rawNumber);
-  const session = await requireSignedIn(`/missions/${tenant}/${number}`);
+  const session = await requireSignedIn(`${paths.missions(tenant)}/${number}`);
   const token = session.accessToken ?? "";
   const [mission, tenants] = await Promise.all([
     getMission(token, tenant, number),
@@ -91,7 +92,7 @@ export default async function MissionPage({ params }: Props) {
           </h1>
         </div>
         <Link
-          href={`/missions?tenant=${encodeURIComponent(tenant)}`}
+          href={paths.missions(tenant)}
           className="rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700"
         >
           All missions

@@ -4,7 +4,7 @@
 // (e4edm's dataset name, YYYY.MM.DD.PROJECT.LOCATION, where there is one).
 
 import { useState, useTransition } from "react";
-import { createDeploymentAction } from "../missions/actions";
+import { createDeploymentAction } from "./missions/actions";
 
 const field =
   "rounded-md border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900";

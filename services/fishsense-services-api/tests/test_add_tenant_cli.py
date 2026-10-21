@@ -78,3 +78,13 @@ async def test_without_an_owner_dsn_it_fails_naming_it(monkeypatch, capsys):
 
     assert await main(["add-tenant", "x", "--name", "x"]) == 2
     assert "FISHSENSE_MIGRATION_DATABASE_URL" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("slug", ["fish", "api", "portal", "missions"])
+async def test_a_slug_the_web_routes_is_refused(as_owner, owner_engine, capsys, slug):
+    """The web serves each tenant under its slug (``/lab/fish``), so a tenant
+    named like one of the web's own routes would be unreachable."""
+    assert await main(["add-tenant", slug, "--name", "X"]) == 2
+
+    assert await _tenants(owner_engine) == []
+    assert "reserved" in capsys.readouterr().err

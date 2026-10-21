@@ -260,13 +260,13 @@ describe("observationHref", () => {
       client_capture_uuid: "7ceaecf8-2eab-5bb9-a429-c4b68ae38e76",
     });
     expect(observationHref("lab", o)).toBe(
-      "/captures/lab/7ceaecf8-2eab-5bb9-a429-c4b68ae38e76",
+      "/lab/data/captures/7ceaecf8-2eab-5bb9-a429-c4b68ae38e76",
     );
   });
 
   it("sends a Lite fish to its own page", () => {
     expect(observationHref("lab", observation())).toBe(
-      `/fish/lab/${CAPTURE}/${FISH}`,
+      `/lab/fish/${CAPTURE}/${FISH}`,
     );
   });
 });
