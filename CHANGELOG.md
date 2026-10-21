@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.23.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.22.0...v0.23.0) (2026-10-21)
+
+
+### Features
+
+* **web:** the Fish pages in Deep water, a fish's evidence on its own page ([d777691](https://github.com/UCSD-E4E/fishsense-services/commit/d777691833da09a095bd59a7439b9fc37ae35aba))
+
+
+### Bug Fixes
+
+* **web:** a browser's /favicon.ico is not a tenant ([98dc012](https://github.com/UCSD-E4E/fishsense-services/commit/98dc0126b4befcfabba61c36f4238e04f45bc722))
+
 ## [0.22.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.21.0...v0.22.0) (2026-10-21)
 
 
