@@ -13,14 +13,17 @@ export type SwitcherTenant = { slug: string; name: string; role: string | null }
  */
 export function TenantSwitcher({
   tenants,
+  others = [],
   lastTenant,
 }: {
   tenants: SwitcherTenant[];
+  /** For a system admin, every tenant they are not a member of (0056). */
+  others?: SwitcherTenant[];
   lastTenant: string | null;
 }) {
   const pathname = usePathname() ?? "/";
   const slug = tenantOf(pathname) ?? lastTenant;
-  const current = tenants.find((t) => t.slug === slug);
+  const current = [...tenants, ...others].find((t) => t.slug === slug);
   if (!current) return null;
   const badge = (
     <span
@@ -30,7 +33,7 @@ export function TenantSwitcher({
       {current.name.slice(0, 1).toUpperCase()}
     </span>
   );
-  if (tenants.length === 1) {
+  if (tenants.length + others.length === 1) {
     return (
       <span className="inline-flex h-10 items-center gap-2 px-1 font-semibold">
         {badge}
@@ -67,6 +70,30 @@ export function TenantSwitcher({
             </Link>
           </li>
         ))}
+        {others.length > 0 && (
+          <>
+            <li className="mx-1 my-1.5 h-px bg-line" aria-hidden />
+            <li className="flex items-center gap-2 px-2.5 pb-1 pt-1.5 text-xs font-medium uppercase tracking-wide text-fg-2">
+              Every tenant
+              <span className="rounded-chip bg-raised px-1.5 py-0.5 normal-case tracking-normal">System admin</span>
+            </li>
+            {others.map((t) => (
+              <li key={t.slug}>
+                <Link
+                  href={switchHref(pathname, t.slug)}
+                  aria-current={t.slug === current.slug ? "true" : undefined}
+                  className="flex min-h-11 items-center gap-2.5 rounded-control px-2.5 hover:bg-raised aria-[current=true]:bg-teal-tint"
+                >
+                  <span className="flex-1 font-medium">{t.name}</span>
+                  <span className="text-xs text-fg-2">read-only</span>
+                </Link>
+              </li>
+            ))}
+            <li className="px-2.5 pb-1.5 pt-1 text-xs leading-snug text-fg-2">
+              Opening a tenant you are not in shows a banner while you are there, and is recorded.
+            </li>
+          </>
+        )}
       </ul>
     </details>
   );

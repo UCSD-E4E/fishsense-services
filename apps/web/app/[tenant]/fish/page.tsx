@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { unstable_rethrow } from "next/navigation";
 import { requireSignedIn } from "@/app/_shell/guard";
-import { memberOf, myTenants } from "@/app/_shell/tenant";
+import { tenantFor } from "@/app/_shell/tenant";
 import { formatLength } from "@/lib/captures";
 import { type TenantMembership } from "@/lib/fishsense-api";
 import { paths } from "@/lib/tenant-paths";
@@ -55,7 +55,7 @@ export default async function FishPage({ params, searchParams }: Props) {
   let page: ObservationPage | null = null;
   let failure: string | null = null;
   try {
-    tenant = memberOf(await myTenants(token), slug);
+    tenant = await tenantFor(token, slug);
     page = await getObservationPage(token, tenant.slug, { device, before });
   } catch (error) {
     unstable_rethrow(error);

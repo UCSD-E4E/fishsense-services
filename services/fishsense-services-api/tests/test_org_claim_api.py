@@ -70,7 +70,12 @@ async def test_a_partners_first_request_finds_them_a_member(tenants, client):
     )
 
     assert response.status_code == 200
-    assert response.json() == {"role": "member", "is_admin": False}
+    assert response.json() == {
+        "role": "member",
+        "is_admin": False,
+        "access": "member",
+        "unlocked_until": None,
+    }
 
 
 async def test_a_partner_is_still_a_stranger_to_the_lab(tenants, client):

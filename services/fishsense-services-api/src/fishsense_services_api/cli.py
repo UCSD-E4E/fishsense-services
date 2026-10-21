@@ -20,6 +20,9 @@ fishsense-services-api infer-deployments --tenant <id> [--together 398=400 ...]
                                     # dry run: deployments for legacy missions
                                     # from their folders and dates; --apply
                                     # <the dry run's fingerprint> writes them
+fishsense-services-api system-admin --user <sub> --grant [--apply]
+                                    # dry run: may open any tenant, read-only
+                                    # until they unlock it (0056)
 fishsense-services-api public-totals --tenant lab --enable [--apply]
                                     # dry run: the signed-out page as it would
                                     # read with the tenant counted (0055)
@@ -170,6 +173,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON {dive number: {laser_position, laser_axis}}, replacing the "
         "database's label-free calibrations",
     )
+    admin = commands.add_parser(
+        "system-admin",
+        help="grant or revoke a system admin (0056): one who may open any tenant, "
+        "read-only until they unlock it; a dry run by default",
+    )
+    admin.add_argument("--user", required=True, help="their sign-in subject (sub)")
+    grant = admin.add_mutually_exclusive_group(required=True)
+    grant.add_argument("--grant", action="store_true")
+    grant.add_argument("--revoke", action="store_true")
+    admin.add_argument("--apply", action="store_true", help="write the change")
     public = commands.add_parser(
         "public-totals",
         help="opt a tenant in or out of the signed-out page's totals and map "
@@ -274,6 +287,8 @@ async def main(argv: Sequence[str]) -> int:
         return await _add_tenant(args)
     if args.command == "public-totals":
         return await _public_totals(args)
+    if args.command == "system-admin":
+        return await _system_admin(args)
     if args.command == "backfill-mission-facts":
         return await _backfill_mission_facts(args)
     if args.command == "infer-deployments":
@@ -485,6 +500,51 @@ async def _backfill_mission_facts(args: argparse.Namespace) -> int:
             f"{args.tenant} --ingested-before {args.ingested_before.isoformat()} "
             f"{again + ' ' if again else ''}--apply {plan.fingerprint}"
         )
+        return 0
+    finally:
+        await engine.dispose()
+
+
+async def _system_admin(args: argparse.Namespace) -> int:
+    """Dry run unless --apply; guarded on the old value, as the schema owner."""
+    settings = _settings(MigrationSettings)
+    if settings is None:
+        return 2
+    want = bool(args.grant)
+    engine = create_async_engine(settings.migration_database_url.get_secret_value())
+    try:
+        async with engine.begin() as conn:
+            now = (
+                await conn.execute(
+                    text("SELECT is_system_admin FROM users WHERE sub = :s"),
+                    {"s": args.user},
+                )
+            ).scalar_one_or_none()
+            if now is None:
+                print(f"{args.user!r} has not signed in: no such user", file=sys.stderr)
+                return 1
+            if now == want:
+                state = "is" if want else "is not"
+                print(f"{args.user} already {state} a system admin", file=sys.stderr)
+                return 1
+            verb = "grant" if want else "revoke"
+            if not args.apply:
+                print(
+                    f"DRY RUN: nothing written. Would {verb} system admin for "
+                    f"{args.user}.\nto write it: system-admin --user {args.user} "
+                    f"--{verb} --apply"
+                )
+                return 0
+            changed = await conn.execute(
+                text(
+                    "UPDATE users SET is_system_admin = :want "
+                    "WHERE sub = :s AND is_system_admin = :now"
+                ),
+                {"s": args.user, "want": want, "now": now},
+            )
+            if changed.rowcount != 1:
+                raise RuntimeError(f"{args.user} changed meanwhile: nothing written")
+        print(f"{args.user} {'is now' if want else 'is no longer'} a system admin")
         return 0
     finally:
         await engine.dispose()

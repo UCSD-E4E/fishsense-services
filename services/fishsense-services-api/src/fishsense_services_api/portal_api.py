@@ -53,6 +53,11 @@ from fishsense_services_api.portal_store import (
 class MyMembership(BaseModel):
     role: str
     is_admin: bool
+    #: ``member``, or how a system admin is here: ``system_admin_read_only``
+    #: or ``system_admin_unlocked`` (0056).
+    access: str = "member"
+    #: When a system admin's unlock ends.
+    unlocked_until: datetime | None = None
 
 
 class Flagged(BaseModel):
@@ -119,7 +124,12 @@ def add_portal_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
         response_model=MyMembership,
     )
     async def get_my_membership(member: Member) -> MyMembership:
-        return MyMembership(role=member.role, is_admin=member.is_admin)
+        return MyMembership(
+            role=member.role,
+            is_admin=member.is_admin,
+            access=member.access,
+            unlocked_until=member.unlocked_until,
+        )
 
     @app.get(
         "/tenants/{slug}/label-studio-projects",

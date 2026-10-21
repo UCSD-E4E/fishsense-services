@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { unstable_rethrow } from "next/navigation";
 import { requireSignedIn } from "@/app/_shell/guard";
-import { memberOf, myTenants } from "@/app/_shell/tenant";
+import { tenantFor } from "@/app/_shell/tenant";
 import { WorkSections } from "@/app/_shell/work-sections";
 import { getDeployments, type Deployment } from "@/lib/mission-facts";
 import { fishName, getObservationPage, observationHref, type Observation } from "@/lib/observations";
 import { paths } from "@/lib/tenant-paths";
 import { getTenantSummary, recentDeployments, type TenantSummary } from "@/lib/today";
+import { getIsSystemAdmin } from "@/lib/system-admin";
 import type { TenantMembership } from "@/lib/fishsense-api";
 
 export const dynamic = "force-dynamic";
@@ -28,14 +29,17 @@ export default async function TodayPage({ params }: Props) {
   let summary: TenantSummary | null = null;
   let fish: Observation[] = [];
   let trips: Deployment[] = [];
+  let systemAdmin = false;
   let failure: string | null = null;
   try {
-    tenant = memberOf(await myTenants(token), slug);
-    const [s, page, deployments] = await Promise.all([
+    tenant = await tenantFor(token, slug);
+    const [s, page, deployments, admin] = await Promise.all([
       getTenantSummary(token, slug),
       getObservationPage(token, slug, {}),
       getDeployments(token, slug),
+      getIsSystemAdmin(token),
     ]);
+    systemAdmin = admin;
     summary = s;
     fish = page.observations.slice(0, 3);
     trips = recentDeployments(deployments, 3);
@@ -179,10 +183,12 @@ export default async function TodayPage({ params }: Props) {
         </aside>
       </div>
 
-      {staff && (
+      {(staff || systemAdmin) && (
         <section className="flex flex-col gap-4 border-t border-line pt-7">
-          <h2 className="text-xl font-semibold">Labelling and dashboards</h2>
-          <WorkSections />
+          <h2 className="text-xl font-semibold">
+            {systemAdmin ? "Labelling and dashboards" : "Labelling"}
+          </h2>
+          <WorkSections dashboards={systemAdmin} />
         </section>
       )}
     </main>

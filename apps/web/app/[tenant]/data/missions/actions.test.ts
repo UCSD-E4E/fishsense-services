@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const {
   auth,
   unstable_update,
-  getMyTenants,
+  getTenantAccess,
   setMissionPort,
   setMissionPurpose,
   setMissionDeployment,
@@ -19,7 +19,7 @@ const {
 } = vi.hoisted(() => ({
   auth: vi.fn(),
   unstable_update: vi.fn(),
-  getMyTenants: vi.fn(),
+  getTenantAccess: vi.fn(),
   setMissionPort: vi.fn(),
   setMissionPurpose: vi.fn(),
   setMissionDeployment: vi.fn(),
@@ -28,9 +28,9 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth, unstable_update }));
-vi.mock("@/lib/fishsense-api", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/fishsense-api")>()),
-  getMyTenants,
+vi.mock("@/lib/system-admin", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/system-admin")>()),
+  getTenantAccess,
 }));
 vi.mock("next/cache", () => ({ revalidatePath }));
 vi.mock("@/lib/mission-facts", async (importOriginal) => ({
@@ -58,10 +58,16 @@ const SIGNED_IN = {
 beforeEach(() => {
   auth.mockResolvedValue(SIGNED_IN);
   unstable_update.mockResolvedValue(SIGNED_IN);
-  getMyTenants.mockResolvedValue([
-    { slug: "lab", name: "Lab", role: "admin", isAdmin: true },
-    { slug: "partner", name: "Partner", role: "member", isAdmin: false },
-  ]);
+  // How the caller is in each tenant, as the API says (it enforces the same).
+  getTenantAccess.mockImplementation(async (_token: string, slug: string) => {
+    const access = {
+      lab: { role: "admin", isAdmin: true, access: "member", unlockedUntil: null },
+      partner: { role: "member", isAdmin: false, access: "member", unlockedUntil: null },
+      unlocked: { role: "admin", isAdmin: true, access: "system_admin_unlocked", unlockedUntil: "2099-01-01T00:00:00Z" },
+      "read-only": { role: "system_admin", isAdmin: false, access: "system_admin_read_only", unlockedUntil: null },
+    } as Record<string, unknown>;
+    return access[slug] ?? null;
+  });
   setMissionPort.mockResolvedValue({});
   setMissionPurpose.mockResolvedValue({});
   setMissionDeployment.mockResolvedValue(undefined);
@@ -70,6 +76,22 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks();
+});
+
+describe("a system admin (0056)", () => {
+  it("may act in a tenant they are not in, once they have unlocked it", async () => {
+    const result = await createDeploymentAction("unlocked", { name: "trip", started_on: "", ended_on: "", notes: "" });
+
+    expect(result).toEqual({ ok: true });
+    expect(createDeployment).toHaveBeenCalled();
+  });
+
+  it("may not before the unlock: read-only", async () => {
+    const result = await createDeploymentAction("read-only", { name: "trip", started_on: "", ended_on: "", notes: "" });
+
+    expect(result).toEqual({ ok: false, error: "Not authorized" });
+    expect(createDeployment).not.toHaveBeenCalled();
+  });
 });
 
 describe("the gate", () => {
@@ -117,7 +139,7 @@ describe("values are checked before any request", () => {
     const result = await act();
 
     expect(result.ok).toBe(false);
-    expect(getMyTenants).not.toHaveBeenCalled();
+    expect(getTenantAccess).not.toHaveBeenCalled();
   });
 });
 

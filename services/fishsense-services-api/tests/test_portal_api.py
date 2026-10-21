@@ -139,8 +139,18 @@ async def test_a_caller_reads_their_own_role(client, tenants):
     admin = await client.get("/tenants/lab/membership", headers=_bearer(ADMIN))
     member = await client.get("/tenants/lab/membership", headers=_bearer(MEMBER))
 
-    assert admin.json() == {"role": "admin", "is_admin": True}
-    assert member.json() == {"role": "member", "is_admin": False}
+    assert admin.json() == {
+        "role": "admin",
+        "is_admin": True,
+        "access": "member",
+        "unlocked_until": None,
+    }
+    assert member.json() == {
+        "role": "member",
+        "is_admin": False,
+        "access": "member",
+        "unlocked_until": None,
+    }
 
 
 async def test_a_non_member_has_no_membership_to_read(client, tenants):

@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getMyTenants } from "@/lib/fishsense-api";
 import { isSlug } from "@/lib/ids";
 import {
   getDeployments,
@@ -9,6 +8,7 @@ import {
   type Deployment,
 } from "@/lib/mission-facts";
 import { requireSignedIn } from "@/app/_shell/guard";
+import { tenantFor } from "@/app/_shell/tenant";
 import { FactsForms } from "@/app/[tenant]/data/missions/facts-forms";
 import { deploymentHref, PortBadge } from "@/app/[tenant]/data/missions/mission-table";
 import { paths } from "@/lib/tenant-paths";
@@ -20,7 +20,8 @@ type Props = { params: Promise<{ tenant: string; number: string }> };
 /**
  * One mission (PLAN.md §4.9, Phase 2b): what it is for, its camera port and
  * what said so, where and when, and its field trip. A tenant's admins can
- * state its port, purpose and deployment here.
+ * state its port, purpose and deployment here, as can a system admin who has
+ * unlocked the tenant (0056).
  */
 export default async function MissionPage({ params }: Props) {
   const { tenant, number: rawNumber } = await params;
@@ -28,12 +29,9 @@ export default async function MissionPage({ params }: Props) {
   const number = Number(rawNumber);
   const session = await requireSignedIn(`${paths.missions(tenant)}/${number}`);
   const token = session.accessToken ?? "";
-  const [mission, tenants] = await Promise.all([
-    getMission(token, tenant, number),
-    getMyTenants(token),
-  ]);
+  const { isAdmin } = await tenantFor(token, tenant);
+  const mission = await getMission(token, tenant, number);
   if (!mission) notFound();
-  const isAdmin = tenants.some((t) => t.slug === tenant && t.isAdmin);
   const deployments: Deployment[] = isAdmin ? await getDeployments(token, tenant) : [];
   const place = [mission.site, mission.region, mission.country].filter(Boolean).join(", ");
 
