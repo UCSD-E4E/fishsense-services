@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.30.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.29.0...v0.30.0) (2026-10-21)
+
+
+### Features
+
+* retire /captures; a mission lists its fish, with its place ([e35a2d5](https://github.com/UCSD-E4E/fishsense-services/commit/e35a2d55c6066269279bd5f6115dfebec002df7e))
+* retire /captures; a mission lists its fish, with its place ([1d2a31d](https://github.com/UCSD-E4E/fishsense-services/commit/1d2a31d1510f04dc73d1f80ec4e0951c60d5ebfe))
+
+
+### Bug Fixes
+
+* **staging:** stage raws from the tenant bucket first; give staging hours ([70923d5](https://github.com/UCSD-E4E/fishsense-services/commit/70923d5eed32744c2ac757ad3523e7f7431fcddd))
+* **staging:** stage raws from the tenant bucket first; give staging hours ([5d4b8ff](https://github.com/UCSD-E4E/fishsense-services/commit/5d4b8ff9cb8e6b3aa121cb255aec7137e18370cd))
+
+
+### Documentation
+
+* **handoff:** a running handoff page for fishsense-mobile ([a46b2f9](https://github.com/UCSD-E4E/fishsense-services/commit/a46b2f91be7b05761d33e1e4dbfe15ac8b0d8c6a))
+
 ## [0.29.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.28.0...v0.29.0) (2026-10-21)
 
 
