@@ -112,8 +112,8 @@ export function where(o: Observation): string | null {
   return o.mission?.name ?? o.place_name ?? null;
 }
 
-/** A fish's page: a mobile fish's is its capture's, a Lite fish's its own. */
+/** A fish's own page, for Lite and Mobile alike: a mobile fish's page shows
+ *  its capture's evidence too (`fish-evidence.ts`). */
 export function observationHref(slug: string, o: Observation): string {
-  if (o.client_capture_uuid) return paths.capture(slug, o.client_capture_uuid);
   return paths.fishDetail(slug, o.capture_id, o.fish_id);
 }
