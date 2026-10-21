@@ -16,9 +16,9 @@ import {
 import { setDeploymentAction, setPortAction, setPurposeAction } from "./actions";
 
 const field =
-  "rounded-md border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900";
+  "rounded-control border border-line bg-surface px-2 py-1 text-sm";
 const button =
-  "rounded-md bg-slate-900 px-3 py-1 text-sm font-medium text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900";
+  "inline-flex h-10 items-center rounded-control bg-teal px-4 text-sm font-semibold text-on-teal disabled:opacity-50";
 
 function useSave() {
   const [pending, start] = useTransition();
@@ -37,7 +37,7 @@ function useSave() {
 }
 
 function Status({ error, saved }: { error: string | null; saved: boolean }) {
-  if (error) return <p className="text-sm text-red-700 dark:text-red-400">{error}</p>;
+  if (error) return <p className="text-sm text-error">{error}</p>;
   if (saved) return <p className="text-sm text-emerald-700 dark:text-emerald-400">Saved.</p>;
   return null;
 }
@@ -64,7 +64,7 @@ export function FactsForms({
   const ruled = mission.port_source === "backfill" || mission.port_source === "device_suffix";
 
   return (
-    <section className="space-y-6 rounded-lg border border-slate-200 p-5 dark:border-slate-800">
+    <section className="space-y-6 rounded-card border border-line bg-surface p-5">
       <h2 className="text-lg font-semibold">Edit (admin)</h2>
 
       <div className="space-y-2">
@@ -72,7 +72,7 @@ export function FactsForms({
           Camera port
         </label>
         {ruled ? (
-          <p className="text-sm text-slate-600 dark:text-slate-400">
+          <p className="text-sm text-fg-2">
             {portLabel(mission.port, mission.port_source)} is the owner&apos;s rule for this
             mission and can&apos;t be changed here.
           </p>

@@ -46,15 +46,15 @@ export default async function MissionPage({ params }: Props) {
       <span key="port" className="space-y-1">
         <PortBadge port={mission.port} source={mission.port_source} />
         {mission.port_note && (
-          <span className="block text-xs text-slate-500">{mission.port_note}</span>
+          <span className="block text-xs text-fg-2">{mission.port_note}</span>
         )}
         {mission.port === "unknown" && (
-          <span className="block text-xs text-amber-700 dark:text-amber-400">
+          <span className="block text-xs text-warn">
             Nothing says which port this camera was behind. A missing D does not mean flat.
           </span>
         )}
         {!mission.processable && (
-          <span className="block text-xs text-amber-700 dark:text-amber-400">
+          <span className="block text-xs text-warn">
             The pipeline won&apos;t process this mission: it needs the corrective optic and a
             pinhole camera calibration, and a borrowed calibration from a mission that has
             them too.
@@ -68,7 +68,7 @@ export default async function MissionPage({ params }: Props) {
         <Link
           key="deployment"
           href={deploymentHref(tenant, mission.deployment_number)}
-          className="text-sky-700 hover:underline dark:text-sky-400"
+          className="text-teal-fg hover:underline"
         >
           {mission.deployment_name}
         </Link>
@@ -86,14 +86,14 @@ export default async function MissionPage({ params }: Props) {
     <main className="mx-auto max-w-4xl px-6 py-12">
       <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-sm text-slate-500">Mission {mission.number}</p>
+          <p className="text-sm text-fg-2">Mission {mission.number}</p>
           <h1 className="text-3xl font-semibold tracking-tight">
             {mission.name ?? `Mission ${mission.number}`}
           </h1>
         </div>
         <Link
           href={paths.missions(tenant)}
-          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700"
+          className="rounded-control border border-line px-3 py-1.5 text-sm "
         >
           All missions
         </Link>
@@ -102,14 +102,14 @@ export default async function MissionPage({ params }: Props) {
       <dl className="mb-8 grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-[10rem_1fr]">
         {facts.map(([label, value]) => (
           <div key={label} className="contents">
-            <dt className="font-medium text-slate-500">{label}</dt>
+            <dt className="font-medium text-fg-2">{label}</dt>
             <dd>{value}</dd>
           </div>
         ))}
       </dl>
 
       {mission.notes && (
-        <p className="mb-8 whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-300">
+        <p className="mb-8 whitespace-pre-wrap text-sm text-fg">
           {mission.notes}
         </p>
       )}

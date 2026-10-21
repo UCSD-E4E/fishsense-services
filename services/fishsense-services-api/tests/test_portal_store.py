@@ -557,3 +557,33 @@ async def test_a_verdict_the_v2_gate_recorded_counts(
         )
 
     assert await _ids(app_engine, lab, gated=True) == [FULLY_GATED]
+
+
+async def test_each_listed_mission_carries_its_camera_and_frame_count(
+    seed, app_engine, owner_engine, lab
+):
+    """Data's pages show each mission's camera and frames (docs/design/README.md,
+    "Web · Data"), without a query per mission."""
+    with_camera = await seed.mission(1, name="Five Seas")
+    await seed.mission(2, name="no camera yet")
+    await seed.image(1, with_camera)
+    await seed.image(2, with_camera)
+    async with owner_engine.begin() as conn:
+        device = await _one(
+            conn,
+            "INSERT INTO devices (tenant_id, kind, serial, name) "
+            "VALUES (:t, 'lite', 'S-1', 'FSL-03') RETURNING id",
+            t=lab,
+        )
+        await conn.execute(
+            text("UPDATE missions SET device_id = :d WHERE id = :m"),
+            {"d": device, "m": with_camera},
+        )
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        missions = await list_missions(conn, lab)
+
+    assert [(m.number, m.device_name, m.captures) for m in missions] == [
+        (1, "FSL-03", 2),
+        (2, None, 0),
+    ]

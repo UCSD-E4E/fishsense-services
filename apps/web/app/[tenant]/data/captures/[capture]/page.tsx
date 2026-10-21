@@ -57,7 +57,7 @@ export default async function CapturePage({ params }: Props) {
           <h1 className="text-3xl font-semibold tracking-tight">
             {formatLength(current?.length_m)}
           </h1>
-          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+          <p className="mt-1 text-sm text-fg-2">
             {new Date(capture.captured_at).toLocaleString()}
             {place
               ? ` · ${place.name}${place.derived ? " (from coordinates)" : ""}`
@@ -66,14 +66,14 @@ export default async function CapturePage({ params }: Props) {
         </div>
         <Link
           href={paths.captures(tenant)}
-          className="shrink-0 rounded-md border border-slate-300 px-3 py-1 text-sm dark:border-slate-700"
+          className="shrink-0 rounded-control border border-line px-3 py-1 text-sm "
         >
           All captures
         </Link>
       </header>
 
       {photo?.url && (
-        <figure className="relative mb-8 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
+        <figure className="relative mb-8 overflow-hidden rounded-card border border-line">
           {/* Presigned Garage URL: not for next/image (it would outlive it). */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={photo.url} alt="Fish capture" className="block w-full" />
@@ -107,7 +107,7 @@ export default async function CapturePage({ params }: Props) {
             </svg>
           )}
           {overlay && (
-            <figcaption className="px-3 py-2 text-xs text-slate-500">
+            <figcaption className="px-3 py-2 text-xs text-fg-2">
               Orange: snout. Green: fork. Points{" "}
               {current ? describeOrigin(current.origin) : ""}.
             </figcaption>
@@ -118,12 +118,12 @@ export default async function CapturePage({ params }: Props) {
       <section className="mb-8">
         <h2 className="mb-2 text-lg font-medium">Measurements</h2>
         {capture.measurements.length === 0 ? (
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-fg-2">
             The phone did not measure this fish.
           </p>
         ) : (
           <table className="w-full text-left text-sm">
-            <thead className="text-slate-500">
+            <thead className="text-fg-2">
               <tr>
                 <th className="py-1">When</th>
                 <th>Length</th>
@@ -135,7 +135,7 @@ export default async function CapturePage({ params }: Props) {
               {capture.measurements.map((m, i) => (
                 <tr
                   key={m.client_measurement_uuid}
-                  className="border-t border-slate-200 dark:border-slate-800"
+                  className="border-t border-line"
                 >
                   <td className="py-1">
                     {new Date(m.measured_at).toLocaleString()}
@@ -143,7 +143,7 @@ export default async function CapturePage({ params }: Props) {
                   </td>
                   <td>{formatLength(m.length_m)}</td>
                   <td>{describeOrigin(m.origin)}</td>
-                  <td className="text-slate-500">
+                  <td className="text-fg-2">
                     {m.algorithm
                       ? `${m.algorithm} ${m.algorithm_version ?? ""}`
                       : "not recorded"}
@@ -207,7 +207,7 @@ export default async function CapturePage({ params }: Props) {
               ) : (
                 (FILE_LABELS[f.role] ?? f.role)
               )}{" "}
-              <span className="text-slate-500">
+              <span className="text-fg-2">
                 {(f.size / 1024).toFixed(0)} KiB · sha256{" "}
                 {f.sha256.slice(0, 12)}…
               </span>
@@ -228,7 +228,7 @@ function Field({
 }) {
   return (
     <div className="flex gap-2">
-      <span className="w-32 shrink-0 text-slate-500">{label}</span>
+      <span className="w-32 shrink-0 text-fg-2">{label}</span>
       <span>{children}</span>
     </div>
   );

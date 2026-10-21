@@ -845,10 +845,14 @@ export interface components {
             calibration_source_number: number | null;
             /** Calibration Target Number */
             calibration_target_number: number | null;
+            /** Captures */
+            captures: number;
             /** Deployment Name */
             deployment_name: string | null;
             /** Deployment Number */
             deployment_number: number | null;
+            /** Device Name */
+            device_name: string | null;
             /** Name */
             name: string | null;
             /** Number */
