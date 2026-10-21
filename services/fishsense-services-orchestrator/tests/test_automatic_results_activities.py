@@ -141,6 +141,13 @@ class _Renders:
         self.presigners += 1
         return lambda key: f"https://garage/fishsense-tenant-lab/{key}?sig"
 
+    #: The tenant's bucket (`renders.urls.TenantRenderUrls.objects`), for
+    #: stored masks; None, no bucket.
+    bucket = None
+
+    async def objects(self, tenant_id):
+        return self.bucket
+
 
 def _render(capture_id, checksum, *, camera=CAMERA, version=AUTOMATIC_JPEG_RENDER_VERSION,
             status="rendered", settled=True):  # fmt: skip
@@ -627,3 +634,77 @@ async def test_a_run_for_a_tenant_the_orchestrator_is_not_in_is_refused():
     with pytest.raises(ApplicationError) as error:
         await _run(_acts(catalog).plan_automatic_run, "nobody", [62])
     assert error.value.non_retryable
+
+
+# -- stored masks (contract 12, 2026-10-21) ------------------------------------------
+
+
+class _MaskBucket:
+    bucket = "fishsense-tenant-lab"
+
+    def __init__(self, stored=None):
+        self.stored = stored or {}
+
+    def presign_mask_put(self, key):
+        return SimpleNamespace(url=f"https://g/{key}?sig")
+
+    def get(self, key):
+        return self.stored.get(key)
+
+
+async def test_each_frame_of_a_chunk_gets_a_mask_upload():
+    renders = _Renders()
+    renders.bucket = _MaskBucket()
+    captures = [uuid.uuid4(), uuid.uuid4()]
+
+    uploads = await _run(_acts(_Catalog(), renders=renders).presign_automatic_masks,
+                         TARGET, captures)  # fmt: skip
+
+    assert [u.key.split("/")[2] for u in uploads] == [str(c) for c in captures]
+    assert all(u.put_url.startswith("https://g/masks/automatic/") for u in uploads)
+
+
+async def test_a_tenant_with_no_bucket_gets_no_mask_uploads():
+    uploads = await _run(_acts(_Catalog()).presign_automatic_masks, TARGET,
+                         [uuid.uuid4()])  # fmt: skip
+    assert uploads == [None]
+
+
+async def test_a_checked_mask_is_written_with_its_prediction_and_left_off_the_row():
+    import gzip
+    import hashlib
+
+    from fishsense_services_contracts.masks import StoredMask, mask_key
+
+    data = gzip.compress(bytes(4 * 3), mtime=0)
+    capture = uuid.uuid4()
+    key = mask_key("automatic", capture, uuid.uuid4())
+    r = _frame_result(capture_id=capture, width=4, height=3, mask_bbox=[0, 0, 1, 1],
+                      mask=StoredMask(key=key, size=len(data),
+                                      sha256=hashlib.sha256(data).hexdigest(),
+                                      width=4, height=3))  # fmt: skip
+    renders = _Renders()
+    renders.bucket = _MaskBucket({key: data})
+    catalog = _Catalog(persist_automatic_head_tails=lambda t, d, rows, masks: len(rows))
+
+    assert await _run(_acts(catalog, renders=renders).persist_automatic_frames,
+                      TARGET, [r]) == 1  # fmt: skip
+    ((_, (_, _, rows, masks), _),) = catalog.calls
+    assert not hasattr(rows[0], "mask")
+    assert [(m.capture_id, m.key) for m in masks] == [(capture, key)]
+
+
+async def test_a_mask_that_fails_its_check_costs_only_itself():
+    from fishsense_services_contracts.masks import StoredMask, mask_key
+
+    capture = uuid.uuid4()
+    key = mask_key("automatic", capture, uuid.uuid4())
+    r = _frame_result(capture_id=capture, width=4, height=3, mask_bbox=[0, 0, 1, 1],
+                      mask=StoredMask(key=key, size=9, sha256="a" * 64, width=4,
+                                      height=3))  # fmt: skip
+    renders = _Renders()
+    renders.bucket = _MaskBucket({})  # never arrived
+    catalog = _Catalog(persist_automatic_head_tails=lambda t, d, rows: len(rows))
+
+    assert await _run(_acts(catalog, renders=renders).persist_automatic_frames,
+                      TARGET, [r]) == 1  # fmt: skip

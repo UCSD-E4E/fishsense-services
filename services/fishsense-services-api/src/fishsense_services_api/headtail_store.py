@@ -55,6 +55,10 @@ from typing import Sequence
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api.prediction_masks_store import (
+    PredictionMask,
+    insert_prediction_masks,
+)
 from fishsense_services_api.camera_sql import (
     RECTIFIABLE_CAMERA_MODEL,
     RECTIFIABLE_MISSION,
@@ -609,6 +613,7 @@ async def persist_headtail_predictions(
     tenant_id: uuid.UUID,
     mission_id: uuid.UUID,
     rows: Sequence[HeadTailPredictionRow],
+    masks: Sequence[PredictionMask] = (),
 ) -> int:
     """Append the dive's predictions, abstentions included, all or nothing, in
     the caller's transaction. Returns how many were written.
@@ -619,6 +624,8 @@ async def persist_headtail_predictions(
     """
     rows = list(rows)
     if not rows:
+        if masks:
+            raise ValueError("masks with no prediction to name them against")
         return 0
     captures = {r.capture_id for r in rows}
     owned = set(
@@ -655,8 +662,9 @@ async def persist_headtail_predictions(
                 f"laser label {r.laser_label_id} is not capture {r.capture_id}'s"
             )
 
+    ids: dict[uuid.UUID, uuid.UUID] = {}
     for r in rows:
-        await conn.execute(
+        ids[r.capture_id] = (await conn.execute(
             text("""
                 INSERT INTO head_tail_predictions (
                     tenant_id, capture_id, status, head_x, head_y, tail_x, tail_y,
@@ -668,9 +676,13 @@ async def persist_headtail_predictions(
                     :tail_y, :width, :height, :mask_area_px, :silhouette_ratio,
                     :crop_x, :crop_y, :laser_label_id, :predictor_version,
                     :checkpoint, :core_version, :mask_bbox)
+                RETURNING id
                 """),
             {"tenant": tenant_id, **r.__dict__},
-        )
+        )).scalar_one()  # fmt: skip
+    if masks:
+        # Each stored mask, named against its capture's prediction (0058).
+        await insert_prediction_masks(conn, tenant_id, "headtail", ids, masks)
     return len(rows)
 
 
@@ -876,9 +888,12 @@ class HeadtailCatalog(ServicePrincipal):
         tenant_id: uuid.UUID,
         mission_id: uuid.UUID,
         rows: Sequence[HeadTailPredictionRow],
+        masks: Sequence[PredictionMask] = (),
     ) -> int:
         async with self._tenant(tenant_id) as conn:
-            return await persist_headtail_predictions(conn, tenant_id, mission_id, rows)
+            return await persist_headtail_predictions(
+                conn, tenant_id, mission_id, rows, masks
+            )
 
     async def missions_needing_headtail_population(
         self, tenant_id: uuid.UUID

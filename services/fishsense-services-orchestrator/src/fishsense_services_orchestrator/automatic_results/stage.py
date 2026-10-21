@@ -85,6 +85,7 @@ def _activities(deps: Deps):
         activities.record_automatic_frame_failures,
         activities.plan_automatic_run,
         activities.resolve_automatic_frames_inputs,
+        activities.presign_automatic_masks,
         activities.persist_automatic_frames,
         activities.resolve_automatic_species_inputs,
         activities.persist_automatic_species,

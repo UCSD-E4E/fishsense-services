@@ -183,11 +183,14 @@ def predict_from_jpeg(
     capture_id: uuid.UUID,
     laser_label_ids: Optional[Sequence[uuid.UUID]] = None,
     options: Optional[PredictOptions] = None,
+    mask_sink: Any = None,
 ) -> HeadtailPredictionResult:
     """Decode, crop, segment, gate, keypoint, and lift back to frame pixels.
 
     `segmenter` is anything with `segment(image) -> list[np.ndarray]` of
     crop-local binary masks: production passes an adapter, tests a stub.
+    `mask_sink` (`masks.MaskSink`), when given, is handed the mask kept, to
+    be stored (contract 12, 2026-10-21).
     """
     # pylint: disable=import-outside-toplevel
     import cv2
@@ -247,6 +250,8 @@ def predict_from_jpeg(
         return _abstain("laser_off_all_fish", **placed)
 
     binary = (np.asarray(mask) > 0).astype(np.uint8)
+    if mask_sink is not None:
+        mask_sink.keep(binary, origin_x, origin_y, width, height)
     return _keypoint(
         binary,
         capture_id=capture_id,

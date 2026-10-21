@@ -66,6 +66,7 @@ from uuid import UUID
 from pydantic import BaseModel, field_validator, ConfigDict, model_validator
 
 from fishsense_services_contracts._boxes import check_box, check_one_image
+from fishsense_services_contracts.masks import MaskUpload, StoredMask, check_mask
 from fishsense_services_contracts.object_store import ObjectRef
 from fishsense_services_contracts.renamed import renamed_from
 from fishsense_services_contracts.renders import RENDER_VERSION
@@ -148,6 +149,8 @@ class AutomaticFrame(BaseModel):
     #: keeps its dot for the calibration and is never measured as a fish.
     slate_probability: Optional[float] = None
     is_slate: bool = False
+    #: Where to PUT the frame's mask, should it keep one (v12, `masks`).
+    mask: Optional[MaskUpload] = None
 
 
 class PredictAutomaticFramesInput(BaseModel):
@@ -209,6 +212,13 @@ class AutomaticFrameResult(BaseModel):
     #: payload).
     jpeg_render_version: Optional[int] = None
     jpeg_camera_calibration_id: Optional[UUID] = None
+    #: The kept mask, as stored (v12, `masks`); never recorded on the row.
+    mask: Optional[StoredMask] = None
+
+    @model_validator(mode="after")
+    def _mask_kept(self) -> "AutomaticFrameResult":
+        check_mask(self.status, self.mask)
+        return self
 
     @field_validator("mask_bbox")
     @classmethod

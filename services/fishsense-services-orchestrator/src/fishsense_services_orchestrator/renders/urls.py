@@ -47,6 +47,15 @@ class TenantRenderUrls:
             camera_calibration_id=camera_calibration_id,
         )
 
+    async def objects(self, tenant_id: uuid.UUID) -> Any:
+        """The tenant's bucket (`TenantObjects`), or None when it has none:
+        where stored masks are presigned and read back (contract 12)."""
+        slug = await self._catalog.tenant_slug(tenant_id)
+        try:
+            return self._stores.for_tenant(slug)
+        except NoTenantStore:
+            return None
+
     async def presigner(self, tenant_id: uuid.UUID) -> Callable[[str], str]:
         """Presigned GETs in the tenant's bucket: the slug looked up once, the
         signing local (review of #144: once per frame was a database round

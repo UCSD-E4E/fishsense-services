@@ -22,6 +22,7 @@ here is what the activities add:
 from __future__ import annotations
 
 import uuid
+from types import SimpleNamespace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -44,6 +45,7 @@ from fishsense_services_contracts.headtail import (
     HeadtailPredictionResult,
 )
 from fishsense_services_contracts.object_store import ObjectRef, ObjectStoreConnection
+from fishsense_services_api.tenant_stores import NoTenantStore
 from fishsense_services_orchestrator.headtail.activities import (
     ClearHeadtailReprocessFlags,
     HeadtailActivities,
@@ -108,17 +110,49 @@ class FakeCatalog:
         self.calls.append(("clear", tenant_id, mission_id, checksums))
         return 3
 
-    async def persist_headtail_predictions(self, tenant_id, mission_id, rows):
+    async def persist_headtail_predictions(self, tenant_id, mission_id, rows, masks=()):
         if "refuse" in self.answers:
             raise self.answers["refuse"]
         self.calls.append(("persist", tenant_id, mission_id, rows))
+        if masks:
+            self.calls.append(("masks", list(masks)))
         return len(rows)
 
+    async def tenant_slug(self, tenant_id):
+        return "lab"
 
-def _activities(catalog, present=()):
+
+class _MaskBucket:
+    """The tenant's bucket, for stored masks (contract 12)."""
+
+    bucket = "fishsense-tenant-lab"
+
+    def __init__(self, stored=None):
+        self.stored = stored or {}
+
+    def presign_mask_put(self, key):
+        return SimpleNamespace(url=f"https://g/{key}?sig")
+
+    def get(self, key):
+        return self.stored.get(key)
+
+
+class _Stores:
+    def __init__(self, objects=None):
+        self.objects = objects
+        self.tenants = {"lab"} if objects else set()
+
+    def for_tenant(self, slug):
+        if self.objects is None:
+            raise NoTenantStore(slug)
+        return self.objects
+
+
+def _activities(catalog, present=(), stores=None):
     return HeadtailActivities(
-        catalog=catalog, store=OrchestratorObjectStore(FakeS3(present), LAYOUT)
-    )
+        catalog=catalog, store=OrchestratorObjectStore(FakeS3(present), LAYOUT),
+        stores=stores,
+    )  # fmt: skip
 
 
 async def _run(fn, *args):
@@ -332,7 +366,7 @@ async def test_every_field_of_a_result_is_persisted():
     assert written == 1
     _, tenant, mission, (row,) = next(c for c in catalog.calls if c[0] == "persist")
     assert (tenant, mission) == (LAB, target.mission_id)
-    assert row.__dict__ == result.model_dump()
+    assert row.__dict__ == result.model_dump(exclude={"mask"})
 
 
 async def test_a_refusal_is_final():
@@ -365,3 +399,77 @@ async def test_a_worker_status_is_never_persisted():
             [_result(uuid.uuid4(), status=HEADTAIL_STATUS_NO_UPGRADE_AVAILABLE)],
         )
     assert not [c for c in catalog.calls if c[0] == "persist"]
+
+
+# -- stored masks (contract 12, 2026-10-21) ------------------------------------------
+
+
+async def test_each_image_gets_a_mask_upload_in_the_tenants_bucket():
+    capture = _capture("a" * 32)
+    jpeg = LAYOUT.processed_jpeg(LAB, "preprocess_headtail_jpeg", "a" * 32)
+
+    inputs = await _run(
+        _activities(FakeCatalog(captures=[capture]), present=[jpeg],
+                    stores=_Stores(_MaskBucket())).resolve_headtail_predict_inputs,
+        HeadtailTarget(LAB, uuid.uuid4()),
+    )  # fmt: skip
+
+    (image,) = inputs.images
+    assert image.mask.key.startswith(f"masks/headtail/{capture.capture_id}/")
+    assert image.mask.put_url == f"https://g/{image.mask.key}?sig"
+
+
+async def test_with_no_bucket_an_image_gets_no_mask_upload():
+    capture = _capture("a" * 32)
+    jpeg = LAYOUT.processed_jpeg(LAB, "preprocess_headtail_jpeg", "a" * 32)
+
+    inputs = await _run(
+        _activities(FakeCatalog(captures=[capture]), present=[jpeg],
+                    stores=_Stores(None)).resolve_headtail_predict_inputs,
+        HeadtailTarget(LAB, uuid.uuid4()),
+    )  # fmt: skip
+    assert inputs.images[0].mask is None
+
+
+async def test_a_firing_hands_out_a_page_of_images_and_defers_the_rest():
+    """A presigned PUT is ~650 characters: a whole large mission's would pass
+    Temporal's 2 MB payload limit, so a firing takes a page; the rest wait for
+    the next, as images with no JPEG do."""
+    from fishsense_services_orchestrator.headtail.activities import (
+        HEADTAIL_PREDICT_PAGE,
+    )
+
+    captures = [_capture(f"{n:032x}") for n in range(HEADTAIL_PREDICT_PAGE + 3)]
+    present = [LAYOUT.processed_jpeg(LAB, "preprocess_headtail_jpeg", c.checksum)
+               for c in captures]  # fmt: skip
+
+    inputs = await _run(
+        _activities(FakeCatalog(captures=captures), present=present,
+                    stores=_Stores(_MaskBucket())).resolve_headtail_predict_inputs,
+        HeadtailTarget(LAB, uuid.uuid4()),
+    )  # fmt: skip
+    assert len(inputs.images) == HEADTAIL_PREDICT_PAGE
+
+
+async def test_a_checked_mask_is_persisted_with_its_prediction():
+    import gzip
+    import hashlib
+
+    from fishsense_services_contracts.masks import StoredMask, mask_key
+
+    capture = uuid.uuid4()
+    data = gzip.compress(bytes(4014 * 3016), mtime=0)
+    key = mask_key("headtail", capture, uuid.uuid4())
+    result = _result(capture, mask_bbox=[0, 0, 1, 1], mask=StoredMask(
+        key=key, size=len(data), sha256=hashlib.sha256(data).hexdigest(),
+        width=4014, height=3016))  # fmt: skip
+    catalog = FakeCatalog()
+
+    await _run(
+        _activities(catalog, stores=_Stores(_MaskBucket({key: data})))
+        .persist_headtail_predictions,
+        HeadtailTarget(LAB, uuid.uuid4()), [result],
+    )  # fmt: skip
+
+    (masks,) = [c[1] for c in catalog.calls if c[0] == "masks"]
+    assert [(m.capture_id, m.key) for m in masks] == [(capture, key)]

@@ -143,6 +143,20 @@ class TenantObjects:
         )
         return PresignedUpload(url=url, headers={"Content-Type": content_type})
 
+    def presign_mask_put(
+        self, key: str, *, expires_seconds: int = RENDER_EXPIRES_SECONDS
+    ) -> PresignedUpload:
+        """A PUT of a SAM mask (0058, 2026-10-21): gzip'd bytes not known when
+        signed, so unsigned, as a render's -- read back and checked after,
+        against the size and SHA-256 the processor reports."""
+        content_type = "application/gzip"
+        url = self._public.generate_presigned_url(
+            "put_object",
+            Params={"Bucket": self.bucket, "Key": key, "ContentType": content_type},
+            ExpiresIn=expires_seconds,
+        )
+        return PresignedUpload(url=url, headers={"Content-Type": content_type})
+
     def presign_get(
         self, key: str, *, expires_seconds: int = DEFAULT_EXPIRES_SECONDS
     ) -> str:

@@ -109,6 +109,7 @@ with workflow.unsafe.imports_passed_through():
     from fishsense_services_orchestrator.object_store.readers import (
         raw_scratch_reader_id,
     )
+    from fishsense_services_contracts.masks import MaskUpload
     from fishsense_services_orchestrator.object_store.steps import (
         LONG_STAGE_RAW_TIMEOUT,
         cleanup_raw,
@@ -268,6 +269,10 @@ def _skip_for_gpu(step: str, gpu: _Gpu, report: AutomaticMissionReport) -> None:
 _AFTER_FRAMES = "calibration, lengths, species"
 
 
+#: The change that stores each frame's SAM mask (contract 12, 2026-10-21): a
+#: run started before it replays without the presign step.
+MASKS_PATCH = "automatic-frames-store-masks"
+
 #: Frames per GPU child: each carries its render's presigned GET, and a whole
 #: large mission's would pass Temporal's 2 MB payload limit (review of #144).
 FRAMES_PER_CHILD = 400
@@ -332,6 +337,18 @@ async def _frames(
         missing: List[uuid.UUID] = []
         for start in range(0, len(ready), FRAMES_PER_CHILD):
             chunk = ready[start : start + FRAMES_PER_CHILD]
+            if workflow.patched(MASKS_PATCH):
+                # Contract 12: each frame's mask upload, presigned for this
+                # chunk (a whole mission's URLs would pass the 2 MB limit).
+                uploads = await _db(
+                    "presign_automatic_masks",
+                    target,
+                    [f.capture_id for f in chunk],
+                    result_type=List[Optional[MaskUpload]],
+                )
+                chunk = [
+                    f.model_copy(update={"mask": u}) for f, u in zip(chunk, uploads)
+                ]
             ran, results = await _child(
                 "PredictAutomaticFramesWorkflow",
                 inputs.model_copy(update={"frames": chunk}),

@@ -1590,3 +1590,28 @@ async def test_headtail_prediction_admits_only_the_corrective_optic(
     await restate_port(owner_engine, mission, port)
 
     assert await _next_predict(app_engine, lab) is None
+
+
+async def test_a_human_path_prediction_and_its_mask_are_written_together(
+    owner_engine, app_engine
+):
+    """The head/tail predictor's SAM mask, stored like the app's mask_u8,
+    named against its prediction (0058, 2026-10-21)."""
+    from fishsense_services_api.prediction_masks_store import PredictionMask
+
+    lab = await _tenant(owner_engine)
+    mission, capture, laser = await _predict_seed(owner_engine, lab)
+    mask = PredictionMask(capture_id=capture, bucket="fishsense-tenant-lab",
+                          key="masks/headtail/abc/1.u8.gz", sha256="b" * 64,
+                          size=700, content_type="application/gzip",
+                          width=4014, height=3016)  # fmt: skip
+
+    await _in(app_engine, lab, persist_headtail_predictions, mission,
+              [_row(capture, laser_label_id=laser)], masks=[mask])  # fmt: skip
+
+    async with owner_engine.connect() as conn:
+        (key, of) = (await conn.execute(text("""
+            SELECT m.object_key, p.capture_id FROM prediction_masks m
+            JOIN head_tail_predictions p ON p.id = m.head_tail_prediction_id
+            """))).one()  # fmt: skip
+    assert (key, of) == ("masks/headtail/abc/1.u8.gz", capture)

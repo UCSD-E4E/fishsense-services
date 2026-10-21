@@ -175,6 +175,17 @@ def test_a_stored_object_reads_back_whole_and_a_missing_one_is_none(stores):
     assert lab.get("raws/not-there.ORF") is None
 
 
+def test_a_mask_put_stores_gzip_bytes_read_back_whole(stores):
+    """A SAM mask (0058, 2026-10-21): PUT unsigned, as a render, then read
+    back by the orchestrator and checked against what the processor said."""
+    lab = stores.for_tenant("lab")
+    upload = lab.presign_mask_put("masks/automatic/abc/1.u8.gz")
+
+    assert upload.headers == {"Content-Type": "application/gzip"}
+    assert _put(upload, BODY) == 200
+    assert lab.get("masks/automatic/abc/1.u8.gz") == BODY
+
+
 def test_urls_are_signed_for_the_public_endpoint(garage):
     """Phones and browsers reach Garage at its public address; the API's own
     checks use the internal one. A signature covers the host, so presigning
