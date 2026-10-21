@@ -135,6 +135,10 @@ class MissionSummary:
     #: and any borrowed calibration's source behind the corrective optic too
     #: (`camera_sql`, 2b-2). Computed here so no client restates the rule.
     processable: bool
+    #: Its camera, and how many frames it holds: Data's pages show both for
+    #: every mission (docs/design/README.md).
+    device_name: str | None
+    captures: int
 
 
 def _gate_scan(*, judged: bool) -> str:
@@ -213,7 +217,10 @@ _MISSION_COLUMNS = f"""
     s.number AS calibration_source_number,
     d.purpose, d.port, d.port_source, d.site,
     p.number AS deployment_number, p.name AS deployment_name,
-    ({RECTIFIABLE_MISSION} AND {ADMITTED_PORT}) AS processable
+    ({RECTIFIABLE_MISSION} AND {ADMITTED_PORT}) AS processable,
+    v.name AS device_name,
+    (SELECT count(*) FROM captures c
+     WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id) AS captures
 """
 _MISSION_JOINS = """
     LEFT JOIN slate_templates t ON t.id = d.slate_template_id
@@ -222,6 +229,7 @@ _MISSION_JOINS = """
       ON s.tenant_id = d.tenant_id AND s.id = d.calibration_source_mission_id
     LEFT JOIN deployments p
       ON p.tenant_id = d.tenant_id AND p.id = d.deployment_id
+    LEFT JOIN devices v ON v.tenant_id = d.tenant_id AND v.id = d.device_id
 """
 _MISSION_SUMMARY = f"""
     SELECT {_MISSION_COLUMNS} FROM missions d {_MISSION_JOINS}
@@ -230,12 +238,8 @@ _MISSION_SUMMARY = f"""
 #: One mission's page: the summary and the rest of the row, in one query.
 _MISSION_DETAIL = f"""
     SELECT {_MISSION_COLUMNS},
-           d.source_path, d.notes, d.port_note, d.country, d.region,
-           v.name AS device_name,
-           (SELECT count(*) FROM captures c
-            WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id) AS captures
+           d.source_path, d.notes, d.port_note, d.country, d.region
     FROM missions d {_MISSION_JOINS}
-    LEFT JOIN devices v ON v.tenant_id = d.tenant_id AND v.id = d.device_id
     WHERE d.tenant_id = :tenant_id AND d.number = :n
 """
 
@@ -281,8 +285,6 @@ class MissionDetail:
     port_note: str | None
     country: str | None
     region: str | None
-    device_name: str | None
-    captures: int
 
 
 async def mission_detail(

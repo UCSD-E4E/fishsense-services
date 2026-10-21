@@ -5,7 +5,8 @@ import { paths } from "@/lib/tenant-paths";
 export const missionHref = paths.mission;
 export const deploymentHref = paths.deployment;
 
-/** Missions as rows: what each is for, its port and what said so, its trip. */
+/** Missions as rows: what each is for, its port and what said so, its camera
+ *  and frames, and its trip. */
 export function MissionTable({
   slug,
   missions,
@@ -16,50 +17,56 @@ export function MissionTable({
   showDeployment?: boolean;
 }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
+    <div className="overflow-x-auto rounded-card border border-line">
       <table className="w-full text-left text-sm">
-        <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+        <thead className="bg-raised text-xs uppercase tracking-wide text-fg-2">
           <tr>
             <th className="px-3 py-2">#</th>
             <th className="px-3 py-2">Mission</th>
             <th className="px-3 py-2">Started</th>
             <th className="px-3 py-2">Purpose</th>
             <th className="px-3 py-2">Port</th>
+            <th className="px-3 py-2">Camera</th>
+            <th className="px-3 py-2 text-right">Frames</th>
             {showDeployment && <th className="px-3 py-2">Deployment</th>}
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+        <tbody className="divide-y divide-line">
           {missions.map((m) => (
-            <tr key={m.number} className="hover:bg-slate-50 dark:hover:bg-slate-900">
-              <td className="px-3 py-2 tabular-nums text-slate-500">{m.number}</td>
+            <tr key={m.number} className="hover:bg-raised">
+              <td className="px-3 py-2 tabular-nums text-fg-2">{m.number}</td>
               <td className="px-3 py-2">
                 <Link href={missionHref(slug, m.number)} className="font-medium hover:underline">
                   {m.name ?? `Mission ${m.number}`}
                 </Link>
-                {m.site && <span className="text-slate-500"> · {m.site}</span>}
+                {m.site && <span className="text-fg-2"> · {m.site}</span>}
               </td>
-              <td className="whitespace-nowrap px-3 py-2 text-slate-600 dark:text-slate-400">
+              <td className="whitespace-nowrap px-3 py-2 text-fg-2">
                 {new Date(m.started_at).toLocaleDateString()}
               </td>
               <td className="px-3 py-2">
-                <span className={m.purpose ? "" : "text-slate-400"}>
+                <span className={m.purpose ? "" : "text-fg-3"}>
                   {purposeLabel(m.purpose)}
                 </span>
               </td>
               <td className="px-3 py-2">
                 <PortBadge port={m.port} source={m.port_source} />
               </td>
+              <td className="px-3 py-2 text-fg-2">{m.device_name ?? "—"}</td>
+              <td className="px-3 py-2 text-right tabular-nums text-fg-2">
+                {m.captures.toLocaleString()}
+              </td>
               {showDeployment && (
                 <td className="px-3 py-2">
                   {m.deployment_number != null ? (
                     <Link
                       href={deploymentHref(slug, m.deployment_number)}
-                      className="text-sky-700 hover:underline dark:text-sky-400"
+                      className="text-teal-fg hover:underline"
                     >
                       {m.deployment_name}
                     </Link>
                   ) : (
-                    <span className="text-slate-400">—</span>
+                    <span className="text-fg-3">—</span>
                   )}
                 </td>
               )}
@@ -80,8 +87,8 @@ export function PortBadge({
 }) {
   const tone =
     port === "unknown"
-      ? "bg-amber-50 text-amber-800 ring-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:ring-amber-800"
-      : "bg-slate-100 text-slate-700 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700";
+      ? "bg-warn/10 text-warn ring-warn/50"
+      : "bg-raised text-fg ring-line";
   return (
     <span className={`inline-block rounded-full px-2 py-0.5 text-xs ring-1 ${tone}`}>
       {portLabel(port, source)}
