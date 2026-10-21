@@ -20,6 +20,9 @@ fishsense-services-api infer-deployments --tenant <id> [--together 398=400 ...]
                                     # dry run: deployments for legacy missions
                                     # from their folders and dates; --apply
                                     # <the dry run's fingerprint> writes them
+fishsense-services-api public-totals --tenant lab --enable [--apply]
+                                    # dry run: the signed-out page as it would
+                                    # read with the tenant counted (0055)
 fishsense-services-api dev-seed --frames deploy/local/ui/frames
                                     # LOCAL ONLY: the UI harness's synthetic
                                     # tenant (compose.ui.yml, dev_seed.py)
@@ -59,6 +62,7 @@ from fishsense_services_api.automatic_validation_store import (
     validation_frames,
 )
 from fishsense_services_api.db import tenant_transaction
+from fishsense_services_api.public_store import PublicSummary, public_summary
 from fishsense_services_api.tenant_slugs import RESERVED_TENANT_SLUGS
 from fishsense_services_api.deployment_inference import (
     InferencePlan,
@@ -166,6 +170,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON {dive number: {laser_position, laser_axis}}, replacing the "
         "database's label-free calibrations",
     )
+    public = commands.add_parser(
+        "public-totals",
+        help="opt a tenant in or out of the signed-out page's totals and map "
+        "(0055); a dry run by default, showing the page as it would read",
+    )
+    public.add_argument("--tenant", required=True, help="the tenant's slug")
+    choice = public.add_mutually_exclusive_group(required=True)
+    choice.add_argument("--enable", action="store_true", help="count it")
+    choice.add_argument("--disable", action="store_true", help="stop counting it")
+    public.add_argument("--apply", action="store_true", help="write the change")
     add_tenant = commands.add_parser(
         "add-tenant",
         help="create (or update) a tenant, optionally joined by a partner org's "
@@ -258,6 +272,8 @@ async def main(argv: Sequence[str]) -> int:
         return await _validate_automatic(args)
     if args.command == "add-tenant":
         return await _add_tenant(args)
+    if args.command == "public-totals":
+        return await _public_totals(args)
     if args.command == "backfill-mission-facts":
         return await _backfill_mission_facts(args)
     if args.command == "infer-deployments":
@@ -469,6 +485,72 @@ async def _backfill_mission_facts(args: argparse.Namespace) -> int:
             f"{args.tenant} --ingested-before {args.ingested_before.isoformat()} "
             f"{again + ' ' if again else ''}--apply {plan.fingerprint}"
         )
+        return 0
+    finally:
+        await engine.dispose()
+
+
+def format_public_summary(found: PublicSummary) -> str:
+    """The signed-out page's numbers, as it would say them."""
+    lines = [
+        f"{found.lengths:,} lengths: {found.wild_fish:,} wild fish of "
+        f"{found.species} species, {found.model_lengths:,} fish-model lengths",
+        f"{found.missions:,} missions in {found.deployments:,} deployments",
+        "map:" if found.regions else "map: nothing yet",
+    ]
+    for r in found.regions:
+        shown = f"about {r.count:,}" if r.count is not None else f"under {r.under}"
+        lines.append(f"  {r.name}: {shown}")
+    return "\n".join(lines)
+
+
+async def _public_totals(args: argparse.Namespace) -> int:
+    """Dry run unless --apply: the page as it would read, then nothing written."""
+    settings = _settings(MigrationSettings)
+    if settings is None:
+        return 2
+    want = bool(args.enable)
+    engine = create_async_engine(settings.migration_database_url.get_secret_value())
+    try:
+        async with engine.begin() as conn:
+            now = (
+                await conn.execute(
+                    text("SELECT public_totals FROM tenants WHERE slug = :s"),
+                    {"s": args.tenant},
+                )
+            ).scalar_one_or_none()
+            if now is None:
+                print(f"unknown tenant {args.tenant!r}", file=sys.stderr)
+                return 1
+            if now == want:
+                state = "counts" if want else "does not count"
+                print(f"{args.tenant} already {state}: nothing to do", file=sys.stderr)
+                return 1
+            changed = await conn.execute(
+                text(
+                    "UPDATE tenants SET public_totals = :want "
+                    "WHERE slug = :s AND public_totals = :now"
+                ),
+                {"s": args.tenant, "want": want, "now": now},
+            )
+            if changed.rowcount != 1:
+                raise RuntimeError(f"{args.tenant} changed meanwhile: nothing written")
+            preview = await public_summary(conn)
+            if not args.apply:
+                await conn.rollback()
+                print(
+                    f"DRY RUN: nothing written. With {args.tenant} "
+                    f"{'in' if want else 'out'}, the public page would say:"
+                )
+                print(format_public_summary(preview))
+                print(
+                    f"\nto write it: public-totals --tenant {args.tenant} "
+                    f"--{'enable' if want else 'disable'} --apply"
+                )
+                return 0
+        state = "now counts in" if want else "no longer counts in"
+        print(f"{args.tenant} {state} the public page. It now says:")
+        print(format_public_summary(preview))
         return 0
     finally:
         await engine.dispose()

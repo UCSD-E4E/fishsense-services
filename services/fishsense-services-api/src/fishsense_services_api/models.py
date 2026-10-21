@@ -73,6 +73,8 @@ class Tenant(Base):
     created_at: Mapped[datetime] = _created_at()
     #: The partner org whose accounts join this tenant as members (0037).
     org_claim: Mapped[str | None] = mapped_column(Text, unique=True)
+    #: Counts in the signed-out page's totals (0055); an operator opts it in.
+    public_totals: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
 
 
 class User(Base):

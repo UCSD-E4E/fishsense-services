@@ -41,34 +41,11 @@ describe("fishsense-web SSR (against the running container)", () => {
     expect(body).toContain("<title>FishSense</title>");
   });
 
-  it("renders the static Results section with both Superset cards", () => {
-    expect(body).toContain("Results");
-    expect(body).toContain("Lengths");
-    expect(body).toContain("Metrics");
-    expect(body).toContain(
-      "https://analytics.fishsense.e4e.ucsd.edu/superset/dashboard/fishsense-fish-measurements",
-    );
-    expect(body).toContain(
-      "https://analytics.fishsense.e4e.ucsd.edu/superset/dashboard/fishsense-pipeline-status",
-    );
-  });
-
-  it("renders the Administration section with the Temporal Workflows link", () => {
-    expect(body).toContain("Administration");
-    expect(body).toContain("Workflows");
-    expect(body).toContain("https://workflows.krg.ucsd.edu/namespaces/fishsense");
-  });
-
-  it("collapses labeling sections when the local DB has no LS-attributed labels", () => {
-    // The container under test runs with LABEL_STUDIO_ENABLED unset, so no
-    // project is asked for and every labeling list is empty. The
-    // section-builder collapses empty categories — verifies that the
-    // production SSR pipeline (fetch → buildSections → render) honors
-    // the same empty-collapse contract the unit tests pin down, and that the
-    // public landing renders with no API and no Label Studio behind it.
-    expect(body).not.toMatch(/>\s*Laser Labeling\s*</);
-    expect(body).not.toMatch(/>\s*Species Labeling\s*</);
-    expect(body).not.toMatch(/>\s*Head\/Tail Labeling\s*</);
-    expect(body).not.toMatch(/>\s*Slate Labeling\s*</);
+  it("is the public page: what FishSense does, and no dashboards", () => {
+    expect(body).toContain("A fish&#x27;s length, from a photo.");
+    expect(body).toContain("Two ways to measure");
+    // Superset and Temporal are staff's (Today), never the public home's.
+    expect(body).not.toContain("analytics.fishsense.e4e.ucsd.edu");
+    expect(body).not.toContain("workflows.krg.ucsd.edu");
   });
 });

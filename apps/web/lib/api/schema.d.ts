@@ -24,6 +24,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/public/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Summary */
+        get: operations["get_public_summary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{slug}/deployments": {
         parameters: {
             query?: never;
@@ -1049,6 +1066,38 @@ export interface components {
              */
             port: "corrective_optic" | "flat" | "dome" | "unknown";
         };
+        /** PublicRegionView */
+        PublicRegionView: {
+            /** Count */
+            count: number | null;
+            /** Latitude */
+            latitude: number;
+            /** Longitude */
+            longitude: number;
+            /** Name */
+            name: string;
+            /** Under */
+            under: number | null;
+        };
+        /** PublicSummaryView */
+        PublicSummaryView: {
+            /** Deployments */
+            deployments: number;
+            /** Lengths */
+            lengths: number;
+            /** Minimum */
+            minimum: number;
+            /** Missions */
+            missions: number;
+            /** Model Lengths */
+            model_lengths: number;
+            /** Regions */
+            regions: components["schemas"]["PublicRegionView"][];
+            /** Species */
+            species: number;
+            /** Wild Fish */
+            wild_fish: number;
+        };
         /** PurposeStatement */
         PurposeStatement: {
             /** Purpose */
@@ -1153,6 +1202,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MyTenant"][];
+                };
+            };
+        };
+    };
+    get_public_summary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicSummaryView"];
                 };
             };
         };
