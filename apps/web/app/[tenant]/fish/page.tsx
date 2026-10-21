@@ -28,8 +28,8 @@ type Props = {
 
 const FILTERS: { label: string; device?: Device }[] = [
   { label: "All" },
-  { label: "FishSense Lite", device: "lite" },
-  { label: "FishSense Mobile", device: "mobile" },
+  { label: "Lite · laser", device: "lite" },
+  { label: "Mobile · LiDAR", device: "mobile" },
   { label: "Other devices", device: "other" },
 ];
 
@@ -63,24 +63,23 @@ export default async function FishPage({ params, searchParams }: Props) {
   }
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-12">
-      <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Fish</h1>
-          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-            Every measured fish, from FishSense Lite and FishSense Mobile.
-          </p>
-        </div>
+    <main className="mx-auto flex max-w-7xl flex-col gap-7 px-6 py-10">
+      <header className="flex flex-col gap-1.5">
+        <h1 className="text-3xl font-bold tracking-tight">Fish</h1>
+        <p className="text-fg-2">
+          Every measured fish{tenant ? ` in ${tenant.name}` : ""}, from FishSense Lite and
+          FishSense Mobile.
+        </p>
       </header>
 
       {tenant && (
-        <nav aria-label="Device" className="mb-6 flex flex-wrap gap-2">
+        <nav aria-label="Device" className="flex flex-wrap gap-2">
           {FILTERS.map((f) => (
             <Link
               key={f.label}
               href={href(tenant.slug, f.device)}
               aria-current={f.device === device ? "page" : undefined}
-              className="rounded-full border border-slate-300 px-3 py-1 text-sm aria-[current=page]:border-slate-900 aria-[current=page]:bg-slate-900 aria-[current=page]:text-white dark:border-slate-700 dark:aria-[current=page]:border-slate-100 dark:aria-[current=page]:bg-slate-100 dark:aria-[current=page]:text-slate-900"
+              className="inline-flex h-11 items-center rounded-chip border border-line bg-surface px-4 text-sm font-medium aria-[current=page]:border-teal aria-[current=page]:bg-teal-tint aria-[current=page]:font-semibold aria-[current=page]:text-teal-fg"
             >
               {f.label}
             </Link>
@@ -89,20 +88,16 @@ export default async function FishPage({ params, searchParams }: Props) {
       )}
 
       {failure ? (
-        <p className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-700 dark:bg-red-950 dark:text-red-300">
+        <p role="alert" className="rounded-card border border-error/40 bg-error/10 p-4 text-sm text-error">
           Could not load fish: {failure}
         </p>
       ) : !tenant ? (
-        <p className="text-sm text-slate-600 dark:text-slate-400">
-          This account isn&apos;t a member of any tenant yet.
-        </p>
+        <p className="text-fg-2">This account isn&apos;t a member of any tenant yet.</p>
       ) : page && page.observations.length === 0 ? (
-        <p className="text-sm text-slate-600 dark:text-slate-400">
-          No measured fish from {tenant.name} yet.
-        </p>
+        <p className="text-fg-2">No measured fish from {tenant.name} yet.</p>
       ) : (
         <>
-          <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <ul className="grid gap-5 [grid-template-columns:repeat(auto-fill,minmax(260px,1fr))]">
             {page?.observations.map((o) => (
               <li key={`${o.capture_id}/${o.fish_id}`}>
                 <FishCard slug={tenant.slug} observation={o} />
@@ -110,10 +105,10 @@ export default async function FishPage({ params, searchParams }: Props) {
             ))}
           </ul>
           {page?.next && (
-            <div className="mt-8">
+            <div className="flex justify-center">
               <Link
                 href={href(tenant.slug, device, page.next)}
-                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700"
+                className="inline-flex h-11 items-center rounded-control border border-line bg-surface px-5 font-medium hover:bg-raised"
               >
                 Older fish
               </Link>
@@ -132,7 +127,7 @@ function FishCard({ slug, observation: o }: { slug: string; observation: Observa
   return (
     <Link
       href={observationHref(slug, o)}
-      className="block overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xs transition hover:shadow-md dark:border-slate-800 dark:bg-slate-900"
+      className="flex h-full flex-col overflow-hidden rounded-card border border-line bg-surface transition hover:border-fg-3"
     >
       {o.photo_url ? (
         // Presigned, short-lived Garage URLs: not for next/image's optimizer,
@@ -142,39 +137,40 @@ function FishCard({ slug, observation: o }: { slug: string; observation: Observa
           src={o.photo_url}
           alt={fish.name}
           loading="lazy"
-          className="aspect-4/3 w-full object-cover"
+          className="aspect-4/3 w-full border-b border-line object-cover"
         />
       ) : (
-        <div className="flex aspect-4/3 w-full items-center justify-center bg-slate-100 text-sm text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-          No photo
+        <div className="flex aspect-4/3 w-full items-center justify-center border-b border-dashed border-line bg-raised text-sm text-fg-2">
+          No photo yet
         </div>
       )}
-      <div className="space-y-1 p-4 text-sm">
-        <div className="flex items-baseline justify-between gap-2">
-          <span className="text-lg font-medium">{formatLength(o.length_m)}</span>
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+      <div className="flex flex-col gap-1.5 p-4">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="font-semibold">{fish.name}</span>
+          <span className="whitespace-nowrap text-[22px] font-semibold tabular-nums">
+            {o.length_m == null ? "—" : o.length_m.toFixed(3)}
+            <span className="text-sm font-medium text-fg-2"> m</span>
+          </span>
+        </div>
+        {fish.detail && (
+          <div className="text-sm text-fg-2">
+            {o.species ? <i>{fish.detail}</i> : fish.detail}
+          </div>
+        )}
+        {error !== null && (
+          <div className="text-sm text-fg-2">
+            {formatError(error)} against its known {formatLength(o.fish_model?.known_length_m)}
+          </div>
+        )}
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <span className="inline-flex h-6 items-center rounded-chip bg-raised px-2 text-xs font-medium">
             {methodLabel(o.method)}
             {o.device.name ? ` · ${o.device.name}` : ""}
           </span>
-        </div>
-        <div>
-          {fish.name}
-          {fish.detail && (
-            <span className="text-slate-500">
-              {" "}
-              {o.species ? <i>{fish.detail}</i> : `(${fish.detail})`}
-            </span>
-          )}
-        </div>
-        {error !== null && (
-          <div className="text-slate-500">
-            {formatError(error)} against its known{" "}
-            {formatLength(o.fish_model?.known_length_m)}
-          </div>
-        )}
-        <div className="text-slate-500">
-          {new Date(o.captured_at).toLocaleString()}
-          {place ? ` · ${place}` : ""}
+          <span className="text-xs text-fg-2">
+            {new Date(o.captured_at).toLocaleDateString()}
+            {place ? ` · ${place}` : ""}
+          </span>
         </div>
       </div>
     </Link>
