@@ -448,6 +448,87 @@
         "title": "AutomaticFrameView",
         "type": "object"
       },
+      "CaptureCardPage": {
+        "properties": {
+          "captures": {
+            "items": {
+              "$ref": "#/components/schemas/CaptureCardView"
+            },
+            "title": "Captures",
+            "type": "array"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next"
+          }
+        },
+        "required": [
+          "captures",
+          "next"
+        ],
+        "title": "CaptureCardPage",
+        "type": "object"
+      },
+      "CaptureCardView": {
+        "properties": {
+          "capture_id": {
+            "format": "uuid",
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "captured_at": {
+            "format": "date-time",
+            "title": "Captured At",
+            "type": "string"
+          },
+          "client_capture_uuid": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Capture Uuid"
+          },
+          "fish": {
+            "items": {
+              "$ref": "#/components/schemas/MeasuredFish"
+            },
+            "title": "Fish",
+            "type": "array"
+          },
+          "photo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Url"
+          }
+        },
+        "required": [
+          "capture_id",
+          "client_capture_uuid",
+          "captured_at",
+          "photo_url",
+          "fish"
+        ],
+        "title": "CaptureCardView",
+        "type": "object"
+      },
       "CaptureCommit": {
         "additionalProperties": true,
         "description": "Everything the app recorded about one capture. Fields this API doesn't\nmodel are allowed, and kept in the manifest.",
@@ -1475,6 +1556,32 @@
           "is_system_admin"
         ],
         "title": "Me",
+        "type": "object"
+      },
+      "MeasuredFish": {
+        "properties": {
+          "fish_id": {
+            "format": "uuid",
+            "title": "Fish Id",
+            "type": "string"
+          },
+          "length_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Length M"
+          }
+        },
+        "required": [
+          "fish_id",
+          "length_m"
+        ],
+        "title": "MeasuredFish",
         "type": "object"
       },
       "MeasurementVersion": {
@@ -4016,6 +4123,89 @@
           }
         ],
         "summary": "Set Mission Calibration Target"
+      }
+    },
+    "/tenants/{slug}/missions/{number}/captures": {
+      "get": {
+        "description": "Every capture of the mission, measured or not, in the order taken.",
+        "operationId": "list_mission_captures",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 48,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureCardPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Mission Captures"
       }
     },
     "/tenants/{slug}/missions/{number}/deployment": {

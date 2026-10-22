@@ -345,6 +345,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{slug}/missions/{number}/captures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Mission Captures
+         * @description Every capture of the mission, measured or not, in the order taken.
+         */
+        get: operations["list_mission_captures"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{slug}/missions/{number}/deployment": {
         parameters: {
             query?: never;
@@ -678,6 +698,32 @@ export interface components {
             status: string;
             tail: components["schemas"]["PixelPoint"] | null;
         };
+        /** CaptureCardPage */
+        CaptureCardPage: {
+            /** Captures */
+            captures: components["schemas"]["CaptureCardView"][];
+            /** Next */
+            next: string | null;
+        };
+        /** CaptureCardView */
+        CaptureCardView: {
+            /**
+             * Capture Id
+             * Format: uuid
+             */
+            capture_id: string;
+            /**
+             * Captured At
+             * Format: date-time
+             */
+            captured_at: string;
+            /** Client Capture Uuid */
+            client_capture_uuid: string | null;
+            /** Fish */
+            fish: components["schemas"]["MeasuredFish"][];
+            /** Photo Url */
+            photo_url: string | null;
+        };
         /**
          * CaptureCommit
          * @description Everything the app recorded about one capture. Fields this API doesn't
@@ -960,6 +1006,16 @@ export interface components {
         Me: {
             /** Is System Admin */
             is_system_admin: boolean;
+        };
+        /** MeasuredFish */
+        MeasuredFish: {
+            /**
+             * Fish Id
+             * Format: uuid
+             */
+            fish_id: string;
+            /** Length M */
+            length_m: number | null;
         };
         /** MeasurementVersion */
         MeasurementVersion: {
@@ -1998,6 +2054,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Mission"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_mission_captures: {
+        parameters: {
+            query?: {
+                limit?: number;
+                after?: string | null;
+            };
+            header?: never;
+            path: {
+                slug: string;
+                number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptureCardPage"];
                 };
             };
             /** @description Validation Error */
