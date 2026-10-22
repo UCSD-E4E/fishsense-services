@@ -49,6 +49,8 @@ class AutomaticFrameView(BaseModel):
     checkpoint: str | None
     core_version: str | None
     render_url: str | None
+    #: Named by a review of these points (0063).
+    render_id: uuid.UUID | None
     render_width: int | None
     render_height: int | None
     #: A frame-sized greyscale PNG, 255 on the fish (0059).
@@ -148,6 +150,7 @@ def add_automatic_routes(
             checkpoint=found.checkpoint,
             core_version=found.core_version,
             render_url=link(slug, found.render_bucket, found.render_key),
+            render_id=found.render_id,
             render_width=found.render_width,
             render_height=found.render_height,
             mask_url=link(slug, found.mask_bucket, found.mask_key),

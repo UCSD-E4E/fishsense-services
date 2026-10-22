@@ -51,6 +51,8 @@ async def test_a_member_reads_what_the_run_made_of_a_frame(
     assert body["length_m"] == 0.42
     assert f"/fishsense-tenant-lab/{key}" in body["render_url"]
     assert (body["render_width"], body["render_height"]) == (4014, 3016)
+    # What a review names as the image its points are on (0063).
+    assert body["render_id"]
     assert body["mask_url"] is None
 
 

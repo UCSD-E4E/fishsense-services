@@ -95,6 +95,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{slug}/captures/{capture_id}/reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Reviews */
+        get: operations["list_capture_reviews"];
+        put?: never;
+        /** Post Review */
+        post: operations["record_review"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{slug}/deployments": {
         parameters: {
             query?: never;
@@ -161,6 +179,43 @@ export interface paths {
          */
         get: operations["list_label_studio_project_ids"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/me/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** My Skills */
+        get: operations["get_my_skills"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/members/{user_id}/skills/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Skill
+         * @description An admin sets a member's level in one kind; it is recorded as theirs.
+         */
+        put: operations["set_member_skill"];
         post?: never;
         delete?: never;
         options?: never;
@@ -702,6 +757,8 @@ export interface components {
             refusal: string | null;
             /** Render Height */
             render_height: number | null;
+            /** Render Id */
+            render_id: string | null;
             /** Render Url */
             render_url: string | null;
             /** Render Width */
@@ -1415,6 +1472,111 @@ export interface components {
             /** Purpose */
             purpose: ("survey" | "lens_calibration" | "laser_calibration" | "known_length" | "other") | null;
         };
+        /** RecordedReviewView */
+        RecordedReviewView: {
+            /** Counts */
+            counts: boolean;
+            /** Label Id */
+            label_id: string | null;
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "learning" | "trusted" | "expert";
+            /**
+             * Review Id
+             * Format: uuid
+             */
+            review_id: string;
+        };
+        /** ReviewBody */
+        ReviewBody: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "accept" | "fix" | "reject" | "confirm";
+            /** Automatic Head Tail Prediction Id */
+            automatic_head_tail_prediction_id?: string | null;
+            /** Confirms Review Id */
+            confirms_review_id?: string | null;
+            head?: components["schemas"]["ReviewPoint"] | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "laser" | "head_tail" | "species";
+            point?: components["schemas"]["ReviewPoint"] | null;
+            /** Raw */
+            raw?: {
+                [key: string]: unknown;
+            } | null;
+            /** Reason */
+            reason?: ("no_fish" | "fish_unmeasurable" | "wrong_fish" | "bad_mask" | "dot_wrong") | null;
+            /** Render Id */
+            render_id?: string | null;
+            /** Scientific Name */
+            scientific_name?: string | null;
+            tail?: components["schemas"]["ReviewPoint"] | null;
+        };
+        /** ReviewPoint */
+        ReviewPoint: {
+            /** X */
+            x: number;
+            /** Y */
+            y: number;
+        };
+        /** ReviewView */
+        ReviewView: {
+            /** Action */
+            action: string;
+            /** Confirms Review Id */
+            confirms_review_id: string | null;
+            /** Counts */
+            counts: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            head: components["schemas"]["ReviewPoint"] | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "laser" | "head_tail" | "species";
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "learning" | "trusted" | "expert";
+            point: components["schemas"]["ReviewPoint"] | null;
+            /** Reason */
+            reason: string | null;
+            /**
+             * Review Id
+             * Format: uuid
+             */
+            review_id: string;
+            /**
+             * Reviewer Id
+             * Format: uuid
+             */
+            reviewer_id: string;
+            /** Scientific Name */
+            scientific_name: string | null;
+            tail: components["schemas"]["ReviewPoint"] | null;
+        };
+        /** SkillBody */
+        SkillBody: {
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "learning" | "trusted" | "expert";
+            /** Note */
+            note?: string | null;
+        };
         /** SpeciesView */
         SpeciesView: {
             /** Common Name */
@@ -1642,6 +1804,74 @@ export interface operations {
             };
         };
     };
+    list_capture_reviews: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                capture_id: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewView"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_review: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                capture_id: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordedReviewView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_deployments: {
         parameters: {
             query?: never;
@@ -1830,6 +2060,74 @@ export interface operations {
                 content: {
                     "application/json": number[];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_my_skills: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: "learning" | "trusted" | "expert";
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_member_skill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+                kind: "laser" | "head_tail" | "species";
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

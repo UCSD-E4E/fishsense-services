@@ -579,7 +579,7 @@ class MissionLaserLine(Base):
 
 # --- Label Studio labels: one shared core, four kinds -------------------------
 
-LABEL_SOURCES = "('human', 'auto_accept', 'pre_annotation', 'import')"
+LABEL_SOURCES = "('human', 'auto_accept', 'pre_annotation', 'import', 'review')"
 
 
 class _LabelCore:
@@ -620,7 +620,44 @@ class _LabelCore:
         return ()
 
 
-class LaserLabel(_LabelCore, Base):
+class _ReviewLabel:
+    """A label a review made (0063): it names its review and the render its
+    points are on. Only laser and head/tail labels come from reviews."""
+
+    #: The review that made it; a label of ``source = 'review'`` has one.
+    review_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    #: The render (``capture_renders``) its pixels are on.
+    render_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+
+    @classmethod
+    def _extra_table_args(cls) -> tuple:
+        table = cls.__tablename__
+        return (
+            ForeignKeyConstraint(
+                ["tenant_id", "review_id"],
+                ["reviews.tenant_id", "reviews.id"],
+                name=f"{table}_review_fk",
+            ),
+            ForeignKeyConstraint(
+                ["tenant_id", "render_id"],
+                ["capture_renders.tenant_id", "capture_renders.id"],
+                name=f"{table}_render_fk",
+            ),
+            CheckConstraint(
+                "(source = 'review') = (review_id IS NOT NULL AND render_id IS NOT NULL)",
+                name=f"{table}_review_label_check",
+            ),
+            # Stage 14 looks for reviewed frames on every selection.
+            Index(
+                f"{table}_review_idx",
+                "tenant_id",
+                "capture_id",
+                postgresql_where=text("source = 'review' AND NOT superseded"),
+            ),
+        )
+
+
+class LaserLabel(_ReviewLabel, _LabelCore, Base):
     __tablename__ = "laser_labels"
 
     x: Mapped[float | None] = mapped_column(Double)
@@ -630,13 +667,15 @@ class LaserLabel(_LabelCore, Base):
     superseded_reason: Mapped[str | None] = mapped_column(Text)
 
 
-class HeadTailLabel(_LabelCore, Base):
+class HeadTailLabel(_ReviewLabel, _LabelCore, Base):
     __tablename__ = "head_tail_labels"
 
     head_x: Mapped[float | None] = mapped_column(Double)
     head_y: Mapped[float | None] = mapped_column(Double)
     tail_x: Mapped[float | None] = mapped_column(Double)
     tail_y: Mapped[float | None] = mapped_column(Double)
+    #: Why it was superseded: ``review`` (0063); NULL otherwise.
+    superseded_reason: Mapped[str | None] = mapped_column(Text)
 
 
 class SlateLabel(_LabelCore, Base):
@@ -1901,3 +1940,76 @@ class CapturePlaceName(Base):
     derived_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )
+
+
+class ReviewerSkill(Base):
+    """A person's level in one kind of review (0063); append-only, the
+    latest is current. Earned, or set by an admin; no row means Learning."""
+
+    __tablename__ = "reviewer_skills"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        Index("reviewer_skills_user_idx", "tenant_id", "user_id", "kind", "seq"),
+        CheckConstraint("kind IN ('laser', 'head_tail', 'species')",
+                        name="reviewer_skills_kind_check"),
+        CheckConstraint("level IN ('learning', 'trusted', 'expert')",
+                        name="reviewer_skills_level_check"),
+        CheckConstraint("source IN ('earned', 'admin')",
+                        name="reviewer_skills_source_check"),
+        CheckConstraint("(source = 'admin') = (set_by IS NOT NULL)",
+                        name="reviewer_skills_check"),
+        # A skill is a member's, and goes with the membership.
+        ForeignKeyConstraint(["tenant_id", "user_id"],
+                             ["memberships.tenant_id", "memberships.user_id"],
+                             name="reviewer_skills_membership_fk", ondelete="CASCADE"),
+    )  # fmt: skip
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"))
+    kind: Mapped[str] = mapped_column(Text)
+    level: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(Text)
+    set_by: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("users.id"))
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class Review(Base):
+    """One reviewer's action on one kind of a frame's automatic result
+    (0063): accept, fix, reject or confirm; append-only."""
+
+    __tablename__ = "reviews"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        _fk(("tenant_id", "capture_id"), "captures"),
+        _fk(("tenant_id", "automatic_head_tail_prediction_id"),
+            "automatic_head_tail_predictions"),
+        _fk(("tenant_id", "render_id"), "capture_renders"),
+        _fk(("tenant_id", "confirms_review_id"), "reviews"),
+        Index("reviews_capture_idx", "tenant_id", "capture_id", "seq"),
+        Index("reviews_confirms_idx", "tenant_id", "confirms_review_id"),
+    )  # fmt: skip
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    reviewer_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"))
+    kind: Mapped[str] = mapped_column(Text)
+    action: Mapped[str] = mapped_column(Text)
+    level: Mapped[str] = mapped_column(Text)
+    automatic_head_tail_prediction_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    reason: Mapped[str | None] = mapped_column(Text)
+    x: Mapped[float | None] = mapped_column(Double)
+    y: Mapped[float | None] = mapped_column(Double)
+    head_x: Mapped[float | None] = mapped_column(Double)
+    head_y: Mapped[float | None] = mapped_column(Double)
+    tail_x: Mapped[float | None] = mapped_column(Double)
+    tail_y: Mapped[float | None] = mapped_column(Double)
+    raw: Mapped[dict | None] = mapped_column(JSONB)
+    render_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    scientific_name: Mapped[str | None] = mapped_column(Text)
+    confirms_review_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    created_at: Mapped[datetime] = _created_at()

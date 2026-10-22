@@ -69,6 +69,8 @@ class AutomaticFrame:
     checkpoint: str | None
     core_version: str | None
     #: The render the pixels are on; None before renders existed (0049).
+    #: The render's id: what a review names as the image its points are on.
+    render_id: uuid.UUID | None
     render_bucket: str | None
     render_key: str | None
     render_width: int | None
@@ -98,7 +100,8 @@ async def automatic_frame(
     row = (
         await conn.execute(
             text("""
-                SELECT h.*, r.bucket AS render_bucket, r.key AS render_key,
+                SELECT h.*, r.id AS render_id, r.bucket AS render_bucket,
+                       r.key AS render_key,
                        r.width AS render_width, r.height AS render_height,
                        pm.bucket AS mask_bucket, pm.object_key AS mask_key,
                        pm.width AS mask_width, pm.height AS mask_height,
@@ -108,7 +111,7 @@ async def automatic_frame(
                        s.predicted_choice, s.top1_probability, s.margin, s.top5
                 FROM current_automatic_head_tail_predictions h
                 LEFT JOIN LATERAL (
-                    SELECT r.bucket, r.key, r.width, r.height FROM capture_renders r
+                    SELECT r.id, r.bucket, r.key, r.width, r.height FROM capture_renders r
                     WHERE r.tenant_id = h.tenant_id AND r.capture_id = h.capture_id
                       AND r.status = 'rendered'
                       AND r.render_version = h.jpeg_render_version
@@ -146,6 +149,7 @@ async def automatic_frame(
         predictor_version=row.predictor_version,
         checkpoint=row.checkpoint,
         core_version=row.core_version,
+        render_id=row.render_id,
         render_bucket=row.render_bucket,
         render_key=row.render_key,
         render_width=row.render_width,
