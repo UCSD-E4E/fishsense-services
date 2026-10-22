@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 import httpx
 import jwt
 import pytest
+from sqlalchemy import text
 from jwks_server import JwksServer, jwk, rsa_key
 
 from fishsense_services_api.main import create_app_from_env
@@ -183,3 +184,26 @@ def test_without_a_geocoder_url_no_places_are_named(monkeypatch, app_url, issuer
     create_app_from_env()
 
     assert captured["geocoder"] is None
+
+
+async def test_the_apps_queries_run_without_jit(
+    monkeypatch, app_url, owner_engine, issuer
+):
+    """The API's queries are small and often answered in milliseconds, but its
+    views stack several ``DISTINCT ON``s whose estimated cost crosses
+    Postgres' JIT thresholds. On production (2026-10-21) the Today page's
+    summary spent 9.0 s of 13.5 s compiling 633 functions with LLVM and 4.5 s
+    running them; with JIT off, the same query took 4.5 s."""
+    monkeypatch.setenv("FISHSENSE_DATABASE_URL", app_url)
+    monkeypatch.setenv("FISHSENSE_OIDC_ISSUER", issuer)
+    monkeypatch.setenv("FISHSENSE_OIDC_AUDIENCES", AUDIENCE)
+    captured = _captured_create_app(monkeypatch)
+
+    create_app_from_env()
+
+    engine = captured["engine"]
+    try:
+        async with engine.connect() as conn:
+            assert (await conn.execute(text("SHOW jit"))).scalar_one() == "off"
+    finally:
+        await engine.dispose()
