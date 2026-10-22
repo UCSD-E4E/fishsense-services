@@ -1,8 +1,8 @@
 # Shadow size-constancy laser calibration (SAM 3.1): design
 
-**Status: reviewed by the author (2026-10-21); revised with the review's
-corrections and decisions, and the pool trigger counts it asked for (§6.1).
-Thresholds and switching criteria await the author. Nothing here is built.** This is
+**Status: approved by the author (2026-10-21). The thresholds (§5.3, §6) and
+the switching criteria (§8) are committed in §13, before any backfill, and are
+not to be adjusted after seeing results. Deliverable 2 builds against them.** This is
 deliverable 1 of the shadow-deployment spec. Its job is to collect evidence on
 whether size constancy can replace the current laser calibration, without
 changing anything production reports. The implementation PR (deliverable 2) and
@@ -237,8 +237,11 @@ covers all 258 pool slate frames. The options:
   frames that lack a prediction, writing nothing to `laser_predictions`;
 - **(iii)** keep `laser_predictions` and accept the gaps.
 
-**Author decides.** The pool counts in §6.1 use the automatic dots as a labelled
-stand-in.
+**Decided (author, 2026-10-21): (i), the automatic track's dots**
+(`automatic_head_tail_predictions`: `laser_x`, `laser_y`, `laser_confidence`,
+at the current automatic head/tail version). These are what the pool counts in
+§6.1 used. The `laser_predictions` choice is withdrawn because of the coverage
+gap above.
 
 ### 5.3 The consistency gate, proposed. **Author decides** the values.
 In order, each rejection recorded with its reason:
@@ -535,8 +538,50 @@ Decided:
   frames, for coverage.
 - **Metric:** the paper reports the along-line offset at the camera's own fx.
 
-Open, for the author:
-1. The detector source, given §5.2's coverage gap.
-2. Threshold values (§5.3, §6), from §6.1.
-3. Commit the switching criteria (§8), including the length-constancy and
-   coverage values proposed there.
+Settled (author, 2026-10-21):
+1. Detector source: (i), the automatic track's dots (§5.2).
+2. Threshold values: as proposed in §5.3 and §6. They are committed in §13.
+3. Switching criteria: as proposed in §8, including length constancy and
+   coverage. They are committed in §13.
+
+## 13. Committed values (author, 2026-10-21, before any backfill)
+
+**Not to be changed after seeing backfill results.** A change needs a new
+dated entry here, made before the data it would be judged on is seen.
+
+**Consistency gate (§5.3), detector dots** (the automatic track's):
+- presence confidence ≥ **0.5**;
+- within **10 px** of the detector line. That line is RANSAC (500 iterations,
+  10 px tolerance, `default_rng(0)`) through every confident detector dot of
+  the mission, then TLS through the inliers, oriented to negative y;
+- `ambiguous_line` if the off-line slate dots form a line of ≥ **max(8, 0.25 ×
+  kept)** dots;
+- range-consistency trim: drop, one at a time, a frame whose deleted residual
+  exceeds **0.10** in log size.
+
+**Refusals (§6)**, in this order:
+
+| Reason | Rule |
+|---|---|
+| `too_few_frames` | < **8** frames used |
+| `too_little_size_spread` | max/min size < **1.5** |
+| `lever_arm_below_0.6m` | production's `check_observation_geometry` (`MIN_OBSERVATION_LEVER_M = 0.60`) on the fitted laser points, assumed offset 0.104 m |
+| `se_too_high` | bootstrap SE > **0.05°** (along-line, F = 2850 px) |
+| `sam_scores_low` | median SAM score < **0.5**, or > **25%** of slate frames without a mask under the dot |
+| `unconstrained` | optimum at the search bracket's edge |
+| `ambiguous_line` | gate step 4 (detector dots) |
+
+**Switching criteria (§8)**, judged on field missions only, per dot source, on
+the `gated` variant, at the camera's own fx:
+1. **Agreement:** ≥ **90%** of missions with |along-line offset| ≤ **0.05°**,
+   with the 95% CI lower bound (whole-mission bootstrap) ≥ **80%**.
+2. **Disagreement tiers:**
+   - strict, reported: accepted fits beyond **0.15°**;
+   - budget, enforced: **no** accepted fit beyond IMWUT §5.3's **−0.526° /
+     +0.389°** at 2 m, on the matching side.
+3. **Refusals carry the disagreements:** ≥ **80%** of missions whose `port`
+   variant exceeds the budget are refused by `gated`.
+4. **Slate length constancy:** per accepted mission, CV ≤ **3%** and worst
+   frame within **10%** of the median.
+5. **Coverage:** an accepted `gated` fit on ≥ **25%** of field missions with
+   slate frames, and on ≥ **60%** of those with a production calibration.
