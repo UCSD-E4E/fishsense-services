@@ -6,7 +6,8 @@ app layer's own line of defence (as every store does).
 
 * :func:`list_observations` -- newest first, a page at a time, optionally
   one device group: ``lite``, ``mobile`` or ``other`` (any other kind, or no
-  device), which together cover every fish once.
+  device), which together cover every fish once. :func:`observation_page` is
+  the same with how many there are in all, for pages by number.
 * :func:`observation` -- one fish in one capture, with the evidence its
   method rests on: for ``laser``, the laser depth, the calibration's producer
   and the labelled dot, head and tail; for ``lidar``, the phone's snout and
@@ -40,9 +41,11 @@ __all__ = [
     "Observation",
     "ObservationDetail",
     "CaptureCard",
+    "ObservationPage",
     "list_observations",
     "mission_captures",
     "observation",
+    "observation_page",
 ]
 
 Point = tuple[float, float]
@@ -151,6 +154,13 @@ _DERIVED_PLACE_NAME = """LEFT JOIN LATERAL (
 ) pn ON true"""
 
 
+@dataclass(frozen=True)
+class ObservationPage:
+    observations: list[Observation]
+    #: How many the filters keep in all, whatever the page or cursor.
+    total: int
+
+
 async def list_observations(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
@@ -166,47 +176,97 @@ async def list_observations(
     ``mission`` keeps one mission's, by number (phase 7b: how a phone's fish
     are reached once /captures is retired);
     ``photo_bucket`` is the tenant's current bucket (None: no Lite photos)."""
+    found = await observation_page(
+        conn,
+        tenant_id,
+        limit=limit,
+        before=before,
+        device=device,
+        photo_bucket=photo_bucket,
+        mission=mission,
+    )
+    return found.observations
+
+
+async def observation_page(
+    conn: AsyncConnection,
+    tenant_id: uuid.UUID,
+    *,
+    limit: int,
+    offset: int = 0,
+    before: tuple[datetime, uuid.UUID, uuid.UUID] | None = None,
+    device: str | None = None,
+    photo_bucket: str | None = None,
+    mission: int | None = None,
+) -> ObservationPage:
+    """:func:`list_observations`, from the ``offset``-th, with the total.
+
+    The total is a window over what the filters keep, counted in the same
+    pass: the view is the cost of any read (it builds every current
+    measurement in the tenant to sort them), so a second query for the count
+    would pay it twice. The cursor applies after the count, so the total
+    ignores it, as it does the page."""
     if device is not None and device != "other" and device not in DEVICE_GROUPS:
         raise ValueError(f"no device group {device!r}")
+    params = {
+        "tenant_id": tenant_id,
+        "device": device,
+        "mission": mission,
+        "named": _NAMED_KINDS,
+        "kinds": list(DEVICE_GROUPS.get(device, ())),
+        "before_at": before[0] if before else None,
+        "before_capture": before[1] if before else None,
+        "before_fish": before[2] if before else None,
+        "limit": limit,
+        "offset": offset,
+        "photo_bucket": photo_bucket,
+    }
     # The page first, then its place names and renders: a lateral before
     # the LIMIT would probe every observation in the tenant (review of #151).
-    rows = await conn.execute(
-        text(f"""
-            SELECT {_COLUMNS}, coalesce(o.photo_key, h.key) AS photo_key
+    rows = (
+        await conn.execute(
+            text(f"""
+            SELECT {_COLUMNS}, coalesce(o.photo_key, h.key) AS photo_key, o.total
             FROM (
-                SELECT * FROM observations o
-                WHERE o.tenant_id = :tenant_id
-                  AND (CAST(:device AS text) IS NULL
-                       OR (:device = 'other'
-                           AND (o.device_kind IS NULL
-                                OR o.device_kind <> ALL(CAST(:named AS text[]))))
-                       OR o.device_kind = ANY(CAST(:kinds AS text[])))
-                  AND (CAST(:mission AS integer) IS NULL OR o.mission_number = :mission)
-                  AND (CAST(:before_at AS timestamptz) IS NULL
-                       OR (o.captured_at, o.capture_id, o.fish_id)
-                          < (:before_at, :before_capture, :before_fish))
+                SELECT * FROM ({_KEPT}) o
+                WHERE CAST(:before_at AS timestamptz) IS NULL
+                   OR (o.captured_at, o.capture_id, o.fish_id)
+                      < (:before_at, :before_capture, :before_fish)
                 ORDER BY o.captured_at DESC, o.capture_id DESC, o.fish_id DESC
-                LIMIT :limit
+                LIMIT :limit OFFSET :offset
             ) o
             {_DERIVED_PLACE_NAME}
             {_RENDER}
             {_THUMBNAIL}
             ORDER BY o.captured_at DESC, o.capture_id DESC, o.fish_id DESC
             """),
-        {
-            "tenant_id": tenant_id,
-            "device": device,
-            "mission": mission,
-            "named": _NAMED_KINDS,
-            "kinds": list(DEVICE_GROUPS.get(device, ())),
-            "before_at": before[0] if before else None,
-            "before_capture": before[1] if before else None,
-            "before_fish": before[2] if before else None,
-            "limit": limit,
-            "photo_bucket": photo_bucket,
-        },
-    )
-    return [_observation(row) for row in rows]
+            params,
+        )
+    ).all()
+    if rows:
+        total = rows[0].total
+    elif offset == 0 and before is None:
+        total = 0
+    else:
+        # Past the end: no row to carry the count, so count alone.
+        total = (
+            await conn.execute(text(f"SELECT count(*) FROM ({_KEPT}) o"), params)
+        ).scalar_one()
+    return ObservationPage([_observation(row) for row in rows], total)
+
+
+#: The tenant's observations that the device and mission filters keep, each
+#: with how many there are in all.
+_KEPT = """
+    SELECT o.*, count(*) OVER () AS total FROM observations o
+    WHERE o.tenant_id = :tenant_id
+      AND (CAST(:device AS text) IS NULL
+           OR (:device = 'other'
+               AND (o.device_kind IS NULL
+                    OR o.device_kind <> ALL(CAST(:named AS text[]))))
+           OR o.device_kind = ANY(CAST(:kinds AS text[])))
+      AND (CAST(:mission AS integer) IS NULL OR o.mission_number = :mission)
+"""
 
 
 async def observation(

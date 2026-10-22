@@ -523,7 +523,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List */
+        /**
+         * List
+         * @description Newest first, a page at a time: by number (``page``, from 1, of
+         *     ``limit`` each) or after a cursor (``before``, the last page's
+         *     ``next``), not both. ``total`` is how many there are in all.
+         */
         get: operations["list_observations"];
         put?: never;
         post?: never;
@@ -1284,6 +1289,8 @@ export interface components {
             next: string | null;
             /** Observations */
             observations: components["schemas"]["ObservationView"][];
+            /** Total */
+            total: number;
         };
         /** ObservationView */
         ObservationView: {
@@ -2470,6 +2477,7 @@ export interface operations {
                 mission?: number | null;
                 limit?: number;
                 before?: string | null;
+                page?: number | null;
             };
             header?: never;
             path: {
