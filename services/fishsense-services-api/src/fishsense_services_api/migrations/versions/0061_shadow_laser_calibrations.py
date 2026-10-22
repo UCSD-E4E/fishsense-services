@@ -21,8 +21,8 @@ Append-only, tenant RLS, research read on the lab's rows. ``current_shadow_
 laser_calibrations`` picks the latest row per (mission, source, variant,
 algorithm version).
 
-Revision ID: 0060
-Revises: 0059
+Revision ID: 0061
+Revises: 0060
 """
 
 from alembic import context, op
@@ -33,8 +33,8 @@ from fishsense_services_api.schema_audit import (
     RESEARCH_ROLE,
 )
 
-revision = "0060"
-down_revision = "0059"
+revision = "0061"
+down_revision = "0060"
 
 CALIBRATIONS = "shadow_laser_calibrations"
 FRAMES = "shadow_calibration_frames"

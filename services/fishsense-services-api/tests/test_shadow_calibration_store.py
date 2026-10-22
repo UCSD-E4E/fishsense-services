@@ -1,4 +1,4 @@
-"""The shadow calibration's tables and inputs (0060; docs/shadow-size-constancy.md).
+"""The shadow calibration's tables and inputs (0061; docs/shadow-size-constancy.md).
 
 The shadow stage runs size constancy beside production's laser calibration and
 **feeds nothing**: its two tables are read by no view, function or production
@@ -275,6 +275,10 @@ async def test_the_mission_line_is_its_current_one(owner_engine, app_engine):
         app_engine, lab, shadow_calibration_inputs, m, headtail_version=HV
     )
     assert inputs.mission_line == (0.2, 0.9, -100.0)
+    (number,) = await _rows(
+        owner_engine, "SELECT number FROM missions WHERE id = :d", d=m
+    )
+    assert inputs.mission_number == number["number"]
 
 
 # -- writing ----------------------------------------------------------------------

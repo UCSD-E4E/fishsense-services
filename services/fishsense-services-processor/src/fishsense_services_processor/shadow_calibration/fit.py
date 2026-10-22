@@ -32,6 +32,7 @@ v2 additions, none of which changes a ported number:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 from scipy.optimize import minimize_scalar
@@ -97,13 +98,16 @@ class PortFit:
     axis: np.ndarray
     frames: int
     size_spread: float
-    #: Signed along-line offset of the vanishing point from the reference's.
-    err_px: float
-    err_deg_f2850: float
-    err_deg_fx: float
-    angle_deg: float
     se_px: float
     se_deg: float
+    #: Signed along-line offset of the vanishing point from the reference's,
+    #: and the axes' 3-D angle; None with no reference calibration.
+    err_px: Optional[float] = None
+    err_deg_f2850: Optional[float] = None
+    err_deg_fx: Optional[float] = None
+    angle_deg: Optional[float] = None
+    #: SD of log s - log(t - t_v) - c over the frames (c their median).
+    residual: Optional[float] = None
 
 
 def port_fit(
@@ -112,7 +116,7 @@ def port_fit(
     u: np.ndarray,
     off: float,
     K: np.ndarray,
-    reference_axis: np.ndarray,
+    reference_axis: Optional[np.ndarray],
     *,
     seed: tuple[int, int],
     o_mag: float = O_DESIGN_M,
@@ -130,22 +134,28 @@ def port_fit(
         for k in (brng.integers(0, len(t), len(t)) for _ in range(n_boot))
     ]
     origin, axis = beam(tv, u, off, K, o_mag)
-    sa = np.asarray(reference_axis, float)
-    sa = sa / np.linalg.norm(sa)
-    vs = K @ sa
-    tv_true = float((vs[:2] / vs[2]) @ u)
-    err_px = float(tv - tv_true)
     se_px = float(np.std(boots))
-    return PortFit(
+    log_r = np.log(s) - np.log(t - tv)
+    out = dict(
         tv=float(tv),
         origin=origin,
         axis=axis,
         frames=len(t),
         size_spread=float(s.max() / s.min()),
-        err_px=err_px,
-        err_deg_f2850=float(np.degrees(err_px / F_PX)),
-        err_deg_fx=float(np.degrees(err_px / K[0][0])),
-        angle_deg=float(np.degrees(np.arccos(np.clip(axis @ sa, -1, 1)))),
         se_px=se_px,
         se_deg=float(np.degrees(se_px / F_PX)),
+        residual=float(np.std(log_r - np.median(log_r))),
     )
+    if reference_axis is not None:
+        sa = np.asarray(reference_axis, float)
+        sa = sa / np.linalg.norm(sa)
+        vs = K @ sa
+        tv_true = float((vs[:2] / vs[2]) @ u)
+        err_px = float(tv - tv_true)
+        out.update(
+            err_px=err_px,
+            err_deg_f2850=float(np.degrees(err_px / F_PX)),
+            err_deg_fx=float(np.degrees(err_px / K[0][0])),
+            angle_deg=float(np.degrees(np.arccos(np.clip(axis @ sa, -1, 1)))),
+        )
+    return PortFit(**out)

@@ -26,10 +26,15 @@ from pathlib import Path
 
 import numpy as np
 
-CSCW = Path(sys.argv[1] if len(sys.argv) > 1
-            else "/home/chris/Repos/school/e4e/fishsense/cscw-fishsense2027")
-OUT = (Path(__file__).parents[2]
-       / "services/fishsense-services-processor/tests/fixtures/shadow_pool.json")
+CSCW = Path(
+    sys.argv[1]
+    if len(sys.argv) > 1
+    else "/home/chris/Repos/school/e4e/fishsense/cscw-fishsense2027"
+)
+OUT = (
+    Path(__file__).parents[2]
+    / "services/fishsense-services-processor/tests/fixtures/shadow_pool.json"
+)
 
 
 def load(name, path):
@@ -51,16 +56,27 @@ def main():
     stored, _, intr = sc.S.calibrations()
     cams = {int(r["dive_id"]): int(r["camera_id"])
             for r in csv.DictReader(open(CSCW / "e2e_measurement/extrinsics.psv"), delimiter="|")}  # fmt: skip
-    sizes = {r["image_id"]: float(r["size"]) for r in csv.DictReader(open(E / "sizes/sam3_text.csv"))}
-    detail = {r["image_id"]: r for r in csv.DictReader(open(E / "sam_sizes_detail.csv"))}
+    sizes = {
+        r["image_id"]: float(r["size"])
+        for r in csv.DictReader(open(E / "sizes/sam3_text.csv"))
+    }
+    detail = {
+        r["image_id"]: r for r in csv.DictReader(open(E / "sam_sizes_detail.csv"))
+    }
     frames = list(csv.DictReader(open(E / "sizes_frames.csv")))
     lines = {int(r["dive"]): r for r in csv.DictReader(open(E / "labelfree_tv.csv"))}
     pl = sc.prediction_lines()
-    published = list(csv.DictReader(open(CSCW / "analysis/codesign/results/size_constancy_sessions.csv")))
+    published = list(
+        csv.DictReader(
+            open(CSCW / "analysis/codesign/results/size_constancy_sessions.csv")
+        )
+    )
     # The automatic track's detector dots on every canonical frame of the pool
     # missions, exported read-only from production (2026-10-21): the shadow
     # stage's detector source (author, 2026-10-21).
-    auto = list(csv.DictReader(open(Path(__file__).parent / "data/pool_automatic_dots.csv")))
+    auto = list(
+        csv.DictReader(open(Path(__file__).parent / "data/pool_automatic_dots.csv"))
+    )
     sessions = []
     for dive in sorted(lines):
         K = np.asarray(intr[cams[dive]], float)
@@ -100,12 +116,21 @@ def main():
         for r in csv.DictReader(open(imwut / "fish_model_analysis/data/slate_sizes.csv"))
         if r["dive_id"] == "279"
     ]  # fmt: skip
-    OUT.write_text(json.dumps({
-        "dive279": dive279,
-        "source": f"cscw-fishsense2027@{commit} analysis/codesign/size_constancy_sam.py",
-        "f_px": 2850.0, "n_boot": 500, "sessions": sessions,
-    }, indent=1))
-    print(f"wrote {OUT} ({len(sessions)} sessions, {sum(len(s['frames']) for s in sessions)} frames)")
+    OUT.write_text(
+        json.dumps(
+            {
+                "dive279": dive279,
+                "source": f"cscw-fishsense2027@{commit} analysis/codesign/size_constancy_sam.py",
+                "f_px": 2850.0,
+                "n_boot": 500,
+                "sessions": sessions,
+            },
+            indent=1,
+        )
+    )
+    print(
+        f"wrote {OUT} ({len(sessions)} sessions, {sum(len(s['frames']) for s in sessions)} frames)"
+    )
 
 
 if __name__ == "__main__":

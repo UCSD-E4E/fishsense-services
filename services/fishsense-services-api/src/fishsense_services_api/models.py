@@ -1458,7 +1458,7 @@ class CaptureRaw(Base):
 
 
 class ShadowLaserCalibration(Base):
-    """A shadow size-constancy fit or its refusal (0060); feeds nothing;
+    """A shadow size-constancy fit or its refusal (0061); feeds nothing;
     append-only."""
 
     __tablename__ = "shadow_laser_calibrations"
@@ -1537,7 +1537,7 @@ class ShadowLaserCalibration(Base):
 
 
 class ShadowCalibrationFrame(Base):
-    """A slate frame a shadow fit considered (0060); append-only."""
+    """A slate frame a shadow fit considered (0061); append-only."""
 
     __tablename__ = "shadow_calibration_frames"
     __table_args__ = (

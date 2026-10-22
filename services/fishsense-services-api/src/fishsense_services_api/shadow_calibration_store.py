@@ -1,4 +1,4 @@
-"""The shadow size-constancy laser calibration's database side (0060).
+"""The shadow size-constancy laser calibration's database side (0061).
 
 docs/shadow-size-constancy.md. What the stage reads, read-only, and the two
 tables it writes; nothing here writes anywhere else, and nothing in production
@@ -76,6 +76,9 @@ class ShadowFrame:
 
 @dataclass(frozen=True)
 class ShadowCalibrationInputs:
+    #: The mission's number: seeds the fit's bootstrap, as the port's
+    #: session number did.
+    mission_number: int
     camera_calibration_id: uuid.UUID
     camera_matrix: list[list[float]]
     #: ``(a, b, c)`` of ``a x + b y + c = 0``, or None.
@@ -193,7 +196,14 @@ async def shadow_calibration_inputs(
             {"t": tenant_id, "d": mission_id},
         )
     ).one_or_none()
+    number = (
+        await conn.execute(
+            text("SELECT number FROM missions WHERE tenant_id = :t AND id = :d"),
+            {"t": tenant_id, "d": mission_id},
+        )
+    ).scalar_one()
     return ShadowCalibrationInputs(
+        mission_number=number,
         camera_calibration_id=camera.id,
         camera_matrix=[[float(x) for x in row] for row in camera.camera_matrix],
         mission_line=None if line is None else (float(line.a), float(line.b),

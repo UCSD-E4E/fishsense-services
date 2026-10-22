@@ -483,6 +483,18 @@ pinned SAM 3.1 checkpoint. Then require:
 
 This runs locally (the checkpoint and the render cache are present), not in CI.
 
+**Result (2026-10-21, local GPU, `sam3.1_multiplex.pt`).** The stage's
+`segment_dots` with its own 0.3-threshold processor, on the cached 1600-px
+renders of all 258 pool frames:
+- the same winning prompt on 258/258 frames;
+- the same 5 no-mask frames (16038, 16040, 16041, 16042, 16045);
+- sqrt(area) ours/port: median 1.00000, p5 0.9998, p95 1.0002; 253/253 within
+  0.1%.
+
+What it cannot see: production renders the frame itself (rectified JPEG at
+`RENDER_VERSION`, then downscaled) rather than reading the port's render
+cache, so a difference in the rectification would not show here.
+
 ### 9.4 Usual guards
 - `test_schema_audit`, `test_models_match_migrations`;
 - the pinned Temporal names;
