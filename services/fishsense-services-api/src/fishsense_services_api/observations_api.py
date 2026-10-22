@@ -36,12 +36,13 @@ from fishsense_services_api.memberships import Membership
 from fishsense_services_api.mobile_api import Point
 from fishsense_services_api.observation_store import (
     Observation,
-    list_observations,
+    observation_page,
     observation,
     mission_captures,
 )
 from fishsense_services_api.place_naming import PlaceNamer
 from fishsense_services_api.summary_store import tenant_summary
+from fishsense_services_api.tenant_regions_store import tenant_regions
 from fishsense_services_api.tenant_stores import NoTenantStore, TenantStores
 
 __all__ = ["add_observation_routes"]
@@ -99,6 +100,8 @@ class ObservationPage(BaseModel):
     observations: list[ObservationView]
     #: Pass as ``before`` for the next page; None at the end.
     next: str | None
+    #: How many fish the filters keep in all, whatever the page or cursor.
+    total: int
 
 
 class LaserEvidenceView(BaseModel):
@@ -128,6 +131,24 @@ class ObservationDetailView(BaseModel):
     laser: LaserEvidenceView | None
     #: The phone's snout and fork (``method == "lidar"``).
     device_points: DevicePointsView | None
+
+
+class TenantRegionView(BaseModel):
+    """A broad region, at its one point on the map (`regions`)."""
+
+    name: str
+    latitude: float
+    longitude: float
+    fish: int
+
+
+class TenantRegionsView(BaseModel):
+    """Where a tenant's wild fish were measured, never finer than a region."""
+
+    #: Most fish first.
+    regions: list[TenantRegionView]
+    #: Fish no region holds.
+    elsewhere: int
 
 
 class TenantSummaryView(BaseModel):
@@ -225,6 +246,21 @@ def add_observation_routes(
         return TenantSummaryView(**asdict(found))
 
     @app.get(
+        "/tenants/{slug}/regions",
+        operation_id="get_tenant_regions",
+        response_model=TenantRegionsView,
+    )
+    async def regions(member: Member) -> TenantRegionsView:
+        """Where the tenant's wild fish were measured, by broad region, for
+        its Today map (`tenant_regions_store`). Fish models are left off."""
+        async with tenant_transaction(engine, member.tenant_id) as conn:
+            found = await tenant_regions(conn, member.tenant_id)
+        return TenantRegionsView(
+            regions=[TenantRegionView(**asdict(r)) for r in found.regions],
+            elsewhere=found.elsewhere,
+        )
+
+    @app.get(
         "/tenants/{slug}/missions/{number}/captures",
         operation_id="list_mission_captures",
         response_model=CaptureCardPage,
@@ -285,32 +321,43 @@ def add_observation_routes(
         mission: Annotated[int | None, Query(ge=0)] = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         before: str | None = None,
+        page: Annotated[int | None, Query(ge=1)] = None,
     ) -> ObservationPage:
+        """Newest first, a page at a time: by number (``page``, from 1, of
+        ``limit`` each) or after a cursor (``before``, the last page's
+        ``next``), not both. ``total`` is how many there are in all."""
+        if page is not None and before is not None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "a page or a cursor, not both",
+            )
         cursor = _parse_cursor(before) if before else None
         async with tenant_transaction(engine, member.tenant_id) as conn:
-            found = await list_observations(
+            found = await observation_page(
                 conn,
                 member.tenant_id,
                 limit=limit + 1,
+                offset=((page or 1) - 1) * limit,
                 before=cursor,
                 device=device,
                 photo_bucket=bucket(slug),
                 mission=mission,
             )
-        page, more = found[:limit], len(found) > limit
+        listed, more = found.observations[:limit], len(found.observations) > limit
         if namer is not None:
             namer.later(
                 background,
                 member.tenant_id,
                 [
                     o.capture_id
-                    for o in page
+                    for o in listed
                     if o.place_name is None and o.derived_place_name is None
                 ],
             )
         return ObservationPage(
-            observations=[view(slug, o) for o in page],
-            next=_cursor(page[-1].cursor) if more else None,
+            observations=[view(slug, o) for o in listed],
+            next=_cursor(listed[-1].cursor) if more else None,
+            total=found.total,
         )
 
     @app.get(

@@ -32,6 +32,10 @@ from fishsense_services_contracts.task_queues import (
     PROCESSOR_TASK_QUEUE,
 )
 
+#: v13 (2026-10-21): the shadow size-constancy laser calibration
+#: (`shadow_calibration`): SAM 3.1 slate segmentation of each slate frame's
+#: render (`SegmentSlateFramesInput`, `SlateSegment`) and the fit's payloads
+#: (`FitShadowCalibrationInput`, `ShadowFitResult`). New models only.
 #: v12 (2026-10-21): SAM masks stored as 8-bit greyscale PNGs in the tenant's
 #: bucket, as the app's ``mask_png`` (`masks`):
 #: a frame to predict may carry a mask's key and PUT (`AutomaticFrame.mask`,
@@ -57,7 +61,7 @@ from fishsense_services_contracts.task_queues import (
 #: JSON is unchanged -- each renamed field keeps its old name on the wire
 #: (`renamed.py`) -- so a v6 processor and a v7 orchestrator interoperate; only
 #: the published schema's model names differ.
-CONTRACT_VERSION = 12
+CONTRACT_VERSION = 13
 
 
 def _discover_models() -> tuple[type[BaseModel], ...]:

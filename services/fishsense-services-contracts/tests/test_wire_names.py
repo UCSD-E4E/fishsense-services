@@ -62,5 +62,6 @@ def test_the_version_is_pinned():
     change); v8 (2026-10-19) added optional fields for the automatic render;
     v9 (2026-10-19) renders in the tenant's bucket, read by URL; v10
     (2026-10-20) a render frame may carry its raw's copy too; v11 (2026-10-20)
-    each render's thumbnail; v12 (2026-10-21) SAM masks stored as files."""
-    assert CONTRACT_VERSION == 12
+    each render's thumbnail; v12 (2026-10-21) SAM masks stored as files; v13
+    (2026-10-21) the shadow calibration."""
+    assert CONTRACT_VERSION == 13

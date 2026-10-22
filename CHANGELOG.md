@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.38.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.37.0...v0.38.0) (2026-10-22)
+
+
+### Features
+
+* Today counts wild fish, and notes the fish models apart ([2ea9561](https://github.com/UCSD-E4E/fishsense-services/commit/2ea95612c9bc1be74170063f4681819afcb6be71))
+* Today counts wild fish, and notes the fish models apart ([d3fbd4c](https://github.com/UCSD-E4E/fishsense-services/commit/d3fbd4cde6b80be5166bfe09d3382ec6e296e5bb))
+
+## [0.37.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.36.0...v0.37.0) (2026-10-22)
+
+
+### Features
+
+* shadow size-constancy laser calibration (off by default) ([191cb3f](https://github.com/UCSD-E4E/fishsense-services/commit/191cb3f9f937a080e3f7caa5841c495eb8525ab3))
+
+## [0.36.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.35.0...v0.36.0) (2026-10-22)
+
+
+### Features
+
+* a map on Today of where the tenant's fish were measured ([f8dbc4d](https://github.com/UCSD-E4E/fishsense-services/commit/f8dbc4d2124b31e6cd76c58715bf82188eb52724))
+* a map on Today of where the tenant's fish were measured ([cf23115](https://github.com/UCSD-E4E/fishsense-services/commit/cf23115a85620e07bfde62c67bc40c0c62ff1e82))
+
+## [0.35.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.34.1...v0.35.0) (2026-10-22)
+
+
+### Features
+
+* number the fish list's pages ([5635bcf](https://github.com/UCSD-E4E/fishsense-services/commit/5635bcf3d7bc41810cfbcd4f907ea36f5a47a506))
+* number the fish list's pages ([4f94992](https://github.com/UCSD-E4E/fishsense-services/commit/4f949926ad1a37eee0a4760c980b4d5a7b16d983))
+
+
+### Bug Fixes
+
+* **web:** keep the fish page's fact lists inside their cards ([aa4c3da](https://github.com/UCSD-E4E/fishsense-services/commit/aa4c3dab9a9362efa4d07e9de7d3e444d335bdac))
+* **web:** keep the fish page's fact lists inside their cards ([a2ef7fc](https://github.com/UCSD-E4E/fishsense-services/commit/a2ef7fc61c0663999d13c94f7c3d16b1f123c99a))
+
 ## [0.34.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.34.0...v0.34.1) (2026-10-22)
 
 

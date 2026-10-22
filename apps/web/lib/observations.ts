@@ -28,9 +28,9 @@ export function deviceFilter(value: string | undefined): Device | undefined {
 export async function getObservationPage(
   accessToken: string,
   slug: string,
-  options: { device?: Device; before?: string; mission?: number; limit?: number } = {},
+  options: { device?: Device; before?: string; mission?: number; limit?: number; page?: number } = {},
 ): Promise<ObservationPage> {
-  const query: { device?: Device; before?: string; mission?: number; limit?: number } = {};
+  const query: { device?: Device; before?: string; mission?: number; limit?: number; page?: number } = {};
   if (options.device) query.device = options.device;
   // The API bounds it (and says so in its schema); a number can't forge a path.
   if (options.limit !== undefined) query.limit = options.limit;
@@ -41,6 +41,7 @@ export async function getObservationPage(
     query.mission = options.mission;
   }
   if (options.before) query.before = options.before;
+  if (options.page !== undefined) query.page = options.page;
   const { data, error, response } = await apiClient(accessToken).GET(
     "/tenants/{slug}/observations",
     { params: { path: { slug: safeSlug(slug) }, query } },

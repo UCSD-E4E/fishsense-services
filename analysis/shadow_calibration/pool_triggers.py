@@ -35,8 +35,11 @@ from pathlib import Path
 
 import numpy as np
 
-CSCW = Path(sys.argv[1] if len(sys.argv) > 1
-            else "/home/chris/Repos/school/e4e/fishsense/cscw-fishsense2027")
+CSCW = Path(
+    sys.argv[1]
+    if len(sys.argv) > 1
+    else "/home/chris/Repos/school/e4e/fishsense/cscw-fishsense2027"
+)
 sys.path.insert(0, str(CSCW / "calibration_analysis/e1j_size_constancy"))
 import slate_unknown as su  # noqa: E402  (the port's own estimator)
 
@@ -147,7 +150,9 @@ def fit(source, dive, xy, s, u, off, K, stored_axis, stored_pos, scores, nomask)
     vs = K @ sa
     tv_true = float((vs[:2] / vs[2]) @ u)
     lev, pts = lever(xy, K, origin, axis)
-    lev_prod, _ = lever(xy, K, beam(tv, u, off, K, float(np.linalg.norm(stored_pos[:2])))[0], axis)
+    lev_prod, _ = lever(
+        xy, K, beam(tv, u, off, K, float(np.linalg.norm(stored_pos[:2])))[0], axis
+    )
     try:
         check_observation_geometry(pts)
         lever_ok = True
@@ -162,7 +167,8 @@ def fit(source, dive, xy, s, u, off, K, stored_axis, stored_pos, scores, nomask)
         err_deg_fx=float(np.degrees((tv - tv_true) / K[0][0])),
         angle_deg=float(np.degrees(np.arccos(np.clip(axis @ sa, -1, 1)))),
         se_deg=float(np.degrees(np.std(boots) / su.F_PX)),
-        lever_m=lev, lever_m_prod_offset=lev_prod,
+        lever_m=lev,
+        lever_m_prod_offset=lev_prod,
         sam_median=float(np.median(scores)) if len(scores) else float("nan"),
         no_mask_share=nomask,
         size_cv_pct=float(100 * np.std(size_m) / np.mean(size_m)),
@@ -186,7 +192,9 @@ def main():
     sizes = {r["image_id"]: float(r["size"]) for r in rows(E / "sizes/sam3_text.csv")}
     detail = {r["image_id"]: r for r in rows(E / "sam_sizes_detail.csv")}
     lines = {int(r["dive"]): r for r in rows(E / "labelfree_tv.csv")}
-    ext = {int(r["dive_id"]): r for r in rows(CSCW / "e2e_measurement/extrinsics.psv", "|")}
+    ext = {
+        int(r["dive_id"]): r for r in rows(CSCW / "e2e_measurement/extrinsics.psv", "|")
+    }
     intr = {int(r["camera_id"]): np.array(ast.literal_eval(r["camera_matrix"]))
             for r in rows(CSCW / "laser_detection_analysis/intrinsics.csv")}  # fmt: skip
     auto = rows(HERE / "data/pool_automatic_dots.csv")
@@ -233,7 +241,9 @@ def main():
         if len(off_dots) >= 2:
             _, _, rin = ransac_line(np.array(off_dots), np.random.default_rng(0))
             g["second_line"] = int(rin.sum())
-            g["ambiguous_line"] = bool(g["second_line"] >= max(su.MIN_FRAMES, SECOND_LINE_SHARE * len(kept)))
+            g["ambiguous_line"] = bool(
+                g["second_line"] >= max(su.MIN_FRAMES, SECOND_LINE_SHARE * len(kept))
+            )
         gates.append(g)
         if len(kept) < 3:
             results.append({"source": "detector", "session": dive, "frames": len(kept),
@@ -264,7 +274,9 @@ if __name__ == "__main__":
     out = HERE / "results"
     out.mkdir(exist_ok=True)
     with open(out / "pool_triggers.csv", "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=keys + ["trimmed_if_gated"], extrasaction="ignore")
+        w = csv.DictWriter(
+            f, fieldnames=keys + ["trimmed_if_gated"], extrasaction="ignore"
+        )
         w.writeheader()
         for r in results:
             w.writerow({**r, "refusals": ";".join(r["refusals"])})
