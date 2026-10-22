@@ -28,9 +28,11 @@ export async function getMissionCaptures(
   throw failure("fishsense-api mission captures failed", response, error);
 }
 
-/** Where a capture's card goes: its (first) fish's page, or nowhere for a
- *  capture with no measured fish, which has no page of its own yet. */
-export function captureCardLink(slug: string, card: CaptureCard): string | null {
+/** Where a capture's card goes: its (first) fish's page, or the frame's own
+ *  page (its automatic result) for a capture with no measured fish. */
+export function captureCardLink(slug: string, card: CaptureCard, mission: number): string {
   const [first] = card.fish;
-  return first ? paths.fishDetail(slug, card.capture_id, first.fish_id) : null;
+  return first
+    ? paths.fishDetail(slug, card.capture_id, first.fish_id)
+    : paths.frame(slug, mission, card.capture_id);
 }

@@ -144,7 +144,7 @@ export default async function MissionPage({ params, searchParams }: Props) {
               {mission.captures.toLocaleString()}, measured or not
             </span>
           </h2>
-          <CaptureGrid slug={tenant} captures={captures.captures} />
+          <CaptureGrid slug={tenant} mission={number} captures={captures.captures} />
           <div className="mt-4 flex gap-4 text-sm">
             {after && (
               <Link href={paths.mission(tenant, number)} className="text-teal-fg hover:underline">

@@ -17,6 +17,7 @@ describe("every tenant page lives under its slug (docs/design/README.md, Tenants
     expect(paths.deployment("lab", 4)).toBe("/lab/data/deployments/4");
     expect(paths.missions("lab")).toBe("/lab/data/missions");
     expect(paths.mission("lab", 383)).toBe("/lab/data/missions/383");
+    expect(paths.frame("lab", 383, "c1")).toBe("/lab/data/missions/383/frames/c1");
     expect(paths.phoneMissions("lab")).toBe("/lab/data/missions?source=mobile");
     expect(paths.capture("lab", "u1")).toBe("/lab/data/captures/u1");
   });

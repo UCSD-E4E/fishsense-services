@@ -42,6 +42,9 @@ export const paths = {
   deployment: (slug: string, number: number) => `/${enc(slug)}/data/deployments/${number}`,
   missions: (slug: string) => `/${enc(slug)}/data/missions`,
   mission: (slug: string, number: number) => `/${enc(slug)}/data/missions/${number}`,
+  /** One frame of a mission, measured or not: its automatic result. */
+  frame: (slug: string, number: number, capture: string) =>
+    `/${enc(slug)}/data/missions/${number}/frames/${enc(capture)}`,
   /** The phone's missions: where the retired capture list's links land (7b). */
   phoneMissions: (slug: string) => `/${enc(slug)}/data/missions?source=mobile`,
   /** An old link to one capture; its page sends it to the capture's fish. */
