@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.43.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.42.0...v0.43.0) (2026-10-22)
+
+
+### Features
+
+* judge backfilled masks by the mask; record every regeneration ([92ce892](https://github.com/UCSD-E4E/fishsense-services/commit/92ce89276827da3154d0cda0b4628adedd52abd3))
+* judge backfilled masks by the mask; record every regeneration (0062) ([f0b7199](https://github.com/UCSD-E4E/fishsense-services/commit/f0b7199a45d76783f34e62cf69650478c51b4f08))
+
+
+### Bug Fixes
+
+* **automatic:** measure a fish longer than SAM's window on the whole photo ([be041e1](https://github.com/UCSD-E4E/fishsense-services/commit/be041e1a3aeea5301124e28e2608824a42ab8299))
+* **automatic:** measure a fish longer than SAM's window on the whole photo ([51add5f](https://github.com/UCSD-E4E/fishsense-services/commit/51add5f80f407756589b141db1806d4253a3c2ac))
+
 ## [0.42.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.41.0...v0.42.0) (2026-10-22)
 
 
