@@ -113,7 +113,7 @@ export async function loadQueue(
   // state. A failure here should reach the page and be read.
   // `kindKey`, not a literal: the key doubles as the api's URL segment, and
   // hardcoding "laser" here would have made a second queue silently walk the
-  // laser projects while labelling itself head/tail.
+  // laser projects while labeling itself head/tail.
   const outstanding = await liveProjectIds(kindKey, revalidate);
   if (outstanding.length === 0) {
     return { items: [], scanned: 0, projects: [], notWalked: 0 };

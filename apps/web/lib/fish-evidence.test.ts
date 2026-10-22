@@ -51,7 +51,7 @@ describe("a Lite fish's evidence", () => {
       { key: "current", when: "2026-10-01T10:00:00Z", lengthM: 0.686, how: "laser-pinhole 1", current: true },
     ]);
     expect(e.files).toEqual([]);
-    // Its labelled points were placed on v1's JPEG, not this render: listed,
+    // Its labeled points were placed on v1's JPEG, not this render: listed,
     // never drawn (PLAN.md §9.26, Phase 4).
     expect(e.overlay).toBeNull();
   });

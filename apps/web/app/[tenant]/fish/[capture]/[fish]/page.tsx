@@ -31,7 +31,7 @@ type Point = { x: number; y: number } | null | undefined;
  * checksum. A mobile fish's evidence is its capture's, so this page replaced
  * the Mobile captures page for it (retired in phase 7b), and shows what the
  * phone recorded with the capture too. A Lite fish's photo is its frame's render
- * (Phase 4); its labelled points are listed, not drawn, because they were
+ * (Phase 4); its labeled points are listed, not drawn, because they were
  * placed on v1's JPEG, not on this render.
  */
 export default async function FishDetailPage({ params }: Props) {

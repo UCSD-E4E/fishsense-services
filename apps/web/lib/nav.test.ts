@@ -12,12 +12,12 @@ describe("the main navigation (docs/design/README.md, Navigation)", () => {
     ]);
   });
 
-  it("adds Labelling for staff", () => {
+  it("adds Labeling for staff", () => {
     expect(labels(navItems("/", { staff: true, lastTenant: null }))).toEqual([
       "Today",
       "Fish",
       "Data",
-      "Labelling",
+      "Labeling",
     ]);
   });
 
@@ -56,7 +56,7 @@ describe("the main navigation (docs/design/README.md, Navigation)", () => {
     expect(active("/lab/data")).toEqual(["Data"]);
     expect(active("/lab/data/missions/383")).toEqual(["Data"]);
     expect(active("/lab/data/captures/u")).toEqual(["Data"]);
-    expect(active("/portal/triage")).toEqual(["Labelling"]);
+    expect(active("/portal/triage")).toEqual(["Labeling"]);
     // A prefix that is not a path segment is not the section.
     expect(active("/lab/fishing")).toEqual([]);
   });
