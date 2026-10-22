@@ -13,6 +13,9 @@ from depth_measure_seed import T0, exec_, forget_identities  # noqa: F401
 from observation_seed import ALICE, lite, mobile
 
 from fishsense_services_api.db import tenant_transaction
+from sqlalchemy import text
+
+from fishsense_services_api import summary_store
 from fishsense_services_api.summary_store import tenant_summary
 
 
@@ -103,3 +106,33 @@ async def test_another_tenants_rows_do_not_count(owner_engine, app_engine, tenan
     s = await _summary(app_engine, tenants["lab"])
 
     assert (s.lengths, s.missions, s.frames) == (0, 0, 0)
+
+
+def _scans(plan, relation: str) -> int:
+    """How many plan nodes read ``relation``."""
+    here = int(plan.get("Relation Name") == relation)
+    return here + sum(_scans(p, relation) for p in plan.get("Plans", []))
+
+
+async def _plan(app_engine, tenant_id, sql: str):
+    async with tenant_transaction(app_engine, tenant_id) as conn:
+        found = await conn.execute(
+            text(f"EXPLAIN (FORMAT JSON) {sql}"), {"t": tenant_id}
+        )
+        return found.scalar_one()[0]["Plan"]
+
+
+async def test_it_reads_the_observations_once(app_engine, tenants):
+    """Lengths, wild fish and species from one pass over `observations`, and
+    frames and latest activity from one over `captures`. Each pass over the
+    view rebuilds every current measurement in the tenant: three of them took
+    the summary to 4.5 s on production (2026-10-21), one takes 0.9 s."""
+    lab = tenants["lab"]
+    view = await _plan(
+        app_engine, lab, "SELECT * FROM observations WHERE tenant_id = :t"
+    )
+    summary = await _plan(app_engine, lab, summary_store._SUMMARY)
+
+    assert _scans(summary, "measurements") == _scans(view, "measurements")
+    assert _scans(summary, "species_labels") == _scans(view, "species_labels")
+    assert _scans(summary, "captures") == _scans(view, "captures") + 1

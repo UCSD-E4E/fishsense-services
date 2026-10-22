@@ -33,22 +33,26 @@ class TenantSummary:
     latest_activity: datetime | None
 
 
+#: One pass over `observations` and one over `captures`: each pass over the
+#: view rebuilds every current measurement in the tenant (0.8-1.7 s each on
+#: production, 2026-10-21, against 0.9 s for all three counts at once).
 _SUMMARY = """
-    SELECT
-      (SELECT count(*) FROM observations o WHERE o.tenant_id = :t) AS lengths,
-      (SELECT count(*) FROM observations o
-        WHERE o.tenant_id = :t AND o.fish_model IS NULL) AS wild_fish,
-      (SELECT count(DISTINCT o.scientific_name) FROM observations o
-        WHERE o.tenant_id = :t) AS species,
+    SELECT o.lengths, o.wild_fish, o.species, c.frames, c.latest_activity,
       (SELECT count(*) FROM missions m WHERE m.tenant_id = :t) AS missions,
       (SELECT count(*) FROM deployments d WHERE d.tenant_id = :t) AS deployments,
-      (SELECT count(*) FROM captures c
-        WHERE c.tenant_id = :t AND c.is_canonical) AS frames,
       (SELECT count(*) FROM missions m
         WHERE m.tenant_id = :t AND m.port = 'unknown'
-          AND m.source = 'lite') AS unknown_ports,
-      (SELECT max(c.created_at) FROM captures c WHERE c.tenant_id = :t)
-        AS latest_activity
+          AND m.source = 'lite') AS unknown_ports
+    FROM (
+      SELECT count(*) AS lengths,
+             count(*) FILTER (WHERE fish_model IS NULL) AS wild_fish,
+             count(DISTINCT scientific_name) AS species
+      FROM observations WHERE tenant_id = :t
+    ) o, (
+      SELECT count(*) FILTER (WHERE is_canonical) AS frames,
+             max(created_at) AS latest_activity
+      FROM captures WHERE tenant_id = :t
+    ) c
 """
 
 
