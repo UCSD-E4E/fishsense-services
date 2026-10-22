@@ -11,6 +11,8 @@ import { SignInFallback, SignInLink } from "./sign-in-link";
 import { otherTenants } from "@/lib/system-admin";
 import { allTenants, myTenants } from "./tenant";
 import { TenantSwitcher, type SwitcherTenant } from "./tenant-switcher";
+import { ThemeToggle } from "./theme-toggle";
+import { parseTheme, THEME_COOKIE } from "@/lib/theme";
 
 /** The user's tenants for the switcher; none when they can't be read, so a
  *  failing API costs the switcher, not the page. */
@@ -54,7 +56,9 @@ export async function AppHeader() {
   // The cookie is only a preference: it counts while the user is still in it
   // (the middleware remembers any tenant-shaped path, a 404 included), and
   // otherwise their first tenant stands in.
-  const cookie = (await cookies()).get(LAST_TENANT_COOKIE)?.value;
+  const jar = await cookies();
+  const cookie = jar.get(LAST_TENANT_COOKIE)?.value;
+  const theme = parseTheme(jar.get(THEME_COOKIE)?.value);
   const lastTenant =
     tenants.find((t) => t.slug === cookie)?.slug ?? tenants[0]?.slug ?? null;
   return (
@@ -75,6 +79,7 @@ export async function AppHeader() {
           </>
         )}
         <div className="ml-auto flex items-center gap-3">
+          <ThemeToggle initial={theme} />
           {state.signedIn ? (
             <>
               <span className="text-sm text-fg-2">{state.name}</span>
