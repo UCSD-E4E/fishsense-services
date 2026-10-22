@@ -104,6 +104,7 @@ def upgrade() -> None:
             FROM reviewer_skills
             ORDER BY tenant_id, user_id, kind, seq DESC
         """)
+    op.execute(f"GRANT SELECT ON current_reviewer_skills TO {_app_role()}")
 
     op.execute(f"""
         CREATE TABLE reviews (
@@ -154,7 +155,9 @@ def upgrade() -> None:
             )
         )
         """)
-    op.execute("CREATE INDEX reviews_capture_idx ON reviews (tenant_id, capture_id, seq)")
+    op.execute(
+        "CREATE INDEX reviews_capture_idx ON reviews (tenant_id, capture_id, seq)"
+    )
     op.execute(
         "CREATE INDEX reviews_confirms_idx ON reviews (tenant_id, confirms_review_id)"
     )

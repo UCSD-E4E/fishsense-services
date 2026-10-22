@@ -41,6 +41,7 @@ from fishsense_services_api.memberships import (
     resolve_membership,
 )
 from fishsense_services_api.automatic_api import add_automatic_routes
+from fishsense_services_api.review_api import add_review_routes
 from fishsense_services_api.mobile_api import add_mobile_routes
 from fishsense_services_api.place_names import Geocoder
 from fishsense_services_api.missions_api import add_mission_routes
@@ -291,6 +292,7 @@ def create_app(
     )
     add_public_routes(app, engine=engine)
     add_automatic_routes(app, engine=engine, membership=membership, stores=stores)
+    add_review_routes(app, engine=engine, membership=membership)
     add_mobile_routes(
         app,
         engine=engine,

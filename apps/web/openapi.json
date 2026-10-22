@@ -315,6 +315,18 @@
             ],
             "title": "Render Height"
           },
+          "render_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Render Id"
+          },
           "render_url": {
             "anyOf": [
               {
@@ -429,6 +441,7 @@
           "checkpoint",
           "core_version",
           "render_url",
+          "render_id",
           "render_width",
           "render_height",
           "mask_url",
@@ -2935,6 +2948,357 @@
         "title": "PurposeStatement",
         "type": "object"
       },
+      "RecordedReviewView": {
+        "properties": {
+          "counts": {
+            "title": "Counts",
+            "type": "boolean"
+          },
+          "label_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label Id"
+          },
+          "level": {
+            "enum": [
+              "learning",
+              "trusted",
+              "expert"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "review_id": {
+            "format": "uuid",
+            "title": "Review Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "review_id",
+          "level",
+          "counts",
+          "label_id"
+        ],
+        "title": "RecordedReviewView",
+        "type": "object"
+      },
+      "ReviewBody": {
+        "properties": {
+          "action": {
+            "enum": [
+              "accept",
+              "fix",
+              "reject",
+              "confirm"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "automatic_head_tail_prediction_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Automatic Head Tail Prediction Id"
+          },
+          "confirms_review_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirms Review Id"
+          },
+          "head": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewPoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "enum": [
+              "laser",
+              "head_tail",
+              "species"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "point": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewPoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "raw": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "no_fish",
+                  "fish_unmeasurable",
+                  "wrong_fish",
+                  "bad_mask",
+                  "dot_wrong"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "render_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Render Id"
+          },
+          "scientific_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scientific Name"
+          },
+          "tail": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewPoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "action"
+        ],
+        "title": "ReviewBody",
+        "type": "object"
+      },
+      "ReviewPoint": {
+        "properties": {
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "title": "ReviewPoint",
+        "type": "object"
+      },
+      "ReviewView": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "confirms_review_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirms Review Id"
+          },
+          "counts": {
+            "title": "Counts",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "head": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewPoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "enum": [
+              "laser",
+              "head_tail",
+              "species"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "learning",
+              "trusted",
+              "expert"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "point": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewPoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "review_id": {
+            "format": "uuid",
+            "title": "Review Id",
+            "type": "string"
+          },
+          "reviewer_id": {
+            "format": "uuid",
+            "title": "Reviewer Id",
+            "type": "string"
+          },
+          "scientific_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scientific Name"
+          },
+          "tail": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewPoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "review_id",
+          "reviewer_id",
+          "kind",
+          "action",
+          "level",
+          "counts",
+          "reason",
+          "point",
+          "head",
+          "tail",
+          "scientific_name",
+          "confirms_review_id",
+          "created_at"
+        ],
+        "title": "ReviewView",
+        "type": "object"
+      },
+      "SkillBody": {
+        "properties": {
+          "level": {
+            "enum": [
+              "learning",
+              "trusted",
+              "expert"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "level"
+        ],
+        "title": "SkillBody",
+        "type": "object"
+      },
       "SpeciesView": {
         "properties": {
           "common_name": {
@@ -3371,6 +3735,126 @@
         "summary": "Get Frame"
       }
     },
+    "/tenants/{slug}/captures/{capture_id}/reviews": {
+      "get": {
+        "operationId": "list_capture_reviews",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "capture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Capture Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReviewView"
+                  },
+                  "title": "Response List Capture Reviews",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Reviews"
+      },
+      "post": {
+        "operationId": "record_review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "capture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Capture Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordedReviewView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Post Review"
+      }
+    },
     "/tenants/{slug}/deployments": {
       "get": {
         "operationId": "list_deployments",
@@ -3715,6 +4199,131 @@
           }
         ],
         "summary": "List Label Studio Project Ids"
+      }
+    },
+    "/tenants/{slug}/me/skills": {
+      "get": {
+        "operationId": "get_my_skills",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "enum": [
+                      "learning",
+                      "trusted",
+                      "expert"
+                    ],
+                    "type": "string"
+                  },
+                  "title": "Response Get My Skills",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "My Skills"
+      }
+    },
+    "/tenants/{slug}/members/{user_id}/skills/{kind}": {
+      "put": {
+        "description": "An admin sets a member's level in one kind; it is recorded as theirs.",
+        "operationId": "set_member_skill",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "laser",
+                "head_tail",
+                "species"
+              ],
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put Skill"
       }
     },
     "/tenants/{slug}/membership": {

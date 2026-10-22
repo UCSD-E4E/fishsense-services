@@ -800,6 +800,9 @@ async def record_head_tail_task(
             VALUES (:t, :c, 'human', :p, :k)
             ON CONFLICT (tenant_id, capture_id, ls_project_id) DO UPDATE SET
                 ls_task_id = excluded.ls_task_id, superseded = false
+            -- A label a review superseded stays superseded (0062): reviving it
+            -- would undo the review behind the measurement's back.
+            WHERE head_tail_labels.superseded_reason IS DISTINCT FROM 'review'
             """),
         {"t": tenant_id, "c": capture_id, "p": ls_project_id, "k": ls_task_id},
     )
