@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.32.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.32.0...v0.32.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **automatic:** read each frame's current rows by index, not the tenant's ([972d93c](https://github.com/UCSD-E4E/fishsense-services/commit/972d93c235f3f332bd5710f96fba03bee7107efa))
+* **automatic:** read each frame's current rows by index, not the tenant's ([1b977e0](https://github.com/UCSD-E4E/fishsense-services/commit/1b977e0252cd29df78a05dbb7485537d968f361d))
+
 ## [0.32.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.31.0...v0.32.0) (2026-10-21)
 
 
