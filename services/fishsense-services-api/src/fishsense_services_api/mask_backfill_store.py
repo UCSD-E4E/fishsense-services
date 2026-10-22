@@ -14,7 +14,10 @@ predictions -- never a prediction.
   time, a page at a time (by `seq`);
 * `record_backfilled_masks`: the masks the orchestrator read back and
   checked, each named against its prediction -- a mask for another capture
-  is refused, a prediction already naming one is left as it is.
+  is refused, a prediction already naming one is left as it is;
+* `record_mask_regenerations`: every regeneration, stored or not, with what
+  it got -- the keypointer's head/tail on the regenerated mask, for its
+  repeatability (0062, owner 2026-10-22) -- and the mask it stored.
 """
 
 from __future__ import annotations
@@ -32,9 +35,11 @@ from fishsense_services_api.service_principal import ServicePrincipal
 __all__ = [
     "MASK_BACKFILL_SOURCES",
     "MaskBackfillCatalog",
+    "MaskRegeneration",
     "UnmaskedMission",
     "UnmaskedPrediction",
     "record_backfilled_masks",
+    "record_mask_regenerations",
     "unmasked_missions",
     "unmasked_predictions",
 ]
@@ -227,6 +232,63 @@ async def record_backfilled_masks(
     return written
 
 
+@dataclass(frozen=True)
+class MaskRegeneration:
+    """One regeneration's outcome and what it got (none without a mask)."""
+
+    prediction_id: uuid.UUID
+    capture_id: uuid.UUID
+    outcome: str
+    mask_area_px: int | None = None
+    crop_x: int | None = None
+    crop_y: int | None = None
+    head_x: float | None = None
+    head_y: float | None = None
+    tail_x: float | None = None
+    tail_y: float | None = None
+
+
+async def record_mask_regenerations(
+    conn: AsyncConnection,
+    tenant_id: uuid.UUID,
+    source: str,
+    regenerations: Sequence[MaskRegeneration],
+) -> int:
+    """Append each regeneration, naming its prediction and the mask now named
+    against that prediction, if any; how many were written. A prediction that
+    is not the tenant's, or not of the regeneration's capture, is refused."""
+    column, table = _COLUMN[_source(source)], _TABLE[source]
+    for r in regenerations:
+        capture = (
+            await conn.execute(
+                text(
+                    f"SELECT capture_id FROM {table} WHERE tenant_id = :t AND id = :p"
+                ),
+                {"t": tenant_id, "p": r.prediction_id},
+            )
+        ).scalar_one_or_none()
+        if capture is None or capture != r.capture_id:
+            raise ValueError(
+                f"no {source} prediction {r.prediction_id} of capture {r.capture_id}"
+            )
+        await conn.execute(
+            text(f"""
+                INSERT INTO mask_regenerations (tenant_id, capture_id, {column},
+                    outcome, mask_area_px, crop_x, crop_y, head_x, head_y, tail_x,
+                    tail_y, prediction_mask_id)
+                VALUES (:t, :capture, :prediction, :outcome, :area, :cx, :cy, :hx,
+                    :hy, :tx, :ty,
+                    (SELECT m.id FROM prediction_masks m
+                     WHERE m.tenant_id = :t AND m.{column} = :prediction))
+                """),
+            {"t": tenant_id, "capture": r.capture_id, "prediction": r.prediction_id,
+             "outcome": r.outcome, "area": r.mask_area_px, "cx": r.crop_x,
+             "cy": r.crop_y, "hx": r.head_x, "hy": r.head_y, "tx": r.tail_x,
+             "ty": r.tail_y},
+        )  # fmt: skip
+    return len(regenerations)
+
+
 class MaskBackfillCatalog(ServicePrincipal):
     """The mask backfill's database side, as the orchestrator's service
     principal."""
@@ -246,4 +308,10 @@ class MaskBackfillCatalog(ServicePrincipal):
         async with self._tenant(tenant_id) as conn:
             return await record_backfilled_masks(
                 conn, tenant_id, source, prediction_ids, masks
+            )
+
+    async def record_mask_regenerations(self, tenant_id, source, regenerations):
+        async with self._tenant(tenant_id) as conn:
+            return await record_mask_regenerations(
+                conn, tenant_id, source, regenerations
             )

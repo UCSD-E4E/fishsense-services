@@ -1622,6 +1622,49 @@ class PredictionMask(Base):
     created_at: Mapped[datetime] = _created_at()
 
 
+class MaskRegeneration(Base):
+    """A regeneration of a prediction's SAM mask by the mask backfill, stored
+    or not, and what it got (0062); append-only."""
+
+    __tablename__ = "mask_regenerations"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        _fk(("tenant_id", "capture_id"), "captures"),
+        _fk(("tenant_id", "automatic_head_tail_prediction_id"),
+            "automatic_head_tail_predictions"),
+        _fk(("tenant_id", "head_tail_prediction_id"), "head_tail_predictions"),
+        _fk(("tenant_id", "prediction_mask_id"), "prediction_masks"),
+        Index(None, "tenant_id", "capture_id"),
+        CheckConstraint(
+            "outcome IN ('reproduced', 'mismatch', 'no_mask', 'image_unavailable', "
+            "'decode_failed')",
+            name="mask_regenerations_outcome_check",
+        ),
+        CheckConstraint(
+            "(automatic_head_tail_prediction_id IS NULL) "
+            "<> (head_tail_prediction_id IS NULL)",
+            name="mask_regenerations_one_prediction_check",
+        ),
+    )  # fmt: skip
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    automatic_head_tail_prediction_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    head_tail_prediction_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    outcome: Mapped[str] = mapped_column(Text)
+    mask_area_px: Mapped[int | None] = mapped_column(Integer)
+    crop_x: Mapped[int | None] = mapped_column(Integer)
+    crop_y: Mapped[int | None] = mapped_column(Integer)
+    head_x: Mapped[float | None] = mapped_column(Double)
+    head_y: Mapped[float | None] = mapped_column(Double)
+    tail_x: Mapped[float | None] = mapped_column(Double)
+    tail_y: Mapped[float | None] = mapped_column(Double)
+    prediction_mask_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    created_at: Mapped[datetime] = _created_at()
+
+
 class CaptureThumbnail(Base):
     """A render's thumbnail for /fish's cards, or that the render was not
     there to read (0053); append-only."""

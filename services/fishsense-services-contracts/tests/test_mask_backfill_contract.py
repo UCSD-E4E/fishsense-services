@@ -8,7 +8,6 @@ from pydantic import ValidationError
 
 from fishsense_services_contracts.mask_backfill import (
     MASK_AREA_TOLERANCE,
-    MASK_POINT_TOLERANCE_PX,
     BackfilledMask,
     BackfillMaskFrame,
     MaskExpectation,
@@ -36,14 +35,20 @@ def test_a_frame_names_exactly_one_image():
 
 
 def test_the_same_mask_reproduces_and_a_different_one_does_not():
+    """Judged by the mask alone (owner, 2026-10-22: the trial's mismatches were
+    the same mask, area within 0.1%, with head/tail moved by the keypointer):
+    the crop exactly, the area within the tolerance."""
     assert reproduces(EXPECT, EXPECT)
     near = EXPECT.model_copy(update={
-        "mask_area_px": int(10_000 * (1 + MASK_AREA_TOLERANCE)),
-        "head_x": 10.0 + MASK_POINT_TOLERANCE_PX})  # fmt: skip
+        "mask_area_px": int(10_000 * (1 + MASK_AREA_TOLERANCE))})  # fmt: skip
     assert reproduces(EXPECT, near)
-    for change in ({"mask_area_px": 10_100}, {"crop_x": 101},
-                   {"head_x": 10.0 + 2 * MASK_POINT_TOLERANCE_PX}, {"tail_y": None}):  # fmt: skip
+    for change in ({"mask_area_px": 10_100}, {"crop_x": 101}, {"crop_y": 199}):
         assert not reproduces(EXPECT, EXPECT.model_copy(update=change)), change
+
+
+def test_head_and_tail_do_not_decide_it():
+    moved = EXPECT.model_copy(update={"head_x": 294.0, "tail_y": None})
+    assert reproduces(EXPECT, moved)
 
 
 def test_only_a_reproduced_mask_is_named():
