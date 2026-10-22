@@ -57,6 +57,10 @@ def main():
     lines = {int(r["dive"]): r for r in csv.DictReader(open(E / "labelfree_tv.csv"))}
     pl = sc.prediction_lines()
     published = list(csv.DictReader(open(CSCW / "analysis/codesign/results/size_constancy_sessions.csv")))
+    # The automatic track's detector dots on every canonical frame of the pool
+    # missions, exported read-only from production (2026-10-21): the shadow
+    # stage's detector source (author, 2026-10-21).
+    auto = list(csv.DictReader(open(Path(__file__).parent / "data/pool_automatic_dots.csv")))
     sessions = []
     for dive in sorted(lines):
         K = np.asarray(intr[cams[dive]], float)
@@ -78,11 +82,26 @@ def main():
                  "sam_prompt": detail[r["image_id"]]["text_prompt"] or None}
                 for r in frames if int(r["dive_id"]) == dive
             ],
+            "detector_dots": [
+                {"image_id": int(r["v1_id"]), "x": float(r["laser_x"]),
+                 "y": float(r["laser_y"]), "confidence": float(r["laser_confidence"])}
+                for r in auto if int(r["dive"]) == dive and r["laser_x"]
+            ],
             "published": {r["method"]: {k: float(r[k]) for k in
                                         ("frames", "size_spread", "err_deg", "angle_deg", "se_deg")}
                           for r in published if int(r["session"]) == dive},
         })  # fmt: skip
+    # Dive 279's red specks (imwut_2026_fishsense_lite@ce372d6
+    # fish_model_analysis/data/slate_sizes.csv; IN_PLANE_DRIFT.md:346-358).
+    imwut = Path(str(CSCW).replace("cscw-fishsense2027", "imwut_2026_fishsense_lite"))
+    dive279 = [
+        {"image_id": int(r["image_id"]), "dot_x": float(r["dot_x"]), "dot_y": float(r["dot_y"]),
+         "dot_source": r["dot_source"], "size": float(r["size"]) if r["size"] else None}
+        for r in csv.DictReader(open(imwut / "fish_model_analysis/data/slate_sizes.csv"))
+        if r["dive_id"] == "279"
+    ]  # fmt: skip
     OUT.write_text(json.dumps({
+        "dive279": dive279,
         "source": f"cscw-fishsense2027@{commit} analysis/codesign/size_constancy_sam.py",
         "f_px": 2850.0, "n_boot": 500, "sessions": sessions,
     }, indent=1))
