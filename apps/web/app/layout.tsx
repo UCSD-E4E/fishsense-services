@@ -1,8 +1,10 @@
 // Ported from fishsense-lite@77e8f8e5 apps/fishsense-lite-web/app/layout.tsx.
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import pkg from "../package.json";
 import { AppHeader } from "./_shell/app-header";
+import { parseTheme, THEME_COOKIE, themeAttribute } from "@/lib/theme";
 import "./globals.css";
 
 // The design's two families (docs/design/README.md): Inter for what a person
@@ -29,9 +31,16 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // The theme the user picked (lib/theme.ts), set before the first paint so
+  // the page never flashes the other one; none follows the system.
+  const theme = parseTheme((await cookies()).get(THEME_COOKIE)?.value);
   return (
-    <html lang="en" className={`${inter.variable} ${mono.variable}`}>
+    <html
+      lang="en"
+      className={`${inter.variable} ${mono.variable}`}
+      data-theme={themeAttribute(theme)}
+    >
       <body className="flex min-h-screen flex-col bg-ground font-sans text-fg antialiased">
         <AppHeader />
         <div className="flex-1">{children}</div>
