@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.42.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.41.0...v0.42.0) (2026-10-22)
+
+
+### Features
+
+* backfill SAM masks for predictions made before they were stored ([c9f05d0](https://github.com/UCSD-E4E/fishsense-services/commit/c9f05d0c723162647f5b97f8ab1d7ea6adaffc7a))
+* backfill SAM masks for predictions made before they were stored ([0129dbe](https://github.com/UCSD-E4E/fishsense-services/commit/0129dbe384a3a2b84c086f152d976345393936dc))
+
 ## [0.41.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.40.0...v0.41.0) (2026-10-22)
 
 
