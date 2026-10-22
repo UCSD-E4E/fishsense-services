@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.41.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.40.0...v0.41.0) (2026-10-22)
+
+
+### Features
+
+* **web:** a light / dark / system switch in the header ([fffc993](https://github.com/UCSD-E4E/fishsense-services/commit/fffc9938f4e8b3d6ee8abb7180db879b8def2b12))
+* **web:** a light / dark / system switch in the header ([0114a25](https://github.com/UCSD-E4E/fishsense-services/commit/0114a255d8bdb3b24c0e1fa49e9e5d1810f13697))
+
 ## [0.40.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.39.1...v0.40.0) (2026-10-22)
 
 
