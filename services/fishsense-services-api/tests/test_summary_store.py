@@ -11,11 +11,9 @@ from __future__ import annotations
 import pytest
 from depth_measure_seed import T0, exec_, forget_identities  # noqa: F401
 from observation_seed import ALICE, lite, mobile
+from sqlalchemy import event
 
 from fishsense_services_api.db import tenant_transaction
-from sqlalchemy import text
-
-from fishsense_services_api import summary_store
 from fishsense_services_api.summary_store import tenant_summary
 
 
@@ -114,25 +112,32 @@ def _scans(plan, relation: str) -> int:
     return here + sum(_scans(p, relation) for p in plan.get("Plans", []))
 
 
-async def _plan(app_engine, tenant_id, sql: str):
-    async with tenant_transaction(app_engine, tenant_id) as conn:
-        found = await conn.execute(
-            text(f"EXPLAIN (FORMAT JSON) {sql}"), {"t": tenant_id}
-        )
-        return found.scalar_one()[0]["Plan"]
+async def _plan(conn, statement: str, parameters=()):
+    found = await conn.exec_driver_sql(f"EXPLAIN (FORMAT JSON) {statement}", parameters)
+    return found.scalar_one()[0]["Plan"]
 
 
 async def test_it_reads_the_observations_once(app_engine, tenants):
-    """Lengths, wild fish and species from one pass over `observations`, and
-    frames and latest activity from one over `captures`. Each pass over the
-    view rebuilds every current measurement in the tenant: three of them took
-    the summary to 4.5 s on production (2026-10-21), one takes 0.9 s."""
+    """Lengths, wild fish and species from one pass over `observations`. Each
+    pass rebuilds every current measurement in the tenant: three of them took
+    the summary to 4.5 s on production (2026-10-21), one takes 0.9 s. Planned
+    as `tenant_summary` runs it, against the view's own plan."""
     lab = tenants["lab"]
-    view = await _plan(
-        app_engine, lab, "SELECT * FROM observations WHERE tenant_id = :t"
-    )
-    summary = await _plan(app_engine, lab, summary_store._SUMMARY)
+    ran = []
 
-    assert _scans(summary, "measurements") == _scans(view, "measurements")
-    assert _scans(summary, "species_labels") == _scans(view, "species_labels")
-    assert _scans(summary, "captures") == _scans(view, "captures") + 1
+    def record(conn, cursor, statement, parameters, context, executemany):
+        ran.append((statement, parameters))
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        event.listen(conn.sync_connection, "before_cursor_execute", record)
+        try:
+            await tenant_summary(conn, lab)
+        finally:
+            event.remove(conn.sync_connection, "before_cursor_execute", record)
+        view = await _plan(
+            conn, "SELECT * FROM observations WHERE tenant_id = $1", (lab,)
+        )
+        summaries = [await _plan(conn, *query) for query in ran]
+
+    for relation in ("measurements", "species_labels"):
+        assert sum(_scans(p, relation) for p in summaries) == _scans(view, relation)

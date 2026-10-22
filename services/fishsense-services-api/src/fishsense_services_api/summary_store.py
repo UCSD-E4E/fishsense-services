@@ -36,6 +36,9 @@ class TenantSummary:
 #: One pass over `observations` and one over `captures`: each pass over the
 #: view rebuilds every current measurement in the tenant (0.8-1.7 s each on
 #: production, 2026-10-21, against 0.9 s for all three counts at once).
+#: `max(created_at)` has no index to probe (none leads with tenant and
+#: created_at), so it scans either way: together with the frame count,
+#: 165-171 ms; apart, 378-518 ms (production, 2026-10-21).
 _SUMMARY = """
     SELECT o.lengths, o.wild_fish, o.species, c.frames, c.latest_activity,
       (SELECT count(*) FROM missions m WHERE m.tenant_id = :t) AS missions,

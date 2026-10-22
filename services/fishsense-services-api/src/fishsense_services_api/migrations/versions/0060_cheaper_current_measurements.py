@@ -72,17 +72,10 @@ from alembic import op
 revision = "0060"
 down_revision = "0059"
 
-#: 0038's columns: `measurements`' own, without `measured_at` (0038 kept the
-#: view's columns as they were).
-_COLUMNS = """m.id, m.tenant_id, m.v1_id, m.seq, m.capture_id, m.fish_id,
-    m.source, m.length_m, m.laser_calibration_id, m.laser_depth_id,
-    m.laser_label_id, m.head_tail_label_id, m.algorithm, m.algorithm_version,
-    m.run_id, m.core_version, m.model_version, m.created_at, m.number"""
-
-_HEAD = f"""
+_HEAD = """
 CREATE OR REPLACE VIEW current_measurements WITH (security_invoker = true) AS
 SELECT DISTINCT ON (m.tenant_id, m.capture_id, m.fish_id, m.source)
-    {_COLUMNS}
+    {columns}
 FROM measurements m
 JOIN captures c ON c.tenant_id = m.tenant_id AND c.id = m.capture_id
 LEFT JOIN missions d ON d.tenant_id = c.tenant_id AND d.id = c.mission_id
@@ -133,7 +126,9 @@ WHERE (m.source = 'device' OR m.laser_calibration_id = e.laser_calibration_id)
             AND ({_STALE_SUBJECT})))
 """ + _ORDER
 
-#: The view as 0038 left it and 0046 renamed it.
+#: The view as 0038 left it and 0046 renamed it. A copy, since the text 0038
+#: built from (0028's) names `dives`; test_migration_0060.py pins that the
+#: downgrade restores 0059's definition exactly.
 CURRENT_MEASUREMENTS_0038 = _HEAD + f"""
 LEFT JOIN laser_labels ll
   ON ll.tenant_id = m.tenant_id AND ll.id = m.laser_label_id
@@ -151,9 +146,21 @@ WHERE (m.source = 'device' OR m.laser_calibration_id = e.laser_calibration_id)
 """ + _ORDER
 
 
+def _columns() -> str:
+    """The view's columns as they are, in order: `CREATE OR REPLACE VIEW` must
+    keep them (0038 spelled out `measurements`' own, less `measured_at`)."""
+    names = op.get_bind().exec_driver_sql("""
+        SELECT column_name FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'current_measurements'
+        ORDER BY ordinal_position
+        """).scalars()
+    return ", ".join(f"m.{name}" for name in names)
+
+
 def upgrade() -> None:
-    op.execute(CURRENT_MEASUREMENTS)
+    op.execute(CURRENT_MEASUREMENTS.format(columns=_columns()))
 
 
 def downgrade() -> None:
-    op.execute(CURRENT_MEASUREMENTS_0038)
+    op.execute(CURRENT_MEASUREMENTS_0038.format(columns=_columns()))
