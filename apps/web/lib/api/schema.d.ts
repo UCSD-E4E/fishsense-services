@@ -555,6 +555,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{slug}/regions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Regions
+         * @description Where the tenant's fish were measured, by broad region, for its
+         *     Today map (`tenant_regions_store`).
+         */
+        get: operations["get_tenant_regions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{slug}/summary": {
         parameters: {
             query?: never;
@@ -1392,6 +1413,30 @@ export interface components {
             common_name: string | null;
             /** Scientific Name */
             scientific_name: string | null;
+        };
+        /**
+         * TenantRegionView
+         * @description A broad region, at its one point on the map (`regions`).
+         */
+        TenantRegionView: {
+            /** Fish */
+            fish: number;
+            /** Latitude */
+            latitude: number;
+            /** Longitude */
+            longitude: number;
+            /** Name */
+            name: string;
+        };
+        /**
+         * TenantRegionsView
+         * @description Where a tenant's fish were measured, never finer than a region.
+         */
+        TenantRegionsView: {
+            /** Elsewhere */
+            elsewhere: number;
+            /** Regions */
+            regions: components["schemas"]["TenantRegionView"][];
         };
         /**
          * TenantSummaryView
@@ -2527,6 +2572,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ObservationDetailView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_tenant_regions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantRegionsView"];
                 };
             };
             /** @description Validation Error */

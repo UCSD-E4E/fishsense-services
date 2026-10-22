@@ -5,11 +5,12 @@ import Link from "next/link";
 import { unstable_rethrow } from "next/navigation";
 import { cache, type ReactNode } from "react";
 import { FishGrid } from "@/app/_shell/fish-grid";
+import { RegionMap } from "@/app/_shell/region-map";
 import { WorkSections } from "@/app/_shell/work-sections";
 import { getDeployments } from "@/lib/mission-facts";
 import { getObservationPage } from "@/lib/observations";
 import { paths } from "@/lib/tenant-paths";
-import { getTenantSummary, recentDeployments } from "@/lib/today";
+import { getTenantRegions, getTenantSummary, recentDeployments } from "@/lib/today";
 import { getIsSystemAdmin } from "@/lib/system-admin";
 
 /** The numbers and "Needs you" both read the summary: asked once per request. */
@@ -46,6 +47,30 @@ export async function Numbers({ token, slug }: Section) {
         note="the newest ingest or sync"
         small
       />
+    </div>
+  );
+}
+
+/** Where the tenant's fish were measured, by broad region, on a map. */
+export async function WhereMeasured({ token, slug }: Section) {
+  let found;
+  try {
+    found = await getTenantRegions(token, slug);
+  } catch (error) {
+    unstable_rethrow(error);
+    return <Failure>Could not load the map: {reason(error)}</Failure>;
+  }
+  if (found.regions.length === 0) {
+    return <p className="text-fg-2">Measured fish will appear here by region.</p>;
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <RegionMap regions={found.regions} />
+      {found.elsewhere > 0 && (
+        <p className="text-sm text-fg-2">
+          {found.elsewhere.toLocaleString()} more fish without a region.
+        </p>
+      )}
     </div>
   );
 }
@@ -220,6 +245,14 @@ export function LineLoading() {
         <div className={`${PULSE} h-4 flex-1`} />
         <div className={`${PULSE} h-4 w-8`} />
       </div>
+    </Loading>
+  );
+}
+
+export function MapLoading() {
+  return (
+    <Loading what="the map">
+      <div className="aspect-[2/1] w-full animate-pulse rounded-sheet border border-line bg-raised" />
     </Loading>
   );
 }

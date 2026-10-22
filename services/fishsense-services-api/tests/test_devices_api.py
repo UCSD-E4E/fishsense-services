@@ -246,6 +246,7 @@ async def test_every_operation_has_an_explicit_operation_id(offline_client):
         "get_my_membership",
         "get_observation",
         "get_public_summary",
+        "get_tenant_regions",
         "get_tenant_summary",
         "list_all_tenants",
         "list_deployments",
