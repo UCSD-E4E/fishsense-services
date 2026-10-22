@@ -32,6 +32,9 @@ from fishsense_services_contracts.task_queues import (
     PROCESSOR_TASK_QUEUE,
 )
 
+#: v14 (2026-10-22): the mask backfill (`mask_backfill`): an existing
+#: prediction's SAM mask regenerated and stored only when it reproduces the
+#: prediction (`BackfillMasksInput`, `BackfilledMask`). New models only.
 #: v13 (2026-10-21): the shadow size-constancy laser calibration
 #: (`shadow_calibration`): SAM 3.1 slate segmentation of each slate frame's
 #: render (`SegmentSlateFramesInput`, `SlateSegment`) and the fit's payloads
@@ -61,7 +64,7 @@ from fishsense_services_contracts.task_queues import (
 #: JSON is unchanged -- each renamed field keeps its old name on the wire
 #: (`renamed.py`) -- so a v6 processor and a v7 orchestrator interoperate; only
 #: the published schema's model names differ.
-CONTRACT_VERSION = 13
+CONTRACT_VERSION = 14
 
 
 def _discover_models() -> tuple[type[BaseModel], ...]:
