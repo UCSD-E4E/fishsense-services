@@ -1457,6 +1457,128 @@ class CaptureRaw(Base):
     created_at: Mapped[datetime] = _created_at()
 
 
+class ShadowLaserCalibration(Base):
+    """A shadow size-constancy fit or its refusal (0060); feeds nothing;
+    append-only."""
+
+    __tablename__ = "shadow_laser_calibrations"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        _fk(("tenant_id", "mission_id"), "missions"),
+        _fk(("tenant_id", "reference_laser_calibration_id"), "laser_calibrations"),
+        Index(None, "tenant_id", "mission_id"),
+        CheckConstraint("dot_source IN ('labels', 'detector')",
+                        name="shadow_laser_calibrations_dot_source_check"),
+        CheckConstraint("variant IN ('port', 'gated')",
+                        name="shadow_laser_calibrations_variant_check"),
+        CheckConstraint("outcome IN ('accepted', 'refused')",
+                        name="shadow_laser_calibrations_outcome_check"),
+        CheckConstraint("line_source IN ('mission_line', 'detector_line', 'dots')",
+                        name="shadow_laser_calibrations_line_source_check"),
+        CheckConstraint("frames_used >= 0",
+                        name="shadow_laser_calibrations_frames_used_check"),
+        CheckConstraint(
+            "outcome <> 'accepted' OR (coalesce(cardinality(laser_position), 0) = 3 "
+            "AND coalesce(cardinality(laser_axis), 0) = 3)",
+            name="shadow_laser_calibrations_accepted_check",
+        ),
+        CheckConstraint("(outcome = 'refused') = (refusal_reason IS NOT NULL)",
+                        name="shadow_laser_calibrations_refused_check"),
+    )  # fmt: skip
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    mission_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    dot_source: Mapped[str] = mapped_column(Text)
+    variant: Mapped[str] = mapped_column(Text)
+    outcome: Mapped[str] = mapped_column(Text)
+    refusal_reason: Mapped[str | None] = mapped_column(Text)
+    refusals: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'")
+    )
+    laser_position: Mapped[list[float] | None] = mapped_column(ARRAY(Double))
+    laser_axis: Mapped[list[float] | None] = mapped_column(ARRAY(Double))
+    o_mag_m: Mapped[float] = mapped_column(Double)
+    vanishing_px: Mapped[float | None] = mapped_column(Double)
+    line_direction: Mapped[list[float] | None] = mapped_column(ARRAY(Double))
+    line_offset_px: Mapped[float | None] = mapped_column(Double)
+    line_source: Mapped[str | None] = mapped_column(Text)
+    camera_calibration_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    reference_laser_calibration_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    reference_borrowed: Mapped[bool | None] = mapped_column(Boolean)
+    angle_diff_deg: Mapped[float | None] = mapped_column(Double)
+    vp_offset_px: Mapped[float | None] = mapped_column(Double)
+    vp_offset_deg_fx: Mapped[float | None] = mapped_column(Double)
+    vp_offset_deg_f2850: Mapped[float | None] = mapped_column(Double)
+    fit_residual: Mapped[float | None] = mapped_column(Double)
+    se_px: Mapped[float | None] = mapped_column(Double)
+    se_deg: Mapped[float | None] = mapped_column(Double)
+    frames_used: Mapped[int] = mapped_column(Integer)
+    frames_rejected: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'"))
+    size_spread: Mapped[float | None] = mapped_column(Double)
+    range_min_m: Mapped[float | None] = mapped_column(Double)
+    range_max_m: Mapped[float | None] = mapped_column(Double)
+    lever_m: Mapped[float | None] = mapped_column(Double)
+    lever_m_production_offset: Mapped[float | None] = mapped_column(Double)
+    size_cv_pct: Mapped[float | None] = mapped_column(Double)
+    size_maxdev_pct: Mapped[float | None] = mapped_column(Double)
+    sam_score_min: Mapped[float | None] = mapped_column(Double)
+    sam_score_median: Mapped[float | None] = mapped_column(Double)
+    no_mask_share: Mapped[float | None] = mapped_column(Double)
+    sam_model: Mapped[str] = mapped_column(Text)
+    sam_prompts: Mapped[list[str]] = mapped_column(ARRAY(Text))
+    sam_threshold: Mapped[float] = mapped_column(Double)
+    render_long_side: Mapped[int] = mapped_column(Integer)
+    gate: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'"))
+    algorithm_version: Mapped[str] = mapped_column(Text)
+    code_version: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class ShadowCalibrationFrame(Base):
+    """A slate frame a shadow fit considered (0060); append-only."""
+
+    __tablename__ = "shadow_calibration_frames"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        _fk(("tenant_id", "shadow_laser_calibration_id"), "shadow_laser_calibrations"),
+        _fk(("tenant_id", "capture_id"), "captures"),
+        Index("shadow_calibration_frames_tenant_id_calibration_idx",
+              "tenant_id", "shadow_laser_calibration_id"),
+        CheckConstraint("frame_source IN ('label', 'detector', 'both')",
+                        name="shadow_calibration_frames_frame_source_check"),
+        CheckConstraint("used = (rejected_reason IS NULL)",
+                        name="shadow_calibration_frames_used_check"),
+    )  # fmt: skip
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    shadow_laser_calibration_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    frame_source: Mapped[str] = mapped_column(Text)
+    slate_probability: Mapped[float | None] = mapped_column(Double)
+    dot_x: Mapped[float | None] = mapped_column(Double)
+    dot_y: Mapped[float | None] = mapped_column(Double)
+    dot_label_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    dot_label_source: Mapped[str | None] = mapped_column(Text)
+    dot_prediction_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    dot_confidence: Mapped[float | None] = mapped_column(Double)
+    line_distance_px: Mapped[float | None] = mapped_column(Double)
+    sam_prompt: Mapped[str | None] = mapped_column(Text)
+    sam_score: Mapped[float | None] = mapped_column(Double)
+    mask_area_px: Mapped[float | None] = mapped_column(Double)
+    size: Mapped[float | None] = mapped_column(Double)
+    t_px: Mapped[float | None] = mapped_column(Double)
+    range_m: Mapped[float | None] = mapped_column(Double)
+    used: Mapped[bool] = mapped_column(Boolean)
+    rejected_reason: Mapped[str | None] = mapped_column(Text)
+    capture_number: Mapped[int | None] = mapped_column(Integer)
+    captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _created_at()
+
+
 class PredictionMask(Base):
     """A SAM mask a prediction kept, stored in the tenant's bucket the way
     FishSense Mobile stores its mask, as the app's mask_png (0059); append-only."""
