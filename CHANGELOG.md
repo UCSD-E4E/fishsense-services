@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.39.0...v0.39.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **web:** American spelling: Labeling, labeled ([67f87f9](https://github.com/UCSD-E4E/fishsense-services/commit/67f87f90424a8f0c9626c8b1ddfbee1295d7ce62))
+
 ## [0.39.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.38.0...v0.39.0) (2026-10-22)
 
 
