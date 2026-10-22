@@ -13,6 +13,8 @@ import { requireSignedIn } from "@/app/_shell/guard";
 import { tenantFor } from "@/app/_shell/tenant";
 import { CaptureGrid } from "@/app/[tenant]/data/missions/capture-grid";
 import { getMissionCaptures } from "@/lib/mission-captures";
+import { getMissionAutomatic } from "@/lib/automatic";
+import { AutomaticRun, hasRun } from "@/app/[tenant]/data/missions/automatic-run";
 import { FactsForms } from "@/app/[tenant]/data/missions/facts-forms";
 import { deploymentHref, PortBadge } from "@/app/[tenant]/data/missions/mission-table";
 import { paths } from "@/lib/tenant-paths";
@@ -43,6 +45,8 @@ export default async function MissionPage({ params, searchParams }: Props) {
   if (!mission) notFound();
   // Its captures, measured or not: an unmeasured one is seen here or nowhere.
   const captures = await getMissionCaptures(token, tenant, number, after);
+  // The automatic run, for review (2026-10-21).
+  const run = await getMissionAutomatic(token, tenant, number);
   const deployments: Deployment[] = isAdmin ? await getDeployments(token, tenant) : [];
   const place = [mission.site, mission.region, mission.country].filter(Boolean).join(", ");
   const phone = isPhoneMission(mission);
@@ -129,6 +133,8 @@ export default async function MissionPage({ params, searchParams }: Props) {
           {mission.notes}
         </p>
       )}
+
+      {hasRun(run) && <AutomaticRun run={run} />}
 
       {captures && captures.captures.length > 0 && (
         <section className="mb-8">

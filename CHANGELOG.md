@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.33.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.32.1...v0.33.0) (2026-10-22)
+
+
+### Features
+
+* review the automatic run in the web, read-only ([258ed8d](https://github.com/UCSD-E4E/fishsense-services/commit/258ed8d5e3d2471f6529585e9fcbd8670b07fc46))
+* review the automatic run in the web, read-only ([5a5f734](https://github.com/UCSD-E4E/fishsense-services/commit/5a5f734c49140e941410b7c176a9f06bc30e2e92))
+
 ## [0.32.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.32.0...v0.32.1) (2026-10-22)
 
 

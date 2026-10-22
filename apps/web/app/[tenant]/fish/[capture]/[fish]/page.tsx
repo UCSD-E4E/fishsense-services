@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireSignedIn } from "@/app/_shell/guard";
+import { getAutomaticFrame } from "@/lib/automatic";
 import { describeOrigin, formatLength, getCapture, millimetres, osmLink } from "@/lib/captures";
 import { fishEvidence, type Overlay } from "@/lib/fish-evidence";
 import { isSlug, isUuid } from "@/lib/ids";
@@ -13,6 +14,7 @@ import {
   where,
 } from "@/lib/observations";
 import { paths } from "@/lib/tenant-paths";
+import { AutomaticSection } from "./automatic-section";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +48,8 @@ export default async function FishDetailPage({ params }: Props) {
     ? await getCapture(token, tenant, o.client_capture_uuid)
     : null;
   const evidence = fishEvidence(detail, phone);
+  // What the automatic run made of a Lite frame, for review (2026-10-21).
+  const automatic = o.method === "laser" ? await getAutomaticFrame(token, tenant, capture) : null;
   const photo = phone?.files.find((f) => f.role === "rgb_jpeg")?.url ?? o.photo_url;
   const name = fishName(o);
   const error = knownLengthError(o);
@@ -231,6 +235,8 @@ export default async function FishDetailPage({ params }: Props) {
           </dl>
         </section>
       )}
+
+      {automatic && <AutomaticSection frame={automatic} humanLengthM={o.length_m} />}
 
       {evidence.files.length > 0 && (
         <section className="mt-5 rounded-card border border-line bg-surface px-6 py-5">

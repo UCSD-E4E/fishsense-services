@@ -19,6 +19,435 @@
         "title": "AdminTenant",
         "type": "object"
       },
+      "AutomaticCalibrationView": {
+        "properties": {
+          "algorithm_version": {
+            "title": "Algorithm Version",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "frames_used": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frames Used"
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          },
+          "pair_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pair Count"
+          },
+          "refusal_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal Reason"
+          },
+          "se_px": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Se Px"
+          },
+          "size_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Ratio"
+          }
+        },
+        "required": [
+          "outcome",
+          "refusal_reason",
+          "algorithm_version",
+          "frames_used",
+          "pair_count",
+          "size_ratio",
+          "se_px",
+          "created_at"
+        ],
+        "title": "AutomaticCalibrationView",
+        "type": "object"
+      },
+      "AutomaticFailureView": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "step": {
+            "title": "Step",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step",
+          "error",
+          "created_at"
+        ],
+        "title": "AutomaticFailureView",
+        "type": "object"
+      },
+      "AutomaticFrameView": {
+        "properties": {
+          "calibration_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calibration Source"
+          },
+          "checkpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint"
+          },
+          "core_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Core Version"
+          },
+          "depth_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depth M"
+          },
+          "head": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PixelPoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "laser": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PixelPoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "laser_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Laser Confidence"
+          },
+          "length_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Length M"
+          },
+          "mask_bbox": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mask Bbox"
+          },
+          "mask_height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mask Height"
+          },
+          "mask_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mask Url"
+          },
+          "mask_width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mask Width"
+          },
+          "measurement_algorithm": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Measurement Algorithm"
+          },
+          "measurement_algorithm_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Measurement Algorithm Version"
+          },
+          "predicted_at": {
+            "format": "date-time",
+            "title": "Predicted At",
+            "type": "string"
+          },
+          "predictor_version": {
+            "title": "Predictor Version",
+            "type": "integer"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal"
+          },
+          "render_height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Render Height"
+          },
+          "render_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Render Url"
+          },
+          "render_width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Render Width"
+          },
+          "sam_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sam Score"
+          },
+          "slate_probability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slate Probability"
+          },
+          "species": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Species"
+          },
+          "species_margin": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Species Margin"
+          },
+          "species_probability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Species Probability"
+          },
+          "species_top5": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Species Top5",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tail": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PixelPoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "predicted_at",
+          "laser",
+          "laser_confidence",
+          "head",
+          "tail",
+          "mask_bbox",
+          "sam_score",
+          "slate_probability",
+          "predictor_version",
+          "checkpoint",
+          "core_version",
+          "render_url",
+          "render_width",
+          "render_height",
+          "mask_url",
+          "mask_width",
+          "mask_height",
+          "length_m",
+          "depth_m",
+          "refusal",
+          "calibration_source",
+          "measurement_algorithm",
+          "measurement_algorithm_version",
+          "species",
+          "species_probability",
+          "species_margin",
+          "species_top5"
+        ],
+        "title": "AutomaticFrameView",
+        "type": "object"
+      },
       "CaptureCardPage": {
         "properties": {
           "captures": {
@@ -1521,6 +1950,127 @@
         "title": "Mission",
         "type": "object"
       },
+      "MissionAutomaticView": {
+        "properties": {
+          "by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Status",
+            "type": "object"
+          },
+          "calibration": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AutomaticCalibrationView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "compared": {
+            "title": "Compared",
+            "type": "integer"
+          },
+          "excluded": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Excluded"
+          },
+          "failures": {
+            "items": {
+              "$ref": "#/components/schemas/AutomaticFailureView"
+            },
+            "title": "Failures",
+            "type": "array"
+          },
+          "frames": {
+            "title": "Frames",
+            "type": "integer"
+          },
+          "lengths": {
+            "title": "Lengths",
+            "type": "integer"
+          },
+          "lengths_use": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lengths Use"
+          },
+          "mean_abs_error_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Abs Error Pct"
+          },
+          "median_error_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Error Pct"
+          },
+          "refusals": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Refusals",
+            "type": "object"
+          },
+          "unprocessed": {
+            "title": "Unprocessed",
+            "type": "integer"
+          },
+          "within_10_pct": {
+            "title": "Within 10 Pct",
+            "type": "integer"
+          },
+          "within_5_pct": {
+            "title": "Within 5 Pct",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "frames",
+          "by_status",
+          "unprocessed",
+          "calibration",
+          "lengths_use",
+          "lengths",
+          "refusals",
+          "failures",
+          "excluded",
+          "compared",
+          "median_error_pct",
+          "mean_abs_error_pct",
+          "within_5_pct",
+          "within_10_pct"
+        ],
+        "title": "MissionAutomaticView",
+        "type": "object"
+      },
       "MissionDetail": {
         "properties": {
           "calibration_source_number": {
@@ -2161,6 +2711,24 @@
         "title": "ObservationView",
         "type": "object"
       },
+      "PixelPoint": {
+        "properties": {
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "title": "PixelPoint",
+        "type": "object"
+      },
       "Point": {
         "properties": {
           "x": {
@@ -2665,6 +3233,60 @@
         "summary": "Summary"
       }
     },
+    "/tenants/{slug}/captures/{capture_id}/automatic": {
+      "get": {
+        "operationId": "get_automatic_frame",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "capture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Capture Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomaticFrameView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Frame"
+      }
+    },
     "/tenants/{slug}/deployments": {
       "get": {
         "operationId": "list_deployments",
@@ -3133,6 +3755,60 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MissionDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Mission"
+      }
+    },
+    "/tenants/{slug}/missions/{number}/automatic": {
+      "get": {
+        "operationId": "get_mission_automatic",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MissionAutomaticView"
                 }
               }
             },
