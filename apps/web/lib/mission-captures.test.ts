@@ -45,10 +45,10 @@ describe("captureCardLink", () => {
     ({ capture_id: "c1", fish }) as unknown as CaptureCard;
 
   it("goes to the fish's page for a measured capture", () => {
-    expect(captureCardLink("lab", card([{ fish_id: "f1", length_m: 0.3 }]))).toBe("/lab/fish/c1/f1");
+    expect(captureCardLink("lab", card([{ fish_id: "f1", length_m: 0.3 }]), 383)).toBe("/lab/fish/c1/f1");
   });
 
-  it("goes nowhere for an unmeasured one: it has no fish page yet", () => {
-    expect(captureCardLink("lab", card([]))).toBeNull();
+  it("goes to the frame's own page for an unmeasured one (its automatic result)", () => {
+    expect(captureCardLink("lab", card([]), 383)).toBe("/lab/data/missions/383/frames/c1");
   });
 });

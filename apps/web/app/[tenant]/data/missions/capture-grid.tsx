@@ -3,12 +3,20 @@ import { formatLength } from "@/lib/captures";
 import { captureCardLink, type CaptureCard } from "@/lib/mission-captures";
 
 /** A mission's captures as cards, measured or not: the photo, then its
- *  length (linking to the fish), or "Not measured". */
-export function CaptureGrid({ slug, captures }: { slug: string; captures: CaptureCard[] }) {
+ *  length (linking to the fish), or "Not measured" (linking to the frame). */
+export function CaptureGrid({
+  slug,
+  mission,
+  captures,
+}: {
+  slug: string;
+  mission: number;
+  captures: CaptureCard[];
+}) {
   return (
     <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">
       {captures.map((c) => {
-        const href = captureCardLink(slug, c);
+        const href = captureCardLink(slug, c, mission);
         const body = (
           <>
             {c.photo_url ? (
