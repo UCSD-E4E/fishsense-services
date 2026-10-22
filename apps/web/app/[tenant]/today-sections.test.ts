@@ -9,7 +9,7 @@
 import { createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { NeedsYou, Numbers, RecentFish, RecentTrips, Work } from "./today-sections";
+import { NeedsYou, Numbers, RecentFish, RecentTrips, WhereMeasured, Work } from "./today-sections";
 
 vi.mock("@/app/_shell/work-sections", () => ({
   WorkSections: ({ dashboards }: { dashboards: boolean }) =>
@@ -173,5 +173,42 @@ describe("Work", () => {
     expect(staff).toContain('role="alert"');
     expect(staff).toContain("<p>work</p>");
     expect(member).toContain('role="alert"');
+  });
+});
+
+describe("WhereMeasured", () => {
+  const regions = {
+    regions: [
+      { name: "Florida Keys, USA", latitude: 27.0, longitude: -81.5, fish: 2101 },
+      { name: "Southern California, USA", latitude: 33.5, longitude: -117.5, fish: 1205 },
+    ],
+    elsewhere: 8,
+  };
+
+  it("puts each region on the map with its fish", async () => {
+    api({ "/tenants/lab/regions": regions });
+
+    const out = await html(WhereMeasured(SECTION));
+
+    expect(out).toContain("Florida Keys, USA");
+    expect(out).toContain("2,101 fish");
+    expect(out).toContain("1,205 fish");
+    expect(out).toContain("world.svg");
+    expect(out).toContain("8 more fish without a region");
+  });
+
+  it("says where measurements will show before there are any", async () => {
+    api({ "/tenants/lab/regions": { regions: [], elsewhere: 0 } });
+
+    expect(await html(WhereMeasured(SECTION))).toContain("Measured fish will appear here by region");
+  });
+
+  it("says it could not load the map", async () => {
+    api({});
+
+    const out = await html(WhereMeasured(SECTION));
+
+    expect(out).toContain('role="alert"');
+    expect(out).toContain("Could not load the map");
   });
 });

@@ -245,6 +245,36 @@ class TestList:
         assert response.status_code == 401
 
 
+class TestRegions:
+    """Where the tenant's fish were measured, by broad region (Today's map)."""
+
+    async def test_a_member_sees_their_tenants_regions(
+        self, client, owner_engine, app_engine, tenants
+    ):
+        await mobile(app_engine, owner_engine, tenants["lab"])  # La Jolla
+        await lite(owner_engine, tenants["lab"], species=("A b", "C"))  # no place
+
+        response = await _get(client, "/tenants/lab/regions")
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "regions": [
+                {
+                    "name": "Southern California, USA",
+                    "latitude": 33.5,
+                    "longitude": -117.5,
+                    "fish": 1,
+                }
+            ],
+            "elsewhere": 1,
+        }
+
+    async def test_someone_who_is_not_a_member_gets_nothing(self, client, tenants):
+        response = await _get(client, "/tenants/lab/regions", sub=OUTSIDER)
+
+        assert response.status_code == 404
+
+
 class TestDetail:
     async def test_a_lite_fish_shows_its_laser_evidence(
         self, client, owner_engine, tenants
