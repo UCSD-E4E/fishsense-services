@@ -11,8 +11,8 @@ import {
 } from "@/lib/mission-facts";
 import { requireSignedIn } from "@/app/_shell/guard";
 import { tenantFor } from "@/app/_shell/tenant";
-import { FishGrid } from "@/app/_shell/fish-grid";
-import { getObservationPage } from "@/lib/observations";
+import { CaptureGrid } from "@/app/[tenant]/data/missions/capture-grid";
+import { getMissionCaptures } from "@/lib/mission-captures";
 import { getMissionAutomatic } from "@/lib/automatic";
 import { AutomaticRun, hasRun } from "@/app/[tenant]/data/missions/automatic-run";
 import { FactsForms } from "@/app/[tenant]/data/missions/facts-forms";
@@ -21,16 +21,21 @@ import { paths } from "@/lib/tenant-paths";
 
 export const dynamic = "force-dynamic";
 
-type Props = { params: Promise<{ tenant: string; number: string }> };
+type Props = {
+  params: Promise<{ tenant: string; number: string }>;
+  searchParams: Promise<{ after?: string }>;
+};
 
 /**
  * One mission (PLAN.md §4.9, Phase 2b): what it is for, its camera port and
  * what said so, where and when, and its field trip. A tenant's admins can
  * state its port, purpose and deployment here, as can a system admin who has
- * unlocked the tenant (0056). Its measured fish are listed below its facts.
+ * unlocked the tenant (0056). Its captures are listed below its facts, measured
+ * or not, a page at a time.
  */
-export default async function MissionPage({ params }: Props) {
+export default async function MissionPage({ params, searchParams }: Props) {
   const { tenant, number: rawNumber } = await params;
+  const { after } = await searchParams;
   if (!isSlug(tenant) || !/^\d+$/.test(rawNumber)) notFound();
   const number = Number(rawNumber);
   const session = await requireSignedIn(`${paths.missions(tenant)}/${number}`);
@@ -38,8 +43,8 @@ export default async function MissionPage({ params }: Props) {
   const { isAdmin } = await tenantFor(token, tenant);
   const mission = await getMission(token, tenant, number);
   if (!mission) notFound();
-  // Its fish: how a phone's are reached since /captures was retired (7b).
-  const fish = await getObservationPage(token, tenant, { mission: number });
+  // Its captures, measured or not: an unmeasured one is seen here or nowhere.
+  const captures = await getMissionCaptures(token, tenant, number, after);
   // The automatic run, for review (2026-10-21).
   const run = await getMissionAutomatic(token, tenant, number);
   const deployments: Deployment[] = isAdmin ? await getDeployments(token, tenant) : [];
@@ -131,15 +136,30 @@ export default async function MissionPage({ params }: Props) {
 
       {hasRun(run) && <AutomaticRun run={run} />}
 
-      {fish.observations.length > 0 && (
+      {captures && captures.captures.length > 0 && (
         <section className="mb-8">
           <h2 className="mb-3 text-lg font-semibold">
-            Fish{" "}
+            Captures{" "}
             <span className="text-sm font-normal text-fg-2">
-              {fish.next ? `the latest ${fish.observations.length}` : fish.observations.length}
+              {mission.captures.toLocaleString()}, measured or not
             </span>
           </h2>
-          <FishGrid slug={tenant} fish={fish.observations} />
+          <CaptureGrid slug={tenant} captures={captures.captures} />
+          <div className="mt-4 flex gap-4 text-sm">
+            {after && (
+              <Link href={paths.mission(tenant, number)} className="text-teal-fg hover:underline">
+                Back to the first
+              </Link>
+            )}
+            {captures.next && (
+              <Link
+                href={`${paths.mission(tenant, number)}?after=${encodeURIComponent(captures.next)}`}
+                className="text-teal-fg hover:underline"
+              >
+                More captures
+              </Link>
+            )}
+          </div>
         </section>
       )}
 

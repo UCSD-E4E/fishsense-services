@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.33.0...v0.34.0) (2026-10-22)
+
+
+### Features
+
+* a mission lists all its captures, measured or not ([c18736d](https://github.com/UCSD-E4E/fishsense-services/commit/c18736d32a09b809fee811173a97d15b16914270))
+
 ## [0.33.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.32.1...v0.33.0) (2026-10-22)
 
 
