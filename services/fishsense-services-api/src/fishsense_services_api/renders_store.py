@@ -357,7 +357,8 @@ def newest_render(capture: str, tenant: str, bucket: str) -> str:
     whatever its version or camera, among rows whose bucket meets ``bucket``
     (SQL over ``r.bucket``). An abstention after it does not replace it."""
     return f"""
-        SELECT r.id, r.bucket, r.key, r.render_version, r.camera_calibration_id
+        SELECT r.id, r.bucket, r.key, r.render_version, r.camera_calibration_id,
+            r.width, r.height
         FROM capture_renders r
         WHERE r.tenant_id = {tenant} AND r.capture_id = {capture}
           AND r.status = 'rendered' AND {bucket}

@@ -5,8 +5,11 @@
  *
  * A mobile fish's evidence is its capture's (the phone's photo, mask, depth and
  * measurement versions), so its page needs no separate Mobile captures page.
- * A Lite fish has one current measurement here; its labeled points are listed,
- * not drawn, because they were placed on v1's JPEG, not on this render.
+ * A Lite fish has one current measurement here. Its labeled head, tail and
+ * laser dot are drawn on its render at their own pixels: they were placed on
+ * v1's JPEG of the same transform, and a render is the whole frame, never
+ * cropped (the owner, 2026-10-22; pinned by the processor's whole-frame test).
+ * A point outside the render means it is not that frame, and nothing is drawn.
  */
 import type { Capture } from "./captures";
 import type { ObservationDetail } from "./observations";
@@ -15,7 +18,16 @@ export type CaptureEvidence = Pick<Capture, "mask" | "current_measurement" | "me
 
 type Point = { x: number; y: number };
 
-export type Overlay = { width: number; height: number; snout: Point; fork: Point };
+/** The measurement on the photo: its two ends joined by a line (snout and
+ *  fork, or a Lite fish's head and tail), and a Lite fish's laser dot. */
+export type Overlay = {
+  width: number;
+  height: number;
+  snout: Point;
+  fork: Point;
+  names: { snout: string; fork: string };
+  laser: Point | null;
+};
 
 export type HistoryRow = {
   key: string;
@@ -53,7 +65,7 @@ export function fishEvidence(
 ): FishEvidence {
   if (!capture) {
     return {
-      overlay: null,
+      overlay: liteOverlay(detail),
       history: [
         {
           key: "current",
@@ -69,7 +81,14 @@ export function fishEvidence(
   const current = capture.current_measurement;
   const overlay =
     current && capture.mask
-      ? { width: capture.mask.width, height: capture.mask.height, snout: current.snout, fork: current.fork }
+      ? {
+          width: capture.mask.width,
+          height: capture.mask.height,
+          snout: current.snout,
+          fork: current.fork,
+          names: { snout: "Snout", fork: "Fork" },
+          laser: null,
+        }
       : null;
   const history = [...capture.measurements]
     .sort((a, b) => b.measured_at.localeCompare(a.measured_at))
@@ -90,4 +109,23 @@ export function fishEvidence(
       url: f.url ?? null,
     }));
   return { overlay, history, files };
+}
+
+/** A Lite fish's labeled points on its render, if it has a render, both ends,
+ *  and every point inside it. */
+function liteOverlay(detail: ObservationDetail): Overlay | null {
+  const size = detail.photo_size;
+  const laser = detail.laser;
+  if (!size || !laser?.head || !laser.tail) return null;
+  const inside = (p: Point) => p.x >= 0 && p.y >= 0 && p.x <= size.width && p.y <= size.height;
+  const points = [laser.head, laser.tail, ...(laser.dot ? [laser.dot] : [])];
+  if (!points.every(inside)) return null;
+  return {
+    width: size.width,
+    height: size.height,
+    snout: laser.head,
+    fork: laser.tail,
+    names: { snout: "Head", fork: "Tail" },
+    laser: laser.dot ?? null,
+  };
 }

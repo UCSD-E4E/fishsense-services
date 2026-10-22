@@ -301,6 +301,52 @@ class TestDetail:
         assert body["device_points"] is None
         assert body["algorithm"] == "laser_depth_fronto_parallel"
 
+    async def test_a_rendered_lite_fish_says_how_big_its_photo_is(
+        self, client, owner_engine, tenants
+    ):
+        """The page draws the labelled points on the render at their pixels
+        (the render is never cropped: the processor's whole-frame test), so
+        it needs the render's size to place them."""
+        capture_id, fish_id = await lite(
+            owner_engine, tenants["lab"], model=("Ginny", 0.3127)
+        )
+        await render(owner_engine, tenants["lab"], capture_id)
+
+        body = (
+            await _get(client, f"/tenants/lab/observations/{capture_id}/{fish_id}")
+        ).json()
+
+        assert body["photo_size"] == {"width": 4014, "height": 3016}
+
+    async def test_without_a_render_there_is_no_photo_size(
+        self, client, owner_engine, app_engine, tenants
+    ):
+        capture_id, fish_id = await lite(
+            owner_engine, tenants["lab"], model=("Ginny", 0.3127)
+        )
+        await mobile(app_engine, owner_engine, tenants["lab"])
+        phone = next(
+            o
+            for o in (await _get(client, "/tenants/lab/observations")).json()[
+                "observations"
+            ]
+            if o["method"] == "lidar"
+        )
+
+        lite_body = (
+            await _get(client, f"/tenants/lab/observations/{capture_id}/{fish_id}")
+        ).json()
+        phone_body = (
+            await _get(
+                client,
+                f"/tenants/lab/observations/{phone['capture_id']}/{phone['fish_id']}",
+            )
+        ).json()
+
+        assert lite_body["photo_size"] is None
+        # A phone's photo is its own, and its page sizes it from the capture.
+        assert phone_body["photo_size"] is None
+
     async def test_a_mobile_fish_shows_the_phones_points(
         self, client, owner_engine, app_engine, tenants
     ):

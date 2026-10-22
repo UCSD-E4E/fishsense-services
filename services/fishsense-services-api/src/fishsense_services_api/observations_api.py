@@ -120,6 +120,11 @@ class DevicePointsView(BaseModel):
     origin: str
 
 
+class PhotoSize(BaseModel):
+    width: int
+    height: int
+
+
 class ObservationDetailView(BaseModel):
     observation: ObservationView
     measured_at: datetime
@@ -131,6 +136,9 @@ class ObservationDetailView(BaseModel):
     laser: LaserEvidenceView | None
     #: The phone's snout and fork (``method == "lidar"``).
     device_points: DevicePointsView | None
+    #: The photo's size in pixels when it is the frame's render (a Lite
+    #: fish), for drawing the labelled points on it; None otherwise.
+    photo_size: PhotoSize | None = None
 
 
 class TenantRegionView(BaseModel):
@@ -402,6 +410,11 @@ def add_observation_routes(
                     origin=points.origin,
                 )
                 if points is not None
+                else None
+            ),
+            photo_size=(
+                PhotoSize(width=found.photo_size[0], height=found.photo_size[1])
+                if found.photo_size
                 else None
             ),
         )
