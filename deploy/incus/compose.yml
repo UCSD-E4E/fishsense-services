@@ -269,6 +269,10 @@ services:
       FISHSENSE_TENANT_STORES_FILE: /run/tenant/object-stores/stores.json
       FISHSENSE_OBJECT_STORE_PUBLIC_URL: https://s3.e4e.ucsd.edu
       FISHSENSE_RENDERS_ENABLED: "false"
+      # The shadow size-constancy laser calibration (docs/shadow-size-constancy.md):
+      # stored apart, read by nothing in production. Enabling it, and the
+      # backfill, is the author's call.
+      FISHSENSE_SHADOW_CALIBRATION_ENABLED: "false"
     # FISHSENSE_DATABASE_URL (app role), the NAS, Label Studio and Garage keys.
     env_file:
       - /run/tenant/secrets/orchestrator.env

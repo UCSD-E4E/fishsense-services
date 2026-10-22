@@ -166,6 +166,13 @@ def automatic_frame_result(
     )
 
 
+def _device_type() -> str:
+    # pylint: disable-next=import-outside-toplevel,import-error
+    import torch
+
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
 class ScoredSam3Adapter:  # pylint: disable=too-few-public-methods
     """The SAM 3.1 processor behind a scored seam: the head/tail stage's
     `_Sam3Adapter` (bfloat16 autocast as a context manager, a PIL image,
@@ -176,16 +183,28 @@ class ScoredSam3Adapter:  # pylint: disable=too-few-public-methods
         self._prompt = prompt
 
     def segment_scored(self, image_bgr: np.ndarray) -> List[Tuple[np.ndarray, float]]:
+        return self.prompted(self.encoded(image_bgr), self._prompt)
+
+    def encoded(self, image_bgr: np.ndarray) -> Any:
+        """The image through SAM's encoder once: `prompted` asks it each
+        prompt (the shadow calibration's two; review of #261)."""
         # pylint: disable=import-outside-toplevel,import-error
         import cv2
         import PIL.Image
         import torch
 
         rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-        device_type = "cuda" if torch.cuda.is_available() else "cpu"
-        with torch.autocast(device_type, dtype=torch.bfloat16):
-            state = self._processor.set_image(PIL.Image.fromarray(rgb))
-            state = self._processor.set_text_prompt(self._prompt, state)
+        with torch.autocast(_device_type(), dtype=torch.bfloat16):
+            return self._processor.set_image(PIL.Image.fromarray(rgb))
+
+    def prompted(self, state: Any, prompt: str) -> List[Tuple[np.ndarray, float]]:
+        # pylint: disable-next=import-outside-toplevel,import-error
+        import torch
+
+        with torch.autocast(_device_type(), dtype=torch.bfloat16):
+            if hasattr(self._processor, "reset_all_prompts"):
+                self._processor.reset_all_prompts(state)
+            state = self._processor.set_text_prompt(prompt, state)
         if not hasattr(state, "get") or state.get("masks") is None:
             return []
         scores = state.get("scores")

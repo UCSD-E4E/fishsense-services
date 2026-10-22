@@ -442,6 +442,14 @@ def test_the_orchestrator_presigns_renders_in_each_tenants_own_store():
     assert env["FISHSENSE_RENDERS_ENABLED"] == "false"
 
 
+def test_the_shadow_calibration_ships_off():
+    """The shadow size-constancy calibration (docs/shadow-size-constancy.md)
+    runs only when the author enables it, and the backfill is the author's
+    call: explicit here, so turning it on is a reviewed diff."""
+    env = service_env(services()["orchestrator"])
+    assert env["FISHSENSE_SHADOW_CALIBRATION_ENABLED"] == "false"
+
+
 def test_the_api_reads_each_tenants_own_store():
     """Bucket-per-tenant (PLAN.md §9.11): the API presigns each tenant's
     uploads with that tenant's key, from the stores krg-infra provisions. The

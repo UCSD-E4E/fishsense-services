@@ -122,6 +122,25 @@ with no edits to shared files beyond registering it.
      numpy and scipy).
   5. `persist_shadow_calibration`, which writes the shadow tables (§4) in one
      transaction.
+- **As built (review of #261):**
+  - The labels source takes **slate-labelled frames only**, as production's
+    slate fit does. A frame only the presence detector calls slate enters the
+    detector source alone.
+  - A mission with any slate frame not yet rendered **waits**
+    (`renders_pending`, nothing stored). A fit on part of its frames would be
+    stored as final. The stage does not render; renders come from the render
+    stage or the automatic track.
+  - Every fitted mission stores all four rows (source × variant). A source
+    with no dot is refused `no_dots`; detector dots whose confident mission
+    dots define no line are refused `no_detector_line`. A mission with no dot
+    wakes no GPU.
+  - A frame SAM never answered for fails the mission, to be retried. A render
+    SAM could not decode is left out as `decode_failed`, and not counted as
+    no mask.
+  - The SAM chunks run in parallel, and one mission's run is bounded at 11 h.
+    A mission that fails is reported, and the parent goes on to the next.
+  - SAM encodes each render once and asks it both prompts. On the pool this
+    gave identical masks on 258/258 frames, in 58% of the time.
 - **Flag:** `ShadowCalibrationSettings` (env prefix
   `FISHSENSE_SHADOW_CALIBRATION_`), `enabled: bool = False`. Off, the stage has
   **no schedule**. Its workflows and activities stay registered so one mission
@@ -482,6 +501,18 @@ pinned SAM 3.1 checkpoint. Then require:
 - the same 5 no-mask frames on dive 114 (16038, 16040, 16041, 16042, 16045).
 
 This runs locally (the checkpoint and the render cache are present), not in CI.
+
+**Result (2026-10-21, local GPU, `sam3.1_multiplex.pt`).** The stage's
+`segment_dots` with its own 0.3-threshold processor, on the cached 1600-px
+renders of all 258 pool frames:
+- the same winning prompt on 258/258 frames;
+- the same 5 no-mask frames (16038, 16040, 16041, 16042, 16045);
+- sqrt(area) ours/port: median 1.00000, p5 0.9998, p95 1.0002; 253/253 within
+  0.1%.
+
+What it cannot see: production renders the frame itself (rectified JPEG at
+`RENDER_VERSION`, then downscaled) rather than reading the port's render
+cache, so a difference in the rectification would not show here.
 
 ### 9.4 Usual guards
 - `test_schema_audit`, `test_models_match_migrations`;
