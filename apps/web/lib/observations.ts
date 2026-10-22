@@ -28,10 +28,12 @@ export function deviceFilter(value: string | undefined): Device | undefined {
 export async function getObservationPage(
   accessToken: string,
   slug: string,
-  options: { device?: Device; before?: string; mission?: number } = {},
+  options: { device?: Device; before?: string; mission?: number; limit?: number } = {},
 ): Promise<ObservationPage> {
-  const query: { device?: Device; before?: string; mission?: number } = {};
+  const query: { device?: Device; before?: string; mission?: number; limit?: number } = {};
   if (options.device) query.device = options.device;
+  // The API bounds it (and says so in its schema); a number can't forge a path.
+  if (options.limit !== undefined) query.limit = options.limit;
   if (options.mission !== undefined) {
     if (!Number.isInteger(options.mission) || options.mission < 0) {
       throw new Error(`Invalid mission number: ${options.mission}`);
