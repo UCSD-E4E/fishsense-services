@@ -564,8 +564,8 @@ export interface paths {
         };
         /**
          * Regions
-         * @description Where the tenant's fish were measured, by broad region, for its
-         *     Today map (`tenant_regions_store`).
+         * @description Where the tenant's wild fish were measured, by broad region, for
+         *     its Today map (`tenant_regions_store`). Fish models are left off.
          */
         get: operations["get_tenant_regions"];
         put?: never;
@@ -1430,7 +1430,7 @@ export interface components {
         };
         /**
          * TenantRegionsView
-         * @description Where a tenant's fish were measured, never finer than a region.
+         * @description Where a tenant's wild fish were measured, never finer than a region.
          */
         TenantRegionsView: {
             /** Elsewhere */

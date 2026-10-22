@@ -26,32 +26,42 @@ export async function Numbers({ token, slug }: Section) {
     unstable_rethrow(error);
     return <Failure>Could not load the numbers: {reason(error)}</Failure>;
   }
+  // Wild fish only: fish models are the decoys of pool trials, noted apart
+  // (the owner, 2026-10-21; as the public page does).
+  const models = summary.lengths - summary.wild_fish;
   return (
-    <div className={STATS_GRID}>
-      <Stat
-        href={paths.fish(slug)}
-        label="Lengths measured"
-        value={summary.lengths.toLocaleString()}
-        note={`${summary.wild_fish.toLocaleString()} wild fish, ${summary.species} species`}
-      />
-      <Stat
-        href={paths.data(slug)}
-        label="Missions"
-        value={summary.missions.toLocaleString()}
-        note={`in ${summary.deployments.toLocaleString()} ${summary.deployments === 1 ? "deployment" : "deployments"}`}
-      />
-      <Stat label="Frames" value={summary.frames.toLocaleString()} note="each counted once" />
-      <Stat
-        label="Latest activity"
-        value={summary.latest_activity ? new Date(summary.latest_activity).toLocaleDateString() : "—"}
-        note="the newest ingest or sync"
-        small
-      />
+    <div className="flex flex-col gap-2">
+      <div className={STATS_GRID}>
+        <Stat
+          href={paths.fish(slug)}
+          label="Fish measured"
+          value={summary.wild_fish.toLocaleString()}
+          note={`${summary.species} species`}
+        />
+        <Stat
+          href={paths.data(slug)}
+          label="Missions"
+          value={summary.missions.toLocaleString()}
+          note={`in ${summary.deployments.toLocaleString()} ${summary.deployments === 1 ? "deployment" : "deployments"}`}
+        />
+        <Stat label="Frames" value={summary.frames.toLocaleString()} note="each counted once" />
+        <Stat
+          label="Latest activity"
+          value={summary.latest_activity ? new Date(summary.latest_activity).toLocaleDateString() : "—"}
+          note="the newest ingest or sync"
+          small
+        />
+      </div>
+      {models > 0 && (
+        <p className="text-sm text-fg-2">
+          +{models.toLocaleString()} fish-model lengths in pool trials
+        </p>
+      )}
     </div>
   );
 }
 
-/** Where the tenant's fish were measured, by broad region, on a map. */
+/** Where the tenant's wild fish were measured, by broad region, on a map. */
 export async function WhereMeasured({ token, slug }: Section) {
   let found;
   try {

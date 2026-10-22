@@ -60,14 +60,23 @@ async function html(section: Promise<ReactElement | null>): Promise<string> {
 const SECTION = { token: "t", slug: "lab" };
 
 describe("Numbers", () => {
-  it("shows the tenant's numbers", async () => {
+  it("counts wild fish, and notes the fish models apart", async () => {
     api({ "/tenants/lab/summary": SUMMARY });
 
     const out = await html(Numbers(SECTION));
 
-    expect(out).toContain("3,314");
-    expect(out).toContain("203 wild fish, 11 species");
+    expect(out).toContain("Fish measured");
+    expect(out).toMatch(/>203</);
+    expect(out).toContain("11 species");
     expect(out).toContain("69,162");
+    expect(out).toContain("3,111 fish-model lengths in pool trials");
+    expect(out).not.toContain("3,314");
+  });
+
+  it("says nothing of fish models when there are none", async () => {
+    api({ "/tenants/lab/summary": { ...SUMMARY, lengths: 203 } });
+
+    expect(await html(Numbers(SECTION))).not.toContain("fish-model");
   });
 
   it("says it could not load them", async () => {

@@ -2,9 +2,13 @@
 Today map. Tenant-scoped, read in a tenant transaction like every store.
 
 Coarse on purpose: the map is a picture of where the work happens (the
-owner, 2026-10-21), so nothing finer than a region leaves here. A fish is
-placed by its mission's folder, pools included at their region; else by its
-capture's GPS (a phone's), the nearest region; else it is "elsewhere".
+owner, 2026-10-21), so nothing finer than a region leaves here. Wild fish
+only: fish models, the decoys of pool trials, are left off (the owner, the
+same day), as on the public map. On production that took the lab's map from
+3,314 fish to its 203 wild ones, and Southern California off it: Nathan's
+Pool held fish models alone. A fish is placed by its mission's folder (a
+pool at its region, for a wild fish measured in one); else by its capture's
+GPS (a phone's), the nearest region; else it is "elsewhere".
 """
 
 from __future__ import annotations
@@ -34,7 +38,7 @@ class TenantRegion:
 class TenantRegions:
     #: Most fish first.
     regions: list[TenantRegion]
-    #: Fish no region holds.
+    #: Wild fish no region holds.
     elsewhere: int
 
 
@@ -47,7 +51,7 @@ async def tenant_regions(conn: AsyncConnection, tenant_id: uuid.UUID) -> TenantR
             FROM observations o
             LEFT JOIN missions m
               ON m.tenant_id = o.tenant_id AND m.id = o.mission_id
-            WHERE o.tenant_id = :t
+            WHERE o.tenant_id = :t AND o.fish_model IS NULL
             GROUP BY m.source_path, o.latitude, o.longitude
             """),
         {"t": tenant_id},

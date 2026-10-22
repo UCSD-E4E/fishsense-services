@@ -1,7 +1,9 @@
 """Where a tenant's fish were measured, by broad region, for its Today map.
 
 Coarse on purpose (the owner, 2026-10-21): the map is for a picture of where
-the work happens, and no marker is ever finer than a region. Pools are on it
+the work happens, and no marker is ever finer than a region. Wild fish only:
+fish models, the decoys of pool trials, are left off (the owner, the same
+day), as they are on the public map. Pools are on it
 too, at their region (the owner: "Pool" is in the Florida Keys, "Nathan's
 Pool" in Southern California). A fish is placed by its mission's folder,
 else by its phone's GPS (the nearest region within 300 km); anything else is
@@ -60,12 +62,14 @@ async def tenants(seed_memberships):
 _devices = itertools.count(10)
 
 
-async def _filed(owner_engine, tenant_id, folder: str) -> None:
-    """A measured Lite fish whose mission sits in ``folder``."""
+async def _filed(owner_engine, tenant_id, folder: str, *, model=None) -> None:
+    """A measured Lite fish whose mission sits in ``folder``: a wild one, or
+    a fish ``model`` (name, known length)."""
     capture_id, _ = await lite(
         owner_engine,
         tenant_id,
-        species=("A b", "C"),
+        species=None if model else ("A b", "C"),
+        model=model,
         device_name=f"FSL-{next(_devices)}",
     )
     await exec_(
@@ -99,6 +103,21 @@ class TestTenantRegions:
         assert (found.regions[0].latitude, found.regions[0].longitude) == (
             regions.REGIONS[KEYS]
         )
+        assert found.elsewhere == 0
+
+    async def test_fish_models_are_left_off_the_map(
+        self, owner_engine, app_engine, tenants
+    ):
+        """Pool trials are fish models: they are neither on the map nor
+        "elsewhere"."""
+        lab = tenants["lab"]
+        await _filed(owner_engine, lab, "102724_Islamorada")
+        await _filed(owner_engine, lab, "Alligator Reef", model=("Ginny", 0.3127))
+        await _filed(owner_engine, lab, "Nathans Pool", model=("George", 0.3127))
+
+        found = await _regions(app_engine, lab)
+
+        assert {r.name: r.fish for r in found.regions} == {KEYS: 1}
         assert found.elsewhere == 0
 
     async def test_a_phone_fish_is_placed_by_its_gps(
