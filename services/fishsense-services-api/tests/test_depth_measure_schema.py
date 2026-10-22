@@ -25,7 +25,9 @@ from depth_measure_seed import (  # noqa: F401  (forget_identities: a fixture)
     capture,
     exec_,
     fish,
+    head_tail_label,
     laser_label,
+    measurement,
     species_label,
     tenant,
 )
@@ -374,6 +376,48 @@ async def test_a_devices_own_measurement_is_never_a_stale_binding(owner_engine):
         )
 
     assert current == ["device"]
+
+
+@pytest.mark.parametrize("table", ["laser_labels", "head_tail_labels"])
+async def test_a_result_from_a_superseded_label_is_not_current(owner_engine, table):
+    """Either input label superseded, the result is stale until remeasured
+    (0013). Both are pinned: 0060 rewrote each check on its own."""
+    lab = await tenant(owner_engine)
+    mission_id, calibration = await calibrated_dive(owner_engine, lab)
+    capture_id = await capture(owner_engine, lab, mission_id)
+    labels = {
+        "laser_labels": await laser_label(owner_engine, lab, capture_id),
+        "head_tail_labels": await head_tail_label(owner_engine, lab, capture_id),
+    }
+    real = await fish(owner_engine, lab)
+    await measurement(
+        owner_engine,
+        lab,
+        capture_id,
+        real,
+        calibration,
+        laser_label_id=labels["laser_labels"],
+        head_tail_label_id=labels["head_tail_labels"],
+    )
+
+    async def current() -> int:
+        async with owner_engine.connect() as conn:
+            return (
+                await conn.execute(
+                    text(
+                        "SELECT count(*) FROM current_measurements WHERE capture_id = :c"
+                    ),
+                    {"c": capture_id},
+                )
+            ).scalar_one()
+
+    assert await current() == 1
+    await exec_(
+        owner_engine,
+        f"UPDATE {table} SET superseded = true WHERE id = :l",
+        l=labels[table],
+    )
+    assert await current() == 0
 
 
 # -- what the per-capture lookups stand on --------------------------------------
