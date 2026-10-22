@@ -1,5 +1,74 @@
 # Changelog
 
+## [0.41.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.40.0...v0.41.0) (2026-10-22)
+
+
+### Features
+
+* **web:** a light / dark / system switch in the header ([fffc993](https://github.com/UCSD-E4E/fishsense-services/commit/fffc9938f4e8b3d6ee8abb7180db879b8def2b12))
+* **web:** a light / dark / system switch in the header ([0114a25](https://github.com/UCSD-E4E/fishsense-services/commit/0114a255d8bdb3b24c0e1fa49e9e5d1810f13697))
+
+## [0.40.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.39.1...v0.40.0) (2026-10-22)
+
+
+### Features
+
+* **api:** link v1 measurements to the depth and labels they used ([cea0079](https://github.com/UCSD-E4E/fishsense-services/commit/cea0079c07f4c5826c5c25573951f7a9e94942d1))
+* **api:** link v1 measurements to the depth and labels they used ([13296fd](https://github.com/UCSD-E4E/fishsense-services/commit/13296fddc1d52a8bb8f88ca98461864d1faf05fc))
+* draw a Lite fish's head, tail and laser dot on its render ([6a12752](https://github.com/UCSD-E4E/fishsense-services/commit/6a127527bca346789aee5a32e98b7335c5f829c1))
+* draw a Lite fish's head, tail and laser dot on its render ([c9c12b3](https://github.com/UCSD-E4E/fishsense-services/commit/c9c12b3a0658c313c03992dd1f9ce0579f7f3395))
+
+## [0.39.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.39.0...v0.39.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **web:** American spelling: Labeling, labeled ([67f87f9](https://github.com/UCSD-E4E/fishsense-services/commit/67f87f90424a8f0c9626c8b1ddfbee1295d7ce62))
+
+## [0.39.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.38.0...v0.39.0) (2026-10-22)
+
+
+### Features
+
+* **web:** a frame page, so an unmeasured frame's automatic result can be seen ([1946eaa](https://github.com/UCSD-E4E/fishsense-services/commit/1946eaab95654445ec787b908fe760b851affd2e))
+
+## [0.38.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.37.0...v0.38.0) (2026-10-22)
+
+
+### Features
+
+* Today counts wild fish, and notes the fish models apart ([2ea9561](https://github.com/UCSD-E4E/fishsense-services/commit/2ea95612c9bc1be74170063f4681819afcb6be71))
+* Today counts wild fish, and notes the fish models apart ([d3fbd4c](https://github.com/UCSD-E4E/fishsense-services/commit/d3fbd4cde6b80be5166bfe09d3382ec6e296e5bb))
+
+## [0.37.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.36.0...v0.37.0) (2026-10-22)
+
+
+### Features
+
+* shadow size-constancy laser calibration (off by default) ([191cb3f](https://github.com/UCSD-E4E/fishsense-services/commit/191cb3f9f937a080e3f7caa5841c495eb8525ab3))
+
+## [0.36.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.35.0...v0.36.0) (2026-10-22)
+
+
+### Features
+
+* a map on Today of where the tenant's fish were measured ([f8dbc4d](https://github.com/UCSD-E4E/fishsense-services/commit/f8dbc4d2124b31e6cd76c58715bf82188eb52724))
+* a map on Today of where the tenant's fish were measured ([cf23115](https://github.com/UCSD-E4E/fishsense-services/commit/cf23115a85620e07bfde62c67bc40c0c62ff1e82))
+
+## [0.35.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.34.1...v0.35.0) (2026-10-22)
+
+
+### Features
+
+* number the fish list's pages ([5635bcf](https://github.com/UCSD-E4E/fishsense-services/commit/5635bcf3d7bc41810cfbcd4f907ea36f5a47a506))
+* number the fish list's pages ([4f94992](https://github.com/UCSD-E4E/fishsense-services/commit/4f949926ad1a37eee0a4760c980b4d5a7b16d983))
+
+
+### Bug Fixes
+
+* **web:** keep the fish page's fact lists inside their cards ([aa4c3da](https://github.com/UCSD-E4E/fishsense-services/commit/aa4c3dab9a9362efa4d07e9de7d3e444d335bdac))
+* **web:** keep the fish page's fact lists inside their cards ([a2ef7fc](https://github.com/UCSD-E4E/fishsense-services/commit/a2ef7fc61c0663999d13c94f7c3d16b1f123c99a))
+
 ## [0.34.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.34.0...v0.34.1) (2026-10-22)
 
 

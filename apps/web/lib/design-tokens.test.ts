@@ -27,13 +27,29 @@ describe("the web's theme is docs/design/tokens.json", () => {
     expect([...generated].filter((v) => !mapped.has(v))).toEqual([]);
   });
 
-  it("switches every colour with the system theme", () => {
-    const [light, dark] = tokensToCss(tokens).split("@media (prefers-color-scheme: dark)");
+  it("switches every colour with the system theme, unless the user picked one", () => {
+    const css = tokensToCss(tokens);
+    const [light, rest] = css.split("@media (prefers-color-scheme: dark)");
+    const [system, pinned] = rest.split(':root[data-theme="dark"]');
 
+    // The system's dark, for anyone who did not pick light (the header's
+    // switch, lib/theme.ts); and dark for anyone who picked it, any system.
+    expect(system).toContain(':root:not([data-theme="light"])');
     for (const [name, value] of Object.entries(tokens.color.dark)) {
       expect(light).toContain(`--fs-${kebab(name)}: ${tokens.color.light[name]};`);
-      expect(dark).toContain(`--fs-${kebab(name)}: ${value};`);
+      expect(system).toContain(`--fs-${kebab(name)}: ${value};`);
+      expect(pinned).toContain(`--fs-${kebab(name)}: ${value};`);
     }
+  });
+
+  it("keys Tailwind's dark: variant to the same pick", () => {
+    // Pages still carry `dark:` utilities; keyed to the system alone, a
+    // picked theme would split a page in two.
+    const globals = read("app/globals.css");
+
+    expect(globals).toContain("@custom-variant dark");
+    expect(globals).toContain('[data-theme="dark"]');
+    expect(globals).toContain(':not([data-theme="light"])');
   });
 
   it("names variables in kebab case", () => {

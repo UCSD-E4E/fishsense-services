@@ -1,6 +1,6 @@
 // Ported from fishsense-lite@77e8f8e5 apps/fishsense-lite-web/app/page.tsx: the
-// labelling projects with work waiting, and the dashboards and workflows.
-// Shown on Today: the labelling to staff, and the dashboards (Superset,
+// labeling projects with work waiting, and the dashboards and workflows.
+// Shown on Today: the labeling to staff, and the dashboards (Superset,
 // Temporal) to system admins only (0056; the owner, 2026-10-20).
 import { getActiveProjects } from "@/lib/active-projects";
 import { buildSections, type Section, type SectionLink } from "@/lib/sections";

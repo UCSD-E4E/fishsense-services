@@ -9,6 +9,7 @@ import {
   Failure,
   FishLoading,
   LineLoading,
+  MapLoading,
   NeedsYou,
   NothingYet,
   Numbers,
@@ -17,6 +18,7 @@ import {
   RecentTrips,
   RowsLoading,
   StatsLoading,
+  WhereMeasured,
   Work,
   WorkLoading,
 } from "./today-sections";
@@ -28,7 +30,7 @@ type Props = { params: Promise<{ tenant: string }> };
 /**
  * A tenant's Today (docs/design/README.md, Home pages): its numbers, its
  * recent fish and deployments, and what needs someone. Staff also see the
- * labelling work and the dashboards here, which the public home no longer
+ * labeling work and the dashboards here, which the public home no longer
  * lists.
  *
  * The page streams. Its header comes first and each section follows as its
@@ -69,6 +71,13 @@ export default async function TodayPage({ params }: Props) {
           <Suspense fallback={<StatsLoading />}>
             <Numbers token={token} slug={slug} />
           </Suspense>
+
+          <section className="flex flex-col gap-3">
+            <h2 className="text-xl font-semibold">Where we&apos;ve measured</h2>
+            <Suspense fallback={<MapLoading />}>
+              <WhereMeasured token={token} slug={slug} />
+            </Suspense>
+          </section>
 
           <div className="flex flex-wrap items-start gap-6">
             <div className="flex min-w-0 flex-[999_1_560px] flex-col gap-6">

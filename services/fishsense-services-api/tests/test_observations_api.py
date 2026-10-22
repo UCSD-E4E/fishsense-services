@@ -177,6 +177,54 @@ class TestList:
         assert len(second["observations"]) == 1
         assert second["next"] is None
 
+    async def test_pages_by_number_say_how_many_there_are(
+        self, client, owner_engine, app_engine, tenants
+    ):
+        for h in range(5):
+            await mobile(
+                app_engine, owner_engine, tenants["lab"], at=T0 + timedelta(hours=h)
+            )
+
+        pages = [
+            (await _get(client, "/tenants/lab/observations", limit=2, page=n)).json()
+            for n in (1, 2, 3, 4)
+        ]
+
+        assert [len(p["observations"]) for p in pages] == [2, 2, 1, 0]
+        assert [p["total"] for p in pages] == [5, 5, 5, 5]
+        seen = [o["capture_id"] for p in pages for o in p["observations"]]
+        assert len(set(seen)) == 5
+
+    async def test_the_total_comes_with_every_list(self, client, owner_engine, tenants):
+        await lite(owner_engine, tenants["lab"], species=("A b", "C"))
+
+        listed = (await _get(client, "/tenants/lab/observations")).json()
+
+        assert listed["total"] == 1
+
+    async def test_a_page_that_is_not_one_is_refused(self, client, tenants):
+        response = await _get(client, "/tenants/lab/observations", page=0)
+
+        assert response.status_code == 422
+
+    async def test_a_page_and_a_cursor_together_are_refused(
+        self, client, owner_engine, app_engine, tenants
+    ):
+        """Two places to start from: which one meant is anyone's guess."""
+        for h in range(3):
+            await mobile(
+                app_engine, owner_engine, tenants["lab"], at=T0 + timedelta(hours=h)
+            )
+        cursor = (await _get(client, "/tenants/lab/observations", limit=1)).json()[
+            "next"
+        ]
+
+        response = await _get(
+            client, "/tenants/lab/observations", limit=1, page=2, before=cursor
+        )
+
+        assert response.status_code == 422
+
     async def test_a_cursor_that_is_not_one_is_refused(self, client, tenants):
         response = await _get(client, "/tenants/lab/observations", before="nonsense")
 
@@ -195,6 +243,36 @@ class TestList:
         response = await client.get("/tenants/lab/observations")
 
         assert response.status_code == 401
+
+
+class TestRegions:
+    """Where the tenant's fish were measured, by broad region (Today's map)."""
+
+    async def test_a_member_sees_their_tenants_regions(
+        self, client, owner_engine, app_engine, tenants
+    ):
+        await mobile(app_engine, owner_engine, tenants["lab"])  # La Jolla
+        await lite(owner_engine, tenants["lab"], species=("A b", "C"))  # no place
+
+        response = await _get(client, "/tenants/lab/regions")
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "regions": [
+                {
+                    "name": "Southern California, USA",
+                    "latitude": 33.5,
+                    "longitude": -117.5,
+                    "fish": 1,
+                }
+            ],
+            "elsewhere": 1,
+        }
+
+    async def test_someone_who_is_not_a_member_gets_nothing(self, client, tenants):
+        response = await _get(client, "/tenants/lab/regions", sub=OUTSIDER)
+
+        assert response.status_code == 404
 
 
 class TestDetail:
@@ -222,6 +300,52 @@ class TestDetail:
         }
         assert body["device_points"] is None
         assert body["algorithm"] == "laser_depth_fronto_parallel"
+
+    async def test_a_rendered_lite_fish_says_how_big_its_photo_is(
+        self, client, owner_engine, tenants
+    ):
+        """The page draws the labelled points on the render at their pixels
+        (the render is never cropped: the processor's whole-frame test), so
+        it needs the render's size to place them."""
+        capture_id, fish_id = await lite(
+            owner_engine, tenants["lab"], model=("Ginny", 0.3127)
+        )
+        await render(owner_engine, tenants["lab"], capture_id)
+
+        body = (
+            await _get(client, f"/tenants/lab/observations/{capture_id}/{fish_id}")
+        ).json()
+
+        assert body["photo_size"] == {"width": 4014, "height": 3016}
+
+    async def test_without_a_render_there_is_no_photo_size(
+        self, client, owner_engine, app_engine, tenants
+    ):
+        capture_id, fish_id = await lite(
+            owner_engine, tenants["lab"], model=("Ginny", 0.3127)
+        )
+        await mobile(app_engine, owner_engine, tenants["lab"])
+        phone = next(
+            o
+            for o in (await _get(client, "/tenants/lab/observations")).json()[
+                "observations"
+            ]
+            if o["method"] == "lidar"
+        )
+
+        lite_body = (
+            await _get(client, f"/tenants/lab/observations/{capture_id}/{fish_id}")
+        ).json()
+        phone_body = (
+            await _get(
+                client,
+                f"/tenants/lab/observations/{phone['capture_id']}/{phone['fish_id']}",
+            )
+        ).json()
+
+        assert lite_body["photo_size"] is None
+        # A phone's photo is its own, and its page sizes it from the capture.
+        assert phone_body["photo_size"] is None
 
     async def test_a_mobile_fish_shows_the_phones_points(
         self, client, owner_engine, app_engine, tenants

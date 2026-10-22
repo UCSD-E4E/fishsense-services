@@ -3,7 +3,8 @@
 
 /* The Deep water tokens (docs/design/README.md) as Tailwind's theme: `bg-surface`,
    `text-fg-2`, `border-line`, `bg-teal text-on-teal`. Each is a variable from
-   tokens.css, so the theme follows the system without `dark:` variants. */
+   tokens.css, so the theme follows the user's pick, else the system, without
+   `dark:` variants. */
 @theme inline {
   --color-ground: var(--fs-ground);
   --color-surface: var(--fs-surface);
@@ -31,6 +32,20 @@
   --radius-chip: var(--fs-radius-chip);
 }
 
+/* `dark:` follows the theme the user picked in the header (`data-theme` on
+   <html>, lib/theme.ts), else the system's: the same rule as tokens.css, so a
+   page's `dark:` utilities and its tokens never disagree. */
+@custom-variant dark {
+  &:where([data-theme="dark"], [data-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme="light"]), :root:not([data-theme="light"]) *) {
+      @slot;
+    }
+  }
+}
+
 /* v4 scopes `hover:` to `@media (hover: hover)`, which drops the tap feedback
    v3 gave on phones -- and triage is used one-handed on one. Keep v3's. */
 @custom-variant hover (&:hover);
@@ -51,4 +66,10 @@
 
 :root {
   color-scheme: light dark;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }

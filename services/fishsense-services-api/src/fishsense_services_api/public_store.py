@@ -20,29 +20,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from fishsense_services_api.deployment_inference import place_of
+from fishsense_services_api.regions import REGIONS, region_of_place
 
 __all__ = ["MINIMUM", "PublicRegion", "PublicSummary", "REGIONS", "public_summary"]
 
 #: A region shows its count from this many wild fish (the owner, 2026-10-20).
 MINIMUM = 25
-
-#: Each region's place on the map: broad, never a site.
-REGIONS: dict[str, tuple[float, float]] = {
-    "Florida Keys, USA": (27.0, -81.5),
-    "Caribbean": (18.5, -76.0),
-    "Southern California, USA": (33.5, -117.5),
-}
-
-#: The places `place_of` names, and their regions. A pool is nowhere in public.
-_REGION_OF = {
-    "Islamorada": "Florida Keys, USA",
-    "Key Largo": "Florida Keys, USA",
-    "Cuba": "Caribbean",
-    "Cayman Islands": "Caribbean",
-    "St Lucia": "Caribbean",
-    "Curaçao": "Caribbean",
-    "San Diego": "Southern California, USA",
-}
 
 
 @dataclass(frozen=True)
@@ -79,7 +62,9 @@ async def public_summary(conn: AsyncConnection) -> PublicSummary:
     by_region: dict[str, int] = defaultdict(int)
     for row in await conn.execute(text("SELECT * FROM public_wild_fish_by_folder()")):
         # A phone mission has no folder to place it by (0057).
-        region = row.source_path and _REGION_OF.get(place_of(row.source_path) or "")
+        region = row.source_path and region_of_place(
+            place_of(row.source_path), pools=False
+        )
         if region:
             by_region[region] += row.wild_fish
     regions = sorted(

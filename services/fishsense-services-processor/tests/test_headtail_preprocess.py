@@ -114,6 +114,21 @@ def test_worker_transform_matches_notebook_byte_for_byte(orf_path: Path):
     assert notebook == worker, "stage 5.1 worker and notebook diverge"
 
 
+def test_a_render_is_the_whole_frame(orf_path: Path):
+    """Never cropped (the owner, 2026-10-22): a Lite fish's head, tail and laser
+    dot were labelled on v1's JPEG of the same transform, and are drawn on this
+    render at the same pixels. That holds only while the render is the raw
+    frame, every pixel of it."""
+    from fishsense_core.image.raw_image import RawImage
+
+    height, width = RawImage(orf_path).data.shape[:2]
+
+    out = sut.rectify_and_encode_jpeg(orf_path.read_bytes(), _K, _D)
+
+    decoded = cv2.imdecode(np.frombuffer(out, np.uint8), cv2.IMREAD_COLOR)
+    assert decoded.shape[:2] == (height, width)
+
+
 # -- the activity -------------------------------------------------------------------
 
 

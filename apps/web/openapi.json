@@ -2540,6 +2540,16 @@
           },
           "observation": {
             "$ref": "#/components/schemas/ObservationView"
+          },
+          "photo_size": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhotoSize"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -2574,11 +2584,16 @@
             },
             "title": "Observations",
             "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
           }
         },
         "required": [
           "observations",
-          "next"
+          "next",
+          "total"
         ],
         "title": "ObservationPage",
         "type": "object"
@@ -2709,6 +2724,24 @@
           "photo_url"
         ],
         "title": "ObservationView",
+        "type": "object"
+      },
+      "PhotoSize": {
+        "properties": {
+          "height": {
+            "title": "Height",
+            "type": "integer"
+          },
+          "width": {
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "width",
+          "height"
+        ],
+        "title": "PhotoSize",
         "type": "object"
       },
       "PixelPoint": {
@@ -2932,6 +2965,57 @@
           "common_name"
         ],
         "title": "SpeciesView",
+        "type": "object"
+      },
+      "TenantRegionView": {
+        "description": "A broad region, at its one point on the map (`regions`).",
+        "properties": {
+          "fish": {
+            "title": "Fish",
+            "type": "integer"
+          },
+          "latitude": {
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "title": "Longitude",
+            "type": "number"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "latitude",
+          "longitude",
+          "fish"
+        ],
+        "title": "TenantRegionView",
+        "type": "object"
+      },
+      "TenantRegionsView": {
+        "description": "Where a tenant's wild fish were measured, never finer than a region.",
+        "properties": {
+          "elsewhere": {
+            "title": "Elsewhere",
+            "type": "integer"
+          },
+          "regions": {
+            "items": {
+              "$ref": "#/components/schemas/TenantRegionView"
+            },
+            "title": "Regions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "regions",
+          "elsewhere"
+        ],
+        "title": "TenantRegionsView",
         "type": "object"
       },
       "TenantSummaryView": {
@@ -4862,6 +4946,7 @@
     },
     "/tenants/{slug}/observations": {
       "get": {
+        "description": "Newest first, a page at a time: by number (``page``, from 1, of\n``limit`` each) or after a cursor (``before``, the last page's\n``next``), not both. ``total`` is how many there are in all.",
         "operationId": "list_observations",
         "parameters": [
           {
@@ -4937,6 +5022,23 @@
                 }
               ],
               "title": "Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Page"
             }
           }
         ],
@@ -5032,6 +5134,51 @@
           }
         ],
         "summary": "Get"
+      }
+    },
+    "/tenants/{slug}/regions": {
+      "get": {
+        "description": "Where the tenant's wild fish were measured, by broad region, for\nits Today map (`tenant_regions_store`). Fish models are left off.",
+        "operationId": "get_tenant_regions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantRegionsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Regions"
       }
     },
     "/tenants/{slug}/summary": {

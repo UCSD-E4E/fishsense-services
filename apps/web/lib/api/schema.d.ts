@@ -523,7 +523,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List */
+        /**
+         * List
+         * @description Newest first, a page at a time: by number (``page``, from 1, of
+         *     ``limit`` each) or after a cursor (``before``, the last page's
+         *     ``next``), not both. ``total`` is how many there are in all.
+         */
         get: operations["list_observations"];
         put?: never;
         post?: never;
@@ -542,6 +547,27 @@ export interface paths {
         };
         /** Get */
         get: operations["get_observation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/regions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Regions
+         * @description Where the tenant's wild fish were measured, by broad region, for
+         *     its Today map (`tenant_regions_store`). Fish models are left off.
+         */
+        get: operations["get_tenant_regions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1277,6 +1303,7 @@ export interface components {
             /** Model Version */
             model_version: string | null;
             observation: components["schemas"]["ObservationView"];
+            photo_size?: components["schemas"]["PhotoSize"] | null;
         };
         /** ObservationPage */
         ObservationPage: {
@@ -1284,6 +1311,8 @@ export interface components {
             next: string | null;
             /** Observations */
             observations: components["schemas"]["ObservationView"][];
+            /** Total */
+            total: number;
         };
         /** ObservationView */
         ObservationView: {
@@ -1317,6 +1346,13 @@ export interface components {
             /** Place Name */
             place_name: string | null;
             species: components["schemas"]["SpeciesView"] | null;
+        };
+        /** PhotoSize */
+        PhotoSize: {
+            /** Height */
+            height: number;
+            /** Width */
+            width: number;
         };
         /** PixelPoint */
         PixelPoint: {
@@ -1385,6 +1421,30 @@ export interface components {
             common_name: string | null;
             /** Scientific Name */
             scientific_name: string | null;
+        };
+        /**
+         * TenantRegionView
+         * @description A broad region, at its one point on the map (`regions`).
+         */
+        TenantRegionView: {
+            /** Fish */
+            fish: number;
+            /** Latitude */
+            latitude: number;
+            /** Longitude */
+            longitude: number;
+            /** Name */
+            name: string;
+        };
+        /**
+         * TenantRegionsView
+         * @description Where a tenant's wild fish were measured, never finer than a region.
+         */
+        TenantRegionsView: {
+            /** Elsewhere */
+            elsewhere: number;
+            /** Regions */
+            regions: components["schemas"]["TenantRegionView"][];
         };
         /**
          * TenantSummaryView
@@ -2470,6 +2530,7 @@ export interface operations {
                 mission?: number | null;
                 limit?: number;
                 before?: string | null;
+                page?: number | null;
             };
             header?: never;
             path: {
@@ -2519,6 +2580,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ObservationDetailView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_tenant_regions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantRegionsView"];
                 };
             };
             /** @description Validation Error */

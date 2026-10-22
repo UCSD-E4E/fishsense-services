@@ -32,7 +32,7 @@ describe("the shell's view of the session", () => {
 
   it("asks the portal's own rule who is staff", async () => {
     // A stale admin flag beside a failed membership read is not staff: the
-    // portal would refuse them, so Labelling must not lead there.
+    // portal would refuse them, so Labeling must not lead there.
     const stale = { ...admin, membershipError: "unavailable" } as unknown as Session;
 
     expect((await shellState(async () => stale)).staff).toBe(false);

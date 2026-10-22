@@ -7,7 +7,7 @@
  * the API decides what they may see and checks their admin role on writes.
  * Values from the URL or a form are validated before they reach a request.
  *
- * The port is the owner's rule where one applies (2026-10-16): a D-labelled
+ * The port is the owner's rule where one applies (2026-10-16): a D-labeled
  * device, or anything ingested before ports were recorded, is the corrective
  * optic, and the API refuses to contradict it. Nothing else is known: a
  * missing D does not mean flat.
@@ -67,7 +67,7 @@ const PORT_NAMES: Record<Port, string> = {
 };
 
 const SOURCE_NAMES: Record<PortSource, string> = {
-  device_suffix: "D-labelled device",
+  device_suffix: "D-labeled device",
   backfill: "ingested before the port was recorded",
   operator: "stated by an operator",
   calibration: "inferred from a lens calibration",

@@ -5,11 +5,12 @@ import Link from "next/link";
 import { unstable_rethrow } from "next/navigation";
 import { cache, type ReactNode } from "react";
 import { FishGrid } from "@/app/_shell/fish-grid";
+import { RegionMap } from "@/app/_shell/region-map";
 import { WorkSections } from "@/app/_shell/work-sections";
 import { getDeployments } from "@/lib/mission-facts";
 import { getObservationPage } from "@/lib/observations";
 import { paths } from "@/lib/tenant-paths";
-import { getTenantSummary, recentDeployments } from "@/lib/today";
+import { getTenantRegions, getTenantSummary, recentDeployments } from "@/lib/today";
 import { getIsSystemAdmin } from "@/lib/system-admin";
 
 /** The numbers and "Needs you" both read the summary: asked once per request. */
@@ -25,27 +26,61 @@ export async function Numbers({ token, slug }: Section) {
     unstable_rethrow(error);
     return <Failure>Could not load the numbers: {reason(error)}</Failure>;
   }
+  // Wild fish only: fish models are the decoys of pool trials, noted apart
+  // (the owner, 2026-10-21; as the public page does).
+  const models = summary.lengths - summary.wild_fish;
   return (
-    <div className={STATS_GRID}>
-      <Stat
-        href={paths.fish(slug)}
-        label="Lengths measured"
-        value={summary.lengths.toLocaleString()}
-        note={`${summary.wild_fish.toLocaleString()} wild fish, ${summary.species} species`}
-      />
-      <Stat
-        href={paths.data(slug)}
-        label="Missions"
-        value={summary.missions.toLocaleString()}
-        note={`in ${summary.deployments.toLocaleString()} ${summary.deployments === 1 ? "deployment" : "deployments"}`}
-      />
-      <Stat label="Frames" value={summary.frames.toLocaleString()} note="each counted once" />
-      <Stat
-        label="Latest activity"
-        value={summary.latest_activity ? new Date(summary.latest_activity).toLocaleDateString() : "—"}
-        note="the newest ingest or sync"
-        small
-      />
+    <div className="flex flex-col gap-2">
+      <div className={STATS_GRID}>
+        <Stat
+          href={paths.fish(slug)}
+          label="Fish measured"
+          value={summary.wild_fish.toLocaleString()}
+          note={`${summary.species} species`}
+        />
+        <Stat
+          href={paths.data(slug)}
+          label="Missions"
+          value={summary.missions.toLocaleString()}
+          note={`in ${summary.deployments.toLocaleString()} ${summary.deployments === 1 ? "deployment" : "deployments"}`}
+        />
+        <Stat label="Frames" value={summary.frames.toLocaleString()} note="each counted once" />
+        <Stat
+          label="Latest activity"
+          value={summary.latest_activity ? new Date(summary.latest_activity).toLocaleDateString() : "—"}
+          note="the newest ingest or sync"
+          small
+        />
+      </div>
+      {models > 0 && (
+        <p className="text-sm text-fg-2">
+          +{models.toLocaleString()} fish-model lengths in pool trials
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Where the tenant's wild fish were measured, by broad region, on a map. */
+export async function WhereMeasured({ token, slug }: Section) {
+  let found;
+  try {
+    found = await getTenantRegions(token, slug);
+  } catch (error) {
+    unstable_rethrow(error);
+    return <Failure>Could not load the map: {reason(error)}</Failure>;
+  }
+  if (found.regions.length === 0) {
+    return <p className="text-fg-2">Measured fish will appear here by region.</p>;
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <RegionMap regions={found.regions} />
+      {found.elsewhere > 0 && (
+        <p className="text-sm text-fg-2">
+          {found.elsewhere.toLocaleString()} more fish without a region.
+        </p>
+      )}
     </div>
   );
 }
@@ -111,7 +146,7 @@ export async function NeedsYou({ token, slug }: Section) {
   );
 }
 
-/** Labelling for staff, and the dashboards for system admins. Label Studio
+/** Labeling for staff, and the dashboards for system admins. Label Studio
  *  answers slowly when it answers at all, so this section never holds up
  *  the others. */
 export async function Work({ token, staff }: { token: string; staff: boolean }) {
@@ -127,7 +162,7 @@ export async function Work({ token, staff }: { token: string; staff: boolean }) 
   if (!staff && !systemAdmin) return notice;
   return (
     <section className="flex flex-col gap-4 border-t border-line pt-7">
-      <h2 className="text-xl font-semibold">{systemAdmin ? "Labelling and dashboards" : "Labelling"}</h2>
+      <h2 className="text-xl font-semibold">{systemAdmin ? "Labeling and dashboards" : "Labeling"}</h2>
       {notice}
       <WorkSections dashboards={systemAdmin} />
     </section>
@@ -224,9 +259,17 @@ export function LineLoading() {
   );
 }
 
+export function MapLoading() {
+  return (
+    <Loading what="the map">
+      <div className="aspect-[2/1] w-full animate-pulse rounded-sheet border border-line bg-raised" />
+    </Loading>
+  );
+}
+
 export function WorkLoading() {
   return (
-    <Loading what="the labelling">
+    <Loading what="the labeling">
       <section className="flex flex-col gap-4 border-t border-line pt-7">
         <div className={`${PULSE} h-6 w-40`} />
         <div className={`${PULSE} h-24 w-full`} />
