@@ -28,10 +28,16 @@ export function deviceFilter(value: string | undefined): Device | undefined {
 export async function getObservationPage(
   accessToken: string,
   slug: string,
-  options: { device?: Device; before?: string; mission?: number } = {},
+  options: { device?: Device; before?: string; mission?: number; limit?: number } = {},
 ): Promise<ObservationPage> {
-  const query: { device?: Device; before?: string; mission?: number } = {};
+  const query: { device?: Device; before?: string; mission?: number; limit?: number } = {};
   if (options.device) query.device = options.device;
+  if (options.limit !== undefined) {
+    if (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 200) {
+      throw new Error(`Invalid limit: ${options.limit}`);
+    }
+    query.limit = options.limit;
+  }
   if (options.mission !== undefined) {
     if (!Number.isInteger(options.mission) || options.mission < 0) {
       throw new Error(`Invalid mission number: ${options.mission}`);

@@ -75,6 +75,22 @@ describe("getObservationPage", () => {
     expect(fetchMock.mock.calls[0][0].url).toBe("http://api.test/tenants/lab/observations?mission=7");
   });
 
+  it("asks for only as many fish as are shown (Today shows three)", async () => {
+    const fetchMock = vi.fn<FetchSig>(async () => jsonResponse({ observations: [], next: null }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getObservationPage("t", "lab", { limit: 3 });
+
+    expect(fetchMock.mock.calls[0][0].url).toBe("http://api.test/tenants/lab/observations?limit=3");
+  });
+
+  it("refuses a limit the API would", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+
+    await expect(getObservationPage("t", "lab", { limit: 0 })).rejects.toThrow(/limit/);
+    await expect(getObservationPage("t", "lab", { limit: 201 })).rejects.toThrow(/limit/);
+  });
+
   it("refuses a mission number that isn't one", async () => {
     vi.stubGlobal("fetch", vi.fn());
 
