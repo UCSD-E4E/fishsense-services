@@ -5,11 +5,17 @@ made before then kept theirs only as numbers (area, crop, box, head/tail). The
 backfill re-runs the kernel that made each prediction -- the automatic
 track's `automatic_frame_result` on its render, or the head/tail stage's
 `predict_from_jpeg` on its stage-5.1 JPEG -- with the prediction's own dot,
-and keeps the mask only when it `reproduces` what the prediction recorded:
-the same crop, the mask area within `MASK_AREA_TOLERANCE`, head and tail
-within `MASK_POINT_TOLERANCE_PX`. A mask that does not is not that
-prediction's mask, and is never stored as it. Nothing here writes a
+and keeps the mask only when it `reproduces` the prediction's: the same crop
+and the mask area within `MASK_AREA_TOLERANCE`. A mask that does not is not
+that prediction's mask, and is never stored as it. Nothing here writes a
 prediction.
+
+**Judged by the mask, not the head/tail** (owner, 2026-10-22). On the trial
+(missions 172 and 498, 142 predictions) the crop matched every time and 24 of
+the 27 that missed a 1 px head/tail tolerance had the same mask to within
+0.1% of its area -- SAM in bfloat16 on another GPU moves a few boundary
+pixels -- while the keypointer moved head or tail 1-284 px. The regenerated
+head/tail is recorded with every regeneration, for that repeatability.
 """
 
 from __future__ import annotations
@@ -28,7 +34,6 @@ __all__ = [
     "BackfillMaskFrame",
     "BackfillMasksInput",
     "MASK_AREA_TOLERANCE",
-    "MASK_POINT_TOLERANCE_PX",
     "MASK_SOURCES",
     "MaskExpectation",
     "reproduces",
@@ -39,8 +44,6 @@ MASK_SOURCES = ("automatic", "headtail")
 #: The most a regenerated mask's area may differ from the recorded one,
 #: relative: SAM in bfloat16 on another GPU need not repeat bit for bit.
 MASK_AREA_TOLERANCE = 0.005
-#: The most a regenerated head or tail may sit from the recorded one, px.
-MASK_POINT_TOLERANCE_PX = 1.0
 BACKFILL_OUTCOMES = (
     "reproduced",  # stored
     "mismatch",  # SAM kept a different mask: not this prediction's
@@ -63,22 +66,14 @@ class MaskExpectation(BaseModel):
 
 
 def reproduces(expected: MaskExpectation, got: MaskExpectation) -> bool:
-    """Whether `got` is the mask `expected` recorded."""
+    """Whether `got` is the mask `expected` recorded: its crop, and its area
+    within the tolerance. Head and tail are not the mask's: they are the
+    keypointer's reading of it, and are recorded, not judged."""
     if (got.crop_x, got.crop_y) != (expected.crop_x, expected.crop_y):
         return False
-    if abs(got.mask_area_px - expected.mask_area_px) > MASK_AREA_TOLERANCE * max(
+    return abs(got.mask_area_px - expected.mask_area_px) <= MASK_AREA_TOLERANCE * max(
         expected.mask_area_px, 1
-    ):
-        return False
-    for a, b in (
-        (expected.head_x, got.head_x), (expected.head_y, got.head_y),
-        (expected.tail_x, got.tail_x), (expected.tail_y, got.tail_y),
-    ):  # fmt: skip
-        if (a is None) != (b is None):
-            return False
-        if a is not None and abs(a - b) > MASK_POINT_TOLERANCE_PX:
-            return False
-    return True
+    )
 
 
 class BackfillMaskFrame(BaseModel):
