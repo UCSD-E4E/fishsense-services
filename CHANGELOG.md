@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.40.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.39.1...v0.40.0) (2026-10-22)
+
+
+### Features
+
+* **api:** link v1 measurements to the depth and labels they used ([cea0079](https://github.com/UCSD-E4E/fishsense-services/commit/cea0079c07f4c5826c5c25573951f7a9e94942d1))
+* **api:** link v1 measurements to the depth and labels they used ([13296fd](https://github.com/UCSD-E4E/fishsense-services/commit/13296fddc1d52a8bb8f88ca98461864d1faf05fc))
+* draw a Lite fish's head, tail and laser dot on its render ([6a12752](https://github.com/UCSD-E4E/fishsense-services/commit/6a127527bca346789aee5a32e98b7335c5f829c1))
+* draw a Lite fish's head, tail and laser dot on its render ([c9c12b3](https://github.com/UCSD-E4E/fishsense-services/commit/c9c12b3a0658c313c03992dd1f9ce0579f7f3395))
+
 ## [0.39.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.39.0...v0.39.1) (2026-10-22)
 
 
