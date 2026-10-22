@@ -143,7 +143,7 @@ class TenantRegionView(BaseModel):
 
 
 class TenantRegionsView(BaseModel):
-    """Where a tenant's fish were measured, never finer than a region."""
+    """Where a tenant's wild fish were measured, never finer than a region."""
 
     #: Most fish first.
     regions: list[TenantRegionView]
@@ -251,8 +251,8 @@ def add_observation_routes(
         response_model=TenantRegionsView,
     )
     async def regions(member: Member) -> TenantRegionsView:
-        """Where the tenant's fish were measured, by broad region, for its
-        Today map (`tenant_regions_store`)."""
+        """Where the tenant's wild fish were measured, by broad region, for
+        its Today map (`tenant_regions_store`). Fish models are left off."""
         async with tenant_transaction(engine, member.tenant_id) as conn:
             found = await tenant_regions(conn, member.tenant_id)
         return TenantRegionsView(

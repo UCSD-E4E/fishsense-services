@@ -2969,7 +2969,7 @@
         "type": "object"
       },
       "TenantRegionsView": {
-        "description": "Where a tenant's fish were measured, never finer than a region.",
+        "description": "Where a tenant's wild fish were measured, never finer than a region.",
         "properties": {
           "elsewhere": {
             "title": "Elsewhere",
@@ -5110,7 +5110,7 @@
     },
     "/tenants/{slug}/regions": {
       "get": {
-        "description": "Where the tenant's fish were measured, by broad region, for its\nToday map (`tenant_regions_store`).",
+        "description": "Where the tenant's wild fish were measured, by broad region, for\nits Today map (`tenant_regions_store`). Fish models are left off.",
         "operationId": "get_tenant_regions",
         "parameters": [
           {
