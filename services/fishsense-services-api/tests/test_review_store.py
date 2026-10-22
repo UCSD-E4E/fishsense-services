@@ -296,3 +296,299 @@ async def test_populate_does_not_revive_a_label_a_review_superseded(
 async def _in_reviews(app_engine, lab, capture_id):
     async with tenant_transaction(app_engine, lab) as conn:
         return {r.review_id: r for r in await capture_reviews(conn, lab, capture_id)}
+
+
+# -- code review of #293 ------------------------------------------------------------
+#
+# A reviewed frame's labels come from the app: Label Studio isn't asked for
+# them again, nothing revives what a review superseded, and an older or
+# weaker review can't undo one that counts.
+
+
+async def _unlabelled_frame(lab, owner_engine, *, laser=True):
+    """A frame with no head/tail label (and with ``laser``, a Label Studio dot),
+    and its render."""
+    mission_id, _ = await calibrated_dive(owner_engine, lab)
+    c = await capture(owner_engine, lab, mission_id)
+    if laser:
+        await laser_label(owner_engine, lab, c, x=770.0, y=524.0)
+    await _render(owner_engine, lab, c)
+    return c, await _render_of(owner_engine, c), mission_id
+
+
+async def _render_of(owner_engine, c, *, newest=True):
+    async with owner_engine.connect() as conn:
+        return (
+            await conn.execute(
+                text(
+                    "SELECT id FROM capture_renders WHERE capture_id = :c "
+                    f"ORDER BY seq {'DESC' if newest else 'ASC'} LIMIT 1"
+                ),
+                {"c": c},
+            )
+        ).scalar_one()
+
+
+async def test_a_reviewed_frame_is_not_sent_to_label_studio_again(
+    lab, people, frame, app_engine
+):
+    """Stage 5.1 asked for a head/tail of every frame with a dot and no live
+    Label Studio row. A review supersedes that row, so the frame was imported
+    again every wake, and populate (which won't revive it) never ended it."""
+    from fishsense_services_api.headtail_store import (
+        next_mission_for_headtail_preprocessing,
+    )
+
+    await _review(app_engine, lab, **_head_tail(people, EXPERT, frame))
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        assert await next_mission_for_headtail_preprocessing(conn, lab) is None
+
+
+async def test_a_frame_reviewed_in_the_app_is_not_label_studio_work(
+    lab, people, app_engine, owner_engine
+):
+    """Nor a frame that never had a Label Studio row: its labels come from the
+    app, whatever its review's level."""
+    from fishsense_services_api.headtail_store import headtail_preprocess_inputs
+
+    c, render, mission_id = await _unlabelled_frame(lab, owner_engine)
+    await _review(app_engine, lab, **_head_tail(people, LEARNER, (c, render)))
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        found = await headtail_preprocess_inputs(conn, lab, mission_id)
+    assert found.captures == []
+
+
+async def test_a_frame_whose_dot_was_reviewed_needs_no_laser_jpeg(
+    lab, people, app_engine, owner_engine
+):
+    from fishsense_services_api.laser_store import laser_preprocess_captures
+
+    c, render, mission_id = await _unlabelled_frame(lab, owner_engine, laser=False)
+    await _review(app_engine, lab, capture_id=c, reviewer_id=people[EXPERT],
+                  kind="laser", action="fix", point=(772.0, 521.0), render_id=render)  # fmt: skip
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        assert await laser_preprocess_captures(conn, lab, mission_id) == []
+
+
+async def test_a_remediation_does_not_revive_a_dot_a_review_superseded(
+    lab, people, frame, app_engine, owner_engine
+):
+    from fishsense_services_api.laser_store import (
+        laser_label_population,
+        revive_laser_labels,
+    )
+
+    c, render = frame
+    await _review(app_engine, lab, capture_id=c, reviewer_id=people[EXPERT],
+                  kind="laser", action="fix", point=(772.0, 521.0), render_id=render)  # fmt: skip
+    async with owner_engine.connect() as conn:
+        mission_id, number = (
+            await conn.execute(
+                text(
+                    "SELECT c.mission_id, l.number FROM laser_labels l JOIN captures c "
+                    "ON c.id = l.capture_id WHERE l.capture_id = :c AND l.source = 'human'"
+                ),
+                {"c": c},
+            )
+        ).one()
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        population = await laser_label_population(conn, lab, mission_id)
+        revived = await revive_laser_labels(
+            conn, lab, mission_id, [number], population.fingerprint
+        )
+
+    assert revived == 0
+    old, new = await _labels(owner_engine, c, "laser_labels")
+    assert old["superseded"] and not new["superseded"]
+
+
+async def test_an_older_learners_review_cannot_undo_a_newer_one_that_counts(
+    lab, people, frame, app_engine, owner_engine
+):
+    first = await _review(app_engine, lab, **_head_tail(people, LEARNER, frame))
+    expert_head = (HEAD[0] + 100, HEAD[1])
+    await _review(
+        app_engine, lab, **_head_tail(people, EXPERT, frame, head=expert_head)
+    )
+
+    with pytest.raises(ReviewRefused, match="newer"):
+        await _review(app_engine, lab, **_head_tail(
+            people, LEARNER_2, frame, confirms_review_id=first.review_id))  # fmt: skip
+    with pytest.raises(ReviewRefused, match="newer"):
+        await _review(app_engine, lab, capture_id=frame[0], reviewer_id=people[TRUSTED],
+                      kind="head_tail", action="confirm", confirms_review_id=first.review_id)  # fmt: skip
+
+    *_, live = await _labels(owner_engine, frame[0])
+    assert (live["head_x"], live["superseded"]) == (expert_head[0], False)
+
+
+async def test_a_confirm_of_points_on_an_older_camera_is_refused(
+    lab, people, frame, app_engine, owner_engine
+):
+    first = await _review(app_engine, lab, **_head_tail(people, LEARNER, frame))
+    await _render(owner_engine, lab, frame[0], new_camera=True)  # recalibrated since
+
+    with pytest.raises(ReviewRefused, match="camera"):
+        await _review(app_engine, lab, capture_id=frame[0], reviewer_id=people[TRUSTED],
+                      kind="head_tail", action="confirm", confirms_review_id=first.review_id)  # fmt: skip
+    new_render = await _render_of(owner_engine, frame[0])
+    with pytest.raises(ReviewRefused, match="camera"):
+        await _review(app_engine, lab, **_head_tail(
+            people, LEARNER_2, (frame[0], new_render), confirms_review_id=first.review_id))  # fmt: skip
+
+
+async def test_rejecting_an_accepted_result_supersedes_the_label_it_made(
+    lab, people, frame, app_engine, owner_engine
+):
+    """An accept made the automatic result the label; a counting reject of
+    that result (any reason) takes it back. Nothing is left to measure."""
+    await _review(
+        app_engine, lab, **_head_tail(people, LEARNER, frame, action="accept")
+    )
+    accepted = await _review(app_engine, lab, **_head_tail(people, EXPERT, frame, action="accept"))  # fmt: skip
+
+    await _review(app_engine, lab, capture_id=frame[0], reviewer_id=people[TRUSTED],
+                  kind="head_tail", action="reject", reason="bad_mask")  # fmt: skip
+
+    labels = await _labels(owner_engine, frame[0])
+    assert not [l for l in labels if not l["superseded"]]
+    assert {l["review_id"] for l in labels if l["source"] == "review"} == {
+        accepted.review_id
+    }
+
+
+async def test_a_reject_of_the_result_alone_keeps_a_label_studio_label(
+    lab, people, frame, app_engine, owner_engine
+):
+    """A wrong mask or fish, or a wrong dot, says the automatic result is
+    wrong: it says nothing of a labeller's points."""
+    for reason in ("bad_mask", "wrong_fish"):
+        await _review(app_engine, lab, capture_id=frame[0], reviewer_id=people[EXPERT],
+                      kind="head_tail", action="reject", reason=reason)  # fmt: skip
+
+    assert [l["superseded"] for l in await _labels(owner_engine, frame[0])] == [False]
+
+
+async def test_a_frame_with_no_measurable_fish_has_no_live_label(
+    lab, people, frame, app_engine, owner_engine
+):
+    """No fish, or a fish that can't be measured, is said of the frame: its
+    head/tail labels are superseded, whoever placed them."""
+    first = await _review(app_engine, lab, capture_id=frame[0], reviewer_id=people[LEARNER],
+                          kind="head_tail", action="reject", reason="no_fish")  # fmt: skip
+    assert [l["superseded"] for l in await _labels(owner_engine, frame[0])] == [False]
+
+    await _review(app_engine, lab, capture_id=frame[0], reviewer_id=people[TRUSTED],
+                  kind="head_tail", action="confirm", confirms_review_id=first.review_id)  # fmt: skip
+
+    (label,) = await _labels(owner_engine, frame[0])
+    assert (label["superseded"], label["superseded_reason"]) == (True, "review")
+
+
+async def test_a_device_without_a_pinhole_camera_says_so(
+    lab, people, frame, app_engine, owner_engine
+):
+    await exec_(
+        owner_engine,
+        "INSERT INTO camera_calibrations (tenant_id, device_id, camera_model, "
+        "port_model, camera_matrix, distortion_coefficients) SELECT :t, m.device_id, "
+        "'axial_refractive', 'flat', '[[3100,0,2048],[0,3100,1536],[0,0,1]]', "
+        "'[0,0,0,0,0]' FROM captures c JOIN missions m ON m.id = c.mission_id "
+        "WHERE c.id = :c",
+        t=lab,
+        c=frame[0],
+    )
+
+    with pytest.raises(ReviewRefused, match="no current pinhole camera"):
+        await _review(app_engine, lab, **_head_tail(people, EXPERT, frame))
+
+
+async def test_a_review_of_no_such_frame_is_refused(lab, people, app_engine):
+    from fishsense_services_api.review_store import FrameNotFound
+
+    with pytest.raises(FrameNotFound):
+        await _review(app_engine, lab, capture_id=__import__("uuid").uuid4(),
+                      reviewer_id=people[EXPERT], kind="species", action="fix",
+                      scientific_name="Scarus coeruleus")  # fmt: skip
+
+
+async def test_a_review_names_its_own_frames_prediction(
+    lab, people, frame, app_engine, owner_engine
+):
+    """A prediction of another frame isn't this frame's."""
+    c, *_ = await _unlabelled_frame(lab, owner_engine)
+    async with owner_engine.begin() as conn:
+        prediction = (
+            await conn.execute(
+                text(
+                    "INSERT INTO automatic_head_tail_predictions (tenant_id, "
+                    "capture_id, status, predictor_version) VALUES "
+                    "(:t, :c, 'no_detections', 1) RETURNING id"
+                ),
+                {"t": lab, "c": c},
+            )
+        ).scalar_one()
+
+    with pytest.raises(ReviewRefused, match="prediction"):
+        await _review(app_engine, lab, capture_id=frame[0], reviewer_id=people[EXPERT],
+                      kind="species", action="fix", scientific_name="Scarus coeruleus",
+                      automatic_head_tail_prediction_id=prediction)  # fmt: skip
+
+
+async def test_only_a_member_of_the_tenant_has_a_skill_in_it(
+    lab, people, app_engine, owner_engine
+):
+    from fishsense_services_api.review_store import NotAMember
+
+    async with owner_engine.begin() as conn:
+        outsider = (
+            await conn.execute(
+                text("INSERT INTO users (sub) VALUES ('outsider') RETURNING id")
+            )
+        ).scalar_one()
+
+    with pytest.raises(NotAMember):
+        async with tenant_transaction(app_engine, lab) as conn:
+            await set_skill(
+                conn, lab, outsider, "laser", "expert", set_by=people[ADMIN]
+            )
+
+
+async def test_the_status_agrees_a_reviewed_frame_is_not_label_studio_work(
+    lab, people, app_engine, owner_engine
+):
+    """`dive_pipeline_status` reads the cohorts' terms (0062)."""
+    c, render, mission_id = await _unlabelled_frame(lab, owner_engine, laser=False)
+    await _review(app_engine, lab, capture_id=c, reviewer_id=people[EXPERT],
+                  kind="laser", action="fix", point=(772.0, 521.0), render_id=render)  # fmt: skip
+    assert (
+        await _status(app_engine, lab, mission_id, "laser_preprocess_pending") is False
+    )
+    assert (
+        await _status(app_engine, lab, mission_id, "headtail_preprocess_pending")
+        is True
+    )
+
+    await _review(app_engine, lab, **_head_tail(people, LEARNER, (c, render)))
+
+    assert (
+        await _status(app_engine, lab, mission_id, "headtail_preprocess_pending")
+        is False
+    )
+
+
+async def _status(app_engine, lab, mission_id, column):
+    async with tenant_transaction(app_engine, lab) as conn:
+        return (
+            await conn.execute(
+                text(
+                    f"SELECT s.{column} FROM dive_pipeline_status s "
+                    "JOIN missions m ON m.number = s.dive_id WHERE m.id = :m"
+                ),
+                {"m": mission_id},
+            )
+        ).scalar_one()

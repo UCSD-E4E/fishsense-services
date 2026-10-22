@@ -56,6 +56,7 @@ from fishsense_services_api.camera_sql import (
     RECTIFIABLE_CAMERA_MODEL,
     RECTIFIABLE_MISSION,
 )
+from fishsense_services_api.review_store import reviewed_in_app
 from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
@@ -318,14 +319,15 @@ _CAPTURE_COLUMNS = (
 # -- stage 0.1: preprocess -------------------------------------------------------
 
 #: Capture `c` needs its stage-0.1 JPEG: no non-sentinel label (a sentinel has
-#: no project; an incomplete row seeded by populate counts as labeled), or a
-#: live label flagged `needs_reprocess` (v1's two ways in).
-NEEDS_LASER_JPEG = """(
-    NOT EXISTS (
+#: no project; an incomplete row seeded by populate counts as labeled) and no
+#: dot review (its dot comes from the app, 0062), or a live label flagged
+#: `needs_reprocess` (v1's two ways in).
+NEEDS_LASER_JPEG = f"""(
+    (NOT EXISTS (
         SELECT 1 FROM laser_labels l
         WHERE l.tenant_id = c.tenant_id AND l.capture_id = c.id
           AND l.ls_project_id IS NOT NULL
-    )
+    ) AND NOT {reviewed_in_app("laser")})
     OR EXISTS (
         SELECT 1 FROM laser_labels l
         WHERE l.tenant_id = c.tenant_id AND l.capture_id = c.id
@@ -1120,7 +1122,8 @@ async def revive_laser_labels(
     live row it records the last change was a revival). Refuses, writing
     nothing, if the dive's population is not the one the plan was made from,
     or a label is not the dive's. Labels already live are skipped, so
-    re-applying is a no-op. Returns how many were revived."""
+    re-applying is a no-op, and so is a label an app review superseded (0062):
+    the review's dot is the frame's. Returns how many were revived."""
     await _lock_mission(conn, "validation", mission_id)
     population = await laser_label_population(conn, tenant_id, mission_id, lock=True)
     by_number = {r.number: r for r in population.rows}
@@ -1139,6 +1142,7 @@ async def revive_laser_labels(
             SET superseded = false, superseded_reason = 'remediation'
             WHERE tenant_id = :tenant AND number = ANY(:numbers)
               AND superseded AND completed
+              AND superseded_reason IS DISTINCT FROM 'review'
             """),
         {"tenant": tenant_id, "numbers": pending},
     )

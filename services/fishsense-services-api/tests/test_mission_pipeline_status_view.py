@@ -476,6 +476,26 @@ def test_0050_adds_the_port_terms_todays_stores_use():
     assert rendered == migration.RENDERED_SHA256
 
 
+def test_0062_adds_the_review_terms_todays_stores_use():
+    """0062 recreates the function so a frame reviewed in the app isn't Label
+    Studio work, and a parked mission's reviewed frames are pending
+    measurement. When the stores' review terms change, this fails: ship a
+    migration that recreates the function again."""
+    from fishsense_services_api.measurement_store import reviewed_measurement_work
+    from fishsense_services_api.review_store import reviewed_in_app
+
+    migration = importlib.import_module(
+        "fishsense_services_api.migrations.versions.0062_reviews_and_skills"
+    )
+    assert migration.REVIEWED_HEAD_TAIL == reviewed_in_app("head_tail")
+    assert migration.REVIEWED_LASER == reviewed_in_app("laser")
+    assert migration.REVIEWED_MEASUREMENT_WORK == reviewed_measurement_work(
+        "d.tenant_id"
+    )
+    rendered = hashlib.sha256(migration.FUNCTION_SQL.encode()).hexdigest()
+    assert rendered == migration.RENDERED_SHA256
+
+
 def test_0046_recreates_the_function_from_0029_with_the_renamed_schema():
     """0046 renamed dives to missions, and a SQL function keeps its body as
     text, so 0046 recreates it: 0029's frozen rendering with the renamed

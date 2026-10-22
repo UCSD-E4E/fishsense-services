@@ -647,6 +647,13 @@ class _ReviewLabel:
                 "(source = 'review') = (review_id IS NOT NULL AND render_id IS NOT NULL)",
                 name=f"{table}_review_label_check",
             ),
+            # Stage 14 looks for reviewed frames on every selection.
+            Index(
+                f"{table}_review_idx",
+                "tenant_id",
+                "capture_id",
+                postgresql_where=text("source = 'review' AND NOT superseded"),
+            ),
         )
 
 
@@ -1908,6 +1915,10 @@ class ReviewerSkill(Base):
                         name="reviewer_skills_source_check"),
         CheckConstraint("(source = 'admin') = (set_by IS NOT NULL)",
                         name="reviewer_skills_check"),
+        # A skill is a member's, and goes with the membership.
+        ForeignKeyConstraint(["tenant_id", "user_id"],
+                             ["memberships.tenant_id", "memberships.user_id"],
+                             name="reviewer_skills_membership_fk", ondelete="CASCADE"),
     )  # fmt: skip
 
     id: Mapped[uuid.UUID] = _id()

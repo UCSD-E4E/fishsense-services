@@ -72,6 +72,7 @@ __all__ = [
     "SpeciesNames",
     "measurement_work",
     "next_mission_for_measurement",
+    "reviewed_measurement_work",
     "persist_measurements",
 ]
 
@@ -96,9 +97,35 @@ def _reviewed(work: str) -> str:
                  AND rl.source = 'review'))"""
 
 
+def reviewed_missions(tenant: str) -> str:
+    """The missions of ``tenant``'s captures with a live label from a review
+    (0062): few, and found by partial indexes, so the dear `measurement_work`
+    is read only for them."""
+    return f"""(
+    SELECT c.mission_id FROM captures c
+    WHERE c.tenant_id = {tenant} AND c.id IN (
+        SELECT l.capture_id FROM head_tail_labels l
+        WHERE l.tenant_id = {tenant} AND l.source = 'review' AND NOT l.superseded
+        UNION ALL
+        SELECT l.capture_id FROM laser_labels l
+        WHERE l.tenant_id = {tenant} AND l.source = 'review' AND NOT l.superseded))"""
+
+
+#: Dive `d`'s reviewed frames to measure, whatever its priority (0062). The
+#: selector's form (hashed over the tenant) and the status function's.
+def reviewed_measurement_work(tenant: str) -> str:
+    return f"""(d.id IN {reviewed_missions(tenant)} AND EXISTS (
+    SELECT 1 FROM measurement_work w
+    WHERE w.tenant_id = d.tenant_id AND w.mission_id = d.id AND {_reviewed("w")}))"""
+
+
 #: A parked (not high-priority) mission's work is its reviewed frames only:
 #: every reviewed frame is measured (the owner, 2026-10-21), and a review must
 #: not unpark the rest. The resolver's and the persist check's form.
+#: "Every" is every frame `measurement_work` can measure: a species label, a
+#: cluster for a real fish, and the mission's laser geometry. A reviewed frame
+#: without them is no work and records nothing (#293's review); measuring
+#: the automatic track's missions waits on grouping frames into fish.
 _PRIORITY_OR_REVIEWED = f"""(
     EXISTS (SELECT 1 FROM missions pd
             WHERE pd.tenant_id = :tenant AND pd.id = :mission AND pd.priority = 'high')
@@ -220,10 +247,8 @@ async def next_mission_for_measurement(
                 SELECT d.id, d.created_at, d.number FROM missions d
                 WHERE d.tenant_id = :tenant
                   AND ((d.priority = 'high' AND {MEASUREMENT_COHORT})
-                       OR ({ADMITTED_PORT} AND EXISTS (
-                           SELECT 1 FROM measurement_work w
-                           WHERE w.tenant_id = d.tenant_id AND w.mission_id = d.id
-                             AND {_reviewed("w")})))
+                       OR ({ADMITTED_PORT}
+                           AND {reviewed_measurement_work(":tenant")}))
                 ORDER BY d.created_at, d.number
                 LIMIT 1
                 """),

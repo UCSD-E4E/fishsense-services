@@ -20,6 +20,8 @@ from fishsense_services_api.memberships import Membership
 from fishsense_services_api.portal_api import admin_of
 from fishsense_services_api.review_store import (
     KINDS,
+    FrameNotFound,
+    NotAMember,
     ReviewInput,
     ReviewRefused,
     capture_reviews,
@@ -147,6 +149,8 @@ def add_review_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
                         confirms_review_id=body.confirms_review_id,
                     ),
                 )
+        except FrameNotFound as error:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from None
         except ReviewRefused as error:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)
@@ -174,7 +178,10 @@ def add_review_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
         user_id: uuid.UUID, kind: Kind, body: SkillBody, admin: Admin
     ) -> Response:
         """An admin sets a member's level in one kind; it is recorded as theirs."""
-        async with tenant_transaction(engine, admin.tenant_id) as conn:
-            await set_skill(conn, admin.tenant_id, user_id, kind, body.level,
-                            set_by=admin.user_id, note=body.note)  # fmt: skip
+        try:
+            async with tenant_transaction(engine, admin.tenant_id) as conn:
+                await set_skill(conn, admin.tenant_id, user_id, kind, body.level,
+                                set_by=admin.user_id, note=body.note)  # fmt: skip
+        except NotAMember as error:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from None
         return Response(status_code=status.HTTP_204_NO_CONTENT)

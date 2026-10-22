@@ -64,6 +64,7 @@ from fishsense_services_api.camera_sql import (
     RECTIFIABLE_MISSION,
 )
 from fishsense_services_api.clustering_store import VALID_LASER
+from fishsense_services_api.review_store import reviewed_in_app
 from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
@@ -129,8 +130,20 @@ _RENDERABLE_CAMERA_MODEL = RECTIFIABLE_CAMERA_MODEL
 _RENDERABLE = RECTIFIABLE_MISSION
 
 
+#: Capture `c` has its head/tail label: a live row in a project, or one from
+#: the app (a frame with a head/tail review takes its labels from there; the
+#: review superseded its row, 0062).
+_LABELLED = f"""(EXISTS (
+    SELECT 1 FROM head_tail_labels h
+    WHERE h.tenant_id = c.tenant_id
+      AND h.capture_id = c.id
+      AND h.ls_project_id IS NOT NULL
+      AND NOT h.superseded
+) OR {reviewed_in_app("head_tail")})"""
+
+
 #: Dive `d` has stage-5.1 work: a canonical capture with a valid laser and no
-#: live head/tail row in a project, or a canonical capture whose live row is
+#: head/tail label (`_LABELLED`), or a canonical capture whose live row is
 #: flagged for a redraw. Named, with the cohorts below, so
 #: `dive_pipeline_status` reads the same predicates (migration
 #: 0029).
@@ -139,13 +152,7 @@ HEADTAIL_PREPROCESS_WORK = f"""EXISTS (
     WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id
       AND c.is_canonical
       AND (
-          ({_LIVE_LASER} AND NOT EXISTS (
-              SELECT 1 FROM head_tail_labels h
-              WHERE h.tenant_id = c.tenant_id
-                AND h.capture_id = c.id
-                AND h.ls_project_id IS NOT NULL
-                AND NOT h.superseded
-          ))
+          ({_LIVE_LASER} AND NOT {_LABELLED})
           OR EXISTS (
               SELECT 1 FROM head_tail_labels h
               WHERE h.tenant_id = c.tenant_id
@@ -377,11 +384,7 @@ async def headtail_preprocess_inputs(
                        (SELECT min(l.number) FROM laser_labels l
                         WHERE l.tenant_id = c.tenant_id AND l.capture_id = c.id
                           AND {VALID_LASER}) AS first_laser,
-                       EXISTS (
-                           SELECT 1 FROM head_tail_labels h
-                           WHERE h.tenant_id = c.tenant_id AND h.capture_id = c.id
-                             AND h.ls_project_id IS NOT NULL AND NOT h.superseded
-                       ) AS labelled,
+                       {_LABELLED} AS labelled,
                        EXISTS (
                            SELECT 1 FROM head_tail_labels h
                            WHERE h.tenant_id = c.tenant_id AND h.capture_id = c.id

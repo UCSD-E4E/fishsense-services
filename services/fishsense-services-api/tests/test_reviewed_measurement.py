@@ -30,6 +30,13 @@ async def _expert(owner_engine, app_engine, lab):
                 text("INSERT INTO users (sub) VALUES ('rev') RETURNING id")
             )
         ).scalar_one()
+        await conn.execute(
+            text(
+                "INSERT INTO memberships (tenant_id, user_id, role) "
+                "VALUES (:t, :u, 'member')"
+            ),
+            {"t": lab, "u": user},
+        )
     async with tenant_transaction(app_engine, lab) as conn:
         for kind in ("laser", "head_tail"):
             await set_skill(conn, lab, user, kind, "expert", set_by=user)
@@ -99,3 +106,31 @@ async def test_a_high_priority_missions_work_is_unchanged(owner_engine, app_engi
         reviewed,
         other,
     }
+
+
+async def test_the_status_shows_a_parked_missions_reviewed_frames_as_pending(
+    owner_engine, app_engine
+):
+    """`dive_pipeline_status` says what stage 14 will pick (0062)."""
+    lab = await tenant(owner_engine)
+    parked, _ = await calibrated_dive(owner_engine, lab, priority="low")
+    reviewed = await measurable_capture(owner_engine, lab, parked)
+    reviewer = await _expert(owner_engine, app_engine, lab)
+    assert not await _measurement_pending(app_engine, lab, parked)
+
+    await _review_head_tail(owner_engine, app_engine, lab, reviewed, reviewer)
+
+    assert await _measurement_pending(app_engine, lab, parked)
+
+
+async def _measurement_pending(app_engine, lab, mission_id) -> bool:
+    async with tenant_transaction(app_engine, lab) as conn:
+        return (
+            await conn.execute(
+                text(
+                    "SELECT s.measurement_pending FROM dive_pipeline_status s "
+                    "JOIN missions m ON m.number = s.dive_id WHERE m.id = :m"
+                ),
+                {"m": mission_id},
+            )
+        ).scalar_one()

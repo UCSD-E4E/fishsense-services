@@ -124,3 +124,38 @@ async def test_someone_outside_the_tenant_cant_review(
                                  json=_fix(render), headers=_bearer(OUTSIDER))  # fmt: skip
 
     assert response.status_code == 404
+
+
+async def test_a_review_of_no_such_frame_is_not_found(
+    client, seed_memberships, owner_engine
+):
+    await _setup(seed_memberships, owner_engine)
+
+    response = await client.post(
+        f"/tenants/lab/captures/{__import__('uuid').uuid4()}/reviews",
+        json={
+            "kind": "species",
+            "action": "fix",
+            "scientific_name": "Scarus coeruleus",
+        },
+        headers=_bearer(MEMBER),
+    )
+
+    assert response.status_code == 404, response.text
+
+
+async def test_a_skill_for_someone_outside_the_tenant_is_not_found(
+    client, seed_memberships, owner_engine
+):
+    await _setup(seed_memberships, owner_engine)
+    async with owner_engine.connect() as conn:
+        outsider = (
+            await conn.execute(
+                text("SELECT id FROM users WHERE sub = :s"), {"s": OUTSIDER}
+            )
+        ).scalar_one()
+
+    response = await client.put(f"/tenants/lab/members/{outsider}/skills/laser",
+                                json={"level": "expert"}, headers=_bearer(ADMIN))  # fmt: skip
+
+    assert response.status_code == 404, response.text
