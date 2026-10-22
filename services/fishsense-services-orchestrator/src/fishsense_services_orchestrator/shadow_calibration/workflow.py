@@ -2,22 +2,32 @@
 
 `ShadowCalibrationForMissionWorkflow` (also run by hand): resolve the
 mission's slate frames; wake the GPU and segment them with SAM 3.1 (children
-on the GPU queue, `SEGMENT_CHUNK` frames each, under the 2 MB payload limit);
-fit both dot sources and both variants on the light queue; store the results
-in the shadow tables. Nothing it writes is read by production.
+on the GPU queue, `SEGMENT_CHUNK` frames each, under the 2 MB payload limit,
+in parallel); fit both dot sources and both variants on the light queue;
+store the results in the shadow tables. Nothing it writes is read by
+production. Review of #261:
+
+* a slate frame with no render yet means the mission waits
+  (``renders_pending``, nothing stored): a fit on part of its frames would be
+  stored as final;
+* a mission with no dot to segment wakes no GPU but is still fitted, so its
+  refusals are stored and the cohort moves past it.
 
 `ShadowCalibrationParentWorkflow` (hourly, when enabled): one mission after
 another, calibrated missions first, until none is left or the drain window
-has passed.
+has passed. A mission that fails is reported and passed over; only a GPU
+that won't come up stops the drain.
 """
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 from typing import List, Optional
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
+from temporalio.exceptions import ChildWorkflowError, WorkflowAlreadyStartedError
 
 with workflow.unsafe.imports_passed_through():
     import annotated_types  # noqa: F401  pylint: disable=unused-import
@@ -44,6 +54,7 @@ with workflow.unsafe.imports_passed_through():
 
 __all__ = [
     "DRAIN_WINDOW",
+    "MISSION_TIMEOUT",
     "SEGMENT_CHUNK",
     "ShadowCalibrationForMissionWorkflow",
     "ShadowCalibrationParentWorkflow",
@@ -56,6 +67,11 @@ _DB = dict(schedule_to_close_timeout=timedelta(minutes=15),
                                     non_retryable_error_types=["NotAMember"]))  # fmt: skip
 #: How long after its start a parent run may begin another mission.
 DRAIN_WINDOW = timedelta(minutes=50)
+#: One mission's run, bounded inside the parent's run timeout (the
+#: schedule's: DRAIN_WINDOW + 12 h).
+MISSION_TIMEOUT = timedelta(hours=11)
+#: Each SAM child; the chunks run in parallel.
+SEGMENT_TIMEOUT = timedelta(hours=6)
 
 
 @workflow.defn(name="ShadowCalibrationForMissionWorkflow")
@@ -66,29 +82,31 @@ class ShadowCalibrationForMissionWorkflow:
         plan: ShadowPlan = await workflow.execute_activity(
             "resolve_shadow_calibration_inputs", target, result_type=ShadowPlan, **_DB
         )
-        if not plan.segment.frames:
-            workflow.logger.info("shadow mission=%s: no rendered slate frame with a dot",
-                                 target.mission_id)  # fmt: skip
-            return "no_frames"
-        if await wake_gpu_processor() != MODE_GPU:
-            workflow.logger.warning(
-                "shadow mission=%s: no GPU; skipped", target.mission_id
-            )
-            return "no_gpu"
+        if plan.unrendered:
+            workflow.logger.info("shadow mission=%s: %d slate frames not rendered yet",
+                                 target.mission_id, plan.unrendered)  # fmt: skip
+            return "renders_pending"
         segments: List[SlateSegment] = []
         frames = plan.segment.frames
-        for n, at in enumerate(range(0, len(frames), SEGMENT_CHUNK)):
-            segments += await workflow.execute_child_workflow(
-                "SegmentSlateFramesWorkflow",
-                plan.segment.model_copy(
-                    update={"frames": frames[at : at + SEGMENT_CHUNK]}
-                ),
-                id=f"shadow-segment-{target.mission_id}-{n}",
-                task_queue=PROCESSOR_GPU_TASK_QUEUE,
-                execution_timeout=timedelta(hours=6),
-                id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
-                result_type=List[SlateSegment],
-            )
+        if frames:
+            if await wake_gpu_processor() != MODE_GPU:
+                workflow.logger.warning("shadow mission=%s: no GPU; skipped",
+                                        target.mission_id)  # fmt: skip
+                return "no_gpu"
+            chunks = await asyncio.gather(*[
+                workflow.execute_child_workflow(
+                    "SegmentSlateFramesWorkflow",
+                    plan.segment.model_copy(
+                        update={"frames": frames[at : at + SEGMENT_CHUNK]}),
+                    id=f"shadow-segment-{target.mission_id}-{n}",
+                    task_queue=PROCESSOR_GPU_TASK_QUEUE,
+                    execution_timeout=SEGMENT_TIMEOUT,
+                    id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
+                    result_type=List[SlateSegment],
+                )
+                for n, at in enumerate(range(0, len(frames), SEGMENT_CHUNK))
+            ])  # fmt: skip
+            segments = [s for chunk in chunks for s in chunk]
         payload: FitShadowCalibrationInput = await workflow.execute_activity(
             "assemble_shadow_fit", args=(plan, segments),
             result_type=FitShadowCalibrationInput, **_DB,
@@ -125,13 +143,21 @@ class ShadowCalibrationParentWorkflow:
             if target is None:
                 break
             tried.append(target.mission_id)
-            outcome = await workflow.execute_child_workflow(
-                ShadowCalibrationForMissionWorkflow.run,
-                target,
-                id=f"shadow-calibration-{target.mission_id}",
-                id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
-                result_type=str,
-            )
+            try:
+                outcome = await workflow.execute_child_workflow(
+                    ShadowCalibrationForMissionWorkflow.run,
+                    target,
+                    id=f"shadow-calibration-{target.mission_id}",
+                    execution_timeout=MISSION_TIMEOUT,
+                    id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
+                    result_type=str,
+                )
+            except ChildWorkflowError as exc:
+                workflow.logger.warning("shadow mission=%s failed: %s",
+                                        target.mission_id, exc.cause or exc)  # fmt: skip
+                outcome = "failed"
+            except WorkflowAlreadyStartedError:
+                outcome = "running_elsewhere"  # a run by hand holds it
             done.append(f"{target.mission_id}:{outcome}")
             if outcome == "no_gpu":
                 break  # every mission behind it would wait out the wake too

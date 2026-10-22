@@ -112,6 +112,9 @@ class ShadowFitFrame(BaseModel):
     sam_score: Optional[float] = None
     mask_area_px: Optional[float] = None
     size: Optional[float] = None
+    #: ``decode_failed`` when SAM could not read the frame's render: the
+    #: frame is left out under that reason, not counted as no mask.
+    segment_status: Optional[str] = None
     capture_number: Optional[int] = None
     captured_at: Optional[datetime] = None
 
@@ -211,5 +214,7 @@ class ShadowCalibrationOut(BaseModel):
 
 
 class ShadowFitResult(BaseModel):
-    mission_id: UUID
+    model_config = ConfigDict(validate_by_name=True)
+
+    mission_id: Annotated[UUID, renamed_from("dive_id", "mission_id")]
     calibrations: List[ShadowCalibrationOut]

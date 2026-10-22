@@ -102,12 +102,16 @@ _LABELLED_SLATE = """
 """
 
 #: Each capture's lowest live laser label: laser_calibration_store's
-#: `_LOWEST_LIVE_DOT`, with its id and source.
+#: `_LOWEST_LIVE_DOT`, with its id and source, and only the mission's
+#: captures scanned. Kept equal to production's by
+#: test_the_label_dots_are_the_ones_productions_calibration_reads.
 _LOWEST_LIVE_DOT_WITH_SOURCE = """
     SELECT DISTINCT ON (l.capture_id) l.capture_id, l.x, l.y, l.id, l.source
     FROM laser_labels l
     WHERE l.tenant_id = :t AND NOT l.superseded
       AND l.x IS NOT NULL AND l.y IS NOT NULL
+      AND l.capture_id IN (SELECT id FROM captures
+                           WHERE tenant_id = :t AND mission_id = :d)
     ORDER BY l.capture_id, l.number
 """
 
@@ -164,9 +168,11 @@ async def shadow_calibration_inputs(
                 frame_source=("both" if r.labelled and by_detector
                               else "label" if r.labelled else "detector"),
                 slate_probability=detected.get(r.id),
-                label_dot=None if r.lx is None else (float(r.lx), float(r.ly)),
-                label_id=r.label_id,
-                label_source=r.label_source,
+                # Production's slate fit reads slate-labelled frames only.
+                label_dot=(None if r.lx is None or not r.labelled
+                           else (float(r.lx), float(r.ly))),
+                label_id=r.label_id if r.labelled else None,
+                label_source=r.label_source if r.labelled else None,
                 detector_dot=(None if r.laser_x is None
                               else (float(r.laser_x), float(r.laser_y))),
                 detector_confidence=(None if r.laser_confidence is None

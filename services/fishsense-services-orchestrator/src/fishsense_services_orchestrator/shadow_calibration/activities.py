@@ -6,8 +6,11 @@
 - `resolve_shadow_calibration_inputs`: its slate frames, both dots, the line,
   the camera and the reference, read-only, and each frame's render by
   presigned GET (the render stage's, at its version under the mission's
-  camera). A frame with no render yet is left out and counted.
+  camera). A slate frame with no render yet makes the mission wait.
 - `assemble_shadow_fit`: the fit's payload, from the plan and SAM's results.
+  A frame SAM never answered for is an outage, not a frame with no mask: the
+  mission fails, to be tried again, rather than stored short (review of
+  #261); a render SAM could not decode is marked so.
 - `persist_shadow_calibration`: the fit's results, into the shadow tables
   only.
 """
@@ -19,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from temporalio import activity
+from temporalio.exceptions import ApplicationError
 
 from fishsense_services_api.shadow_calibration_store import (
     ShadowCalibrationRow,
@@ -54,7 +58,7 @@ class ShadowPlan:
 
     segment: SegmentSlateFramesInput
     fit: FitShadowCalibrationInput
-    #: Slate frames left out for want of a render.
+    #: Slate frames with no render yet: the mission waits for them.
     unrendered: int = 0
     #: Per frame (by capture), which `dots` index each source's dot is.
     dot_index: Dict[str, Dict[str, int]] = field(default_factory=dict)
@@ -127,7 +131,7 @@ class ShadowCalibrationActivities:
                     dot_confidence=f.detector_confidence))  # fmt: skip
         if len(rendered) < len(frames):
             activity.logger.warning(
-                "mission=%s: %d of %d slate frames have no render yet; left out",
+                "mission=%s: %d of %d slate frames have no render yet; it waits",
                 target.mission_id, len(frames) - len(rendered), len(frames),
             )  # fmt: skip
         return ShadowPlan(
@@ -155,20 +159,31 @@ class ShadowCalibrationActivities:
     async def assemble_shadow_fit(
         self, plan: ShadowPlan, segments: List[SlateSegment]
     ) -> FitShadowCalibrationInput:
-        """SAM's answer under each frame's dot, onto the fit's frames. A frame
-        SAM never answered for (left out after its tries, or its render gone)
-        stays with no size: the fit counts it as no mask at the dot."""
-        by_capture = {str(s.capture_id): s for s in segments if s.status == "segmented"}
+        """SAM's answer under each frame's dot, onto the fit's frames."""
+        answered = {str(s.capture_id): s for s in segments
+                    if s.status in ("segmented", "decode_failed")}  # fmt: skip
+        missing = [f.capture_id for f in plan.segment.frames
+                   if str(f.capture_id) not in answered]  # fmt: skip
+        if missing:
+            raise ApplicationError(
+                f"mission {plan.fit.mission_id}: SAM answered for "
+                f"{len(plan.segment.frames) - len(missing)} of "
+                f"{len(plan.segment.frames)} slate frames",
+                type="SegmentationIncomplete", non_retryable=True,
+            )  # fmt: skip
+        by_capture = {k: s for k, s in answered.items() if s.status == "segmented"}
         models = {s.sam_model for s in by_capture.values() if s.sam_model}
         scales = [s.render_scale for s in by_capture.values() if s.render_scale]
         frames = {}
         for source, fs in plan.fit.frames.items():
             out = []
             for f in fs:
-                seg = by_capture.get(str(f.capture_id))
-                d = (None if seg is None
-                     else seg.dots[plan.dot_index[str(f.capture_id)][source]])  # fmt: skip
-                out.append(f.model_copy(update={} if d is None else {
+                seg = answered[str(f.capture_id)]
+                if seg.status == "decode_failed":
+                    out.append(f.model_copy(update={"segment_status": "decode_failed"}))
+                    continue
+                d = seg.dots[plan.dot_index[str(f.capture_id)][source]]
+                out.append(f.model_copy(update={
                     "sam_prompt": d.prompt, "sam_score": d.score,
                     "mask_area_px": d.mask_area_px, "size": d.size}))  # fmt: skip
             frames[source] = out

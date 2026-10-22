@@ -112,7 +112,8 @@ class DetectorGate:
 
 def _ransac_line(xy: np.ndarray, rng, tol: float, iters: int = 500):
     """size_constancy_sam.prediction_lines: RANSAC, then TLS through the
-    inliers; u oriented to negative y."""
+    inliers; u oriented to negative y. None when no two points are a pixel
+    apart: coincident dots define no line (review of #261)."""
     best = None
     for _ in range(iters):
         i, j = rng.choice(len(xy), 2, replace=False)
@@ -123,6 +124,8 @@ def _ransac_line(xy: np.ndarray, rng, tol: float, iters: int = 500):
         inl = np.abs(xy @ nn - nn @ xy[i]) <= tol
         if best is None or inl.sum() > best.sum():
             best = inl
+    if best is None:
+        return None
     q = xy[best]
     m = q.mean(0)
     u = np.linalg.svd(q - m)[2][0]
@@ -135,14 +138,23 @@ def detector_gate(
     slate_dots: Sequence[tuple],
     mission_dots: np.ndarray,
     thresholds: Thresholds = COMMITTED,
-) -> DetectorGate:
+) -> Optional[DetectorGate]:
     """The gate over a mission's detector dots. `slate_dots` are
     ``(capture, x, y, confidence)`` on its slate frames; `mission_dots` its
-    every frame's ``(x, y, confidence)``, the detector line's population."""
+    every frame's ``(x, y, confidence)``, the detector line's population.
+    None when the confident dots define no line (fewer than two, or all at
+    one pixel)."""
     th = thresholds
     md = np.asarray(mission_dots, float).reshape(-1, 3)
     confident = md[md[:, 2] >= th.min_confidence][:, :2]
-    u, off, inl = _ransac_line(confident, np.random.default_rng(0), th.off_line_px)
+    line = (
+        _ransac_line(confident, np.random.default_rng(0), th.off_line_px)
+        if len(confident) >= 2
+        else None
+    )
+    if line is None:
+        return None
+    u, off, inl = line
     n = np.array([-u[1], u[0]])
     kept, rejected, off_dots = [], {}, []
     for capture, x, y, conf in slate_dots:
@@ -155,10 +167,10 @@ def detector_gate(
             kept.append(capture)
     second = 0
     if len(off_dots) >= 2:
-        _, _, rin = _ransac_line(
+        second_line = _ransac_line(
             np.array(off_dots, float), np.random.default_rng(0), th.off_line_px
         )
-        second = int(rin.sum())
+        second = 0 if second_line is None else int(second_line[2].sum())
     ambiguous = second >= max(th.second_line_min, th.second_line_share * len(kept))
     return DetectorGate(
         u=u, offset=off, line_points=int(inl.sum()), line_of=len(confident),

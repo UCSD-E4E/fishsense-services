@@ -122,6 +122,25 @@ with no edits to shared files beyond registering it.
      numpy and scipy).
   5. `persist_shadow_calibration`, which writes the shadow tables (§4) in one
      transaction.
+- **As built (review of #261):**
+  - The labels source takes **slate-labelled frames only**, as production's
+    slate fit does. A frame only the presence detector calls slate enters the
+    detector source alone.
+  - A mission with any slate frame not yet rendered **waits**
+    (`renders_pending`, nothing stored). A fit on part of its frames would be
+    stored as final. The stage does not render; renders come from the render
+    stage or the automatic track.
+  - Every fitted mission stores all four rows (source × variant). A source
+    with no dot is refused `no_dots`; detector dots whose confident mission
+    dots define no line are refused `no_detector_line`. A mission with no dot
+    wakes no GPU.
+  - A frame SAM never answered for fails the mission, to be retried. A render
+    SAM could not decode is left out as `decode_failed`, and not counted as
+    no mask.
+  - The SAM chunks run in parallel, and one mission's run is bounded at 11 h.
+    A mission that fails is reported, and the parent goes on to the next.
+  - SAM encodes each render once and asks it both prompts. On the pool this
+    gave identical masks on 258/258 frames, in 58% of the time.
 - **Flag:** `ShadowCalibrationSettings` (env prefix
   `FISHSENSE_SHADOW_CALIBRATION_`), `enabled: bool = False`. Off, the stage has
   **no schedule**. Its workflows and activities stay registered so one mission

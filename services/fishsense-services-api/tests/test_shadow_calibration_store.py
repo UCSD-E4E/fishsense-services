@@ -159,6 +159,27 @@ async def test_slate_frames_are_labelled_or_detected_and_say_which(
     ] == pytest.approx(0.9)
 
 
+async def test_a_frame_only_the_detector_calls_slate_has_no_label_dot(
+    owner_engine, app_engine
+):
+    """Production's slate fit reads slate-labelled frames only, so the labels
+    source does too (review of #261): a laser label on a frame only the
+    presence detector calls slate stays out of it."""
+    lab = await tenant(owner_engine)
+    m = await _mission(owner_engine, lab)
+    frame = await capture(owner_engine, lab, m)
+    await slate_presence(owner_engine, lab, frame, probability=0.9)
+    await laser_label(owner_engine, lab, frame, x=2.0, y=3.0, project=71)
+
+    (f,) = (
+        await _in(app_engine, lab, shadow_calibration_inputs, m, headtail_version=HV,
+                  slate_frames=slate_frames)  # fmt: skip
+    ).frames
+
+    assert f.frame_source == "detector"
+    assert (f.label_dot, f.label_id, f.label_source) == (None, None, None)
+
+
 async def test_the_label_dot_is_productions_lowest_live_one_whatever_its_source(
     owner_engine, app_engine
 ):

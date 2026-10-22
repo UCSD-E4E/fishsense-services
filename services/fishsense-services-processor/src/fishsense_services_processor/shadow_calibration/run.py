@@ -13,6 +13,12 @@ and for each variant: ``port`` (the script: no gate, no trim, no refusal but
 too few frames to fit at all) and ``gated`` (§13's gate, trim and refusals).
 Every field the backfill report needs is filled here; the orchestrator only
 stores it.
+
+Every mission gets all four rows (review of #261): a source with no dot is
+refused ``no_dots``, detector dots with no detector line ``no_detector_line``
+-- a mission with nothing stored would be picked again every hour. A frame
+whose render SAM could not decode is left out of both variants as
+``decode_failed``, not counted as no mask.
 """
 
 from __future__ import annotations
@@ -80,26 +86,50 @@ def _frame_out(f: ShadowFitFrame, **extra) -> ShadowFrameOut:
                                            - {"used", "rejected_reason"}), **extra})  # fmt: skip
 
 
-def _calibration(payload, source, variant, *, u, off, line_source, frames_out,
-                 result, gate=None) -> ShadowCalibrationOut:  # fmt: skip
-    fit = result.fit
+def _rejected_counts(frames_out) -> dict[str, int]:
     rejected: dict[str, int] = {}
     for f in frames_out:
         if not f.used:
             rejected[f.rejected_reason] = rejected.get(f.rejected_reason, 0) + 1
-    ranges = list(result.ranges_m.values())
-    out = dict(
-        dot_source=source, variant=variant, outcome=result.outcome,
-        refusal_reason=result.refusal_reason, refusals=list(result.refusals),
-        o_mag_m=O_DESIGN_M, frames_used=len(result.used),
+    return rejected
+
+
+def _common(payload, source, variant) -> dict:
+    return dict(
+        dot_source=source, variant=variant, o_mag_m=O_DESIGN_M,
         sam_model=payload.sam_model, sam_prompts=list(SHADOW_SAM_PROMPTS),
         sam_threshold=SHADOW_SAM_THRESHOLD, render_long_side=SHADOW_RENDER_LONG_SIDE,
         algorithm_version=SHADOW_ALGORITHM_VERSION, code_version=_code_version(),
-        line_direction=[float(v) for v in u], line_offset_px=float(off),
-        line_source=line_source, camera_calibration_id=payload.camera_calibration_id,
+        camera_calibration_id=payload.camera_calibration_id,
         reference_laser_calibration_id=payload.reference_laser_calibration_id,
         reference_borrowed=payload.reference_borrowed,
-        frames_rejected=rejected, lever_m=result.lever_m,
+    )  # fmt: skip
+
+
+def _refused(payload, source, reason, frames: list[ShadowFitFrame]) -> list:
+    """Both variants of a source with nothing to fit, every frame listed."""
+    out = []
+    for variant in ("port", "gated"):
+        frames_out = [_frame_out(f, used=False, rejected_reason=reason) for f in frames]
+        out.append(ShadowCalibrationOut(
+            **_common(payload, source, variant), outcome="refused",
+            refusal_reason=reason, refusals=[reason], frames_used=0,
+            frames_rejected=_rejected_counts(frames_out), frames=frames_out,
+        ))  # fmt: skip
+    return out
+
+
+def _calibration(payload, source, variant, *, u, off, line_source, frames_out,
+                 result, gate=None) -> ShadowCalibrationOut:  # fmt: skip
+    fit = result.fit
+    ranges = list(result.ranges_m.values())
+    out = dict(
+        **_common(payload, source, variant), outcome=result.outcome,
+        refusal_reason=result.refusal_reason, refusals=list(result.refusals),
+        frames_used=len(result.used),
+        line_direction=[float(v) for v in u], line_offset_px=float(off),
+        line_source=line_source,
+        frames_rejected=_rejected_counts(frames_out), lever_m=result.lever_m,
         lever_m_production_offset=result.lever_m_production_offset,
         size_cv_pct=result.size_cv_pct, size_maxdev_pct=result.size_maxdev_pct,
         sam_score_min=result.sam_score_min, sam_score_median=result.sam_score_median,
@@ -137,9 +167,11 @@ def _variants(payload, source, frames: list[ShadowFitFrame], *, u, off, line_sou
     )
     seed = (payload.mission_number, _SEED[source])
     out = []
+    undecoded = {f.capture_id: "decode_failed" for f in frames
+                 if f.segment_status == "decode_failed"}  # fmt: skip
     for variant in ("port", "gated"):
         # The gate is the gated variant's: the port is the script, ungated.
-        rejected = pre_rejected if variant == "gated" else {}
+        rejected = {**(pre_rejected if variant == "gated" else {}), **undecoded}
         candidates = [Frame(capture_id=f.capture_id, x=f.dot_x, y=f.dot_y, size=f.size,
                             sam_score=f.sam_score, frame_source=f.frame_source)
                       for f in frames if f.capture_id not in rejected]  # fmt: skip
@@ -216,16 +248,23 @@ def run_shadow_fit(payload: FitShadowCalibrationInput) -> ShadowFitResult:
             source = "dots"
         calibrations += _variants(payload, "labels", labels, u=u, off=off,
                                   line_source=source, pre_rejected={})  # fmt: skip
+    else:
+        calibrations += _refused(payload, "labels", "no_dots", [])
     detector = [f for f in payload.frames.get("detector", []) if f.dot_x is not None]
-    confident = [
-        d for d in payload.mission_detector_dots if d[2] >= COMMITTED.min_confidence
-    ]
-    if detector and len(confident) >= 2:
-        gate = detector_gate(
+    gate = (
+        detector_gate(
             slate_dots=[(f.capture_id, f.dot_x, f.dot_y, f.dot_confidence or 0.0)
                         for f in detector],
             mission_dots=np.array(payload.mission_detector_dots, float),
         )  # fmt: skip
+        if detector
+        else None
+    )
+    if not detector:
+        calibrations += _refused(payload, "detector", "no_dots", [])
+    elif gate is None:
+        calibrations += _refused(payload, "detector", "no_detector_line", detector)
+    else:
         counts: dict[str, int] = {}
         for r in gate.rejected.values():
             counts[r] = counts.get(r, 0) + 1

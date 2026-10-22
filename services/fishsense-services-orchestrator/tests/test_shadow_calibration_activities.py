@@ -42,7 +42,7 @@ def _frame(*, label=True, detector=True):
     return ShadowFrame(
         capture_id=uuid.uuid4(), capture_number=3,
         captured_at=datetime(2024, 1, 1, tzinfo=timezone.utc), checksum="c",
-        frame_source="slate_label", slate_probability=None,
+        frame_source="both", slate_probability=None,
         label_dot=(10.0, 20.0) if label else None,
         label_id=uuid.uuid4() if label else None,
         label_source="label_studio" if label else None,
@@ -170,13 +170,14 @@ async def test_resolve_with_no_frames_asks_for_no_renders():
 async def test_assemble_puts_each_answer_under_its_own_dot():
     both, missing = _frame(), _frame()
     acts, _ = _activities([both, missing])
+    lost = SlateSegment(capture_id=missing.capture_id, status="decode_failed")
     plan = await acts.resolve_shadow_calibration_inputs(TARGET)
     segments = [SlateSegment(
         capture_id=both.capture_id, status="segmented", render_scale=2.5,
         sam_model="sam3.1",
         dots=[DotSegment(prompt="white board", score=0.8, mask_area_px=100.0, size=10.0),
               DotSegment(prompt="slate", score=0.6, mask_area_px=400.0, size=20.0)],
-    )]  # fmt: skip
+    ), lost]  # fmt: skip
     fit = await acts.assemble_shadow_fit(plan, segments)
 
     label = {f.capture_id: f for f in fit.frames["labels"]}
@@ -206,7 +207,7 @@ async def test_persist_stores_every_result_with_its_frames():
         frames_used=0, sam_model="m", sam_prompts=["slate"], sam_threshold=0.3,
         render_long_side=1600, algorithm_version="1", code_version="x",
         refusal_reason="too_few_frames",
-        frames=[ShadowFrameOut(capture_id=uuid.uuid4(), frame_source="slate_label",
+        frames=[ShadowFrameOut(capture_id=uuid.uuid4(), frame_source="both",
                                used=False, rejected_reason="no_mask")],
     )  # fmt: skip
     assert (
@@ -217,3 +218,35 @@ async def test_persist_stores_every_result_with_its_frames():
     )
     (row,) = catalog.persisted
     assert row.refusal_reason == "too_few_frames" and len(row.frames) == 1
+
+
+async def test_assemble_refuses_a_frame_sam_never_answered_for():
+    """Review of #261: a frame SAM never answered for (its render gone, every
+    try failed) is an outage, not a frame with no mask: the mission fails and
+    is tried again, rather than stored short."""
+    from temporalio.exceptions import ApplicationError
+
+    answered, lost = _frame(), _frame()
+    acts, _ = _activities([answered, lost])
+    plan = await acts.resolve_shadow_calibration_inputs(TARGET)
+    seg = SlateSegment(capture_id=answered.capture_id, status="segmented",
+                       render_scale=2.5, sam_model="m",
+                       dots=[DotSegment(), DotSegment()])  # fmt: skip
+    gone = SlateSegment(capture_id=lost.capture_id, status="render_unavailable")
+    for segments in ([seg], [seg, gone]):
+        with pytest.raises(ApplicationError) as e:
+            await acts.assemble_shadow_fit(plan, segments)
+        assert e.value.type == "SegmentationIncomplete"
+
+
+async def test_assemble_marks_a_render_sam_could_not_decode():
+    ok, bad = _frame(), _frame()
+    acts, _ = _activities([ok, bad])
+    plan = await acts.resolve_shadow_calibration_inputs(TARGET)
+    fit = await acts.assemble_shadow_fit(plan, [
+        SlateSegment(capture_id=ok.capture_id, status="segmented", render_scale=2.5,
+                     sam_model="m", dots=[DotSegment(), DotSegment()]),
+        SlateSegment(capture_id=bad.capture_id, status="decode_failed"),
+    ])  # fmt: skip
+    status = {f.capture_id: f.segment_status for f in fit.frames["labels"]}
+    assert status == {ok.capture_id: None, bad.capture_id: "decode_failed"}

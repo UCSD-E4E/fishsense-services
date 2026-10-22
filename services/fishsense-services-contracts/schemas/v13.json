@@ -2243,6 +2243,18 @@
             "default": null,
             "title": "Sam Score"
           },
+          "segment_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Segment Status"
+          },
           "size": {
             "anyOf": [
               {
@@ -8247,6 +8259,18 @@
         "default": null,
         "title": "Sam Score"
       },
+      "segment_status": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Segment Status"
+      },
       "size": {
         "anyOf": [
           {
@@ -8952,14 +8976,14 @@
         "title": "Calibrations",
         "type": "array"
       },
-      "mission_id": {
+      "dive_id": {
         "format": "uuid",
-        "title": "Mission Id",
+        "title": "Dive Id",
         "type": "string"
       }
     },
     "required": [
-      "mission_id",
+      "dive_id",
       "calibrations"
     ],
     "title": "ShadowFitResult",

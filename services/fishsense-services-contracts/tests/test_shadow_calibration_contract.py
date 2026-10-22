@@ -29,3 +29,27 @@ def test_a_frame_names_its_render_and_its_dots_and_the_old_wire_name_parses():
     )
     assert payload.frames[0].dots == [[1.0, 2.0], [3.0, 4.0]]
     assert SlateSegment(capture_id=uuid.uuid4(), status="render_unavailable").dots == []
+
+
+def test_the_result_keeps_the_wire_name_as_every_payload_does():
+    """Review of #261: the result names its mission as the inputs do."""
+    from uuid import uuid4
+
+    from fishsense_services_contracts.shadow_calibration import ShadowFitResult
+
+    m = uuid4()
+    wire = ShadowFitResult(mission_id=m, calibrations=[]).model_dump(
+        mode="json", by_alias=True
+    )
+    assert wire == {"dive_id": str(m), "calibrations": []}
+    assert ShadowFitResult.model_validate(wire).mission_id == m
+
+
+def test_a_fit_frame_says_when_its_render_could_not_be_decoded():
+    from uuid import uuid4
+
+    from fishsense_services_contracts.shadow_calibration import ShadowFitFrame
+
+    f = ShadowFitFrame(capture_id=uuid4(), frame_source="label")
+    assert f.segment_status is None
+    assert f.model_copy(update={"segment_status": "decode_failed"}).segment_status

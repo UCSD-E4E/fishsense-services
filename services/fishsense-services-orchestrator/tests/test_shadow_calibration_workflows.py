@@ -14,6 +14,7 @@ from datetime import timedelta
 from typing import List, Optional
 
 from temporalio import activity, workflow
+from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -46,10 +47,11 @@ EVENTS: list[tuple] = []
 SELECTS: list[tuple] = []
 
 
-def _plan(n):
+def _plan(n, unrendered=0):
     frames = [SegmentSlateFrame(capture_id=uuid.uuid4(), render_url="https://g/r?sig",
                                 dots=[[1.0, 2.0]]) for _ in range(n)]  # fmt: skip
     return ShadowPlan(
+        unrendered=unrendered,
         segment=SegmentSlateFramesInput(tenant_id=TENANT, mission_id=MISSION, frames=frames),
         fit=FitShadowCalibrationInput(tenant_id=TENANT, mission_id=MISSION,
                                       mission_number=7, camera_matrix=[[1.0]],
@@ -57,7 +59,9 @@ def _plan(n):
     )  # fmt: skip
 
 
-def _stubs(*, mode="gpu", frames=2, selected=TARGET):
+def _stubs(*, mode="gpu", frames=2, selected=TARGET, unrendered=0, broken=()):
+    """`broken`: missions whose resolve fails (a camera that isn't pinhole, a
+    tenant with no bucket)."""
     cohort = list(selected) if isinstance(selected, list) else None
 
     @activity.defn(name="select_next_mission_for_shadow_calibration")
@@ -72,7 +76,9 @@ def _stubs(*, mode="gpu", frames=2, selected=TARGET):
     @activity.defn(name="resolve_shadow_calibration_inputs")
     async def resolve(t: ShadowTarget) -> ShadowPlan:
         EVENTS.append(("resolve", t.mission_id))
-        return _plan(frames)
+        if t.mission_id in broken:
+            raise ApplicationError("not pinhole", type="ValueError", non_retryable=True)
+        return _plan(frames, unrendered)
 
     @activity.defn(name="assemble_shadow_fit")
     async def assemble(
@@ -165,17 +171,31 @@ async def test_one_mission_every_step_in_order():
 async def test_segments_in_chunks_under_the_payload_limit():
     n = 2 * sut.SEGMENT_CHUNK + 1
     await _run(ShadowCalibrationForMissionWorkflow, TARGET, frames=n)
-    children = [e for e in EVENTS if e[0] == "child" and "segment" in e[1]]
+    children = sorted(e for e in EVENTS if e[0] == "child" and "segment" in e[1])
     sizes = [str(sut.SEGMENT_CHUNK), str(sut.SEGMENT_CHUNK), "1"]
     assert children == [("child", f"shadow-segment-{MISSION}-{i}", k)
                         for i, k in enumerate(sizes)]  # fmt: skip
     assert ("assemble", n) in EVENTS
 
 
-async def test_nothing_to_segment_wakes_nothing():
-    assert (
-        await _run(ShadowCalibrationForMissionWorkflow, TARGET, frames=0) == "no_frames"
-    )
+async def test_nothing_to_segment_is_still_fitted_and_stored_without_a_gpu():
+    """Review of #261: a mission with no dot is stored (as refused) so the
+    cohort moves past it; it never wakes the GPU."""
+    assert await _run(ShadowCalibrationForMissionWorkflow, TARGET, frames=0) == "stored"
+    assert EVENTS == [
+        ("resolve", MISSION),
+        ("assemble", 0),
+        ("wake light",),
+        ("child", f"shadow-fit-{MISSION}", "0"),
+        ("persist", 0),
+    ]
+
+
+async def test_a_mission_with_unrendered_slate_frames_waits_and_stores_nothing():
+    """Review of #261: fitted on part of its frames, the stored result would
+    be final; the mission waits for its renders instead."""
+    outcome = await _run(ShadowCalibrationForMissionWorkflow, TARGET, unrendered=3)
+    assert outcome == "renders_pending"
     assert EVENTS == [("resolve", MISSION)]
 
 
@@ -200,3 +220,18 @@ async def test_parent_stops_when_no_gpu():
     done = await _run(ShadowCalibrationParentWorkflow, selected=[TARGET, other],
                       mode="unavailable")  # fmt: skip
     assert done == [f"{MISSION}:no_gpu"]
+
+
+async def test_one_failing_mission_does_not_stop_the_drain():
+    """Review of #261: the parent goes on past a mission that fails."""
+    bad, good = ShadowTarget(TENANT, uuid.uuid4()), ShadowTarget(TENANT, uuid.uuid4())
+    done = await _run(ShadowCalibrationParentWorkflow, selected=[bad, good],
+                      broken=(bad.mission_id,))  # fmt: skip
+    assert done == [f"{bad.mission_id}:failed", f"{good.mission_id}:stored"]
+
+
+async def test_a_pending_mission_does_not_stop_the_drain():
+    other = ShadowTarget(TENANT, uuid.uuid4())
+    done = await _run(ShadowCalibrationParentWorkflow, selected=[TARGET, other],
+                      unrendered=1)  # fmt: skip
+    assert done == [f"{MISSION}:renders_pending", f"{other.mission_id}:renders_pending"]

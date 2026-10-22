@@ -59,11 +59,17 @@ def _segmenter(path: str):
                 get_segmenter(path).model, confidence_threshold=SHADOW_SAM_THRESHOLD
             )
 
+    adapter = ScoredSam3Adapter(_PROCESSOR)
+    encoded: list = [None, None]  # (image, its encoder state)
+
     def segment(image, prompt):
-        # The adapter takes BGR, as the frames it was written for.
-        return ScoredSam3Adapter(_PROCESSOR, prompt=prompt).segment_scored(
-            image[:, :, ::-1]
-        )
+        # One encoder pass per image, every prompt asked of it (review of
+        # #261: "white board" wins 253 of the pool's 258 frames, so nearly
+        # every frame asks both). The adapter takes BGR, as the frames it was
+        # written for.
+        if encoded[0] is not image:
+            encoded[:] = [image, adapter.encoded(image[:, :, ::-1])]
+        return adapter.prompted(encoded[1], prompt)
 
     return segment
 

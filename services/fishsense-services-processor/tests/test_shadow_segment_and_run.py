@@ -207,3 +207,110 @@ def test_the_port_variant_is_ungated_on_detector_dots_too():
     assert port.outcome == "accepted" and port.gate == {}
     assert not any(f.rejected_reason == "off_line" for f in port.frames)
     assert gated.outcome == "refused" and gated.frames_rejected["off_line"] == 22
+
+
+ALL = {
+    ("labels", "port"),
+    ("labels", "gated"),
+    ("detector", "port"),
+    ("detector", "gated"),
+}
+
+
+def test_a_source_with_nothing_to_fit_is_stored_as_refused():
+    """Review of #261: a mission is done once it has a row per source and
+    variant; storing nothing would put it back in the cohort every hour."""
+    p = _payload(SESSIONS[62])
+    empty = p.model_copy(update={"frames": {"labels": [], "detector": []},
+                                 "mission_detector_dots": []})  # fmt: skip
+    result = _by(run_shadow_fit(empty))
+    assert set(result) == ALL
+    for c in result.values():
+        assert c.outcome == "refused" and c.refusal_reason == "no_dots"
+        assert c.frames == [] and c.frames_used == 0
+
+
+def test_detector_dots_with_no_detector_line_are_refused_and_listed():
+    p = _payload(SESSIONS[62])
+    few = p.model_copy(update={"mission_detector_dots": [[1.0, 2.0, 0.9]]})
+    result = _by(run_shadow_fit(few))
+    assert set(result) == ALL
+    for v in ("port", "gated"):
+        c = result[("detector", v)]
+        assert (c.outcome, c.refusal_reason) == ("refused", "no_detector_line")
+        assert c.frames and {f.rejected_reason for f in c.frames} == {
+            "no_detector_line"
+        }
+    assert result[("labels", "port")].outcome == "accepted"
+
+
+def test_coincident_detector_dots_give_no_line_rather_than_a_crash():
+    p = _payload(SESSIONS[62])
+    same = p.model_copy(update={"mission_detector_dots": [[5.0, 5.0, 0.9]] * 20})
+    c = _by(run_shadow_fit(same))[("detector", "gated")]
+    assert c.refusal_reason == "no_detector_line"
+
+
+def test_a_render_that_could_not_be_decoded_is_not_counted_as_no_mask():
+    """Review of #261: a frame SAM could not read says so, and stays out of
+    the no-mask share the sam_scores_low refusal reads."""
+    p = _payload(SESSIONS[62])
+    labels = p.frames["labels"]
+    bad = {f.capture_id for f in labels[:5]}
+    frames = [f.model_copy(update={"segment_status": "decode_failed", "size": None,
+                                   "sam_score": None, "sam_prompt": None})
+              if f.capture_id in bad else f for f in labels]  # fmt: skip
+    c = _by(run_shadow_fit(p.model_copy(update={"frames": {"labels": frames,
+                                                           "detector": []}})))  # fmt: skip
+    for v in ("port", "gated"):
+        out = c[("labels", v)]
+        assert {
+            f.capture_id for f in out.frames if f.rejected_reason == "decode_failed"
+        } == bad
+        assert "no_mask_at_dot" not in out.frames_rejected
+        assert out.no_mask_share == 0.0
+
+
+def test_the_segmenter_encodes_each_render_once_for_every_prompt(monkeypatch):
+    """Review of #261: SAM's image encoder runs once per frame, every prompt
+    asked of that encoding (on the pool, 258/258 frames identical to encoding
+    per prompt, in 58% of the time)."""
+    import contextlib
+    import sys
+    import types
+
+    from fishsense_services_processor.shadow_calibration import wiring
+
+    torch = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(is_available=lambda: False),
+        bfloat16=None,
+        autocast=lambda *a, **k: contextlib.nullcontext(),
+    )
+    monkeypatch.setitem(sys.modules, "torch", torch)
+
+    class _Processor:
+        def __init__(self):
+            self.calls = []
+
+        def set_image(self, image):
+            self.calls.append("encode")
+            return {}
+
+        def reset_all_prompts(self, state):
+            state.pop("masks", None)
+
+        def set_text_prompt(self, prompt, state):
+            self.calls.append(prompt)
+            state["masks"] = [np.ones((2, 2), bool)]
+            state["scores"] = np.array([0.7])
+            return state
+
+    proc = _Processor()
+    monkeypatch.setattr(wiring, "_PROCESSOR", proc)
+    seg = wiring._segmenter("unused")  # pylint: disable=protected-access
+    a, b = np.zeros((2, 2, 3), np.uint8), np.zeros((2, 2, 3), np.uint8)
+    for image in (a, b):
+        for prompt in SHADOW_SAM_PROMPTS:
+            ((mask, score),) = seg(image, prompt)
+            assert score == pytest.approx(0.7) and mask.all()
+    assert proc.calls == ["encode", *SHADOW_SAM_PROMPTS] * 2
