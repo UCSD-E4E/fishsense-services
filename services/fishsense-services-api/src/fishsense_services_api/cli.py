@@ -20,6 +20,10 @@ fishsense-services-api infer-deployments --tenant <id> [--together 398=400 ...]
                                     # dry run: deployments for legacy missions
                                     # from their folders and dates; --apply
                                     # <the dry run's fingerprint> writes them
+fishsense-services-api backfill-v1-measurement-inputs --tenant <id>
+                                    # dry run: link v1's measurements to the
+                                    # depth and labels that reproduce them;
+                                    # --apply <fingerprint>, as the owner
 fishsense-services-api serve-tenants [--apply]
                                     # dry run: make the orchestrator a member
                                     # of every tenant it isn't yet (add-tenant
@@ -111,6 +115,11 @@ from fishsense_services_api.settings import (
     V1MigrationSettings,
 )
 from fishsense_services_api.tenant_service import serve, unserved
+from fishsense_services_api.v1_measurement_inputs import (
+    V1InputsPlan,
+    apply_v1_inputs,
+    plan_v1_inputs,
+)
 from fishsense_services_api.v1_migration import (
     measurement_parity,
     migrate_v1,
@@ -270,6 +279,18 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="FINGERPRINT",
         help="write the plan whose dry run printed this fingerprint",
     )
+    v1_inputs = commands.add_parser(
+        "backfill-v1-measurement-inputs",
+        help="plan (and with --apply, write) the depth, laser label and head/tail "
+        "label of each v1 measurement, which v1 never recorded; a dry run by "
+        "default, as the schema owner",
+    )
+    v1_inputs.add_argument("--tenant", required=True, help="tenant id or slug")
+    v1_inputs.add_argument(
+        "--apply",
+        metavar="FINGERPRINT",
+        help="write the plan whose dry run printed this fingerprint",
+    )
     seed = commands.add_parser(
         "dev-seed",
         help="LOCAL ONLY: seed the UI harness's synthetic tenant (compose.ui.yml); "
@@ -307,6 +328,8 @@ async def main(argv: Sequence[str]) -> int:
         return await _backfill_mission_facts(args)
     if args.command == "infer-deployments":
         return await _infer_deployments(args)
+    if args.command == "backfill-v1-measurement-inputs":
+        return await _backfill_v1_inputs(args)
     if args.command == "dev-seed":
         return await _dev_seed(args)
     return 2  # unreachable: argparse rejects unknown commands
@@ -513,6 +536,62 @@ async def _backfill_mission_facts(args: argparse.Namespace) -> int:
             f"\nto write exactly this plan: backfill-mission-facts --tenant "
             f"{args.tenant} --ingested-before {args.ingested_before.isoformat()} "
             f"{again + ' ' if again else ''}--apply {plan.fingerprint}"
+        )
+        return 0
+    finally:
+        await engine.dispose()
+
+
+def format_v1_inputs_plan(plan: V1InputsPlan) -> str:
+    """The dry run's report: totals, how closely the links reproduce v1, then
+    every link that leaves the current results and every skip."""
+    leaving = [link for link in plan.links if link.leaves_current]
+    lines = [
+        f"{len(plan.links)} to link, {len(leaving)} of them leaving the current "
+        "results (a linked label is superseded)"
+    ]
+    if plan.links:
+        errors = sorted(link.relative_error for link in plan.links)
+        lines.append(
+            f"  recomputed vs v1's length, relative: median "
+            f"{errors[len(errors) // 2]:.1e}, worst {errors[-1]:.1e}"
+        )
+    for link in leaving:
+        lines.append(f"  leaves current: v1 measurement {link.v1_id}")
+    lines.append(f"{len(plan.skipped)} skipped")
+    for skip in plan.skipped:
+        lines.append(f"  v1 measurement {skip.v1_id}: {skip.reason}")
+    return "\n".join(lines)
+
+
+async def _backfill_v1_inputs(args: argparse.Namespace) -> int:
+    """Dry run unless --apply names the fingerprint of the plan reviewed; as
+    the schema owner, since the app role may not update `measurements`."""
+    settings = _settings(MigrationSettings)
+    if settings is None:
+        return 2
+    engine = create_async_engine(settings.migration_database_url.get_secret_value())
+    try:
+        tenant_id = await _tenant_id(engine, args.tenant)
+        if tenant_id is None:
+            print(f"unknown tenant {args.tenant!r}", file=sys.stderr)
+            return 1
+        if args.apply:
+            try:
+                async with tenant_transaction(engine, tenant_id) as conn:
+                    linked = await apply_v1_inputs(conn, tenant_id, expect=args.apply)
+            except PlanChanged as error:
+                print(f"nothing written: {error}", file=sys.stderr)
+                return 1
+            print(f"applied {args.apply}: linked {linked} v1 measurements")
+            return 0
+        async with tenant_transaction(engine, tenant_id) as conn:
+            plan = await plan_v1_inputs(conn, tenant_id)
+        print("DRY RUN: nothing written")
+        print(format_v1_inputs_plan(plan))
+        print(
+            f"\nto write exactly this plan: backfill-v1-measurement-inputs "
+            f"--tenant {args.tenant} --apply {plan.fingerprint}"
         )
         return 0
     finally:
