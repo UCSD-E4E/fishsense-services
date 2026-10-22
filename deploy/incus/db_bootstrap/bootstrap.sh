@@ -126,6 +126,12 @@ ALTER DATABASE :"db" OWNER TO fishsense_owner;
 REVOKE CONNECT, TEMPORARY ON DATABASE :"db" FROM PUBLIC;
 GRANT CONNECT ON DATABASE :"db"
     TO fishsense_app, fishsense_backup, fishsense_analytics, fishsense_research;
+-- No JIT for anyone in v2's database. Our views stack DISTINCT ONs whose
+-- estimated cost crosses the JIT thresholds, and compiling costs more than
+-- running: 9.0 s of the Today summary's 13.5 s on production (2026-10-21).
+-- Here rather than in postgres.conf, which reaches the running server only
+-- on a restart; this reaches every new session from the next converge.
+ALTER DATABASE :"db" SET jit = off;
 SQL
 
 # Superset's login reads the lab's rows: the canonical tenant policy reads

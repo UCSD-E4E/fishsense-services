@@ -22,13 +22,8 @@ from fishsense_services_api.tenant_stores import TenantStores
 
 def create_app_from_env() -> FastAPI:
     settings = Settings()
-    # No JIT: our views' estimated costs cross its thresholds, and compiling
-    # cost more than running -- 9.0 s of the Today summary's 13.5 s on
-    # production (2026-10-21).
     engine = create_async_engine(
-        settings.database_url.get_secret_value(),
-        pool_pre_ping=True,
-        connect_args={"server_settings": {"jit": "off"}},
+        settings.database_url.get_secret_value(), pool_pre_ping=True
     )
 
     def _issuer(issuer: str, audiences: tuple[str, ...], jwks_url: str):
