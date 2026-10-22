@@ -5,7 +5,7 @@
  * failure there (a missing AUTH_SECRET, an unreachable provider) would take
  * every page down, the public ones included. So a failure renders the shell
  * signed out, and is logged; Next's own control-flow errors still pass. Who is staff is the portal's own rule
- * (`isPortalAuthorized`), so Labelling never leads to a portal that refuses.
+ * (`isPortalAuthorized`), so Labeling never leads to a portal that refuses.
  */
 import { unstable_rethrow } from "next/navigation";
 import type { Session } from "next-auth";

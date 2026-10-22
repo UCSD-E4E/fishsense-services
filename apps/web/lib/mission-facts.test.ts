@@ -195,7 +195,7 @@ describe("form values", () => {
 describe("labels", () => {
   it("shows a port with what said so", () => {
     expect(portLabel("corrective_optic", "device_suffix")).toBe(
-      "Corrective optic (D-labelled device)",
+      "Corrective optic (D-labeled device)",
     );
     expect(portLabel("corrective_optic", "backfill")).toBe(
       "Corrective optic (ingested before the port was recorded)",

@@ -30,7 +30,7 @@ type Props = { params: Promise<{ tenant: string }> };
 /**
  * A tenant's Today (docs/design/README.md, Home pages): its numbers, its
  * recent fish and deployments, and what needs someone. Staff also see the
- * labelling work and the dashboards here, which the public home no longer
+ * labeling work and the dashboards here, which the public home no longer
  * lists.
  *
  * The page streams. Its header comes first and each section follows as its

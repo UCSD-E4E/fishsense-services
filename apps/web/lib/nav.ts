@@ -1,6 +1,6 @@
 /**
  * The portal's main navigation (docs/design/README.md, Navigation): Today
- * (`/lab`), Fish, Data, and Labelling for staff. Map and Settings join when their pages
+ * (`/lab`), Fish, Data, and Labeling for staff. Map and Settings join when their pages
  * exist, so the nav never links to a page that is not there.
  *
  * Fish and Data are a tenant's (`/lab/fish`, `/lab/data`): they link into the
@@ -40,7 +40,7 @@ export function navItems(pathname: string, { staff, lastTenant }: Context): NavI
   ];
   if (staff) {
     items.push({
-      label: "Labelling",
+      label: "Labeling",
       href: "/portal",
       active: pathname === "/portal" || pathname.startsWith("/portal/"),
     });

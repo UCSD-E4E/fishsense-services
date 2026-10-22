@@ -146,7 +146,7 @@ export async function NeedsYou({ token, slug }: Section) {
   );
 }
 
-/** Labelling for staff, and the dashboards for system admins. Label Studio
+/** Labeling for staff, and the dashboards for system admins. Label Studio
  *  answers slowly when it answers at all, so this section never holds up
  *  the others. */
 export async function Work({ token, staff }: { token: string; staff: boolean }) {
@@ -162,7 +162,7 @@ export async function Work({ token, staff }: { token: string; staff: boolean }) 
   if (!staff && !systemAdmin) return notice;
   return (
     <section className="flex flex-col gap-4 border-t border-line pt-7">
-      <h2 className="text-xl font-semibold">{systemAdmin ? "Labelling and dashboards" : "Labelling"}</h2>
+      <h2 className="text-xl font-semibold">{systemAdmin ? "Labeling and dashboards" : "Labeling"}</h2>
       {notice}
       <WorkSections dashboards={systemAdmin} />
     </section>
@@ -269,7 +269,7 @@ export function MapLoading() {
 
 export function WorkLoading() {
   return (
-    <Loading what="the labelling">
+    <Loading what="the labeling">
       <section className="flex flex-col gap-4 border-t border-line pt-7">
         <div className={`${PULSE} h-6 w-40`} />
         <div className={`${PULSE} h-24 w-full`} />

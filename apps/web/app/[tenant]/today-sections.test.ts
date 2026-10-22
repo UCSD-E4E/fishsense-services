@@ -4,8 +4,8 @@
 //  * each section reads only what it shows (three fish, not a page of fifty);
 //  * a section whose call fails says so, as an alert, and claims nothing:
 //    "Needs you" never shows its empty state for a summary it could not read,
-//    and the labelling never silently loses its dashboards (review of #250);
-//  * the labelling is shown to staff and the dashboards to system admins.
+//    and the labeling never silently loses its dashboards (review of #250);
+//  * the labeling is shown to staff and the dashboards to system admins.
 import { createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -149,12 +149,12 @@ describe("RecentTrips", () => {
 });
 
 describe("Work", () => {
-  it("shows staff the labelling", async () => {
+  it("shows staff the labeling", async () => {
     api({ "/me": { is_system_admin: false } });
 
     const out = await html(Work({ token: "t", staff: true }));
 
-    expect(out).toContain("Labelling");
+    expect(out).toContain("Labeling");
     expect(out).toContain("<p>work</p>");
   });
 
@@ -163,7 +163,7 @@ describe("Work", () => {
 
     const out = await html(Work({ token: "t", staff: false }));
 
-    expect(out).toContain("Labelling and dashboards");
+    expect(out).toContain("Labeling and dashboards");
     expect(out).toContain("work and dashboards");
   });
 

@@ -5,7 +5,7 @@
  *
  * A mobile fish's evidence is its capture's (the phone's photo, mask, depth and
  * measurement versions), so its page needs no separate Mobile captures page.
- * A Lite fish has one current measurement here; its labelled points are listed,
+ * A Lite fish has one current measurement here; its labeled points are listed,
  * not drawn, because they were placed on v1's JPEG, not on this render.
  */
 import type { Capture } from "./captures";
