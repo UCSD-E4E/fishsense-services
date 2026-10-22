@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.38.0...v0.39.0) (2026-10-22)
+
+
+### Features
+
+* **web:** a frame page, so an unmeasured frame's automatic result can be seen ([1946eaa](https://github.com/UCSD-E4E/fishsense-services/commit/1946eaab95654445ec787b908fe760b851affd2e))
+
 ## [0.38.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.37.0...v0.38.0) (2026-10-22)
 
 
