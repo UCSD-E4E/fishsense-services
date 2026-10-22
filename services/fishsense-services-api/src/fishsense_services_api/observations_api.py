@@ -36,7 +36,7 @@ from fishsense_services_api.memberships import Membership
 from fishsense_services_api.mobile_api import Point
 from fishsense_services_api.observation_store import (
     Observation,
-    list_observations,
+    observation_page,
     observation,
     mission_captures,
 )
@@ -99,6 +99,8 @@ class ObservationPage(BaseModel):
     observations: list[ObservationView]
     #: Pass as ``before`` for the next page; None at the end.
     next: str | None
+    #: How many fish the filters keep in all, whatever the page or cursor.
+    total: int
 
 
 class LaserEvidenceView(BaseModel):
@@ -285,32 +287,43 @@ def add_observation_routes(
         mission: Annotated[int | None, Query(ge=0)] = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         before: str | None = None,
+        page: Annotated[int | None, Query(ge=1)] = None,
     ) -> ObservationPage:
+        """Newest first, a page at a time: by number (``page``, from 1, of
+        ``limit`` each) or after a cursor (``before``, the last page's
+        ``next``), not both. ``total`` is how many there are in all."""
+        if page is not None and before is not None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "a page or a cursor, not both",
+            )
         cursor = _parse_cursor(before) if before else None
         async with tenant_transaction(engine, member.tenant_id) as conn:
-            found = await list_observations(
+            found = await observation_page(
                 conn,
                 member.tenant_id,
                 limit=limit + 1,
+                offset=((page or 1) - 1) * limit,
                 before=cursor,
                 device=device,
                 photo_bucket=bucket(slug),
                 mission=mission,
             )
-        page, more = found[:limit], len(found) > limit
+        listed, more = found.observations[:limit], len(found.observations) > limit
         if namer is not None:
             namer.later(
                 background,
                 member.tenant_id,
                 [
                     o.capture_id
-                    for o in page
+                    for o in listed
                     if o.place_name is None and o.derived_place_name is None
                 ],
             )
         return ObservationPage(
-            observations=[view(slug, o) for o in page],
-            next=_cursor(page[-1].cursor) if more else None,
+            observations=[view(slug, o) for o in listed],
+            next=_cursor(listed[-1].cursor) if more else None,
+            total=found.total,
         )
 
     @app.get(

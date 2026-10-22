@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.34.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.34.0...v0.34.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **web:** a Today section that can't load says so ([63553cd](https://github.com/UCSD-E4E/fishsense-services/commit/63553cdde4fee92dee4365aac3994c69585e93a0))
+
+
+### Performance Improvements
+
+* **deploy:** no JIT anywhere in v2's database ([eab0c7e](https://github.com/UCSD-E4E/fishsense-services/commit/eab0c7eeec432ac5972a7eaa9185ddd29332a886))
+* make the Today page fast, and stream it ([83639dd](https://github.com/UCSD-E4E/fishsense-services/commit/83639dd0bd169afe594c919fa555119d4a18df5a))
+
+
+### Documentation
+
+* design the shadow size-constancy laser calibration (SAM 3.1) ([333e1c7](https://github.com/UCSD-E4E/fishsense-services/commit/333e1c7afc30fff14299fea4850795ea0dbc76d4))
+* **shadow:** commit the author's decisions, thresholds and switching criteria ([8cdeb17](https://github.com/UCSD-E4E/fishsense-services/commit/8cdeb17e7239eb8d428cb1d57c2087d92293019f))
+* **shadow:** correct the pool gate count: 4 on confidence, not 5 ([528f354](https://github.com/UCSD-E4E/fishsense-services/commit/528f354318dbf5165b7f9a4419e24cabe087ee2d))
+
 ## [0.34.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.33.0...v0.34.0) (2026-10-22)
 
 

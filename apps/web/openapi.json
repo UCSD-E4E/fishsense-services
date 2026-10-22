@@ -2574,11 +2574,16 @@
             },
             "title": "Observations",
             "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
           }
         },
         "required": [
           "observations",
-          "next"
+          "next",
+          "total"
         ],
         "title": "ObservationPage",
         "type": "object"
@@ -4862,6 +4867,7 @@
     },
     "/tenants/{slug}/observations": {
       "get": {
+        "description": "Newest first, a page at a time: by number (``page``, from 1, of\n``limit`` each) or after a cursor (``before``, the last page's\n``next``), not both. ``total`` is how many there are in all.",
         "operationId": "list_observations",
         "parameters": [
           {
@@ -4937,6 +4943,23 @@
                 }
               ],
               "title": "Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Page"
             }
           }
         ],

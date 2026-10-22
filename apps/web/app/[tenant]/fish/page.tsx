@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { unstable_rethrow } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 import { requireSignedIn } from "@/app/_shell/guard";
 import { tenantFor } from "@/app/_shell/tenant";
 import { formatLength, millimetres } from "@/lib/captures";
 import { type TenantMembership } from "@/lib/fishsense-api";
+import { pageCount, pageLinks, pageRange, parsePage } from "@/lib/pages";
 import { paths } from "@/lib/tenant-paths";
 import {
   deviceFilter,
@@ -23,8 +24,10 @@ export const dynamic = "force-dynamic";
 
 type Props = {
   params: Promise<{ tenant: string }>;
-  searchParams: Promise<{ device?: string; before?: string }>;
+  searchParams: Promise<{ device?: string; page?: string }>;
 };
+
+const PER_PAGE = 50;
 
 const FILTERS: { label: string; device?: Device }[] = [
   { label: "All" },
@@ -33,22 +36,24 @@ const FILTERS: { label: string; device?: Device }[] = [
   { label: "Other devices", device: "other" },
 ];
 
-function href(tenant: string, device?: Device, before?: string): string {
+function href(tenant: string, device?: Device, page = 1): string {
   const query = new URLSearchParams();
   if (device) query.set("device", device);
-  if (before) query.set("before", before);
+  if (page > 1) query.set("page", String(page));
   return `${paths.fish(tenant)}${query.size ? `?${query}` : ""}`;
 }
 
 /**
  * Every measured fish in a tenant, Lite and Mobile together (PLAN.md §4.9,
- * Phase 1 of §9.26), newest first. Any member sees their tenant's.
+ * Phase 1 of §9.26), newest first. Any member sees their tenant's. Fifty to
+ * a page, by number (`?page=`), with how many there are in all.
  */
 export default async function FishPage({ params, searchParams }: Props) {
   const { tenant: slug } = await params;
-  const { device: rawDevice, before } = await searchParams;
+  const { device: rawDevice, page: rawPage } = await searchParams;
   const device = deviceFilter(rawDevice);
-  const session = await requireSignedIn(href(slug, device, before));
+  const current = parsePage(rawPage);
+  const session = await requireSignedIn(href(slug, device, current));
   const token = session.accessToken ?? "";
 
   let tenant: TenantMembership | null = null;
@@ -56,11 +61,18 @@ export default async function FishPage({ params, searchParams }: Props) {
   let failure: string | null = null;
   try {
     tenant = await tenantFor(token, slug);
-    page = await getObservationPage(token, tenant.slug, { device, before });
+    page = await getObservationPage(token, tenant.slug, { device, page: current, limit: PER_PAGE });
   } catch (error) {
     unstable_rethrow(error);
     failure = error instanceof Error ? error.message : "unavailable";
   }
+  const last = page ? pageCount(page.total, PER_PAGE) : 1;
+  // Past the end (a bookmark from when there were more, or a typed number):
+  // the last page there is.
+  if (tenant && page && page.observations.length === 0 && current > last) {
+    redirect(href(tenant.slug, device, last));
+  }
+  const range = page ? pageRange(current, PER_PAGE, page.total) : null;
 
   return (
     <main className="mx-auto flex max-w-7xl flex-col gap-7 px-6 py-10">
@@ -97,6 +109,11 @@ export default async function FishPage({ params, searchParams }: Props) {
         <p className="text-fg-2">No measured fish from {tenant.name} yet.</p>
       ) : (
         <>
+          {page && range && (
+            <p className="text-sm text-fg-2 tabular-nums">
+              {range.first.toLocaleString()}–{range.last.toLocaleString()} of {page.total.toLocaleString()}
+            </p>
+          )}
           <ul className="grid gap-5 [grid-template-columns:repeat(auto-fill,minmax(260px,1fr))]">
             {page?.observations.map((o) => (
               <li key={`${o.capture_id}/${o.fish_id}`}>
@@ -104,19 +121,67 @@ export default async function FishPage({ params, searchParams }: Props) {
               </li>
             ))}
           </ul>
-          {page?.next && (
-            <div className="flex justify-center">
-              <Link
-                href={href(tenant.slug, device, page.next)}
-                className="inline-flex h-11 items-center rounded-control border border-line bg-surface px-5 font-medium hover:bg-raised"
-              >
-                Older fish
-              </Link>
-            </div>
-          )}
+          {last > 1 && <Pager slug={tenant.slug} device={device} current={current} last={last} />}
         </>
       )}
     </main>
+  );
+}
+
+function Pager({
+  slug,
+  device,
+  current,
+  last,
+}: {
+  slug: string;
+  device?: Device;
+  current: number;
+  last: number;
+}) {
+  const box = "inline-flex h-11 min-w-11 items-center justify-center rounded-control px-3 font-medium tabular-nums";
+  const link = `${box} border border-line bg-surface hover:bg-raised`;
+  const off = `${box} border border-line text-fg-3`;
+  return (
+    <nav aria-label="Pages" className="flex flex-wrap items-center justify-center gap-2">
+      {current > 1 ? (
+        <Link href={href(slug, device, current - 1)} rel="prev" className={link}>
+          ‹ Newer
+        </Link>
+      ) : (
+        <span aria-disabled className={off}>
+          ‹ Newer
+        </span>
+      )}
+      {pageLinks(current, last).map((n, i) =>
+        n === "gap" ? (
+          <span key={`gap-${i}`} aria-hidden className="px-1 text-fg-2">
+            …
+          </span>
+        ) : n === current ? (
+          <span
+            key={n}
+            aria-current="page"
+            className={`${box} border border-teal bg-teal-tint font-semibold text-teal-fg`}
+          >
+            {n}
+          </span>
+        ) : (
+          <Link key={n} href={href(slug, device, n)} aria-label={`Page ${n}`} className={link}>
+            {n}
+          </Link>
+        ),
+      )}
+      {current < last ? (
+        <Link href={href(slug, device, current + 1)} rel="next" className={link}>
+          Older ›
+        </Link>
+      ) : (
+        <span aria-disabled className={off}>
+          Older ›
+        </span>
+      )}
+    </nav>
   );
 }
 
