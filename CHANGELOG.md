@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.36.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.35.0...v0.36.0) (2026-10-22)
+
+
+### Features
+
+* a map on Today of where the tenant's fish were measured ([f8dbc4d](https://github.com/UCSD-E4E/fishsense-services/commit/f8dbc4d2124b31e6cd76c58715bf82188eb52724))
+* a map on Today of where the tenant's fish were measured ([cf23115](https://github.com/UCSD-E4E/fishsense-services/commit/cf23115a85620e07bfde62c67bc40c0c62ff1e82))
+
 ## [0.35.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.34.1...v0.35.0) (2026-10-22)
 
 
