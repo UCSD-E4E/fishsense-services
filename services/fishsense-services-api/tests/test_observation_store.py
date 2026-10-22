@@ -22,6 +22,7 @@ from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.observation_store import (
     list_observations,
     observation,
+    observation_page,
 )
 from observation_seed import (
     ALICE,
@@ -243,6 +244,87 @@ class TestList:
 
         listed = [o.capture_id for o in first + second + rest]
         assert listed == list(reversed(made))
+
+
+async def _page(app_engine, tenant_id, **kwargs):
+    async with tenant_transaction(app_engine, tenant_id) as conn:
+        return await observation_page(
+            conn, tenant_id, limit=kwargs.pop("limit", 50), **kwargs
+        )
+
+
+class TestNumberedPages:
+    """The web's fish list goes by page number, showing how many there are."""
+
+    async def _five(self, owner_engine, app_engine, tenant_id):
+        made = [
+            (
+                await _mobile(
+                    app_engine, owner_engine, tenant_id, at=T0 + timedelta(hours=h)
+                )
+            )[0]
+            for h in range(5)
+        ]
+        return list(reversed(made))  # newest first
+
+    async def test_a_page_is_its_slice_of_the_newest_first_list(
+        self, owner_engine, app_engine, tenants
+    ):
+        newest_first = await self._five(owner_engine, app_engine, tenants["lab"])
+
+        pages = [
+            await _page(app_engine, tenants["lab"], limit=2, offset=offset)
+            for offset in (0, 2, 4)
+        ]
+
+        assert [[o.capture_id for o in p.observations] for p in pages] == [
+            newest_first[0:2],
+            newest_first[2:4],
+            newest_first[4:5],
+        ]
+        assert [p.total for p in pages] == [5, 5, 5]
+
+    async def test_the_total_counts_what_the_filters_keep(
+        self, owner_engine, app_engine, tenants
+    ):
+        await self._five(owner_engine, app_engine, tenants["lab"])
+        await _lite(owner_engine, tenants["lab"], species=("A b", "C"))
+        await _mobile(app_engine, owner_engine, tenants["partner"])
+
+        everything = await _page(app_engine, tenants["lab"], limit=1)
+        phones = await _page(app_engine, tenants["lab"], limit=1, device="mobile")
+        lites = await _page(app_engine, tenants["lab"], limit=1, device="lite")
+
+        assert (everything.total, phones.total, lites.total) == (6, 5, 1)
+
+    async def test_past_the_last_page_there_are_none_but_the_total_stands(
+        self, owner_engine, app_engine, tenants
+    ):
+        """So the web can send someone to the last page that exists."""
+        await self._five(owner_engine, app_engine, tenants["lab"])
+
+        beyond = await _page(app_engine, tenants["lab"], limit=2, offset=10)
+
+        assert (beyond.observations, beyond.total) == ([], 5)
+
+    async def test_an_empty_tenant_has_none(self, app_engine, tenants):
+        assert await _page(app_engine, tenants["lab"], limit=2) == (
+            await _page(app_engine, tenants["lab"], limit=2, offset=2)
+        )
+        assert (await _page(app_engine, tenants["lab"])).total == 0
+
+    async def test_the_cursor_still_pages_and_the_total_ignores_it(
+        self, owner_engine, app_engine, tenants
+    ):
+        newest_first = await self._five(owner_engine, app_engine, tenants["lab"])
+        first = await _page(app_engine, tenants["lab"], limit=2)
+
+        second = await _page(
+            app_engine, tenants["lab"], limit=2, before=first.observations[-1].cursor
+        )
+
+        assert [o.capture_id for o in second.observations] == newest_first[2:4]
+        assert second.total == 5
 
 
 class TestDetail:
