@@ -116,7 +116,7 @@ export default async function FishDetailPage({ params }: Props) {
             <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-fg-2">
               Recorded with
             </h2>
-            <dl className="grid grid-cols-[max-content_1fr] gap-x-5 gap-y-2.5">
+            <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-5 gap-y-2.5">
               {o.mission && (
                 <Row label="Mission">
                   {o.mission.number != null ? (
@@ -145,7 +145,7 @@ export default async function FishDetailPage({ params }: Props) {
       <div className="mt-7 grid gap-5 [grid-template-columns:repeat(auto-fit,minmax(340px,1fr))]">
         <section className="rounded-card border border-line bg-surface px-6 py-5">
           <h2 className="mb-3 text-lg font-semibold">How it was measured</h2>
-          <dl className="grid grid-cols-[max-content_1fr] gap-x-5 gap-y-2.5">
+          <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-5 gap-y-2.5">
             {detail.laser && (
               <>
                 <Row label="Laser depth">{metres(detail.laser.depth_m)}</Row>
@@ -204,7 +204,7 @@ export default async function FishDetailPage({ params }: Props) {
       {phone && (
         <section className="mt-5 rounded-card border border-line bg-surface px-6 py-5">
           <h2 className="mb-3 text-lg font-semibold">Recorded with the capture</h2>
-          <dl className="grid grid-cols-[max-content_1fr] gap-x-5 gap-y-2.5 text-sm">
+          <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-5 gap-y-2.5 text-sm">
             <Row label="Phone">{phone.device.model ?? phone.device.info ?? "—"}</Row>
             <Row label="App">{phone.app_version ?? "not recorded"}</Row>
             <Row label="Model">{phone.model_version ?? "—"}</Row>
@@ -352,7 +352,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   return (
     <>
       <dt className="text-fg-2">{label}</dt>
-      <dd>{children}</dd>
+      <dd className="min-w-0 [overflow-wrap:anywhere]">{children}</dd>
     </>
   );
 }

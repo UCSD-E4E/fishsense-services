@@ -77,7 +77,7 @@ export function AutomaticSection({
             {overlay?.maskUrl && <Key className="bg-teal">Fish mask</Key>}
           </figcaption>
         </figure>
-        <dl className="grid min-w-64 flex-[1_1_260px] grid-cols-[max-content_1fr] gap-x-5 gap-y-2.5 text-sm">
+        <dl className="grid min-w-0 flex-[1_1_260px] grid-cols-[max-content_minmax(0,1fr)] gap-x-5 gap-y-2.5 text-sm">
           <Row label="Result">{statusLabel(frame.status)}</Row>
           <Row label="Length">
             {frame.length_m != null ? formatLength(frame.length_m) : frame.refusal ?? "—"}
@@ -152,7 +152,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   return (
     <>
       <dt className="text-fg-2">{label}</dt>
-      <dd>{children}</dd>
+      <dd className="min-w-0 [overflow-wrap:anywhere]">{children}</dd>
     </>
   );
 }
