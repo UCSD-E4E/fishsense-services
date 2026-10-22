@@ -125,6 +125,7 @@ def automatic_frame_result(
             checkpoint=checkpoint,
             core_version=core_version,
             predictor_version=AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
+            grow_cut_masks=True,
         ),
         mask_sink=mask_sink,
     )

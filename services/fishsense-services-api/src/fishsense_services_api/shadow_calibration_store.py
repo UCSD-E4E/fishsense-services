@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from fishsense_services_api.automatic_results_store import (
     SlateFrames,
     _pinhole_camera,
+    head_tail_current,
     no_slate_frames,
 )
 from fishsense_services_api.service_principal import ServicePrincipal
@@ -141,7 +142,7 @@ async def shadow_calibration_inputs(
                 LEFT JOIN LATERAL (
                     SELECT a.* FROM current_automatic_head_tail_predictions a
                     WHERE a.tenant_id = c.tenant_id AND a.capture_id = c.id
-                      AND a.predictor_version = :hv
+                      AND {head_tail_current('a')}
                     LIMIT 1
                 ) h ON true
                 WHERE c.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
