@@ -42,6 +42,7 @@ from fishsense_services_api.observation_store import (
 )
 from fishsense_services_api.place_naming import PlaceNamer
 from fishsense_services_api.summary_store import tenant_summary
+from fishsense_services_api.tenant_regions_store import tenant_regions
 from fishsense_services_api.tenant_stores import NoTenantStore, TenantStores
 
 __all__ = ["add_observation_routes"]
@@ -130,6 +131,24 @@ class ObservationDetailView(BaseModel):
     laser: LaserEvidenceView | None
     #: The phone's snout and fork (``method == "lidar"``).
     device_points: DevicePointsView | None
+
+
+class TenantRegionView(BaseModel):
+    """A broad region, at its one point on the map (`regions`)."""
+
+    name: str
+    latitude: float
+    longitude: float
+    fish: int
+
+
+class TenantRegionsView(BaseModel):
+    """Where a tenant's fish were measured, never finer than a region."""
+
+    #: Most fish first.
+    regions: list[TenantRegionView]
+    #: Fish no region holds.
+    elsewhere: int
 
 
 class TenantSummaryView(BaseModel):
@@ -225,6 +244,21 @@ def add_observation_routes(
         async with tenant_transaction(engine, member.tenant_id) as conn:
             found = await tenant_summary(conn, member.tenant_id)
         return TenantSummaryView(**asdict(found))
+
+    @app.get(
+        "/tenants/{slug}/regions",
+        operation_id="get_tenant_regions",
+        response_model=TenantRegionsView,
+    )
+    async def regions(member: Member) -> TenantRegionsView:
+        """Where the tenant's fish were measured, by broad region, for its
+        Today map (`tenant_regions_store`)."""
+        async with tenant_transaction(engine, member.tenant_id) as conn:
+            found = await tenant_regions(conn, member.tenant_id)
+        return TenantRegionsView(
+            regions=[TenantRegionView(**asdict(r)) for r in found.regions],
+            elsewhere=found.elsewhere,
+        )
 
     @app.get(
         "/tenants/{slug}/missions/{number}/captures",

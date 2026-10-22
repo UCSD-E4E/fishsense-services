@@ -2939,6 +2939,57 @@
         "title": "SpeciesView",
         "type": "object"
       },
+      "TenantRegionView": {
+        "description": "A broad region, at its one point on the map (`regions`).",
+        "properties": {
+          "fish": {
+            "title": "Fish",
+            "type": "integer"
+          },
+          "latitude": {
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "title": "Longitude",
+            "type": "number"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "latitude",
+          "longitude",
+          "fish"
+        ],
+        "title": "TenantRegionView",
+        "type": "object"
+      },
+      "TenantRegionsView": {
+        "description": "Where a tenant's fish were measured, never finer than a region.",
+        "properties": {
+          "elsewhere": {
+            "title": "Elsewhere",
+            "type": "integer"
+          },
+          "regions": {
+            "items": {
+              "$ref": "#/components/schemas/TenantRegionView"
+            },
+            "title": "Regions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "regions",
+          "elsewhere"
+        ],
+        "title": "TenantRegionsView",
+        "type": "object"
+      },
       "TenantSummaryView": {
         "description": "A tenant's numbers (docs/design/README.md, Home pages).",
         "properties": {
@@ -5055,6 +5106,51 @@
           }
         ],
         "summary": "Get"
+      }
+    },
+    "/tenants/{slug}/regions": {
+      "get": {
+        "description": "Where the tenant's fish were measured, by broad region, for its\nToday map (`tenant_regions_store`).",
+        "operationId": "get_tenant_regions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantRegionsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Regions"
       }
     },
     "/tenants/{slug}/summary": {
