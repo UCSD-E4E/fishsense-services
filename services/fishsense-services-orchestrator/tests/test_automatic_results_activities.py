@@ -745,3 +745,19 @@ async def test_a_mask_of_a_frame_left_owed_is_deleted():
 
     await _run(_acts(catalog, renders=renders).persist_automatic_frames, TARGET, [r])
     assert renders.bucket.deleted == [key]
+
+
+def test_the_api_repeats_the_window_and_the_cut_mask_version():
+    """The API image has no contracts: its copies of the window and of the
+    version that grows a cut mask's window are pinned here (2026-10-22)."""
+    from fishsense_services_api import automatic_results_store as api
+    from fishsense_services_contracts.headtail import (
+        HEADTAIL_CROP_HEIGHT,
+        HEADTAIL_CROP_WIDTH,
+    )
+
+    assert (api.HEADTAIL_CROP_WIDTH, api.HEADTAIL_CROP_HEIGHT) == (
+        HEADTAIL_CROP_WIDTH,
+        HEADTAIL_CROP_HEIGHT,
+    )
+    assert api.CUT_MASK_FIX_VERSION == AUTOMATIC_HEADTAIL_PREDICTOR_VERSION == 4

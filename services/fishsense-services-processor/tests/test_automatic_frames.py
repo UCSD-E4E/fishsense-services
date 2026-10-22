@@ -188,6 +188,98 @@ def test_a_slate_frame_with_no_dot_is_no_dot():
     assert r.status == "no_laser_dot" and r.slate_probability == 0.9
 
 
+# -- a fish longer than the window (2026-10-22) -----------------------------------
+#
+# The window is 1800x1350 around the dot; a fish longer than it came back cut by
+# the window's straight edges, and its head and tail were read off the cut
+# (lab mission 383: a 686 mm Nassau Grouper measured 554 mm). A mask touching an
+# edge of the window that is not the frame's own is segmented again on the
+# whole frame.
+
+
+def _fish_in_frame(cx, cy, half_len, half_h=150):
+    m = np.zeros((FRAME_H, FRAME_W), np.uint8)
+    cv2.ellipse(m, (int(cx), int(cy)), (half_len, half_h), 0, 0, 360, 1, -1)
+    return m
+
+
+def _window_of(frame_mask, dot=DOT):
+    ox, oy = crop_origin(*dot, FRAME_W, FRAME_H, CROP_W, CROP_H)
+    return np.ascontiguousarray(frame_mask[oy : oy + CROP_H, ox : ox + CROP_W])
+
+
+class _Windowed:
+    """A scored segmenter that answers the window and the whole frame each
+    with their own masks, as SAM would see them."""
+
+    def __init__(self, window, frame):
+        self.answers = {(CROP_H, CROP_W): window, (FRAME_H, FRAME_W): frame}
+        self.shapes = []
+
+    def segment_scored(self, image):
+        self.shapes.append(image.shape[:2])
+        return self.answers[image.shape[:2]]
+
+
+LONG_FISH = _fish_in_frame(*DOT, half_len=1300)
+
+
+def test_a_fish_longer_than_the_window_is_measured_on_the_whole_frame():
+    seg = _Windowed([(_window_of(LONG_FISH), 0.93)], [(LONG_FISH, 0.88)])
+
+    r = _result(seg)
+
+    assert seg.shapes == [(CROP_H, CROP_W), (FRAME_H, FRAME_W)]
+    assert r.status == "predicted"
+    assert (r.crop_x, r.crop_y) == (0, 0)
+    assert r.mask_bbox[0] <= DOT[0] - 1290 and r.mask_bbox[2] >= DOT[0] + 1290
+    ends = sorted((r.head_x, r.tail_x))
+    assert ends[0] == pytest.approx(DOT[0] - 1300, abs=30)
+    assert ends[1] == pytest.approx(DOT[0] + 1300, abs=30)
+    assert r.sam_score == pytest.approx(0.88)  # the whole frame's mask's
+
+
+def test_a_fish_inside_the_window_is_segmented_once():
+    fish = _fish_in_frame(*DOT, half_len=500)
+    seg = _Windowed([(_window_of(fish), 0.9)], [])
+
+    r = _result(seg)
+
+    assert seg.shapes == [(CROP_H, CROP_W)]
+    assert r.status == "predicted"
+    assert (r.crop_x, r.crop_y) == crop_origin(*DOT, FRAME_W, FRAME_H, CROP_W, CROP_H)
+
+
+def test_a_mask_cut_only_by_the_frames_own_edge_is_not_segmented_again():
+    """Near the frame's edge the window is clamped there: a fish running off
+    the photo is cut by the photo, which a bigger window cannot help."""
+    dot = (300.0, 1500.0)
+    fish = _fish_in_frame(150, 1500, half_len=600)  # runs off the left edge
+    seg = _Windowed([(_window_of(fish, dot), 0.9)], [])
+
+    r = _result(seg, dot=dot)
+
+    assert seg.shapes == [(CROP_H, CROP_W)]
+    assert r.status == "predicted" and r.crop_x == 0
+
+
+def test_a_cut_fish_the_whole_frame_puts_no_mask_under_the_dot_is_an_abstention():
+    """The cut mask's length is known to be wrong, so it is never kept."""
+    elsewhere = _fish_in_frame(DOT[0] + 1500, 400, half_len=300)
+    seg = _Windowed([(_window_of(LONG_FISH), 0.93)], [(elsewhere, 0.9)])
+
+    r = _result(seg)
+
+    assert r.status == "laser_off_all_fish"
+    assert r.head_x is None and r.sam_score is None
+
+
+def test_a_cut_fish_whose_whole_frame_mask_fails_the_gate_is_no_detection():
+    seg = _Windowed([(_window_of(LONG_FISH), 0.93)], [(LONG_FISH, 0.4)])
+
+    assert _result(seg).status == "no_detections"
+
+
 # -- the activity ------------------------------------------------------------------
 
 
@@ -607,6 +699,25 @@ async def test_a_kept_mask_is_stored_in_the_apps_encoding_and_named():
     )  # fmt: skip
     assert (r.mask.width, r.mask.height) == (FRAME_W, FRAME_H)
     assert np.count_nonzero(pixels) == r.mask_area_px
+
+
+async def test_a_long_fishs_stored_mask_is_the_whole_frames():
+    puts = []
+
+    def put(url, headers, data):
+        puts.append(data)
+        return 200
+
+    seg = _Windowed([(_window_of(LONG_FISH), 0.93)], [(LONG_FISH, 0.88)])
+    r = await ActivityEnvironment().run(
+        _activities(_Store(), put=put, segmenter=seg).predict_automatic_frame,
+        _with_mask(),
+    )
+
+    (data,) = puts
+    pixels = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED)
+    assert r.status == "predicted"
+    assert (pixels == LONG_FISH * 255).all()
 
 
 async def test_a_frame_with_no_upload_slot_stores_nothing():

@@ -909,3 +909,17 @@ async def test_a_mask_that_cannot_be_stored_leaves_the_prediction(no_gpu, monkey
         _payload(mask=MaskUpload(key=key, put_url="https://g/m")),
     )
     assert result.status in ("predicted", "headtail_failed") and result.mask is None
+
+
+def test_the_label_studio_prefill_keeps_v1s_window_for_a_fish_longer_than_it():
+    """Growing the window past a cut mask is the automatic chain's (2026-10-22);
+    the human path's pre-fill is unchanged, so its version is too."""
+    laser = (2000.0, 1500.0)
+    ox, oy = crop_origin(*laser, FRAME_W, FRAME_H, CROP_W, CROP_H)
+    long_fish = _fish_mask(int(laser[0] - ox), int(laser[1] - oy), half_len=1300)
+    stub = _Stub([long_fish])
+
+    result = _predict(_jpeg(), [laser], stub)
+
+    assert stub.seen_shape == (CROP_H, CROP_W)
+    assert (result.crop_x, result.crop_y) == (ox, oy)

@@ -156,9 +156,50 @@ def _latest(table: str, capture: str = "c") -> str:
     )"""
 
 
+#: The head/tail stage's window around the dot (contracts
+#: `headtail.HEADTAIL_CROP_WIDTH` / `_HEIGHT`; the API image has no contracts,
+#: so they are repeated here and pinned by the orchestrator's tests).
+HEADTAIL_CROP_WIDTH = 1800
+HEADTAIL_CROP_HEIGHT = 1350
+
+#: The automatic version that grows a cut mask's window to the whole photo
+#: (contracts `AUTOMATIC_HEADTAIL_PREDICTOR_VERSION` 4, 2026-10-22).
+CUT_MASK_FIX_VERSION = 4
+
+
+def _cut_by_window(h: str) -> str:
+    """Row `h`'s kept mask ran into an edge of the window that is not the
+    photo's own (processor `geometry.cut_by_window`, by the half-open box):
+    the fish went on past what SAM saw. A row with a kept mask and no box
+    (``mask_unscored``) may have been, so it counts as cut."""
+    return f"""(
+        ({h}.mask_bbox IS NULL AND {h}.status = 'mask_unscored')
+        OR ({h}.mask_bbox IS NOT NULL AND (
+            ({h}.crop_x > 0 AND {h}.mask_bbox[1] <= {h}.crop_x)
+         OR ({h}.crop_x + {HEADTAIL_CROP_WIDTH} < {h}.width
+             AND {h}.mask_bbox[3] >= {h}.crop_x + {HEADTAIL_CROP_WIDTH})
+         OR ({h}.crop_y > 0 AND {h}.mask_bbox[2] <= {h}.crop_y)
+         OR ({h}.crop_y + {HEADTAIL_CROP_HEIGHT} < {h}.height
+             AND {h}.mask_bbox[4] >= {h}.crop_y + {HEADTAIL_CROP_HEIGHT})))
+    )"""
+
+
+def head_tail_current(h: str) -> str:
+    """Row `h` is the frame's answer at version `:hv`. Version 4 changed only
+    frames whose mask the window cut, so a version-3 row of any other frame is
+    what 4 would write, and stands: the drain re-runs only the cut ones
+    (2026-10-22: 1,346 of 38,923 masks, instead of every frame)."""
+    return f"""(
+        {h}.predictor_version = :hv
+        OR (:hv = {CUT_MASK_FIX_VERSION}
+            AND {h}.predictor_version = {CUT_MASK_FIX_VERSION - 1}
+            AND NOT {_cut_by_window(h)})
+    )"""
+
+
 _FRAME_DONE = f"""EXISTS (
     SELECT 1 FROM {_latest("automatic_head_tail_predictions")} h
-    WHERE h.predictor_version = :hv
+    WHERE {head_tail_current("h")}
 )"""
 
 #: Capture `c` is one the slate-presence detector currently calls a slate

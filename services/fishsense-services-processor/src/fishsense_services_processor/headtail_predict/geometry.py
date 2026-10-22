@@ -16,6 +16,7 @@ import numpy as np
 
 __all__ = [
     "crop_origin",
+    "cut_by_window",
     "lift_point",
     "mask_at_point",
     "mask_box",
@@ -39,6 +40,23 @@ def crop_origin(
     ox = int(min(max(0, laser_x - crop_w // 2), max_x))
     oy = int(min(max(0, laser_y - crop_h // 2), max_y))
     return ox, oy
+
+
+def cut_by_window(
+    binary: np.ndarray, origin_x: int, origin_y: int, frame_w: int, frame_h: int
+) -> bool:
+    """Whether a crop-local mask runs into an edge of the window that is not
+    the frame's own: the fish goes on past what the segmenter saw, so the
+    mask's ends, and the head and tail read off them, are the window's.
+    New in v2 (2026-10-22; v1 kept the cut mask). An edge the window was
+    clamped to is the photo's, which no bigger window can see past."""
+    h, w = binary.shape[:2]
+    return bool(
+        (origin_x > 0 and binary[:, 0].any())
+        or (origin_x + w < frame_w and binary[:, -1].any())
+        or (origin_y > 0 and binary[0, :].any())
+        or (origin_y + h < frame_h and binary[-1, :].any())
+    )
 
 
 def lift_point(
