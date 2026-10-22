@@ -32,12 +32,8 @@ export async function getObservationPage(
 ): Promise<ObservationPage> {
   const query: { device?: Device; before?: string; mission?: number; limit?: number } = {};
   if (options.device) query.device = options.device;
-  if (options.limit !== undefined) {
-    if (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 200) {
-      throw new Error(`Invalid limit: ${options.limit}`);
-    }
-    query.limit = options.limit;
-  }
+  // The API bounds it (and says so in its schema); a number can't forge a path.
+  if (options.limit !== undefined) query.limit = options.limit;
   if (options.mission !== undefined) {
     if (!Number.isInteger(options.mission) || options.mission < 0) {
       throw new Error(`Invalid mission number: ${options.mission}`);

@@ -7,6 +7,9 @@ export default defineConfig({
       "@": path.resolve(__dirname, "."),
     },
   },
+  // tsconfig keeps JSX for Next (`"jsx": "preserve"`); tests that render a
+  // server component (app/[tenant]/today-sections.test.ts) need it compiled.
+  oxc: { jsx: { runtime: "automatic" } },
   test: {
     environment: "node",
     // `app/**` as well as `lib/**`: server actions live under app/ and are
