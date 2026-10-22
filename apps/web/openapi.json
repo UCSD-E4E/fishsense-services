@@ -2540,6 +2540,16 @@
           },
           "observation": {
             "$ref": "#/components/schemas/ObservationView"
+          },
+          "photo_size": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhotoSize"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -2714,6 +2724,24 @@
           "photo_url"
         ],
         "title": "ObservationView",
+        "type": "object"
+      },
+      "PhotoSize": {
+        "properties": {
+          "height": {
+            "title": "Height",
+            "type": "integer"
+          },
+          "width": {
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "width",
+          "height"
+        ],
+        "title": "PhotoSize",
         "type": "object"
       },
       "PixelPoint": {

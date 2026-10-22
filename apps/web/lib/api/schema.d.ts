@@ -1303,6 +1303,7 @@ export interface components {
             /** Model Version */
             model_version: string | null;
             observation: components["schemas"]["ObservationView"];
+            photo_size?: components["schemas"]["PhotoSize"] | null;
         };
         /** ObservationPage */
         ObservationPage: {
@@ -1345,6 +1346,13 @@ export interface components {
             /** Place Name */
             place_name: string | null;
             species: components["schemas"]["SpeciesView"] | null;
+        };
+        /** PhotoSize */
+        PhotoSize: {
+            /** Height */
+            height: number;
+            /** Width */
+            width: number;
         };
         /** PixelPoint */
         PixelPoint: {

@@ -31,8 +31,8 @@ type Point = { x: number; y: number } | null | undefined;
  * checksum. A mobile fish's evidence is its capture's, so this page replaced
  * the Mobile captures page for it (retired in phase 7b), and shows what the
  * phone recorded with the capture too. A Lite fish's photo is its frame's render
- * (Phase 4); its labeled points are listed, not drawn, because they were
- * placed on v1's JPEG, not on this render.
+ * (Phase 4), with its labeled head, tail and laser dot drawn on it
+ * (`fish-evidence`: a render is the whole frame, never cropped).
  */
 export default async function FishDetailPage({ params }: Props) {
   const { tenant, capture, fish } = await params;
@@ -80,8 +80,9 @@ export default async function FishDetailPage({ params }: Props) {
           )}
           {evidence.overlay && (
             <figcaption className="mt-2.5 flex flex-wrap gap-4 text-sm text-fg-2">
-              <Key className="bg-snout">Snout</Key>
-              <Key className="bg-fork">Fork</Key>
+              <Key className="bg-snout">{evidence.overlay.names.snout}</Key>
+              <Key className="bg-fork">{evidence.overlay.names.fork}</Key>
+              {evidence.overlay.laser && <Key className="bg-laser">Laser dot</Key>}
               {phone?.current_measurement && (
                 <span>Points {describeOrigin(phone.current_measurement.origin)}</span>
               )}
@@ -282,8 +283,9 @@ export default async function FishDetailPage({ params }: Props) {
   );
 }
 
-/** Snout and fork in the design's overlay colours, each ringed so it stands
- *  out on any photo, joined by a dashed line. */
+/** Snout and fork (a Lite fish's head and tail) in the design's overlay
+ *  colours, each ringed so it stands out on any photo, joined by a dashed
+ *  line; and a Lite fish's laser dot, in red. */
 function MeasurementOverlay({ overlay }: { overlay: Overlay }) {
   const r = overlay.width / 110;
   return (
@@ -292,7 +294,7 @@ function MeasurementOverlay({ overlay }: { overlay: Overlay }) {
       preserveAspectRatio="none"
       className="absolute inset-0 h-full w-full"
       role="img"
-      aria-label="The measurement: snout and fork points joined by a line"
+      aria-label={`The measurement: ${overlay.names.snout.toLowerCase()} and ${overlay.names.fork.toLowerCase()} joined by a line${overlay.laser ? ", and the laser dot" : ""}`}
     >
       <line
         x1={overlay.snout.x}
@@ -317,6 +319,15 @@ function MeasurementOverlay({ overlay }: { overlay: Overlay }) {
         className="fill-fork stroke-ground"
         strokeWidth={r / 2.5}
       />
+      {overlay.laser && (
+        <circle
+          cx={overlay.laser.x}
+          cy={overlay.laser.y}
+          r={r * 0.7}
+          className="fill-laser stroke-ground"
+          strokeWidth={r / 2.5}
+        />
+      )}
     </svg>
   );
 }

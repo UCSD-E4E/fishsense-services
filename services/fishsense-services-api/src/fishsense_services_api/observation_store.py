@@ -119,6 +119,10 @@ class ObservationDetail:
     model_version: str | None
     laser: LaserEvidence | None
     device_points: DevicePoints | None
+    #: The render's size in pixels, when the photo is the frame's render (a
+    #: Lite fish): its labelled points are drawn on it at their own pixels,
+    #: since a render is the whole frame, never cropped (2026-10-22).
+    photo_size: tuple[int, int] | None = None
 
 
 _COLUMNS = """o.capture_id, o.fish_id, o.method, o.length_m, o.captured_at,
@@ -283,6 +287,8 @@ async def observation(
         await conn.execute(
             text(f"""
                 SELECT {_COLUMNS}, coalesce(o.photo_key, r.key) AS photo_key,
+                    CASE WHEN o.photo_key IS NULL THEN r.width END AS photo_width,
+                    CASE WHEN o.photo_key IS NULL THEN r.height END AS photo_height,
                     COALESCE(m.measured_at, m.created_at) AS measured,
                     m.algorithm, m.algorithm_version, m.core_version,
                     m.model_version,
@@ -357,6 +363,11 @@ async def observation(
         model_version=row.model_version,
         laser=laser,
         device_points=points,
+        photo_size=(
+            (row.photo_width, row.photo_height)
+            if row.photo_width and row.photo_height
+            else None
+        ),
     )
 
 
