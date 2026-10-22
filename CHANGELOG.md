@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.38.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.37.0...v0.38.0) (2026-10-22)
+
+
+### Features
+
+* Today counts wild fish, and notes the fish models apart ([2ea9561](https://github.com/UCSD-E4E/fishsense-services/commit/2ea95612c9bc1be74170063f4681819afcb6be71))
+* Today counts wild fish, and notes the fish models apart ([d3fbd4c](https://github.com/UCSD-E4E/fishsense-services/commit/d3fbd4cde6b80be5166bfe09d3382ec6e296e5bb))
+
 ## [0.37.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.36.0...v0.37.0) (2026-10-22)
 
 
