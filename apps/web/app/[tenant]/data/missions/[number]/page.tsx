@@ -13,6 +13,8 @@ import { requireSignedIn } from "@/app/_shell/guard";
 import { tenantFor } from "@/app/_shell/tenant";
 import { FishGrid } from "@/app/_shell/fish-grid";
 import { getObservationPage } from "@/lib/observations";
+import { getMissionAutomatic } from "@/lib/automatic";
+import { AutomaticRun, hasRun } from "@/app/[tenant]/data/missions/automatic-run";
 import { FactsForms } from "@/app/[tenant]/data/missions/facts-forms";
 import { deploymentHref, PortBadge } from "@/app/[tenant]/data/missions/mission-table";
 import { paths } from "@/lib/tenant-paths";
@@ -38,6 +40,8 @@ export default async function MissionPage({ params }: Props) {
   if (!mission) notFound();
   // Its fish: how a phone's are reached since /captures was retired (7b).
   const fish = await getObservationPage(token, tenant, { mission: number });
+  // The automatic run, for review (2026-10-21).
+  const run = await getMissionAutomatic(token, tenant, number);
   const deployments: Deployment[] = isAdmin ? await getDeployments(token, tenant) : [];
   const place = [mission.site, mission.region, mission.country].filter(Boolean).join(", ");
   const phone = isPhoneMission(mission);
@@ -124,6 +128,8 @@ export default async function MissionPage({ params }: Props) {
           {mission.notes}
         </p>
       )}
+
+      {hasRun(run) && <AutomaticRun run={run} />}
 
       {fish.observations.length > 0 && (
         <section className="mb-8">
