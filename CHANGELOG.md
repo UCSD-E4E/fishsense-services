@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.36.0...v0.37.0) (2026-10-22)
+
+
+### Features
+
+* shadow size-constancy laser calibration (off by default) ([191cb3f](https://github.com/UCSD-E4E/fishsense-services/commit/191cb3f9f937a080e3f7caa5841c495eb8525ab3))
+
 ## [0.36.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.35.0...v0.36.0) (2026-10-22)
 
 
