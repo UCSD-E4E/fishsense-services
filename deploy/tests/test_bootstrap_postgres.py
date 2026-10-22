@@ -185,6 +185,26 @@ def test_the_owner_has_no_statement_timeout(migrated):
     assert _scalar(app, "SHOW statement_timeout") == "30s"
 
 
+@pytest.mark.parametrize(
+    "role",
+    ["fishsense_owner", "fishsense_app", "fishsense_superset", "fishsense_smoke"],
+)
+def test_nothing_in_v2s_database_runs_with_jit(migrated, role):
+    """v2's views stack `DISTINCT ON`s whose estimated cost crosses the JIT
+    thresholds, and compiling costs more than running: 9.0 s of the Today
+    summary's 13.5 s on production (2026-10-21), and 12-17 s for a 2 s
+    pipeline-status query (0029). Off for the database, so it holds for
+    every role and driver: the API, the orchestrator, the CLI and Superset."""
+    assert _scalar(_login(migrated, role), "SHOW jit") == "off"
+
+
+def test_v1s_database_keeps_its_jit(migrated):
+    v1 = _admin(migrated, "fishsense")
+    with v1.connect() as conn:
+        assert conn.execute(text("SHOW jit")).scalar() == "on"
+    v1.dispose()
+
+
 def test_the_app_role_connects_under_rls(migrated):
     app = _login(migrated, "fishsense_app")
     assert _scalar(app, "SELECT count(*) FROM missions") == 0
