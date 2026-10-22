@@ -398,3 +398,24 @@ async def test_writing_shadow_results_changes_no_calibration_depth_or_measuremen
              frames=[ShadowFrameRow(capture_id=c, frame_source="both", used=True)])
         for s in ("labels", "detector") for v in ("port", "gated")])  # fmt: skip
     assert await dump() == before
+
+
+async def test_at_version_4_a_version_3_slate_frames_dot_still_counts(
+    owner_engine, app_engine
+):
+    """Version 4 changed only cut fish masks (2026-10-22); a slate frame is
+    never segmented, so its version-3 dot is version 4's."""
+    lab = await tenant(owner_engine)
+    m = await _mission(owner_engine, lab)
+    slate = await capture(owner_engine, lab, m)
+    await slate_label(owner_engine, lab, slate)
+    pid = await _automatic_dot(
+        owner_engine, lab, slate, 2000.0, 1500.0, 0.97, version=3
+    )
+
+    inputs = await _in(
+        app_engine, lab, shadow_calibration_inputs, m, headtail_version=4
+    )
+
+    (f,) = inputs.frames
+    assert (f.detector_dot, f.prediction_id) == ((2000.0, 1500.0), pid)

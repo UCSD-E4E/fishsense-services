@@ -36,7 +36,9 @@ from fishsense_services_api.headtail_store import (
     persist_headtail_predictions,
 )
 from fishsense_services_api.mask_backfill_store import (
+    MaskRegeneration,
     record_backfilled_masks,
+    record_mask_regenerations,
     unmasked_missions,
     unmasked_predictions,
 )
@@ -177,3 +179,45 @@ async def test_a_tenant_sees_only_its_own_work(owner_engine, app_engine):
     await _predict(app_engine, lab, m, _predicted(await capture(owner_engine, lab, m)))
     assert await _in(app_engine, other, unmasked_missions, "automatic") == []
     assert await _in(app_engine, other, unmasked_predictions, "automatic", m) == []
+
+
+async def test_every_regeneration_is_recorded_with_what_it_got(
+    owner_engine, app_engine
+):
+    """Owner, 2026-10-22: the regenerated head/tail is kept with every
+    regeneration, stored or not, to measure the keypointer's repeatability."""
+    lab = await tenant(owner_engine)
+    m = await _mission(owner_engine, lab)
+    a, b = await capture(owner_engine, lab, m), await capture(owner_engine, lab, m)
+    await _predict(app_engine, lab, m, _predicted(a), _predicted(b))
+    pa, pb = sorted(await _in(app_engine, lab, unmasked_predictions, "automatic", m),
+                    key=lambda p: p.capture_id == b)  # fmt: skip
+    await _in(app_engine, lab, record_backfilled_masks, "automatic", [pa.prediction_id],
+              [_mask(a)])  # fmt: skip
+    written = await _in(app_engine, lab, record_mask_regenerations, "automatic", [
+        MaskRegeneration(prediction_id=pa.prediction_id, capture_id=a, outcome="reproduced",
+                         mask_area_px=50_010, crop_x=1100, crop_y=825, head_x=1801.0,
+                         head_y=1500.0, tail_x=2300.0, tail_y=1480.0),
+        MaskRegeneration(prediction_id=pb.prediction_id, capture_id=b, outcome="no_mask"),
+    ])  # fmt: skip
+    assert written == 2
+    rows = await _rows(owner_engine, """
+        SELECT r.automatic_head_tail_prediction_id AS p, r.outcome, r.head_x,
+               r.prediction_mask_id IS NOT NULL AS stored
+        FROM mask_regenerations r ORDER BY r.seq""")  # fmt: skip
+    assert rows == [{"p": pa.prediction_id, "outcome": "reproduced", "head_x": 1801.0,
+                     "stored": True},
+                    {"p": pb.prediction_id, "outcome": "no_mask", "head_x": None,
+                     "stored": False}]  # fmt: skip
+
+
+async def test_a_regeneration_of_another_capture_is_refused(owner_engine, app_engine):
+    lab = await tenant(owner_engine)
+    m = await _mission(owner_engine, lab)
+    a, b = await capture(owner_engine, lab, m), await capture(owner_engine, lab, m)
+    await _predict(app_engine, lab, m, _predicted(a))
+    (p,) = await _in(app_engine, lab, unmasked_predictions, "automatic", m)
+    with pytest.raises(ValueError):
+        await _in(app_engine, lab, record_mask_regenerations, "automatic",
+                  [MaskRegeneration(prediction_id=p.prediction_id, capture_id=b,
+                                    outcome="mismatch")])  # fmt: skip

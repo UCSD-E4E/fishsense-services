@@ -372,6 +372,109 @@ async def test_a_new_version_reopens_the_frames(owner_engine, app_engine):
     assert [f.capture_id for f in inputs.frames] == [c]
 
 
+# Version 4 (2026-10-22) changed only a frame whose mask ran into an edge of the
+# 1800x1350 window that is not the photo's: it is segmented again on the whole
+# photo. Any other version-3 row is what 4 would write, so it stands; the cut
+# ones are owed, and the drain re-runs exactly those.
+
+#: A window 1800x1350 at (1100, 825) in a 4000x3000 frame.
+_WINDOW = dict(crop_x=1100, crop_y=825, width=4000, height=3000)
+
+
+async def _owed_at_4(app_engine, lab, mission_id):
+    inputs = await _in(app_engine, lab, automatic_frames_inputs, mission_id,
+                       headtail_version=4)  # fmt: skip
+    return [f.capture_id for f in inputs.frames]
+
+
+async def test_at_4_a_version_3_frame_inside_the_window_stands(
+    owner_engine, app_engine
+):
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    c = await capture(owner_engine, lab, mission_id)
+    await _predict(app_engine, lab, mission_id, _predicted(
+        c, predictor_version=3, mask_bbox=[1101, 826, 2899, 2174], **_WINDOW))  # fmt: skip
+
+    assert await _owed_at_4(app_engine, lab, mission_id) == []
+
+
+@pytest.mark.parametrize(
+    "box",
+    [[1100, 900, 2000, 1000],   # the window's left edge
+     [2000, 900, 2900, 1000],   # its right (half-open: 1100 + 1800)
+     [2000, 825, 2100, 1000],   # its top
+     [2000, 1000, 2100, 2175]],  # its bottom (825 + 1350)
+)  # fmt: skip
+async def test_at_4_a_version_3_frame_cut_by_the_window_is_owed(
+    owner_engine, app_engine, box
+):
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    c = await capture(owner_engine, lab, mission_id)
+    await _predict(app_engine, lab, mission_id,
+                   _predicted(c, predictor_version=3, mask_bbox=box, **_WINDOW))  # fmt: skip
+
+    assert await _owed_at_4(app_engine, lab, mission_id) == [c]
+
+
+async def test_at_4_a_version_3_frame_cut_only_by_the_photos_edge_stands(
+    owner_engine, app_engine
+):
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    c = await capture(owner_engine, lab, mission_id)
+    await _predict(app_engine, lab, mission_id, _predicted(
+        c, predictor_version=3, mask_bbox=[0, 900, 600, 1000],
+        crop_x=0, crop_y=825, width=4000, height=3000))  # fmt: skip
+
+    assert await _owed_at_4(app_engine, lab, mission_id) == []
+
+
+async def test_at_4_a_version_3_cut_mask_that_failed_keypointing_is_owed(
+    owner_engine, app_engine
+):
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    c = await capture(owner_engine, lab, mission_id)
+    await _predict(app_engine, lab, mission_id, _predicted(
+        c, predictor_version=3, status="headtail_failed", head_x=None, head_y=None,
+        tail_x=None, tail_y=None, silhouette_ratio=None,
+        mask_bbox=[1100, 900, 2900, 1000], **_WINDOW))  # fmt: skip
+
+    assert await _owed_at_4(app_engine, lab, mission_id) == [c]
+
+
+async def test_at_4_version_3_abstentions_stand_but_an_unscored_mask_is_owed(
+    owner_engine, app_engine
+):
+    """An unscored mask was kept with no box recorded, so whether the window
+    cut it is unknown: it is run again."""
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    no_dot = await capture(owner_engine, lab, mission_id)
+    unscored = await capture(owner_engine, lab, mission_id)
+    bare = dict(head_x=None, head_y=None, tail_x=None, tail_y=None, mask_bbox=None,
+                silhouette_ratio=None, mask_area_px=None, sam_score=None,
+                crop_x=None, crop_y=None, predictor_version=3)  # fmt: skip
+    await _predict(app_engine, lab, mission_id,
+                   _predicted(no_dot, status="no_laser_dot", laser_x=None,
+                              laser_y=None, laser_confidence=None, **bare),
+                   _predicted(unscored, status="mask_unscored", **bare))  # fmt: skip
+
+    assert await _owed_at_4(app_engine, lab, mission_id) == [unscored]
+
+
+async def test_at_4_a_version_2_frame_is_still_owed(owner_engine, app_engine):
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    c = await capture(owner_engine, lab, mission_id)
+    await _predict(app_engine, lab, mission_id, _predicted(
+        c, predictor_version=2, mask_bbox=[1101, 826, 2899, 2174], **_WINDOW))  # fmt: skip
+
+    assert await _owed_at_4(app_engine, lab, mission_id) == [c]
+
+
 async def test_new_frames_make_the_calibration_stale(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     mission_id = await _backlog_mission(owner_engine, lab)

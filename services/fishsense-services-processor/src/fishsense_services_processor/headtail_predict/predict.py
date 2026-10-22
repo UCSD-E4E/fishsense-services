@@ -47,6 +47,7 @@ from fishsense_services_contracts.headtail import (
 )
 from fishsense_services_processor.headtail_predict.geometry import (
     crop_origin,
+    cut_by_window,
     lift_point,
     mask_at_point,
     mask_box,
@@ -159,6 +160,11 @@ class PredictOptions:
     core_version: Optional[str] = None
     #: The tier: the stage's version for SAM 3.1, the fallback's for Mask R-CNN.
     predictor_version: int = HEADTAIL_PREDICTOR_VERSION
+    #: A kept mask cut by an edge of the window that is not the frame's is
+    #: segmented again on the whole frame (`cut_by_window`). The automatic
+    #: chain's (2026-10-22); off for the human path, whose pre-fill and
+    #: version are unchanged.
+    grow_cut_masks: bool = False
 
 
 def _laser_label_for_mask(
@@ -250,6 +256,23 @@ def predict_from_jpeg(
         return _abstain("laser_off_all_fish", **placed)
 
     binary = (np.asarray(mask) > 0).astype(np.uint8)
+    if options.grow_cut_masks and cut_by_window(
+        binary, origin_x, origin_y, width, height
+    ):
+        # The fish runs on past the window (lab mission 383, 2026-10-22: a
+        # 686 mm grouper cut at both ends measured 554 mm). The cut mask's
+        # length is known to be wrong, so it is never kept: the whole frame
+        # answers, or the frame abstains.
+        origin_x = origin_y = 0
+        placed.update(crop_x=0, crop_y=0)
+        local_points = [(float(px), float(py)) for px, py in laser_points]
+        masks = segmenter.segment(np.ascontiguousarray(frame))
+        if not masks:
+            return _abstain("no_detections", **placed)
+        mask = mask_at_point(masks, local_points)
+        if mask is None:
+            return _abstain("laser_off_all_fish", **placed)
+        binary = (np.asarray(mask) > 0).astype(np.uint8)
     if mask_sink is not None:
         mask_sink.keep(binary, origin_x, origin_y, width, height)
     return _keypoint(

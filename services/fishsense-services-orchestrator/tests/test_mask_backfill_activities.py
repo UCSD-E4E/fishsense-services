@@ -21,7 +21,7 @@ from fishsense_services_api.mask_backfill_store import (
     UnmaskedMission,
     UnmaskedPrediction,
 )
-from fishsense_services_contracts.mask_backfill import BackfilledMask
+from fishsense_services_contracts.mask_backfill import BackfilledMask, MaskExpectation
 from fishsense_services_contracts.masks import StoredMask, mask_key
 from fishsense_services_contracts.object_store import HEADTAIL_JPEG_FOLDER, ObjectRef
 from fishsense_services_orchestrator.mask_backfill.activities import (
@@ -47,6 +47,7 @@ class _Catalog:
         self.rows = list(rows)
         self.slugs = slugs or {TENANT: "lab"}
         self.recorded = []
+        self.regenerations = []
 
     async def member_tenants(self):
         return list(self.slugs)
@@ -59,6 +60,10 @@ class _Catalog:
 
     async def unmasked_predictions(self, t, source, m, *, after_seq=0, limit=200):
         return [r for r in self.rows if r.seq > after_seq][:limit]
+
+    async def record_mask_regenerations(self, t, source, regenerations):
+        self.regenerations.append((source, list(regenerations)))
+        return len(regenerations)
 
     async def record_backfilled_masks(self, t, source, predictions, masks):
         self.recorded.append((source, list(predictions), list(masks)))
@@ -218,3 +223,23 @@ async def test_persist_names_only_masks_that_read_back():
     ((source, predictions, masks),) = catalog.recorded
     assert source == "automatic" and predictions == [good.prediction_id]
     assert masks[0].key == good_key and objects.deleted == [bad_key]
+
+
+async def test_every_regeneration_is_recorded_after_the_masks_are_named():
+    """Stored or not, with what it got (0062): the keypointer's repeatability."""
+    acts, catalog, _ = _acts()
+    got = MaskExpectation(mask_area_px=99, crop_x=1, crop_y=2, head_x=3.5, head_y=4.0,
+                          tail_x=5.0, tail_y=6.0)  # fmt: skip
+    results = [
+        BackfilledMask(prediction_id=uuid.uuid4(), capture_id=uuid.uuid4(),
+                       outcome="mismatch", got=got),
+        BackfilledMask(prediction_id=uuid.uuid4(), capture_id=uuid.uuid4(),
+                       outcome="no_mask"),
+    ]  # fmt: skip
+    await _act(acts.persist_mask_backfill, MaskBackfillTarget(TENANT, MISSION, "automatic"),
+               results)  # fmt: skip
+    ((source, regs),) = catalog.regenerations
+    assert source == "automatic"
+    assert [(r.prediction_id, r.outcome, r.head_x, r.mask_area_px) for r in regs] == [
+        (results[0].prediction_id, "mismatch", 3.5, 99),
+        (results[1].prediction_id, "no_mask", None, None)]  # fmt: skip

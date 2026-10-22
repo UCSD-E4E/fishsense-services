@@ -9,7 +9,8 @@
   and left out;
 - `persist_mask_backfill`: each reproduced mask, read back and checked
   (`masks.checked_masks`), named against its prediction; every other stored
-  mask deleted.
+  mask deleted; then every regeneration recorded, stored or not, with what it
+  got (0062).
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from typing import Any, Dict, List, Optional
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+from fishsense_services_api.mask_backfill_store import MaskRegeneration
 from fishsense_services_contracts.mask_backfill import (
     BackfilledMask,
     BackfillMaskFrame,
@@ -161,25 +163,34 @@ class MaskBackfillActivities:
     ) -> int:
         objects = await self._renders.objects(target.tenant_id)
         stored = [r for r in results if r.mask is not None]
-        if objects is None or not stored:
-            return 0
-        # `checked_masks` reads each back: the key the source's for its
-        # capture, the bytes the ones reported, an 8-bit greyscale PNG.
-        views = [SimpleNamespace(capture_id=r.capture_id, mask=r.mask,
-                                 width=r.mask.width, height=r.mask.height)
-                 for r in stored]  # fmt: skip
-        masks, failed = await checked_masks(objects, target.source, views)
-        good = [(r.prediction_id, m) for r, m in zip(stored, masks) if m is not None]
-        written = (
-            await self._catalog.record_backfilled_masks(
-                target.tenant_id, target.source, [p for p, _ in good],
-                [m for _, m in good],
+        written = 0
+        if objects is not None and stored:
+            # `checked_masks` reads each back: the key the source's for its
+            # capture, the bytes the ones reported, an 8-bit greyscale PNG.
+            views = [SimpleNamespace(capture_id=r.capture_id, mask=r.mask,
+                                     width=r.mask.width, height=r.mask.height)
+                     for r in stored]  # fmt: skip
+            masks, failed = await checked_masks(objects, target.source, views)
+            good = [
+                (r.prediction_id, m) for r, m in zip(stored, masks) if m is not None
+            ]
+            if good:
+                written = await self._catalog.record_backfilled_masks(
+                    target.tenant_id, target.source, [p for p, _ in good],
+                    [m for _, m in good],
+                )  # fmt: skip
+            if failed:
+                await discard(objects, failed)
+        # Every regeneration, stored or not, after its mask is named (0062):
+        # what the keypointer got on the regenerated mask, for its repeatability.
+        if results:
+            await self._catalog.record_mask_regenerations(
+                target.tenant_id, target.source,
+                [MaskRegeneration(prediction_id=r.prediction_id, capture_id=r.capture_id,
+                                  outcome=r.outcome,
+                                  **({} if r.got is None else r.got.model_dump()))
+                 for r in results],
             )  # fmt: skip
-            if good
-            else 0
-        )
-        if failed:
-            await discard(objects, failed)
         activity.logger.info("mask backfill %s mission=%s: %d masks named",
                              target.source, target.mission_id, written)  # fmt: skip
         return written

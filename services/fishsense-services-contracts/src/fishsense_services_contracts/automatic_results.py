@@ -36,6 +36,15 @@ its raw, the image its dot and mask were found in -- is written under
 that; under 2
 a migrated frame kept v1's head/tail JPEG, which they then read. A frame's dot
 and head/tail are as under 2; the bump re-runs every frame to write its render.
+4 (2026-10-22) a kept mask cut by an edge of the 1800x1350 window that is
+not the photo's own is segmented again on the whole photo, and the frame
+abstains if no mask there is under the dot: a fish longer than the window came
+back cut straight across, its head and tail read off the cut (lab mission 383:
+a 686 mm Nassau Grouper measured 554 mm; 1,346 of 38,923 masks were cut, and
+on the 74 with a human length the error ran -23 % to +25 %, p10-p90). Every
+other frame is as under 3, so the API counts a version-3 row of an uncut mask
+as done (`automatic_results_store.head_tail_current`) and the drain re-runs
+only the cut ones.
 
 `AUTOMATIC_JPEG_RENDER_VERSION` names that render: the raw decoded and
 rectified by fishsense-core with the camera's matrix and distortion, then
@@ -93,7 +102,7 @@ __all__ = [
 ]
 
 #: See the module docstring.
-AUTOMATIC_HEADTAIL_PREDICTOR_VERSION = 3
+AUTOMATIC_HEADTAIL_PREDICTOR_VERSION = 4
 #: The one render every step reads (`renders.RENDER_VERSION`).
 AUTOMATIC_JPEG_RENDER_VERSION = RENDER_VERSION
 AUTOMATIC_CALIBRATION_VERSION = "2"
