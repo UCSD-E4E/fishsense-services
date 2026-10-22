@@ -331,10 +331,16 @@ Script: `analysis/shadow_calibration/pool_triggers.py`, with results in
 | Step | Frames | Sessions |
 |---|---|---|
 | 1. out of region / no dot | 0 | |
-| 2. confidence < 0.5 | 5 | 65 (3), 83 (1), 114 (1) |
+| 2. confidence < 0.5 | 4 | 65 (3), 83 (1) |
 | 3. > 10 px off the detector line | 23 | 77 (22), 114 (1) |
 | 4. ambiguous line (dive refused) | 1 dive | 77: all 22 slate dots form their own line; the RANSAC detector line took the other (38/68 inliers) |
 | 5. range-consistency trim (> 0.10) | 0 | none, on either source |
+
+**Correction (2026-10-21, same day):** this table first said 5 frames on
+confidence, putting 114's dropped frame there. The analysis output
+(`results/pool_gate.csv`) has it **off the line**, and the stage's own test
+(`test_the_detector_gate_drops_what_was_reported_on_the_pool`) agrees. The
+total dropped and every refusal count are unchanged.
 
 **Agreement, for context. These are not the criteria, which are judged on field
 missions only:**
