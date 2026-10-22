@@ -1,6 +1,8 @@
 # Shadow size-constancy laser calibration (SAM 3.1): design
 
-**Status: design for review (2026-10-21). Nothing here is built.** This is
+**Status: reviewed by the author (2026-10-21); revised with the review's
+corrections and decisions, and the pool trigger counts it asked for (§6.1).
+Thresholds and switching criteria await the author. Nothing here is built.** This is
 deliverable 1 of the shadow-deployment spec. Its job is to collect evidence on
 whether size constancy can replace the current laser calibration, without
 changing anything production reports. The implementation PR (deliverable 2) and
@@ -31,8 +33,15 @@ These change what the stage must reproduce, so they come first.
    - The thresholds in §6 therefore come from `slate_unknown.py`
      (`MIN_FRAMES = 8`, size ratio ≥ 1.5), PAPER.md ("at least about 1.5× in
      distance"; "under 1.12× spread are unconstrained"), and the spec.
-   - I found **no 0.6 m range-span criterion** in the paper or the code. It is
-     new with this spec.
+   - **The 0.6 m range span has precedent** (author's correction): the
+     FishSense Lite (IMWUT) paper, §5.3, requires calibration photographs to
+     span at least 0.6 m of range (`papers/fishsense-lite-imwut/Sections/results.tex:133`).
+     Production enforces it as the lever-arm refusal:
+     `calibration.consistency.check_observation_geometry`,
+     `MIN_OBSERVATION_LEVER_M = 0.60`, the spread along the optical axis
+     (max z − min z) of the camera-space laser points fitted. The shadow stage
+     calls that function on its own fitted laser points. It reuses the
+     definition and does not add a new one.
 3. **Production's "human dots" are not filtered to human labels.** The laser
    calibration reads any laser label that is `NOT superseded` with x,y set
    (`laser_calibration_store._LIVE_DOT`, :202-208). That includes
@@ -44,11 +53,18 @@ These change what the stage must reproduce, so they come first.
    `laser_calibrations` (0008), resolved per mission by
    `effective_laser_calibrations` (0018: own, else borrowed through
    `missions.calibration_source_mission_id`).
-5. **Dive 279's red-speck false positives are not documented anywhere** in this
-   repo or its history.
-   - The test that the detector gate must catch them (§5.3) needs the frames.
-     **Author: please name the captures** (or a time range) where the specks
-     appear. They will be recorded in this document and turned into a fixture.
+5. **Dive 279's red specks are recorded in the IMWUT analysis**
+   (`imwut_2026_fishsense_lite/fish_model_analysis/IN_PLANE_DRIFT.md:346-358`,
+   ce372d6, 2026-10-18; pinned by `tests/test_in_plane_ends.py`
+   `test_279s_opening_detections_are_not_its_laser`).
+   - In 78686 and 78688 the detector puts dots on the slate at y = 903 and
+     810 px. Along the beam those are 0.49 and 0.42 m, while the slate's size
+     puts it at 0.91 and 0.98 m.
+   - One second later, 78690 puts the dot 445 px further along the line, on the
+     diver's chest.
+   - They are small red specks taken for the laser. **They lie on the laser
+     line**, 3.3 px and 2.5 px from it, so a line-distance gate cannot catch
+     them. Only range consistency can (§5.3 step 5; the result is in §6.1).
 6. **The GPUs that can run SAM 3.1 as configured** are Ampere or newer: the NRP
    A-class cards and the lab's A6000 and RTX 4500 Ada. Commit f987f46 found that
    a 2080 Ti (Turing) fails bfloat16 and then loses its CUDA context.
@@ -163,12 +179,14 @@ the live row.
 | `vanishing_px`, `line_direction`, `line_offset_px`, `line_source` | the fit along its line; `line_source` is `'mission_line'`, `'detector_line'` or `'dots'` |
 | `reference_laser_calibration_id`, `reference_borrowed` | production's `effective_laser_calibrations` row when the fit ran (NULL if none) |
 | `angle_diff_deg` | 3D angle between the shadow and reference axes |
-| `vp_offset_px`, `vp_offset_deg_f2850`, `vp_offset_deg_fx` | signed along-line offset of the vanishing point from the reference's, in px, and in degrees at F=2850 (the paper's metric) and at the camera's fx |
+| `vp_offset_px`, `vp_offset_deg_fx`, `vp_offset_deg_f2850` | signed along-line offset of the vanishing point from the reference's, in px, and in degrees at the camera's own fx (what the paper reports) and at F=2850 (cscw's, for comparison) |
 | `fit_residual` | SD of `log s − log(t − t_v) − c` over frames used |
 | `se_px`, `se_deg` | bootstrap SE (500 draws, seeded per mission and source) |
 | `frames_used`, `frames_rejected` | count, and `jsonb` {reason: count} |
 | `size_spread` | max/min size over frames used |
-| `range_min_m`, `range_max_m`, `range_span_m` | the frames' ranges under the fitted calibration (§7.3) |
+| `range_min_m`, `range_max_m`, `lever_m` | the frames' laser-point ranges under the fitted calibration, and their spread along the optical axis (production's lever arm, §6) |
+| `lever_m_production_offset` | the same spread with the mission's own production offset, where one exists: a sensitivity check only |
+| `size_cv_pct`, `size_maxdev_pct` | slate length constancy: CV, and worst frame's deviation, of the slate's size in metres across frames (§8.4) |
 | `sam_score_min`, `sam_score_median` | over frames used |
 | `sam_model`, `sam_prompts`, `sam_threshold`, `render_long_side` | e.g. `sam3/3.1@ab12cd34ef56`, `{slate,"white board"}`, 0.3, 1600 |
 | `gate` | `jsonb`: the detector gate's thresholds and per-reason rejection counts (detector source) |
@@ -200,9 +218,27 @@ port used (`lines.psv` is production's dive line), with the offset as the median
 normal coordinate of the frames' dots (`register.py:153-154`).
 
 ### 5.2 (b) Detector dots
-**Source:** the current `laser_predictions` row per capture. This is production's
-detector on the human path, `LASER_PREDICTOR_VERSION = 2`, which already rejects
-dots outside `LASER_REGION_POLYGON` (`rejected_out_of_region`).
+**Source, as the author decided:** the current `laser_predictions` row per
+capture. This is production's detector on the human path,
+`LASER_PREDICTOR_VERSION = 2`, which already rejects dots outside
+`LASER_REGION_POLYGON` (`rejected_out_of_region`).
+
+**A coverage problem the author should see before the implementation.**
+Production's human-path detector has only run where the laser stage needed it.
+On the 10 pool missions it covers **128 of 1,596 canonical frames**: 62 has 7 of
+34, 65 has 1 of 39, and 71 has 2 of 72. As decided, the detector source would
+have too few dots to fit on most pool sessions, and on many field missions too.
+
+The automatic track runs the **same detector kernel**
+(`laser_predict._predict_from_raw`, the same region gate) on every frame, and
+covers all 258 pool slate frames. The options:
+- **(i)** have the shadow stage use the automatic track's dots;
+- **(ii)** have the shadow stage run the human-path detector on the slate
+  frames that lack a prediction, writing nothing to `laser_predictions`;
+- **(iii)** keep `laser_predictions` and accept the gaps.
+
+**Author decides.** The pool counts in §6.1 use the automatic dots as a labelled
+stand-in.
 
 ### 5.3 The consistency gate, proposed. **Author decides** the values.
 In order, each rejection recorded with its reason:
@@ -227,10 +263,18 @@ In order, each rejection recorded with its reason:
    - **This is an addition the port lacks.** It is recorded as a separate
      variant (§7.4), so the port itself stays reproducible.
 
-**Dive 279's red specks:** a test fixture built from the author's named frames
-(§1.5). It must show them rejected at step 2 or 3, or the dive refused at step 4.
-If the specks sit on the line at plausible ranges, none of these steps can catch
-them, and the design comes back for review.
+**Dive 279's red specks:** the test fixture is built from the IMWUT rows
+(`fish_model_analysis/data/slate_sizes.csv`: 78686, 78688, 78690, 78696, and
+the human closing frames 78797-78807). On those rows (§6.1):
+- steps 2-4 **do not** catch the specks, which are on the line;
+- step 5 **does**: it drops 78686 and 78688, and also 78696 (165 px off the
+  line) and one human closing frame (78807);
+- that leaves too few frames, so the dive is refused.
+
+279 has only 6 sized frames, so it would be refused for too few frames anyway.
+It therefore **does not test step 5 on its own.** The implementation adds a
+synthetic fixture: a sound pool session with two dots moved along the line to
+the specks' wrong ranges. Step 5 must drop exactly those two.
 
 ## 6. Refusal thresholds, proposed. **Author decides**
 
@@ -240,16 +284,68 @@ A source's fit is refused, with the first reason that applies, when:
 |---|---|---|
 | `too_few_frames` | < 8 frames used | `slate_unknown.MIN_FRAMES` |
 | `too_little_size_spread` | max/min size < 1.5 | PAPER.md §4.3; `slate_unknown` |
-| `too_little_range_span` | range span < 0.6 m (under the fitted calibration) | the spec; no precedent found |
+| `lever_arm_below_0.6m` | production's own `check_observation_geometry` (`MIN_OBSERVATION_LEVER_M = 0.60`) on the fitted laser points, under the assumed 0.104 m offset | IMWUT §5.3; production's lever-arm refusal |
 | `se_too_high` | bootstrap SE > 0.05° along-line (F=2850) | `TARGET`; the paper's v-to-2.5 px |
 | `sam_scores_low` | median score < 0.5, or > 25% of frames lack a mask under the dot | 0.5 is production's SAM gate; the port's floor is 0.3 |
 | `unconstrained` | optimum at the search bracket's edge | `size_constancy._pinned` |
 | `ambiguous_line` | §5.3 step 4 (detector source) | session 77 |
 | `no_reference_line` | no mission line and < 3 dots to fit one | |
 
-The range span depends on the fit, because a range is computed from the fitted
-calibration. So it is checked after the fit, as a refusal rather than a
+The lever arm depends on the fit, because a laser point is computed from the
+fitted calibration. So it is checked after the fit, as a refusal rather than a
 precondition.
+
+As a **sensitivity check only** (author's decision 4), each result also records
+the lever arm computed with the mission's own production offset |O| where one
+exists (`lever_m_production_offset`). It never decides a refusal.
+
+### 6.1 Trigger counts on the 10 pool sessions (the author's request)
+
+Script: `analysis/shadow_calibration/pool_triggers.py`, with results in
+`analysis/shadow_calibration/results/`.
+- Inputs: cscw-fishsense2027@8312780a, plus the automatic-track dots exported
+  read-only from production (`data/pool_automatic_dots.csv`; the stand-in of
+  §5.2).
+- It uses cscw's own `fit_tv` and production's own lever-arm gate.
+- **Sanity:** on the label dots it reproduces `size_constancy_sessions.csv`
+  exactly, per session. Median |along-line offset| is 0.0232° and median axis
+  angle 0.029°, with 10/10 within 0.05°.
+
+**Refusals (§6): how many of 10 sessions each would refuse**
+
+| Refusal | Label dots | Detector dots | Closest session to the threshold |
+|---|---|---|---|
+| `too_few_frames` (< 8) | 0 | **1** (77, after the gate) | fewest kept: 17 (63) |
+| `too_little_size_spread` (< 1.5) | 0 | 0 | 1.73 (62) |
+| `lever_arm_below_0.6m` | 0 | 0 | 1.05 m labels, 1.00 m detector (62) |
+| `se_too_high` (> 0.05°) | 0 | 0 | 0.046° (62, labels) |
+| `sam_scores_low` (median < 0.5, or > 25% without a mask) | 0 | 0 | median 0.54 (87); no-mask share 17% (114) |
+| `unconstrained` | 0 | 0 | |
+| `ambiguous_line` | n/a | **1** (77) | |
+
+**The detector gate (§5.3): frames removed per step, over 258 slate frames**
+
+| Step | Frames | Sessions |
+|---|---|---|
+| 1. out of region / no dot | 0 | |
+| 2. confidence < 0.5 | 5 | 65 (3), 83 (1), 114 (1) |
+| 3. > 10 px off the detector line | 23 | 77 (22), 114 (1) |
+| 4. ambiguous line (dive refused) | 1 dive | 77: all 22 slate dots form their own line; the RANSAC detector line took the other (38/68 inliers) |
+| 5. range-consistency trim (> 0.10) | 0 | none, on either source |
+
+**Agreement, for context. These are not the criteria, which are judged on field
+missions only:**
+- Label dots: 10/10 within 0.05° along-line.
+- Detector dots: 6/9 accepted within 0.05°, median 0.040°, max 0.068° (65).
+
+**Lever arm with the production offset (sensitivity):** within 0.13 m of the
+assumed-offset value on every session (94: 2.47 → 2.34 m).
+
+**What the pool cannot set.** Nothing on the pool is near the frame, spread,
+lever or SE thresholds, so the pool gives no evidence for tightening them, only
+that they don't refuse sound sessions. Step 5 never fired on the pool. Its
+value comes from 279 and mission 80 (`size_constancy.FRAME_RESIDUAL_MAX`
+history).
 
 ## 7. The fit: a port, not a reimplementation
 
@@ -294,16 +390,44 @@ effect is visible rather than baked in.
 Proposed candidates, to be judged per dot source, on the `gated` variant, over
 missions where both the shadow fit (accepted) and a production calibration exist:
 
-1. **Agreement:** at least **90%** of missions have along-line |offset| ≤ 0.05°
-   at F=2850. The 95% CI lower bound, resampling whole missions, is at least 80%.
-2. **No silent disagreement:** no accepted mission with |offset| above the
-   length-budget angle. Proposed: 0.15°, the `slate_unknown` second tier.
-   Beyond 0.05° the paper's 2.5 px budget is spent.
+Judged on **field missions only** (author's decision 2). The paper reports the
+along-line offset at the camera's own fx (`vp_offset_deg_fx`); F=2850 is
+stored beside it for comparison with cscw.
+
+1. **Agreement:** at least **90%** of missions have along-line |offset| ≤ 0.05°.
+   The 95% CI lower bound, resampling whole missions, is at least 80%.
+2. **Two tiers on disagreement** (author's change):
+   - **strict tier, reported:** accepted fits beyond **0.15°** are counted and
+     listed. 0.15° is a stricter tier, named as such, not the length budget.
+   - **budget, enforced:** no accepted fit may exceed the length-budget angle,
+     **0.39°**. That's the tighter side of IMWUT §5.3's −0.53° to +0.39° of
+     in-plane rotation at 2 m for a 15% length budget
+     (`fishsense_imwut/calibration.py:1147-1156` `pointing_budget_deg(0.104, 2.0)`
+     = (−0.526°, +0.389°)). The angle tested is the signed along-line offset,
+     against the matching side of the band.
 3. **Refusals carry the disagreements:** among missions where the `port` variant
-   disagrees by more than 0.15°, at least 80% are refused by `gated`.
-4. **Coverage:** state the share of missions with any slate frames that get an
-   accepted fit. **No threshold is proposed here.** The author sets one if
-   replacing calibration requires it.
+   exceeds the budget angle, at least 80% are refused by `gated`.
+4. **Slate length constancy** (new, the author's): under the shadow
+   calibration, the slate's apparent size in metres (√area × range ÷ fx) must
+   stay constant across range. On the pool's label dots (§6.1), its CV across
+   frames is **0.7–1.7%**, and the worst frame deviates **1.4–6.4%** from the
+   session median. Proposed:
+   - **CV ≤ 3%** per mission (about twice the pool's worst);
+   - **worst frame within 10%** of the median.
+
+   Reported on every accepted mission. A mission over either is counted as a
+   failure of this criterion.
+5. **Coverage** (author's request for a value): at least **25%** of field
+   missions with slate frames receive an accepted `gated` fit, and at least
+   **60%** of those with a production calibration.
+   - The only field reference is the automatic track's SIFT method, which has
+     accepted 37 of 171 attempted missions (22%, production, 5:33 PM PDT
+     2026-10-21).
+   - The proposal asks the SAM method to beat that clearly. On calibrated
+     missions it asks more, because those are where slate sessions were shot to
+     be calibrated.
+   - **This value has the weakest basis of any here**, since there is no pool
+     evidence for it. The author should set it knowingly.
 
 **The reference is production's stored calibration, not ground truth.** Where
 tape-measured lengths exist (the SMILE paired fish), the report also gives length
@@ -397,16 +521,22 @@ proposed.**
   days, and **only once the GPU is otherwise idle** (the rule: no extra GPU until
   the first is fully used).
 
-## 12. Open questions for the author
+## 12. Decisions (author, 2026-10-21) and what is still open
 
-1. Dive 279: which captures show the red specks (§1.5)?
-2. Thresholds in §5.3 and §6, and the criteria in §8: accept, change, or replace?
-3. Detector dot source: the human-path detector (`laser_predictions`, proposed),
-   or the automatic track's dots (`automatic_head_tail_predictions`, the same
-   detector without the human path's history)?
-4. Is the assumed |O| = 0.104 m acceptable for origins and ranges, or should the
-   stage borrow |O| from the mission's production calibration where one exists?
-   That would make the range span less assumption-bound, but no longer
-   independent of production.
-5. Scope of the backfill: every mission with slate frames, or the calibrated
-   sessions first?
+Decided:
+- **Dive 279:** found in the IMWUT analysis (§1.5, §5.3).
+- **Thresholds:** the structure is accepted. Values are to be set on the pool
+  sessions, from the counts in §6.1.
+- **Detector dots:** `laser_predictions`. **Reopened** by the coverage gap in
+  §5.2: options (i) to (iii).
+- **Laser offset:** the fit keeps the assumed 0.104 m. The production offset's
+  lever arm is recorded as a sensitivity check only.
+- **Backfill order:** calibrated missions first, then every mission with slate
+  frames, for coverage.
+- **Metric:** the paper reports the along-line offset at the camera's own fx.
+
+Open, for the author:
+1. The detector source, given §5.2's coverage gap.
+2. Threshold values (§5.3, §6), from §6.1.
+3. Commit the switching criteria (§8), including the length-constancy and
+   coverage values proposed there.
