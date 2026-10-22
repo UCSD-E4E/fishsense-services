@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.35.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.34.1...v0.35.0) (2026-10-22)
+
+
+### Features
+
+* number the fish list's pages ([5635bcf](https://github.com/UCSD-E4E/fishsense-services/commit/5635bcf3d7bc41810cfbcd4f907ea36f5a47a506))
+* number the fish list's pages ([4f94992](https://github.com/UCSD-E4E/fishsense-services/commit/4f949926ad1a37eee0a4760c980b4d5a7b16d983))
+
+
+### Bug Fixes
+
+* **web:** keep the fish page's fact lists inside their cards ([aa4c3da](https://github.com/UCSD-E4E/fishsense-services/commit/aa4c3dab9a9362efa4d07e9de7d3e444d335bdac))
+* **web:** keep the fish page's fact lists inside their cards ([a2ef7fc](https://github.com/UCSD-E4E/fishsense-services/commit/a2ef7fc61c0663999d13c94f7c3d16b1f123c99a))
+
 ## [0.34.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.34.0...v0.34.1) (2026-10-22)
 
 
