@@ -87,7 +87,7 @@ MEASUREMENT_COHORT = f"""{ADMITTED_PORT} AND EXISTS (
 
 
 def _reviewed(work: str) -> str:
-    """The work row's dot or head/tail label came from a review (0062)."""
+    """The work row's dot or head/tail label came from a review (0063)."""
     return f"""(
     EXISTS (SELECT 1 FROM head_tail_labels rh
             WHERE rh.tenant_id = {work}.tenant_id AND rh.id = {work}.head_tail_label_id
@@ -99,7 +99,7 @@ def _reviewed(work: str) -> str:
 
 def reviewed_missions(tenant: str) -> str:
     """The missions of ``tenant``'s captures with a live label from a review
-    (0062): few, and found by partial indexes, so the dear `measurement_work`
+    (0063): few, and found by partial indexes, so the dear `measurement_work`
     is read only for them."""
     return f"""(
     SELECT c.mission_id FROM captures c
@@ -111,7 +111,7 @@ def reviewed_missions(tenant: str) -> str:
         WHERE l.tenant_id = {tenant} AND l.source = 'review' AND NOT l.superseded))"""
 
 
-#: Dive `d`'s reviewed frames to measure, whatever its priority (0062). The
+#: Dive `d`'s reviewed frames to measure, whatever its priority (0063). The
 #: selector's form (hashed over the tenant) and the status function's.
 def reviewed_measurement_work(tenant: str) -> str:
     return f"""(d.id IN {reviewed_missions(tenant)} AND EXISTS (
@@ -240,7 +240,7 @@ async def next_mission_for_measurement(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> MeasurementCandidate | None:
     """The tenant's oldest high-priority dive with stage-14 work, or any dive
-    with a reviewed frame to measure (0062)."""
+    with a reviewed frame to measure (0063)."""
     row = (
         await conn.execute(
             text(f"""

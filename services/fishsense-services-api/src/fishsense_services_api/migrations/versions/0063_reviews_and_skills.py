@@ -30,8 +30,8 @@ expert at dots and still learning species.
   lab like every table it reads (0030). The terms are spelled here and pinned
   to the stores by tests/test_mission_pipeline_status_view.py.
 
-Revision ID: 0062
-Revises: 0061
+Revision ID: 0063
+Revises: 0062
 """
 
 import importlib.util
@@ -45,8 +45,8 @@ from fishsense_services_api.schema_audit import (
     RESEARCH_ROLE,
 )
 
-revision = "0062"
-down_revision = "0061"
+revision = "0063"
+down_revision = "0062"
 
 ACTIVE_TENANT = "NULLIF(current_setting('app.tenant_id', true), '')::uuid"
 _LAB = "tenant_id = (SELECT public.research_tenant_id())"
@@ -290,7 +290,7 @@ def downgrade() -> None:
     op.execute("""
         DO $$ BEGIN
             IF EXISTS (SELECT 1 FROM reviews) OR EXISTS (SELECT 1 FROM reviewer_skills)
-            THEN RAISE EXCEPTION 'reviews or skills exist; 0062 cannot be undone';
+            THEN RAISE EXCEPTION 'reviews or skills exist; 0063 cannot be undone';
             END IF;
         END $$
         """)

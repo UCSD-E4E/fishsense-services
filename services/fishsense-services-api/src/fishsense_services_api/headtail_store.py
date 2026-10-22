@@ -132,7 +132,7 @@ _RENDERABLE = RECTIFIABLE_MISSION
 
 #: Capture `c` has its head/tail label: a live row in a project, or one from
 #: the app (a frame with a head/tail review takes its labels from there; the
-#: review superseded its row, 0062).
+#: review superseded its row, 0063).
 _LABELLED = f"""(EXISTS (
     SELECT 1 FROM head_tail_labels h
     WHERE h.tenant_id = c.tenant_id
@@ -803,7 +803,7 @@ async def record_head_tail_task(
             VALUES (:t, :c, 'human', :p, :k)
             ON CONFLICT (tenant_id, capture_id, ls_project_id) DO UPDATE SET
                 ls_task_id = excluded.ls_task_id, superseded = false
-            -- A label a review superseded stays superseded (0062): reviving it
+            -- A label a review superseded stays superseded (0063): reviving it
             -- would undo the review behind the measurement's back.
             WHERE head_tail_labels.superseded_reason IS DISTINCT FROM 'review'
             """),

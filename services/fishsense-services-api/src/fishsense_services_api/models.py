@@ -621,7 +621,7 @@ class _LabelCore:
 
 
 class _ReviewLabel:
-    """A label a review made (0062): it names its review and the render its
+    """A label a review made (0063): it names its review and the render its
     points are on. Only laser and head/tail labels come from reviews."""
 
     #: The review that made it; a label of ``source = 'review'`` has one.
@@ -674,7 +674,7 @@ class HeadTailLabel(_ReviewLabel, _LabelCore, Base):
     head_y: Mapped[float | None] = mapped_column(Double)
     tail_x: Mapped[float | None] = mapped_column(Double)
     tail_y: Mapped[float | None] = mapped_column(Double)
-    #: Why it was superseded: ``review`` (0062); NULL otherwise.
+    #: Why it was superseded: ``review`` (0063); NULL otherwise.
     superseded_reason: Mapped[str | None] = mapped_column(Text)
 
 
@@ -1943,7 +1943,7 @@ class CapturePlaceName(Base):
 
 
 class ReviewerSkill(Base):
-    """A person's level in one kind of review (0062); append-only, the
+    """A person's level in one kind of review (0063); append-only, the
     latest is current. Earned, or set by an admin; no row means Learning."""
 
     __tablename__ = "reviewer_skills"
@@ -1978,7 +1978,7 @@ class ReviewerSkill(Base):
 
 class Review(Base):
     """One reviewer's action on one kind of a frame's automatic result
-    (0062): accept, fix, reject or confirm; append-only."""
+    (0063): accept, fix, reject or confirm; append-only."""
 
     __tablename__ = "reviews"
     __table_args__ = (

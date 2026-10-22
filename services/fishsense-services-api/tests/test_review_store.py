@@ -1,4 +1,4 @@
-"""Reviews and reviewers' skills (0062; the owner, 2026-10-21).
+"""Reviews and reviewers' skills (0063; the owner, 2026-10-21).
 
 A member reviews one kind of a frame's automatic result -- the laser dot, the
 head and tail, or the species -- by accepting it, fixing it, or rejecting it
@@ -561,7 +561,7 @@ async def test_only_a_member_of_the_tenant_has_a_skill_in_it(
 async def test_the_status_agrees_a_reviewed_frame_is_not_label_studio_work(
     lab, people, app_engine, owner_engine
 ):
-    """`dive_pipeline_status` reads the cohorts' terms (0062)."""
+    """`dive_pipeline_status` reads the cohorts' terms (0063)."""
     c, render, mission_id = await _unlabelled_frame(lab, owner_engine, laser=False)
     await _review(app_engine, lab, capture_id=c, reviewer_id=people[EXPERT],
                   kind="laser", action="fix", point=(772.0, 521.0), render_id=render)  # fmt: skip

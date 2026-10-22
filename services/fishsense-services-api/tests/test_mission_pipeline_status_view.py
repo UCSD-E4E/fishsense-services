@@ -476,8 +476,8 @@ def test_0050_adds_the_port_terms_todays_stores_use():
     assert rendered == migration.RENDERED_SHA256
 
 
-def test_0062_adds_the_review_terms_todays_stores_use():
-    """0062 recreates the function so a frame reviewed in the app isn't Label
+def test_0063_adds_the_review_terms_todays_stores_use():
+    """0063 recreates the function so a frame reviewed in the app isn't Label
     Studio work, and a parked mission's reviewed frames are pending
     measurement. When the stores' review terms change, this fails: ship a
     migration that recreates the function again."""
@@ -485,7 +485,7 @@ def test_0062_adds_the_review_terms_todays_stores_use():
     from fishsense_services_api.review_store import reviewed_in_app
 
     migration = importlib.import_module(
-        "fishsense_services_api.migrations.versions.0062_reviews_and_skills"
+        "fishsense_services_api.migrations.versions.0063_reviews_and_skills"
     )
     assert migration.REVIEWED_HEAD_TAIL == reviewed_in_app("head_tail")
     assert migration.REVIEWED_LASER == reviewed_in_app("laser")

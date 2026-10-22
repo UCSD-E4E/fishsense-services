@@ -49,7 +49,7 @@ class AutomaticFrameView(BaseModel):
     checkpoint: str | None
     core_version: str | None
     render_url: str | None
-    #: Named by a review of these points (0062).
+    #: Named by a review of these points (0063).
     render_id: uuid.UUID | None
     render_width: int | None
     render_height: int | None

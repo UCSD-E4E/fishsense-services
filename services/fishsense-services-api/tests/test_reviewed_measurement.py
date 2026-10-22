@@ -111,7 +111,7 @@ async def test_a_high_priority_missions_work_is_unchanged(owner_engine, app_engi
 async def test_the_status_shows_a_parked_missions_reviewed_frames_as_pending(
     owner_engine, app_engine
 ):
-    """`dive_pipeline_status` says what stage 14 will pick (0062)."""
+    """`dive_pipeline_status` says what stage 14 will pick (0063)."""
     lab = await tenant(owner_engine)
     parked, _ = await calibrated_dive(owner_engine, lab, priority="low")
     reviewed = await measurable_capture(owner_engine, lab, parked)

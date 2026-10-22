@@ -320,7 +320,7 @@ _CAPTURE_COLUMNS = (
 
 #: Capture `c` needs its stage-0.1 JPEG: no non-sentinel label (a sentinel has
 #: no project; an incomplete row seeded by populate counts as labeled) and no
-#: dot review (its dot comes from the app, 0062), or a live label flagged
+#: dot review (its dot comes from the app, 0063), or a live label flagged
 #: `needs_reprocess` (v1's two ways in).
 NEEDS_LASER_JPEG = f"""(
     (NOT EXISTS (
@@ -1122,7 +1122,7 @@ async def revive_laser_labels(
     live row it records the last change was a revival). Refuses, writing
     nothing, if the dive's population is not the one the plan was made from,
     or a label is not the dive's. Labels already live are skipped, so
-    re-applying is a no-op, and so is a label an app review superseded (0062):
+    re-applying is a no-op, and so is a label an app review superseded (0063):
     the review's dot is the frame's. Returns how many were revived."""
     await _lock_mission(conn, "validation", mission_id)
     population = await laser_label_population(conn, tenant_id, mission_id, lock=True)
