@@ -19,7 +19,15 @@ from dataclasses import asdict
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, status
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Path,
+    Query,
+    status,
+)
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -30,6 +38,7 @@ from fishsense_services_api.observation_store import (
     Observation,
     list_observations,
     observation,
+    mission_captures,
 )
 from fishsense_services_api.place_naming import PlaceNamer
 from fishsense_services_api.summary_store import tenant_summary
@@ -216,6 +225,54 @@ def add_observation_routes(
         return TenantSummaryView(**asdict(found))
 
     @app.get(
+        "/tenants/{slug}/missions/{number}/captures",
+        operation_id="list_mission_captures",
+        response_model=CaptureCardPage,
+    )
+    async def list_mission_captures(
+        slug: str,
+        number: Annotated[int, Path(ge=0)],
+        member: Member,
+        limit: Annotated[int, Query(ge=1, le=200)] = 48,
+        after: str | None = None,
+    ) -> CaptureCardPage:
+        """Every capture of the mission, measured or not, in the order taken."""
+        cursor = _parse_capture_cursor(after) if after else None
+        async with tenant_transaction(engine, member.tenant_id) as conn:
+            found = await mission_captures(
+                conn,
+                member.tenant_id,
+                number,
+                limit=limit + 1,
+                after=cursor,
+                photo_bucket=bucket(slug),
+            )
+        if found is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "no such mission")
+        page, more = found[:limit], len(found) > limit
+        try:
+            objects = stores.for_tenant(slug)
+        except NoTenantStore:
+            objects = None
+        return CaptureCardPage(
+            captures=[
+                CaptureCardView(
+                    capture_id=c.capture_id,
+                    client_capture_uuid=c.client_capture_uuid,
+                    captured_at=c.captured_at,
+                    photo_url=(
+                        objects.presign_get(c.photo_key)
+                        if objects is not None and c.photo_key
+                        else None
+                    ),
+                    fish=[MeasuredFish(fish_id=f, length_m=n) for f, n in c.fish],
+                )
+                for c in page
+            ],
+            next=_capture_cursor(page[-1].cursor) if more else None,
+        )
+
+    @app.get(
         "/tenants/{slug}/observations",
         operation_id="list_observations",
         response_model=ObservationPage,
@@ -305,6 +362,40 @@ def add_observation_routes(
 
 def _point(xy: tuple[float, float] | None) -> Point | None:
     return None if xy is None else Point(x=xy[0], y=xy[1])
+
+
+class MeasuredFish(BaseModel):
+    fish_id: uuid.UUID
+    length_m: float | None
+
+
+class CaptureCardView(BaseModel):
+    capture_id: uuid.UUID
+    client_capture_uuid: uuid.UUID | None
+    captured_at: datetime
+    photo_url: str | None
+    #: Empty for a capture with no measured fish.
+    fish: list[MeasuredFish]
+
+
+class CaptureCardPage(BaseModel):
+    captures: list[CaptureCardView]
+    #: Pass as ``after`` for the next page; None at the end.
+    next: str | None
+
+
+def _capture_cursor(position: tuple[datetime, uuid.UUID]) -> str:
+    return f"{position[0].isoformat()}~{position[1]}"
+
+
+def _parse_capture_cursor(value: str) -> tuple[datetime, uuid.UUID]:
+    try:
+        at, capture_id = value.split("~")
+        return datetime.fromisoformat(at), uuid.UUID(capture_id)
+    except ValueError:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "not a page cursor"
+        ) from None
 
 
 def _cursor(position: tuple[datetime, uuid.UUID, uuid.UUID]) -> str:

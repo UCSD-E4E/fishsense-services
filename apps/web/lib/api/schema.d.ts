@@ -78,6 +78,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{slug}/captures/{capture_id}/automatic": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Frame */
+        get: operations["get_automatic_frame"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{slug}/deployments": {
         parameters: {
             query?: never;
@@ -202,6 +219,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{slug}/missions/{number}/automatic": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Mission */
+        get: operations["get_mission_automatic"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{slug}/missions/{number}/calibration-refusal": {
         parameters: {
             query?: never;
@@ -304,6 +338,26 @@ export interface paths {
          *     number.
          */
         put: operations["set_mission_calibration_target"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/missions/{number}/captures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Mission Captures
+         * @description Every capture of the mission, measured or not, in the order taken.
+         */
+        get: operations["list_mission_captures"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -548,6 +602,127 @@ export interface components {
             name: string;
             /** Slug */
             slug: string;
+        };
+        /** AutomaticCalibrationView */
+        AutomaticCalibrationView: {
+            /** Algorithm Version */
+            algorithm_version: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Frames Used */
+            frames_used: number | null;
+            /** Outcome */
+            outcome: string;
+            /** Pair Count */
+            pair_count: number | null;
+            /** Refusal Reason */
+            refusal_reason: string | null;
+            /** Se Px */
+            se_px: number | null;
+            /** Size Ratio */
+            size_ratio: number | null;
+        };
+        /** AutomaticFailureView */
+        AutomaticFailureView: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Error */
+            error: string;
+            /** Step */
+            step: string;
+        };
+        /** AutomaticFrameView */
+        AutomaticFrameView: {
+            /** Calibration Source */
+            calibration_source: string | null;
+            /** Checkpoint */
+            checkpoint: string | null;
+            /** Core Version */
+            core_version: string | null;
+            /** Depth M */
+            depth_m: number | null;
+            head: components["schemas"]["PixelPoint"] | null;
+            laser: components["schemas"]["PixelPoint"] | null;
+            /** Laser Confidence */
+            laser_confidence: number | null;
+            /** Length M */
+            length_m: number | null;
+            /** Mask Bbox */
+            mask_bbox: number[] | null;
+            /** Mask Height */
+            mask_height: number | null;
+            /** Mask Url */
+            mask_url: string | null;
+            /** Mask Width */
+            mask_width: number | null;
+            /** Measurement Algorithm */
+            measurement_algorithm: string | null;
+            /** Measurement Algorithm Version */
+            measurement_algorithm_version: string | null;
+            /**
+             * Predicted At
+             * Format: date-time
+             */
+            predicted_at: string;
+            /** Predictor Version */
+            predictor_version: number;
+            /** Refusal */
+            refusal: string | null;
+            /** Render Height */
+            render_height: number | null;
+            /** Render Url */
+            render_url: string | null;
+            /** Render Width */
+            render_width: number | null;
+            /** Sam Score */
+            sam_score: number | null;
+            /** Slate Probability */
+            slate_probability: number | null;
+            /** Species */
+            species: string | null;
+            /** Species Margin */
+            species_margin: number | null;
+            /** Species Probability */
+            species_probability: number | null;
+            /** Species Top5 */
+            species_top5: {
+                [key: string]: unknown;
+            }[];
+            /** Status */
+            status: string;
+            tail: components["schemas"]["PixelPoint"] | null;
+        };
+        /** CaptureCardPage */
+        CaptureCardPage: {
+            /** Captures */
+            captures: components["schemas"]["CaptureCardView"][];
+            /** Next */
+            next: string | null;
+        };
+        /** CaptureCardView */
+        CaptureCardView: {
+            /**
+             * Capture Id
+             * Format: uuid
+             */
+            capture_id: string;
+            /**
+             * Captured At
+             * Format: date-time
+             */
+            captured_at: string;
+            /** Client Capture Uuid */
+            client_capture_uuid: string | null;
+            /** Fish */
+            fish: components["schemas"]["MeasuredFish"][];
+            /** Photo Url */
+            photo_url: string | null;
         };
         /**
          * CaptureCommit
@@ -832,6 +1007,16 @@ export interface components {
             /** Is System Admin */
             is_system_admin: boolean;
         };
+        /** MeasuredFish */
+        MeasuredFish: {
+            /**
+             * Fish Id
+             * Format: uuid
+             */
+            fish_id: string;
+            /** Length M */
+            length_m: number | null;
+        };
         /** MeasurementVersion */
         MeasurementVersion: {
             /** Algorithm */
@@ -937,6 +1122,40 @@ export interface components {
              * Format: date-time
              */
             started_at: string;
+        };
+        /** MissionAutomaticView */
+        MissionAutomaticView: {
+            /** By Status */
+            by_status: {
+                [key: string]: number;
+            };
+            calibration: components["schemas"]["AutomaticCalibrationView"] | null;
+            /** Compared */
+            compared: number;
+            /** Excluded */
+            excluded: string | null;
+            /** Failures */
+            failures: components["schemas"]["AutomaticFailureView"][];
+            /** Frames */
+            frames: number;
+            /** Lengths */
+            lengths: number;
+            /** Lengths Use */
+            lengths_use: string | null;
+            /** Mean Abs Error Pct */
+            mean_abs_error_pct: number | null;
+            /** Median Error Pct */
+            median_error_pct: number | null;
+            /** Refusals */
+            refusals: {
+                [key: string]: number;
+            };
+            /** Unprocessed */
+            unprocessed: number;
+            /** Within 10 Pct */
+            within_10_pct: number;
+            /** Within 5 Pct */
+            within_5_pct: number;
         };
         /** MissionDetail */
         MissionDetail: {
@@ -1098,6 +1317,13 @@ export interface components {
             /** Place Name */
             place_name: string | null;
             species: components["schemas"]["SpeciesView"] | null;
+        };
+        /** PixelPoint */
+        PixelPoint: {
+            /** X */
+            x: number;
+            /** Y */
+            y: number;
         };
         /** Point */
         Point: {
@@ -1320,6 +1546,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PublicSummaryView"];
+                };
+            };
+        };
+    };
+    get_automatic_frame: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+                capture_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutomaticFrameView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -1618,6 +1876,38 @@ export interface operations {
             };
         };
     };
+    get_mission_automatic: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                number: number;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionAutomaticView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     clear_mission_calibration_refusal: {
         parameters: {
             query?: {
@@ -1764,6 +2054,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Mission"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_mission_captures: {
+        parameters: {
+            query?: {
+                limit?: number;
+                after?: string | null;
+            };
+            header?: never;
+            path: {
+                slug: string;
+                number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptureCardPage"];
                 };
             };
             /** @description Validation Error */

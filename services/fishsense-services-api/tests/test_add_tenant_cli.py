@@ -16,6 +16,7 @@ from fishsense_services_api.cli import main
 @pytest.fixture
 def as_owner(owner_url, monkeypatch) -> None:
     monkeypatch.setenv("FISHSENSE_MIGRATION_DATABASE_URL", owner_url)
+    monkeypatch.setenv("FISHSENSE_ORCHESTRATOR_SUB", "service:fishsense-orchestrator")
 
 
 async def _tenants(owner_engine) -> list[tuple]:

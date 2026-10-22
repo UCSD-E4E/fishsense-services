@@ -113,6 +113,18 @@ def _jwks_under(issuer: str) -> str:
     return f"{issuer.rstrip('/')}/jwks/"
 
 
+class ServiceSettings(BaseSettings):
+    """Who the orchestrator is, for the commands that grant it its tenants.
+
+    The same ``FISHSENSE_ORCHESTRATOR_SUB`` the orchestrator itself is given
+    (deploy/tests/test_production_compose.py keeps the two equal).
+    """
+
+    model_config = SettingsConfigDict(env_prefix="FISHSENSE_")
+
+    orchestrator_sub: str
+
+
 class MigrationSettings(BaseSettings):
     """For the one-shot ``migrate`` command only -- never the running API.
 

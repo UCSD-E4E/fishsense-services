@@ -44,6 +44,7 @@ services:
     environment:
       FISHSENSE_MIGRATION_DATABASE_URL: postgresql+psycopg://fishsense_owner:owner-dev-only@postgres/fishsense
       FISHSENSE_APP_ROLE: fishsense_app
+      FISHSENSE_ORCHESTRATOR_SUB: service:fishsense-orchestrator
     depends_on:
       postgres:
         condition: service_healthy

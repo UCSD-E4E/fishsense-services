@@ -39,7 +39,9 @@ __all__ = [
     "LaserEvidence",
     "Observation",
     "ObservationDetail",
+    "CaptureCard",
     "list_observations",
+    "mission_captures",
     "observation",
 ]
 
@@ -324,3 +326,91 @@ def _observation(row) -> Observation:
         client_capture_uuid=row.client_capture_uuid,
         photo_key=row.photo_key,
     )
+
+
+@dataclass(frozen=True)
+class CaptureCard:
+    """One capture of a mission, measured or not (2026-10-21)."""
+
+    capture_id: uuid.UUID
+    client_capture_uuid: uuid.UUID | None
+    captured_at: datetime
+    #: A phone's own JPEG; a Lite frame's render thumbnail; None: no image yet.
+    photo_key: str | None
+    #: Its measured fish, ``(fish_id, length_m)``; empty when none is measured.
+    fish: list[tuple[uuid.UUID, float]]
+
+    @property
+    def cursor(self) -> tuple[datetime, uuid.UUID]:
+        """Where the next page starts (pass as ``after``)."""
+        return (self.captured_at, self.capture_id)
+
+
+async def mission_captures(
+    conn: AsyncConnection,
+    tenant_id: uuid.UUID,
+    mission_number: int,
+    *,
+    limit: int,
+    after: tuple[datetime, uuid.UUID] | None = None,
+    photo_bucket: str | None = None,
+) -> list[CaptureCard] | None:
+    """The mission's canonical captures in the order they were taken, each
+    with its photo and measured fish; None for no such mission in the tenant.
+
+    The Fish list is measured fish only, so a capture that was never measured
+    is seen here or nowhere (docs/design/README.md: a capture is every frame,
+    measured or not)."""
+    mission_id = (
+        await conn.execute(
+            text("SELECT id FROM missions WHERE tenant_id = :t AND number = :n"),
+            {"t": tenant_id, "n": mission_number},
+        )
+    ).scalar_one_or_none()
+    if mission_id is None:
+        return None
+    rows = await conn.execute(
+        text(f"""
+            SELECT c.id, c.client_capture_uuid, c.captured_at,
+                   CASE WHEN c.client_capture_uuid IS NOT NULL
+                        THEN c.raw_object_key ELSE h.key END AS photo_key,
+                   coalesce((
+                       SELECT json_agg(json_build_array(o.fish_id, o.length_m)
+                                       ORDER BY o.fish_id)
+                       FROM observations o
+                       WHERE o.tenant_id = c.tenant_id AND o.capture_id = c.id
+                   ), '[]'::json) AS fish
+            FROM captures c
+            LEFT JOIN LATERAL (
+                SELECT h.key FROM capture_thumbnails h
+                JOIN capture_renders rr ON rr.tenant_id = h.tenant_id AND rr.id = h.render_id
+                WHERE h.tenant_id = c.tenant_id AND h.capture_id = c.id
+                  AND h.status = 'made' AND h.target_width = {THUMBNAIL_WIDTH}
+                  AND h.bucket = :photo_bucket
+                ORDER BY rr.seq DESC LIMIT 1
+            ) h ON true
+            WHERE c.tenant_id = :t AND c.mission_id = :m AND c.is_canonical
+              AND (CAST(:after_at AS timestamptz) IS NULL
+                   OR (c.captured_at, c.id) > (:after_at, :after_id))
+            ORDER BY c.captured_at, c.id
+            LIMIT :limit
+            """),
+        {
+            "t": tenant_id,
+            "m": mission_id,
+            "photo_bucket": photo_bucket,
+            "after_at": after[0] if after else None,
+            "after_id": after[1] if after else None,
+            "limit": limit,
+        },
+    )
+    return [
+        CaptureCard(
+            capture_id=r.id,
+            client_capture_uuid=r.client_capture_uuid,
+            captured_at=r.captured_at,
+            photo_key=r.photo_key,
+            fish=[(uuid.UUID(f), length) for f, length in r.fish],
+        )
+        for r in rows
+    ]

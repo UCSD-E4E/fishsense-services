@@ -19,6 +19,516 @@
         "title": "AdminTenant",
         "type": "object"
       },
+      "AutomaticCalibrationView": {
+        "properties": {
+          "algorithm_version": {
+            "title": "Algorithm Version",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "frames_used": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frames Used"
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          },
+          "pair_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pair Count"
+          },
+          "refusal_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal Reason"
+          },
+          "se_px": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Se Px"
+          },
+          "size_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Ratio"
+          }
+        },
+        "required": [
+          "outcome",
+          "refusal_reason",
+          "algorithm_version",
+          "frames_used",
+          "pair_count",
+          "size_ratio",
+          "se_px",
+          "created_at"
+        ],
+        "title": "AutomaticCalibrationView",
+        "type": "object"
+      },
+      "AutomaticFailureView": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "step": {
+            "title": "Step",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step",
+          "error",
+          "created_at"
+        ],
+        "title": "AutomaticFailureView",
+        "type": "object"
+      },
+      "AutomaticFrameView": {
+        "properties": {
+          "calibration_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calibration Source"
+          },
+          "checkpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint"
+          },
+          "core_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Core Version"
+          },
+          "depth_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depth M"
+          },
+          "head": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PixelPoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "laser": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PixelPoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "laser_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Laser Confidence"
+          },
+          "length_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Length M"
+          },
+          "mask_bbox": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mask Bbox"
+          },
+          "mask_height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mask Height"
+          },
+          "mask_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mask Url"
+          },
+          "mask_width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mask Width"
+          },
+          "measurement_algorithm": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Measurement Algorithm"
+          },
+          "measurement_algorithm_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Measurement Algorithm Version"
+          },
+          "predicted_at": {
+            "format": "date-time",
+            "title": "Predicted At",
+            "type": "string"
+          },
+          "predictor_version": {
+            "title": "Predictor Version",
+            "type": "integer"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal"
+          },
+          "render_height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Render Height"
+          },
+          "render_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Render Url"
+          },
+          "render_width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Render Width"
+          },
+          "sam_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sam Score"
+          },
+          "slate_probability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slate Probability"
+          },
+          "species": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Species"
+          },
+          "species_margin": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Species Margin"
+          },
+          "species_probability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Species Probability"
+          },
+          "species_top5": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Species Top5",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tail": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PixelPoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "predicted_at",
+          "laser",
+          "laser_confidence",
+          "head",
+          "tail",
+          "mask_bbox",
+          "sam_score",
+          "slate_probability",
+          "predictor_version",
+          "checkpoint",
+          "core_version",
+          "render_url",
+          "render_width",
+          "render_height",
+          "mask_url",
+          "mask_width",
+          "mask_height",
+          "length_m",
+          "depth_m",
+          "refusal",
+          "calibration_source",
+          "measurement_algorithm",
+          "measurement_algorithm_version",
+          "species",
+          "species_probability",
+          "species_margin",
+          "species_top5"
+        ],
+        "title": "AutomaticFrameView",
+        "type": "object"
+      },
+      "CaptureCardPage": {
+        "properties": {
+          "captures": {
+            "items": {
+              "$ref": "#/components/schemas/CaptureCardView"
+            },
+            "title": "Captures",
+            "type": "array"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next"
+          }
+        },
+        "required": [
+          "captures",
+          "next"
+        ],
+        "title": "CaptureCardPage",
+        "type": "object"
+      },
+      "CaptureCardView": {
+        "properties": {
+          "capture_id": {
+            "format": "uuid",
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "captured_at": {
+            "format": "date-time",
+            "title": "Captured At",
+            "type": "string"
+          },
+          "client_capture_uuid": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Capture Uuid"
+          },
+          "fish": {
+            "items": {
+              "$ref": "#/components/schemas/MeasuredFish"
+            },
+            "title": "Fish",
+            "type": "array"
+          },
+          "photo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Url"
+          }
+        },
+        "required": [
+          "capture_id",
+          "client_capture_uuid",
+          "captured_at",
+          "photo_url",
+          "fish"
+        ],
+        "title": "CaptureCardView",
+        "type": "object"
+      },
       "CaptureCommit": {
         "additionalProperties": true,
         "description": "Everything the app recorded about one capture. Fields this API doesn't\nmodel are allowed, and kept in the manifest.",
@@ -1048,6 +1558,32 @@
         "title": "Me",
         "type": "object"
       },
+      "MeasuredFish": {
+        "properties": {
+          "fish_id": {
+            "format": "uuid",
+            "title": "Fish Id",
+            "type": "string"
+          },
+          "length_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Length M"
+          }
+        },
+        "required": [
+          "fish_id",
+          "length_m"
+        ],
+        "title": "MeasuredFish",
+        "type": "object"
+      },
       "MeasurementVersion": {
         "properties": {
           "algorithm": {
@@ -1412,6 +1948,127 @@
           "captures"
         ],
         "title": "Mission",
+        "type": "object"
+      },
+      "MissionAutomaticView": {
+        "properties": {
+          "by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Status",
+            "type": "object"
+          },
+          "calibration": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AutomaticCalibrationView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "compared": {
+            "title": "Compared",
+            "type": "integer"
+          },
+          "excluded": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Excluded"
+          },
+          "failures": {
+            "items": {
+              "$ref": "#/components/schemas/AutomaticFailureView"
+            },
+            "title": "Failures",
+            "type": "array"
+          },
+          "frames": {
+            "title": "Frames",
+            "type": "integer"
+          },
+          "lengths": {
+            "title": "Lengths",
+            "type": "integer"
+          },
+          "lengths_use": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lengths Use"
+          },
+          "mean_abs_error_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Abs Error Pct"
+          },
+          "median_error_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Error Pct"
+          },
+          "refusals": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Refusals",
+            "type": "object"
+          },
+          "unprocessed": {
+            "title": "Unprocessed",
+            "type": "integer"
+          },
+          "within_10_pct": {
+            "title": "Within 10 Pct",
+            "type": "integer"
+          },
+          "within_5_pct": {
+            "title": "Within 5 Pct",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "frames",
+          "by_status",
+          "unprocessed",
+          "calibration",
+          "lengths_use",
+          "lengths",
+          "refusals",
+          "failures",
+          "excluded",
+          "compared",
+          "median_error_pct",
+          "mean_abs_error_pct",
+          "within_5_pct",
+          "within_10_pct"
+        ],
+        "title": "MissionAutomaticView",
         "type": "object"
       },
       "MissionDetail": {
@@ -2054,6 +2711,24 @@
         "title": "ObservationView",
         "type": "object"
       },
+      "PixelPoint": {
+        "properties": {
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "title": "PixelPoint",
+        "type": "object"
+      },
       "Point": {
         "properties": {
           "x": {
@@ -2558,6 +3233,60 @@
         "summary": "Summary"
       }
     },
+    "/tenants/{slug}/captures/{capture_id}/automatic": {
+      "get": {
+        "operationId": "get_automatic_frame",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "capture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Capture Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomaticFrameView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Frame"
+      }
+    },
     "/tenants/{slug}/deployments": {
       "get": {
         "operationId": "list_deployments",
@@ -3050,6 +3779,60 @@
         "summary": "Get Mission"
       }
     },
+    "/tenants/{slug}/missions/{number}/automatic": {
+      "get": {
+        "operationId": "get_mission_automatic",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MissionAutomaticView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Mission"
+      }
+    },
     "/tenants/{slug}/missions/{number}/calibration-refusal": {
       "delete": {
         "description": "Clear dive ``number``'s standing calibration refusal, so it is\nfitted again (idempotent): for a change its labels don't show.",
@@ -3340,6 +4123,89 @@
           }
         ],
         "summary": "Set Mission Calibration Target"
+      }
+    },
+    "/tenants/{slug}/missions/{number}/captures": {
+      "get": {
+        "description": "Every capture of the mission, measured or not, in the order taken.",
+        "operationId": "list_mission_captures",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 48,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureCardPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Mission Captures"
       }
     },
     "/tenants/{slug}/missions/{number}/deployment": {

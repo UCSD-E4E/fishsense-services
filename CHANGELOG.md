@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.34.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.33.0...v0.34.0) (2026-10-22)
+
+
+### Features
+
+* a mission lists all its captures, measured or not ([c18736d](https://github.com/UCSD-E4E/fishsense-services/commit/c18736d32a09b809fee811173a97d15b16914270))
+
+## [0.33.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.32.1...v0.33.0) (2026-10-22)
+
+
+### Features
+
+* review the automatic run in the web, read-only ([258ed8d](https://github.com/UCSD-E4E/fishsense-services/commit/258ed8d5e3d2471f6529585e9fcbd8670b07fc46))
+* review the automatic run in the web, read-only ([5a5f734](https://github.com/UCSD-E4E/fishsense-services/commit/5a5f734c49140e941410b7c176a9f06bc30e2e92))
+
+## [0.32.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.32.0...v0.32.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **automatic:** read each frame's current rows by index, not the tenant's ([972d93c](https://github.com/UCSD-E4E/fishsense-services/commit/972d93c235f3f332bd5710f96fba03bee7107efa))
+* **automatic:** read each frame's current rows by index, not the tenant's ([1b977e0](https://github.com/UCSD-E4E/fishsense-services/commit/1b977e0252cd29df78a05dbb7485537d968f361d))
+
+## [0.32.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.31.0...v0.32.0) (2026-10-21)
+
+
+### Features
+
+* store each kept SAM mask as a file, the way the app stores its mask ([8654d7c](https://github.com/UCSD-E4E/fishsense-services/commit/8654d7c7cefebe9c7090474dffc0e97c5367ef89))
+* the orchestrator serves every tenant by default ([83ad794](https://github.com/UCSD-E4E/fishsense-services/commit/83ad79442287607fb9642f5067f5561a0056ccd2))
+
 ## [0.31.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.30.1...v0.31.0) (2026-10-21)
 
 

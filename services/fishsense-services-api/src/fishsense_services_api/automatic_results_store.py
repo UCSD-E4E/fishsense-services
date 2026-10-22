@@ -358,6 +358,73 @@ class AutomaticCandidate:
     created_at: datetime
 
 
+# -- the per-mission input queries --------------------------------------------------
+#
+# 2026-10-21: these joined the `current_automatic_*` views wholesale, and the
+# planner -- expecting one row from each -- rebuilt the tenant's every current
+# row once per frame: mission 312's measure inputs took 145 s, past the 30 s
+# statement timeout, so lengths stopped being written as the run filled the
+# tables (12 s for a 9-frame mission). Each frame's current row is now a
+# LATERAL lookup on the view filtered by its capture -- its DISTINCT ON key, so
+# the filter reaches the (tenant_id, capture_id, seq) index -- with LIMIT 1, or
+# the planner flattens it back into the join: 0.29 s for 312, the same rows. Named, so their plans are tested
+# (`test_a_missions_inputs_read_each_frames_current_rows_by_its_index`).
+
+
+def _current_row(view: str, alias: str, where: str = "") -> str:
+    """A LATERAL subquery: capture `c`'s current row of `view`, as `alias`,
+    filtered by `where` after the view picks it. ``LIMIT 1`` keeps the
+    planner from flattening it back into the wholesale join (each view has at
+    most one row per capture, so it drops nothing)."""
+    return (
+        f"LATERAL (SELECT {alias}.* FROM {view} {alias} "
+        f"WHERE {alias}.tenant_id = c.tenant_id AND {alias}.capture_id = c.id"
+        f"{' AND ' + where if where else ''} LIMIT 1) {alias}"
+    )
+
+
+AUTOMATIC_MEASURE_CAPTURES = f"""
+    SELECT h.capture_id, h.id, h.laser_x, h.laser_y, h.head_x, h.head_y,
+           h.tail_x, h.tail_y
+    FROM captures c
+    CROSS JOIN {_current_row("current_automatic_head_tail_predictions", "h")}
+    LEFT JOIN {_current_row("current_automatic_measurements", "m",
+                            "m.algorithm_version = :mv")} ON true
+    WHERE c.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
+      AND h.status = 'predicted' AND m.id IS NULL
+      AND NOT {_calibration_session(":t", ":d")}
+    ORDER BY c.number
+    """
+
+AUTOMATIC_SPECIES_CAPTURES = f"""
+    SELECT c.id, c.checksum, c.v1_id IS NOT NULL AS from_v1,
+           h.id AS head_tail_id, h.mask_bbox,
+           s.id IS NOT NULL AS has_existing, h.jpeg_render_version,
+           h.jpeg_camera_calibration_id
+    FROM captures c
+    CROSS JOIN {_current_row("current_automatic_head_tail_predictions", "h")}
+    LEFT JOIN {_current_row("current_automatic_species_predictions", "s")} ON true
+    WHERE c.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
+      AND h.status = 'predicted' AND NOT {_DETECTOR_SLATE}
+      AND h.jpeg_render_version IS NOT NULL
+      AND NOT {_calibration_session(":t", ":d")}
+      AND (s.id IS NULL OR s.automatic_head_tail_prediction_id <> h.id
+           OR s.predictor_version IS DISTINCT FROM :sv)
+    ORDER BY c.number
+    """
+
+AUTOMATIC_CALIBRATION_CAPTURES = f"""
+    SELECT c.id, c.checksum, c.v1_id IS NOT NULL AS from_v1,
+           h.laser_x, h.laser_y, h.jpeg_render_version,
+           h.jpeg_camera_calibration_id
+    FROM captures c
+    CROSS JOIN {_current_row("current_automatic_head_tail_predictions", "h")}
+    WHERE c.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
+      AND h.laser_x IS NOT NULL
+    ORDER BY c.number
+    """
+
+
 async def next_mission_for_automatic_results(
     conn: AsyncConnection,
     tenant_id: uuid.UUID,
@@ -765,24 +832,7 @@ async def automatic_species_captures(
     """The dive's kept automatic masks with no automatic species at the
     current version cropped from them, in capture order."""
     rows = await conn.execute(
-        text(f"""
-            SELECT c.id, c.checksum, c.v1_id IS NOT NULL AS from_v1,
-                   h.id AS head_tail_id, h.mask_bbox,
-                   s.id IS NOT NULL AS has_existing, h.jpeg_render_version,
-                   h.jpeg_camera_calibration_id
-            FROM captures c
-            JOIN current_automatic_head_tail_predictions h
-              ON h.tenant_id = c.tenant_id AND h.capture_id = c.id
-            LEFT JOIN current_automatic_species_predictions s
-              ON s.tenant_id = c.tenant_id AND s.capture_id = c.id
-            WHERE c.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
-              AND h.status = 'predicted' AND NOT {_DETECTOR_SLATE}
-              AND h.jpeg_render_version IS NOT NULL
-              AND NOT {_calibration_session(":t", ":d")}
-              AND (s.id IS NULL OR s.automatic_head_tail_prediction_id <> h.id
-                   OR s.predictor_version IS DISTINCT FROM :sv)
-            ORDER BY c.number
-            """),
+        text(AUTOMATIC_SPECIES_CAPTURES),
         {"t": tenant_id, "d": mission_id, "sv": species_version},
     )
     return [
@@ -875,17 +925,7 @@ async def automatic_calibration_inputs(
     slate = await _slate_probabilities(slate_frames, conn, tenant_id, mission_id)
     rows = (
         await conn.execute(
-            text("""
-                SELECT c.id, c.checksum, c.v1_id IS NOT NULL AS from_v1,
-                       h.laser_x, h.laser_y, h.jpeg_render_version,
-                       h.jpeg_camera_calibration_id
-                FROM captures c
-                JOIN current_automatic_head_tail_predictions h
-                  ON h.tenant_id = c.tenant_id AND h.capture_id = c.id
-                WHERE c.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
-                  AND h.laser_x IS NOT NULL
-                ORDER BY c.number
-                """),
+            text(AUTOMATIC_CALIBRATION_CAPTURES),
             {"t": tenant_id, "d": mission_id},
         )
     ).all()
@@ -1017,20 +1057,7 @@ async def automatic_measure_inputs(
     if cal is None:
         return AutomaticMeasureInputs(None, None, None, [])
     rows = await conn.execute(
-        text(f"""
-            SELECT h.capture_id, h.id, h.laser_x, h.laser_y, h.head_x, h.head_y,
-                   h.tail_x, h.tail_y
-            FROM captures c
-            JOIN current_automatic_head_tail_predictions h
-              ON h.tenant_id = c.tenant_id AND h.capture_id = c.id
-            LEFT JOIN current_automatic_measurements m
-              ON m.tenant_id = c.tenant_id AND m.capture_id = c.id
-             AND m.algorithm_version = :mv
-            WHERE c.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
-              AND h.status = 'predicted' AND m.id IS NULL
-              AND NOT {_calibration_session(":t", ":d")}
-            ORDER BY c.number
-            """),
+        text(AUTOMATIC_MEASURE_CAPTURES),
         {"t": tenant_id, "d": mission_id, "mv": algorithm_version},
     )
     slate = await _slate_probabilities(slate_frames, conn, tenant_id, mission_id)

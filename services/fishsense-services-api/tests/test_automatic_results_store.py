@@ -53,6 +53,9 @@ from depth_measure_seed import (  # noqa: F401  (forget_identities: a fixture)
     tenant,
 )
 from fishsense_services_api.automatic_results_store import (
+    AUTOMATIC_CALIBRATION_CAPTURES,
+    AUTOMATIC_MEASURE_CAPTURES,
+    AUTOMATIC_SPECIES_CAPTURES,
     SLATE_FRAME_THRESHOLD,
     AutomaticCalibrationRow,
     AutomaticHeadTailRow,
@@ -1532,3 +1535,78 @@ async def test_a_mask_names_exactly_one_prediction(owner_engine, app_engine):
                     object_key, sha256, size_bytes, content_type, width, height)
                 VALUES (:t, :c, 'b', 'masks/x.png', :s, 1, 'image/png', 1, 1)
                 """), {"t": lab, "c": fish, "s": "a" * 64})  # fmt: skip
+
+
+# -- a mission's inputs read its frames' current rows, not the tenant's -------------
+
+
+async def _a_measured_tenant(owner_engine, app_engine, lab, *, missions=20, frames=30):
+    """One measured mission, and `missions` more whose every frame has a
+    head/tail, a species and a length: the tenant as the run fills it."""
+    mission_id, c = await _measured(owner_engine, app_engine, lab)
+    (job,) = await _in(app_engine, lab, automatic_species_captures, mission_id,
+                       species_version=1)  # fmt: skip
+    await _in(app_engine, lab, persist_automatic_species, mission_id, [
+        AutomaticSpeciesRow(
+            capture_id=c,
+            automatic_head_tail_prediction_id=job.automatic_head_tail_prediction_id,
+            status="predicted", predictor_version=1, model_id="bioclip/2.5@x",
+            predicted_choice=HOGFISH, top1_probability=0.7, margin=0.4,
+            top5=[{"choice": HOGFISH, "probability": 0.7}],
+        )
+    ])  # fmt: skip
+    device_id = await device(owner_engine, lab)
+    others = []
+    for _ in range(missions):
+        d = await mission(owner_engine, lab, device_id=device_id, priority="low")
+        others.append(d)
+        for _ in range(frames):
+            await capture(owner_engine, lab, d)
+    every = "c.mission_id = ANY(CAST(:missions AS uuid[]))"
+    for table in ("automatic_head_tail_predictions", "automatic_species_predictions",
+                  "automatic_measurements"):  # fmt: skip
+        (row,) = await _rows(owner_engine, f"SELECT id FROM {table} LIMIT 1")
+        await _copy_rows(owner_engine, table, row["id"], every, {"missions": others})
+    await exec_(owner_engine, "ANALYZE")
+    return mission_id
+
+
+#: The tables every input query reads a frame's latest row of.
+_LATEST = {
+    "automatic_head_tail_predictions",
+    "automatic_species_predictions",
+    "automatic_measurements",
+}
+
+
+@pytest.mark.parametrize("query", ["measure", "species", "calibration"])
+async def test_a_missions_inputs_read_each_frames_current_rows_by_its_index(
+    owner_engine, app_engine, query
+):
+    """2026-10-21: the measure-inputs query joined `current_automatic_*`
+    views wholesale, and the planner, expecting one row, rebuilt the tenant's
+    every current length once per frame -- 145 s for mission 312's 492
+    frames, past the 30 s statement timeout, so lengths stopped being written
+    as the run filled the tables. Each frame's current row is now looked up
+    by its own (tenant, capture, seq) index."""
+    lab = await tenant(owner_engine)
+    mission_id = await _a_measured_tenant(owner_engine, app_engine, lab)
+    sql = {
+        "measure": AUTOMATIC_MEASURE_CAPTURES,
+        "species": AUTOMATIC_SPECIES_CAPTURES,
+        "calibration": AUTOMATIC_CALIBRATION_CAPTURES,
+    }[query]
+    async with tenant_transaction(app_engine, lab) as conn:
+        (plan,) = (
+            await conn.execute(
+                text(f"EXPLAIN (FORMAT JSON) {sql}"),
+                {"t": lab, "d": mission_id, "mv": "1", "sv": 1},
+            )
+        ).scalar_one()
+    reads = [n for n in _plan_nodes(plan["Plan"]) if n.get("Relation Name") in _LATEST]
+    assert reads
+    assert all(
+        n["Node Type"] in ("Index Scan", "Index Only Scan", "Index Scan Backward")
+        and "capture_id" in n.get("Index Cond", "")
+        for n in reads
+    ), [(n["Node Type"], n["Relation Name"], n.get("Index Cond")) for n in reads]
