@@ -8,7 +8,7 @@ import { signInHref } from "@/lib/shell";
  * region, from tenants that opted in. Nothing finer than a region is ever on
  * it: the API decides what may be said (`public_store`).
  */
-export async function PublicHome() {
+export async function PublicHome({ signedIn = false }: { signedIn?: boolean } = {}) {
   let summary: PublicSummary | null = null;
   try {
     summary = await getPublicSummary();
@@ -28,13 +28,17 @@ export async function PublicHome() {
           length keeps the photo and the evidence behind it.
         </p>
         <div className="mt-2 flex flex-wrap gap-3">
-          <Link
-            href={signInHref("/", "")}
-            prefetch={false}
-            className="inline-flex h-12 items-center rounded-card bg-teal px-5 font-semibold text-on-teal"
-          >
-            Sign in
-          </Link>
+          {/* Someone signed in here is in no tenant yet: a fresh sign-in
+              would only send them to Authentik again (2026-10-22). */}
+          {!signedIn && (
+            <Link
+              href={signInHref("/", "")}
+              prefetch={false}
+              className="inline-flex h-12 items-center rounded-card bg-teal px-5 font-semibold text-on-teal"
+            >
+              Sign in
+            </Link>
+          )}
           <a
             href="#how"
             className="inline-flex h-12 items-center rounded-card border border-line bg-surface px-5 font-medium"
