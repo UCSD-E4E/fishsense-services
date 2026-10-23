@@ -62,7 +62,9 @@ def _token(
 
 
 def test_a_valid_token_yields_its_stable_subject(validator):
-    assert validator.validate(_token()) == Principal(sub="hashed-user-id-123")
+    assert validator.validate(_token()) == Principal(
+        sub="hashed-user-id-123", email="someone@example.test"
+    )
 
 
 def test_both_client_audiences_are_accepted(validator):
@@ -119,8 +121,22 @@ def test_garbage_is_rejected(validator):
 
 def test_a_partners_org_claim_is_carried_on_the_principal(validator):
     assert validator.validate(_token(org="conservation-angler")) == Principal(
-        sub="hashed-user-id-123", org="conservation-angler"
+        sub="hashed-user-id-123",
+        org="conservation-angler",
+        email="someone@example.test",
     )
+
+
+def test_the_name_and_email_claims_are_carried_trimmed_and_capped(validator):
+    """Kept so the caller's tenant admins see a name (0065)."""
+    found = validator.validate(_token(name="  Ada Admin ", email=" ada@example.org"))
+    assert (found.name, found.email) == ("Ada Admin", "ada@example.org")
+    assert len(validator.validate(_token(name="x" * 500)).name) == 200
+
+
+def test_a_blank_or_odd_name_claim_is_no_name(validator):
+    for odd in ("", "   ", 42, ["Ada"]):
+        assert validator.validate(_token(name=odd)).name is None
 
 
 def test_a_token_without_an_org_claim_has_no_org(validator):

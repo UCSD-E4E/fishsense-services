@@ -55,6 +55,14 @@ export default async function DeploymentsPage({ params }: Props) {
                 <Link href={paths.phoneMissions(tenant.slug)} className="text-teal-fg hover:underline">
                   Phone missions
                 </Link>
+                {tenant.isAdmin && (
+                  <>
+                    {" · "}
+                    <Link href={paths.members(tenant.slug)} className="text-teal-fg hover:underline">
+                      Members
+                    </Link>
+                  </>
+                )}
               </>
             )}
           </p>

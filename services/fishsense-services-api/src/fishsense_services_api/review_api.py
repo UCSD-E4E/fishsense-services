@@ -25,6 +25,7 @@ from fishsense_services_api.review_store import (
     ReviewInput,
     ReviewRefused,
     capture_reviews,
+    member_skills,
     record_review,
     reviewer_level,
     set_skill,
@@ -83,6 +84,16 @@ class ReviewView(BaseModel):
     created_at: datetime
     #: The caller's own review: theirs to see, not to back.
     mine: bool
+
+
+class MemberView(BaseModel):
+    user_id: uuid.UUID
+    #: Their Authentik subject: what names them before they sign in again.
+    sub: str
+    role: str
+    name: str | None
+    email: str | None
+    skills: dict[Kind, Level]
 
 
 class SkillBody(BaseModel):
@@ -171,6 +182,18 @@ def add_review_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
                 kind: await reviewer_level(conn, member.tenant_id, member.user_id, kind)
                 for kind in KINDS
             }
+
+    @app.get(
+        "/tenants/{slug}/members",
+        operation_id="list_members",
+        response_model=list[MemberView],
+    )
+    async def list_members(admin: Admin) -> list[MemberView]:
+        """The tenant's members by name and email (0065), with their review
+        levels: for its admins, who set those levels."""
+        async with tenant_transaction(engine, admin.tenant_id) as conn:
+            found = await member_skills(conn, admin.tenant_id)
+        return [MemberView(**vars(m)) for m in found]
 
     @app.put(
         "/tenants/{slug}/members/{user_id}/skills/{kind}",

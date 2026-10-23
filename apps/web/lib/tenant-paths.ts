@@ -41,6 +41,8 @@ export const paths = {
   data: (slug: string) => `/${enc(slug)}/data`,
   deployment: (slug: string, number: number) => `/${enc(slug)}/data/deployments/${number}`,
   missions: (slug: string) => `/${enc(slug)}/data/missions`,
+  /** The tenant's members and their review levels: its admins' (0065). */
+  members: (slug: string) => `/${enc(slug)}/data/members`,
   mission: (slug: string, number: number) => `/${enc(slug)}/data/missions/${number}`,
   /** One frame of a mission, measured or not: its automatic result. */
   frame: (slug: string, number: number, capture: string) =>

@@ -85,6 +85,9 @@ class User(Base):
     id: Mapped[uuid.UUID] = _id()
     sub: Mapped[str] = mapped_column(Text, unique=True)
     created_at: Mapped[datetime] = _created_at()
+    #: What their token last said (0065): for their tenants' admins.
+    name: Mapped[str | None] = mapped_column(Text)
+    email: Mapped[str | None] = mapped_column(Text)
     #: May open any tenant: read-only, or after an unlock its admin (0056).
     is_system_admin: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
 

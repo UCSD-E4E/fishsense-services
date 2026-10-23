@@ -1777,6 +1777,74 @@
         "title": "MeasurementView",
         "type": "object"
       },
+      "MemberView": {
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "skills": {
+            "additionalProperties": {
+              "enum": [
+                "learning",
+                "trusted",
+                "expert"
+              ],
+              "type": "string"
+            },
+            "propertyNames": {
+              "enum": [
+                "laser",
+                "head_tail",
+                "species"
+              ]
+            },
+            "title": "Skills",
+            "type": "object"
+          },
+          "sub": {
+            "title": "Sub",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "sub",
+          "role",
+          "name",
+          "email",
+          "skills"
+        ],
+        "title": "MemberView",
+        "type": "object"
+      },
       "Mission": {
         "properties": {
           "calibration_source_number": {
@@ -4314,6 +4382,55 @@
           }
         ],
         "summary": "My Skills"
+      }
+    },
+    "/tenants/{slug}/members": {
+      "get": {
+        "description": "The tenant's members by name and email (0065), with their review\nlevels: for its admins, who set those levels.",
+        "operationId": "list_members",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MemberView"
+                  },
+                  "title": "Response List Members",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Members"
       }
     },
     "/tenants/{slug}/members/{user_id}/skills/{kind}": {

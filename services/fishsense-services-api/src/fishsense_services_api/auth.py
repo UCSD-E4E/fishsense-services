@@ -40,6 +40,10 @@ class Principal:
     sub: str
     #: The partner org the IdP vouches for, or None (a lab member's is null).
     org: str | None = None
+    #: Who they are, as the token says (``name``, ``email``): kept so their
+    #: tenants' admins see a name, not a hash (0065).
+    name: str | None = None
+    email: str | None = None
 
 
 class KeySource(Protocol):
@@ -153,7 +157,12 @@ class TokenValidator:
             )
         except jwt.PyJWTError as error:
             raise InvalidToken(str(error)) from error
-        return Principal(sub=claims["sub"], org=_org(claims.get("org")))
+        return Principal(
+            sub=claims["sub"],
+            org=_org(claims.get("org")),
+            name=_text(claims.get("name"), 200),
+            email=_text(claims.get("email"), 320),
+        )
 
 
 class MultiIssuerValidator:
@@ -194,6 +203,13 @@ class MultiIssuerValidator:
                 error = rejected
         assert error is not None
         raise error
+
+
+def _text(claim: object, limit: int) -> str | None:
+    """A non-empty string of at most ``limit`` characters, or nothing."""
+    if not isinstance(claim, str) or not claim.strip():
+        return None
+    return claim.strip()[:limit]
 
 
 def _org(claim: object) -> str | None:
