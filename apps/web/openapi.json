@@ -289,6 +289,11 @@
             "title": "Predicted At",
             "type": "string"
           },
+          "prediction_id": {
+            "format": "uuid",
+            "title": "Prediction Id",
+            "type": "string"
+          },
           "predictor_version": {
             "title": "Predictor Version",
             "type": "integer"
@@ -428,6 +433,7 @@
           }
         },
         "required": [
+          "prediction_id",
           "status",
           "predicted_at",
           "laser",
@@ -3199,6 +3205,10 @@
             "title": "Level",
             "type": "string"
           },
+          "mine": {
+            "title": "Mine",
+            "type": "boolean"
+          },
           "point": {
             "anyOf": [
               {
@@ -3265,7 +3275,8 @@
           "tail",
           "scientific_name",
           "confirms_review_id",
-          "created_at"
+          "created_at",
+          "mine"
         ],
         "title": "ReviewView",
         "type": "object"
@@ -3733,6 +3744,57 @@
           }
         ],
         "summary": "Get Frame"
+      }
+    },
+    "/tenants/{slug}/captures/{capture_id}/automatic/mask": {
+      "get": {
+        "description": "The current prediction's mask, as its PNG bytes (2026-10-22). A fix's\nhead and tail snap to it in the browser, as the app's do, and a page can\nread an image's pixels only from its own origin: the web passes these\non. Read through the store's internal endpoint.",
+        "operationId": "get_automatic_mask",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "capture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Capture Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/png": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Mask"
       }
     },
     "/tenants/{slug}/captures/{capture_id}/reviews": {

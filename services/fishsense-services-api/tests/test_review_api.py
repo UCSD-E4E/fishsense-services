@@ -159,3 +159,22 @@ async def test_a_skill_for_someone_outside_the_tenant_is_not_found(
                                 json={"level": "expert"}, headers=_bearer(ADMIN))  # fmt: skip
 
     assert response.status_code == 404, response.text
+
+
+async def test_a_listed_review_says_whether_it_is_the_callers(
+    client, seed_memberships, owner_engine
+):
+    """The web offers no confirm of one's own review (it would be refused)."""
+    c, render, _ = await _setup(seed_memberships, owner_engine)
+    await client.post(f"/tenants/lab/captures/{c}/reviews",
+                      json=_fix(render), headers=_bearer(MEMBER))  # fmt: skip
+
+    mine = await client.get(
+        f"/tenants/lab/captures/{c}/reviews", headers=_bearer(MEMBER)
+    )
+    theirs = await client.get(
+        f"/tenants/lab/captures/{c}/reviews", headers=_bearer(ADMIN)
+    )
+
+    assert [r["mine"] for r in mine.json()] == [True]
+    assert [r["mine"] for r in theirs.json()] == [False]

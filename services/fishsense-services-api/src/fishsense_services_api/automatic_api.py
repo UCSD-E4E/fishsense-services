@@ -12,7 +12,8 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Path, status
+from fastapi import Depends, FastAPI, HTTPException, Path, Response, status
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -34,6 +35,8 @@ class PixelPoint(BaseModel):
 
 
 class AutomaticFrameView(BaseModel):
+    #: The current prediction: what a review of it names.
+    prediction_id: uuid.UUID
     #: ``predicted``, or why the run abstained.
     status: str
     predicted_at: datetime
@@ -137,6 +140,7 @@ def add_automatic_routes(
         if found is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "no automatic result")
         return AutomaticFrameView(
+            prediction_id=found.prediction_id,
             status=found.status,
             predicted_at=found.created_at,
             laser=_point(found.laser),
@@ -166,6 +170,39 @@ def add_automatic_routes(
             species_probability=found.species_probability,
             species_margin=found.species_margin,
             species_top5=found.species_top5,
+        )
+
+    @app.get(
+        "/tenants/{slug}/captures/{capture_id}/automatic/mask",
+        operation_id="get_automatic_mask",
+        response_class=Response,
+        responses={200: {"content": {"image/png": {}}}},
+    )
+    async def get_mask(slug: str, capture_id: uuid.UUID, member: Member) -> Response:
+        """The current prediction's mask, as its PNG bytes (2026-10-22). A fix's
+        head and tail snap to it in the browser, as the app's do, and a page can
+        read an image's pixels only from its own origin: the web passes these
+        on. Read through the store's internal endpoint."""
+        async with tenant_transaction(engine, member.tenant_id) as conn:
+            found = await automatic_frame(conn, member.tenant_id, capture_id)
+        if found is None or found.mask_key is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "no mask for this frame")
+        try:
+            objects = stores.for_tenant(slug)
+        except NoTenantStore:
+            objects = None
+        data = (
+            await run_in_threadpool(objects.get, found.mask_key)
+            if objects is not None and objects.bucket == found.mask_bucket
+            else None
+        )
+        if data is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "no mask for this frame")
+        return Response(
+            data,
+            media_type="image/png",
+            # A mask is written once per prediction; private: a member's.
+            headers={"cache-control": "private, max-age=3600"},
         )
 
     @app.get(

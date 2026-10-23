@@ -101,3 +101,25 @@ export function agreement(run: MissionAutomatic): string {
     `${run.within_5_pct} of ${run.compared} within 5%, ${run.within_10_pct} within 10%`
   );
 }
+
+/** The frame's current mask, as its PNG bytes; null when it has none. The
+ *  review tool snaps to its pixels, which a page can read only from its own
+ *  origin: app/api/masks passes these on. */
+export async function getAutomaticMask(
+  accessToken: string,
+  slug: string,
+  captureId: string,
+): Promise<ArrayBuffer | null> {
+  const { data, error, response } = await apiClient(accessToken).GET(
+    "/tenants/{slug}/captures/{capture_id}/automatic/mask",
+    {
+      params: {
+        path: { slug: safeSlug(slug), capture_id: safeUuid(captureId, "capture") },
+      },
+      parseAs: "arrayBuffer",
+    },
+  );
+  if (response.status === 404) return null;
+  if (data !== undefined && response.ok) return data as ArrayBuffer;
+  throw failure("fishsense-api automatic mask failed", response, error);
+}
