@@ -237,7 +237,13 @@ export default async function FishDetailPage({ params }: Props) {
         </section>
       )}
 
-      {automatic && <AutomaticSection frame={automatic} humanLengthM={o.length_m} />}
+      {automatic && (
+        <AutomaticSection
+          frame={automatic}
+          humanLengthM={o.length_m}
+          reviewHref={o.mission?.number != null ? paths.frame(tenant, o.mission.number, capture) : null}
+        />
+      )}
 
       {evidence.files.length > 0 && (
         <section className="mt-5 rounded-card border border-line bg-surface px-6 py-5">

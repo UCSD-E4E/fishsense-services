@@ -53,6 +53,8 @@ async def test_a_member_reads_what_the_run_made_of_a_frame(
     assert (body["render_width"], body["render_height"]) == (4014, 3016)
     # What a review names as the image its points are on (0063).
     assert body["render_id"]
+    # ...and as the result it reviews (2026-10-22).
+    assert body["prediction_id"]
     assert body["mask_url"] is None
 
 

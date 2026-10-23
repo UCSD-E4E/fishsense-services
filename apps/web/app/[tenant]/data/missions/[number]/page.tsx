@@ -12,7 +12,7 @@ import {
 import { requireSignedIn } from "@/app/_shell/guard";
 import { tenantFor } from "@/app/_shell/tenant";
 import { CaptureGrid } from "@/app/[tenant]/data/missions/capture-grid";
-import { getMissionCaptures } from "@/lib/mission-captures";
+import { frameLink, getMissionCaptures } from "@/lib/mission-captures";
 import { getMissionAutomatic } from "@/lib/automatic";
 import { AutomaticRun, hasRun } from "@/app/[tenant]/data/missions/automatic-run";
 import { FactsForms } from "@/app/[tenant]/data/missions/facts-forms";
@@ -138,12 +138,24 @@ export default async function MissionPage({ params, searchParams }: Props) {
 
       {captures && captures.captures.length > 0 && (
         <section className="mb-8">
-          <h2 className="mb-3 text-lg font-semibold">
-            Captures{" "}
-            <span className="text-sm font-normal text-fg-2">
-              {mission.captures.toLocaleString()}, measured or not
-            </span>
-          </h2>
+          <div className="mb-3 flex flex-wrap items-baseline justify-between gap-3">
+            <h2 className="text-lg font-semibold">
+              Captures{" "}
+              <span className="text-sm font-normal text-fg-2">
+                {mission.captures.toLocaleString()}, measured or not
+              </span>
+            </h2>
+            {/* Review walks the frames in order, from the first (each frame
+                page offers the next). */}
+            {!after && (
+              <Link
+                href={frameLink(tenant, number, captures.captures[0])}
+                className="text-sm font-medium text-teal-fg hover:underline"
+              >
+                Review frames →
+              </Link>
+            )}
+          </div>
           <CaptureGrid slug={tenant} mission={number} captures={captures.captures} />
           <div className="mt-4 flex gap-4 text-sm">
             {after && (

@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ProjectOutcome, TriageItem } from "@/lib/triage-queue";
 import { acceptAction, undoAcceptAction } from "./actions";
-import { MAX_SCALE, clampScale, initialView } from "@/lib/triage-view";
+import { ZoomFrame } from "@/app/_review/zoom-frame";
 
 
 type Props = {
@@ -212,14 +212,8 @@ export function TriageClient({ items, kindLabel, scanned, projects, notWalked }:
   );
 }
 
-/**
- * Zoomable frame with constant-size prediction markers.
- *
- * The markers are carried by the image — they name a specific pixel, so they
- * must travel with it — while staying a fixed size on screen. That is what
- * makes deep zoom useful: at high magnification the ring ends up smaller than
- * a single image pixel, so the pixel being claimed is unambiguous.
- */
+/** The task's frame in the shared viewer (app/_review/zoom-frame.tsx, moved
+ *  there from here on 2026-10-22), with its predictions as markers. */
 function Viewer({
   item,
   retainedScaleRef,
@@ -227,185 +221,22 @@ function Viewer({
   item: TriageItem;
   retainedScaleRef: React.MutableRefObject<number | null>;
 }) {
-  const stageRef = useRef<HTMLDivElement>(null);
-  const layerRef = useRef<HTMLDivElement>(null);
-  const [ready, setReady] = useState(false);
-  const view = useRef({ k: 1, tx: 0, ty: 0 });
-
   const first = item.keypoints[0];
   const W = first?.originalWidth ?? 4000;
   const H = first?.originalHeight ?? 3000;
-
-  /**
-   * One imperative write per frame, and no React state.
-   *
-   * The markers live INSIDE the transformed layer, so they are carried by the
-   * image for free. `--inv` counter-scales them, which is what keeps the ring
-   * 11 CSS px across at every magnification: the browser composites it, so
-   * panning never re-renders the tree or recomputes a screen position.
-   */
-  const paint = useCallback(() => {
-    const layer = layerRef.current;
-    if (!layer) return;
-    const { k, tx, ty } = view.current;
-    layer.style.transform = `translate(${tx}px,${ty}px) scale(${k})`;
-    layer.style.setProperty("--inv", String(1 / k));
-  }, []);
-
-  const fit = useCallback(() => {
-    const stage = stageRef.current;
-    if (!stage) return;
-    // Fractional box on purpose: `clientHeight` is integer-rounded, and that
-    // rounding is visible once the frame is magnified a hundredfold.
-    const r = stage.getBoundingClientRect();
-    view.current = initialView({
-      stage: { width: r.width, height: r.height },
-      image: { width: W, height: H },
-      keypoint: first ?? null,
-      retainedScale: retainedScaleRef.current,
-    });
-    paint();
-  }, [W, H, first, paint, retainedScaleRef]);
-
-  useEffect(() => {
-    fit();
-    const onResize = () => fit();
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [fit]);
-
-  // --- gestures -------------------------------------------------------------
-
-  const pointers = useRef(new Map<number, { x: number; y: number }>());
-  const pinch = useRef<{ dist: number; cx: number; cy: number } | null>(null);
-  const lastTap = useRef(0);
-
-  function pinchState() {
-    const p = [...pointers.current.values()];
-    return {
-      dist: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1,
-      cx: (p[0].x + p[1].x) / 2,
-      cy: (p[0].y + p[1].y) / 2,
-    };
-  }
-
-  function zoomAbout(nextK: number, cx: number, cy: number) {
-    const { k, tx, ty } = view.current;
-    const ix = (cx - tx) / k;
-    const iy = (cy - ty) / k;
-    const clamped = clampScale(nextK);
-    view.current = { k: clamped, tx: cx - ix * clamped, ty: cy - iy * clamped };
-    retainedScaleRef.current = clamped;
-    paint();
-  }
-
   return (
-    <div
-      ref={stageRef}
-      className="relative aspect-4/3 max-h-[70vh] w-full touch-none select-none overflow-hidden rounded-md border border-slate-300 bg-black dark:border-slate-800"
-      onPointerDown={(e) => {
-        (e.target as Element).setPointerCapture?.(e.pointerId);
-        pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-        if (pointers.current.size === 2) pinch.current = pinchState();
-
-        const now = Date.now();
-        if (pointers.current.size === 1 && now - lastTap.current < 320) {
-          const r = stageRef.current!.getBoundingClientRect();
-          zoomAbout(view.current.k > 60 ? 1 : MAX_SCALE, e.clientX - r.left, e.clientY - r.top);
-        }
-        lastTap.current = now;
-      }}
-      onPointerMove={(e) => {
-        if (!pointers.current.has(e.pointerId)) return;
-        const prev = pointers.current.get(e.pointerId)!;
-        pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
-        if (pointers.current.size === 1) {
-          view.current.tx += e.clientX - prev.x;
-          view.current.ty += e.clientY - prev.y;
-          paint();
-        } else if (pointers.current.size === 2 && pinch.current) {
-          const now = pinchState();
-          const r = stageRef.current!.getBoundingClientRect();
-          const { k, tx, ty } = view.current;
-          const ix = (pinch.current.cx - r.left - tx) / k;
-          const iy = (pinch.current.cy - r.top - ty) / k;
-          const nk = clampScale(k * (now.dist / pinch.current.dist));
-          view.current = {
-            k: nk,
-            tx: now.cx - r.left - ix * nk,
-            ty: now.cy - r.top - iy * nk,
-          };
-          pinch.current = now;
-          retainedScaleRef.current = nk;
-          paint();
-        }
-      }}
-      onPointerUp={(e) => {
-        pointers.current.delete(e.pointerId);
-        pinch.current = pointers.current.size === 2 ? pinchState() : null;
-      }}
-      onPointerCancel={(e) => {
-        pointers.current.delete(e.pointerId);
-        pinch.current = null;
-      }}
-    >
-      <div ref={layerRef} className="absolute left-0 top-0 origin-top-left">
-        {/* Deliberately a plain <img>. `next/image` resamples and re-encodes,
-            which is exactly what must not happen to a frame whose purpose is
-            judging an individual pixel — and the bytes come from an
-            authenticated proxy the optimizer cannot reach anyway. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={`/api/triage/image/${item.taskId}`}
-          alt=""
-          draggable={false}
-          width={W}
-          height={H}
-          // `max-w-none` is load-bearing: Tailwind's preflight sets
-          // `img { max-width: 100% }`, which clamps a 4000px frame to the stage
-          // width so `scale(k)` multiplies a base ten times too small.
-          // Smoothing is off because it invents detail that is not in the
-          // frame, the opposite of what a verification view should do.
-          className="pointer-events-none block max-w-none [image-rendering:pixelated]"
-          onLoad={() => setReady(true)}
-        />
-
-        {/* Held back until a frame has actually decoded: drawn over a blank
-            view, a marker claims a point on an image nobody can see. */}
-        {ready &&
-          item.keypoints.map((kp, i) => (
-            <svg
-              key={i}
-              viewBox="-20 -20 40 40"
-              aria-hidden
-              className="pointer-events-none absolute h-10 w-10 overflow-visible"
-              style={{
-                left: `${(kp.xPercent / 100) * W}px`,
-                top: `${(kp.yPercent / 100) * H}px`,
-                margin: "-20px 0 0 -20px",
-                transform: "scale(var(--inv, 1))",
-              }}
-            >
-              <circle r="11" fill="none" stroke="#000" strokeOpacity="0.55" strokeWidth="3.5" />
-              <circle r="11" fill="none" stroke={colourFor(kp.label)} strokeWidth="1.5" />
-              <path
-                d="M-9 0H-4M4 0H9M0 -9V-4M0 4V9"
-                stroke={colourFor(kp.label)}
-                strokeWidth="1.2"
-              />
-              <circle r="1" fill={colourFor(kp.label)} />
-            </svg>
-          ))}
-      </div>
-
-      {/* Outside the transformed layer, so retained zoom cannot magnify it. */}
-      {!ready && (
-        <div className="absolute inset-0 grid place-items-center text-xs text-slate-400">
-          Loading frame…
-        </div>
-      )}
-    </div>
+    <ZoomFrame
+      src={`/api/triage/image/${item.taskId}`}
+      width={W}
+      height={H}
+      focus={first ?? null}
+      retainedScaleRef={retainedScaleRef}
+      markers={item.keypoints.map((kp) => ({
+        x: (kp.xPercent / 100) * W,
+        y: (kp.yPercent / 100) * H,
+        colour: colourFor(kp.label),
+      }))}
+    />
   );
 }
 

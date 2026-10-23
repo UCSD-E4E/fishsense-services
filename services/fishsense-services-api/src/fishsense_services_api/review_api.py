@@ -82,6 +82,8 @@ class ReviewView(BaseModel):
     scientific_name: str | None
     confirms_review_id: uuid.UUID | None
     created_at: datetime
+    #: The caller's own review: theirs to see, not to back.
+    mine: bool
 
 
 class MemberView(BaseModel):
@@ -126,6 +128,7 @@ def add_review_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None:
                 point=_pt(r.point), head=_pt(r.head), tail=_pt(r.tail),
                 scientific_name=r.scientific_name,
                 confirms_review_id=r.confirms_review_id, created_at=r.created_at,
+                mine=r.reviewer_id == member.user_id,
             )
             for r in found
         ]  # fmt: skip

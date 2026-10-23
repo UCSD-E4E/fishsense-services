@@ -95,6 +95,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{slug}/captures/{capture_id}/automatic/mask": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Mask
+         * @description The current prediction's mask, as its PNG bytes (2026-10-22). A fix's
+         *     head and tail snap to it in the browser, as the app's do, and a page can
+         *     read an image's pixels only from its own origin: the web passes these
+         *     on. Read through the store's internal endpoint.
+         */
+        get: operations["get_automatic_mask"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{slug}/captures/{capture_id}/reviews": {
         parameters: {
             query?: never;
@@ -772,6 +795,11 @@ export interface components {
              * Format: date-time
              */
             predicted_at: string;
+            /**
+             * Prediction Id
+             * Format: uuid
+             */
+            prediction_id: string;
             /** Predictor Version */
             predictor_version: number;
             /** Refusal */
@@ -1591,6 +1619,8 @@ export interface components {
              * @enum {string}
              */
             level: "learning" | "trusted" | "expert";
+            /** Mine */
+            mine: boolean;
             point: components["schemas"]["ReviewPoint"] | null;
             /** Reason */
             reason: string | null;
@@ -1832,6 +1862,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AutomaticFrameView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_automatic_mask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+                capture_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": unknown;
                 };
             };
             /** @description Validation Error */
