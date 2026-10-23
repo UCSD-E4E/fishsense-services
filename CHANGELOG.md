@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.45.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.44.1...v0.45.0) (2026-10-23)
+
+
+### Features
+
+* automatic lengths use the automatic stack alone (0064) ([fb4afed](https://github.com/UCSD-E4E/fishsense-services/commit/fb4afed2dc4fd2f913e6de246fa91971026e9b34))
+
 ## [0.44.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.44.0...v0.44.1) (2026-10-23)
 
 
