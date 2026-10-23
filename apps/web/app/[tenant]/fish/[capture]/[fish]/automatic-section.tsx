@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { formatLength } from "@/lib/captures";
 import { automaticOverlay, statusLabel, type AutomaticFrame } from "@/lib/automatic";
 
@@ -11,9 +12,15 @@ import { automaticOverlay, statusLabel, type AutomaticFrame } from "@/lib/automa
 export function AutomaticSection({
   frame,
   humanLengthM,
+  figure,
+  reviewHref,
 }: {
   frame: AutomaticFrame;
   humanLengthM: number | null | undefined;
+  /** In place of the drawing: the frame page's review workspace. */
+  figure?: React.ReactNode;
+  /** Where this frame is reviewed (its frame page), from the fish page. */
+  reviewHref?: string | null;
 }) {
   const overlay = automaticOverlay(frame);
   const difference =
@@ -28,10 +35,20 @@ export function AutomaticSection({
           Unvalidated
         </span>
         <span className="text-sm text-fg-2">
-          What the automatic run found on this frame. It isn&apos;t the measurement above.
+          {figure
+            ? "What the automatic run found on this frame. Review it here."
+            : <>What the automatic run found on this frame. It isn&apos;t the measurement above.</>}
         </span>
+        {reviewHref && (
+          <Link href={reviewHref} className="ml-auto text-sm font-medium text-teal-fg hover:underline">
+            Review this frame →
+          </Link>
+        )}
       </div>
       <div className="flex flex-wrap items-start gap-6">
+        {figure ? (
+          <div className="min-w-0 flex-[999_1_480px]">{figure}</div>
+        ) : (
         <figure className="m-0 min-w-0 flex-[999_1_480px]">
           {overlay ? (
             <div className="relative overflow-hidden rounded-card bg-raised">
@@ -77,6 +94,7 @@ export function AutomaticSection({
             {overlay?.maskUrl && <Key className="bg-teal">Fish mask</Key>}
           </figcaption>
         </figure>
+        )}
         <dl className="grid min-w-0 flex-[1_1_260px] grid-cols-[max-content_minmax(0,1fr)] gap-x-5 gap-y-2.5 text-sm">
           <Row label="Result">{statusLabel(frame.status)}</Row>
           <Row label="Length">

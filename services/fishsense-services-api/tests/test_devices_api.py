@@ -238,6 +238,7 @@ async def test_every_operation_has_an_explicit_operation_id(offline_client):
         "create_deployment",
         "create_device",
         "get_automatic_frame",
+        "get_automatic_mask",
         "get_deployment",
         "get_me",
         "get_mission",

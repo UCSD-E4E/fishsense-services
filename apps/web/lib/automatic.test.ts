@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   agreement,
   automaticOverlay,
+  getAutomaticMask,
   getAutomaticFrame,
   getMissionAutomatic,
   statusLabel,
@@ -127,5 +128,28 @@ describe("agreement", () => {
 
   it("says when there is nothing to compare", () => {
     expect(agreement({ compared: 0 } as MissionAutomatic)).toBe("No frame has both an automatic and a human length yet");
+  });
+});
+
+describe("getAutomaticMask", () => {
+  it("fetches the mask's bytes as the signed-in user", async () => {
+    const png = new Uint8Array([137, 80, 78, 71]);
+    const fetchMock = vi.fn<FetchSig>(
+      async () => new Response(png, { status: 200, headers: { "content-type": "image/png" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const found = await getAutomaticMask("user-token", "lab", CAPTURE);
+
+    expect(new Uint8Array(found!)).toEqual(png);
+    const [request] = fetchMock.mock.calls[0];
+    expect(request.url).toBe(`http://api.test/tenants/lab/captures/${CAPTURE}/automatic/mask`);
+    expect(request.headers.get("authorization")).toBe("Bearer user-token");
+  });
+
+  it("is null for a frame with no mask", async () => {
+    vi.stubGlobal("fetch", vi.fn<FetchSig>(async () => jsonResponse({ detail: "no mask" }, 404)));
+
+    expect(await getAutomaticMask("t", "lab", CAPTURE)).toBeNull();
   });
 });
