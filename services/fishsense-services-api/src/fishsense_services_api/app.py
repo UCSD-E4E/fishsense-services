@@ -50,7 +50,7 @@ from fishsense_services_api.place_naming import PlaceNamer
 from fishsense_services_api.public_api import add_public_routes
 from fishsense_services_api.portal_api import add_portal_routes
 from fishsense_services_api.tenant_stores import TenantStores
-from fishsense_services_api.users import provision_user
+from fishsense_services_api.users import provision_user, record_profile
 
 UNIQUE_VIOLATION = "23505"  # Postgres SQLSTATE
 
@@ -306,8 +306,11 @@ def create_app(
 
 
 async def _first_sight(conn, principal: Principal) -> None:
-    """Step 2: the caller's user row, and their org's tenant if they have one."""
+    """Step 2: the caller's user row, with their name and email as their token
+    gives them (0065), and their org's tenant if they have one."""
     await provision_user(conn, principal.sub)
+    if principal.name or principal.email:
+        await record_profile(conn, principal.name, principal.email)
     if principal.org is not None:
         await join_claimed_tenant(conn)
 

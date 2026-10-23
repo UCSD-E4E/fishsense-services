@@ -203,6 +203,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{slug}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Members
+         * @description The tenant's members by name and email (0065), with their review
+         *     levels: for its admins, who set those levels.
+         */
+        get: operations["list_members"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{slug}/members/{user_id}/skills/{kind}": {
         parameters: {
             query?: never;
@@ -1157,6 +1178,26 @@ export interface components {
             origin: string;
             snout: components["schemas"]["Point"];
         };
+        /** MemberView */
+        MemberView: {
+            /** Email */
+            email: string | null;
+            /** Name */
+            name: string | null;
+            /** Role */
+            role: string;
+            /** Skills */
+            skills: {
+                [key: string]: "learning" | "trusted" | "expert";
+            };
+            /** Sub */
+            sub: string;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+        };
         /** Mission */
         Mission: {
             /** Calibration Source Number */
@@ -2092,6 +2133,37 @@ export interface operations {
                     "application/json": {
                         [key: string]: "learning" | "trusted" | "expert";
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_members: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberView"][];
                 };
             };
             /** @description Validation Error */

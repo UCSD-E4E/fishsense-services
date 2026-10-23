@@ -254,6 +254,7 @@ async def test_every_operation_has_an_explicit_operation_id(offline_client):
         "list_deployments",
         "list_devices",
         "list_label_studio_project_ids",
+        "list_members",
         "list_mission_captures",
         "list_missions",
         "list_my_memberships",

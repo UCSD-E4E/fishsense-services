@@ -63,6 +63,7 @@ __all__ = [
     "FrameNotFound",
     "KINDS",
     "LEVELS",
+    "MemberSkills",
     "NotAMember",
     "REASONS",
     "RecordedReview",
@@ -70,6 +71,7 @@ __all__ = [
     "ReviewRefused",
     "ReviewView",
     "capture_reviews",
+    "member_skills",
     "record_review",
     "reviewed_in_app",
     "reviewer_level",
@@ -156,6 +158,40 @@ class ReviewView:
     scientific_name: str | None
     confirms_review_id: uuid.UUID | None
     created_at: datetime
+
+
+@dataclass(frozen=True)
+class MemberSkills:
+    user_id: uuid.UUID
+    sub: str
+    role: str
+    name: str | None
+    email: str | None
+    #: Their current level per kind; Learning where none is recorded.
+    skills: dict[str, str]
+
+
+async def member_skills(
+    conn: AsyncConnection, tenant_id: uuid.UUID
+) -> list[MemberSkills]:
+    """The active tenant's members by name (0065), with their levels. For its
+    admins: the API shows it to no one else."""
+    members = (await conn.execute(text("SELECT * FROM tenant_members()"))).all()
+    levels: dict[uuid.UUID, dict[str, str]] = {}
+    for r in await conn.execute(
+        text(
+            "SELECT user_id, kind, level FROM current_reviewer_skills WHERE tenant_id = :t"
+        ),
+        {"t": tenant_id},
+    ):
+        levels.setdefault(r.user_id, {})[r.kind] = r.level
+    return [
+        MemberSkills(
+            user_id=m.user_id, sub=m.sub, role=m.role, name=m.name, email=m.email,
+            skills={k: levels.get(m.user_id, {}).get(k, "learning") for k in KINDS},
+        )
+        for m in members
+    ]  # fmt: skip
 
 
 async def reviewer_level(
