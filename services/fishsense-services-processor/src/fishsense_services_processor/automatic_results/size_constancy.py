@@ -172,6 +172,9 @@ class LabelFreeFit:
     se_px: Optional[float]
     pair_residual_sd: Optional[float]
     o_mag_m: float
+    #: The length scale's predicted SD from dot and size noise (calibration
+    #: v3 on SAM sizes, 2026-10-23); None where not predicted.
+    scale_sd: Optional[float] = None
 
 
 def extract_features(image_bgr: np.ndarray, dot: Sequence[float]) -> FrameFeatures:

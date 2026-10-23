@@ -220,8 +220,9 @@ def replay_v3(
     def fit(indices):
         idx = list(indices)
         if sizes is not None:
+            # No gate in the replay: its draws are what set the threshold.
             return v3.fit_known_sizes(dots[idx], [sizes[i] for i in idx],
-                                      payload.camera_matrix)  # fmt: skip
+                                      payload.camera_matrix, scale_sd_max=np.inf)  # fmt: skip
         return sc.fit_label_free(
             dots=dots[idx], pairs=pairs_of([features[i] for i in idx], dots[idx]),
             camera_matrix=payload.camera_matrix, min_frames=v3.MIN_FRAMES,
@@ -252,6 +253,7 @@ def replay_v3(
         pair_count=0 if f is None else f.pairs,
         size_ratio=None if f is None else f.size_ratio,
         se_px=None if f is None else f.se_px,
+        scale_sd=None if f is None else f.scale_sd,
         gross_dropped=main.gross_dropped, consensus_dropped=main.consensus_dropped,
         rival=main.rival, check_dots=main.check.dots,
         check_median_px=main.check.median_px,
@@ -271,6 +273,7 @@ def replay_v3(
                 laser_axis=d.fit.laser_axis if ok else None,
                 vanishing_px=None if d.fit is None else d.fit.vanishing_px,
                 frames_used=0 if d.fit is None else d.fit.frames_used,
+                scale_sd=None if d.fit is None else d.fit.scale_sd,
                 check_median_px=d.check.median_px,
                 check_within_share=d.check.within_share,
             ))  # fmt: skip

@@ -51,6 +51,10 @@ from fishsense_services_processor.automatic_results import size_constancy as sc
 __all__ = [
     "CHECK_MEDIAN_PX",
     "CHECK_MIN_DOTS",
+    "DOT_SIGMA_PX",
+    "SCALE_SD_MAX",
+    "SIZE_SIGMA",
+    "TRIM_SIGMAS",
     "GROSS_PX",
     "MIN_FRAMES",
     "OFF_LINE_PX",
@@ -75,6 +79,23 @@ RIVAL_SHARE = 0.25
 #: The check decides only with this many non-slate dots.
 CHECK_MIN_DOTS = 10
 CHECK_MEDIAN_PX = 10.0
+#: The known-sizes fit's noise model (2026-10-23, 356 labelled slate frames):
+#: automatic slate dots sit a median 0.72 px from human ones along the beam,
+#: a normal sigma of ~1.1 px; SAM's slate size scatters 0.3% about the human
+#: scale (rounded up).
+DOT_SIGMA_PX = 1.1
+SIZE_SIGMA = 0.005
+#: A frame is trimmed when its deleted residual exceeds this many sigmas of
+#: what that noise explains at its own distance from the vanishing point.
+TRIM_SIGMAS = 4.0
+#: The length scale's predicted SD a fit may have: ~ +-3% at 2 sigma, the
+#: owner's measurement budget. Provisional: with a ~10 cm laser offset the dot
+#: sits only ~300/Z px from the vanishing point, so 1 px is ~0.3% of range a
+#: frame and typical slate geometries predict 1.2-2.7% -- the threshold is to
+#: be set from the replay's draws (predicted against measured error), which
+#: run with no gate.
+SCALE_SD_MAX = 0.015
+SCALE_DRAWS = 200
 
 
 def _xy(dots) -> np.ndarray:
@@ -220,14 +241,21 @@ def fit_known_sizes(
     min_frames: int = MIN_FRAMES,
     min_size_ratio: float = sc.MIN_SIZE_RATIO,
     rng: np.random.Generator | None = None,
+    scale_sd_max: float = SCALE_SD_MAX,
 ) -> sc.LabelFreeFit:
     """The size-constancy fit on sizes measured per frame -- the slate's SAM
     mask, sqrt(area) (strategy 2, owner 2026-10-22) -- instead of solved from
     SIFT pair ratios: no pair registration, so no ``too_few_matched_pairs``.
     A frame with no size (no mask under its dot) is left out. Otherwise
     `fit_label_free`'s steps: the direction through the dots, the
-    deleted-residual trim (`FRAME_RESIDUAL_MAX`), the size spread, the
-    bracket, the bootstrap SE. Sizes in any units: only their ratios count."""
+    deleted-residual trim, the size spread, the bracket, the bootstrap SE.
+    Sizes in any units: only their ratios count.
+
+    2026-10-23: the trim is noise-aware (`_noise_trim`, not the fixed
+    `FRAME_RESIDUAL_MAX`), and a fit whose predicted length-scale SD
+    (`scale_sd`) exceeds `SCALE_SD_MAX` is refused (``uncertain_fit``): on
+    the controls, automatic dots a few px off along the line made 20-27%
+    errors where the slates were far."""
     xy = _xy(dots)
     s_all = np.array([np.nan if v is None else float(v) for v in sizes])
     used = np.flatnonzero(np.isfinite(s_all) & (s_all > 0))
@@ -246,13 +274,7 @@ def fit_known_sizes(
     pinned = sc._pinned(
         t[used], sc.fit_vanishing_position(t[used], s[used])
     )  # pylint: disable=protected-access
-    keep = used
-    while len(keep) > 2:
-        r = sc.deleted_residuals(t[keep], s[keep])
-        worst = int(np.argmax(r))
-        if r[worst] <= sc.FRAME_RESIDUAL_MAX:
-            break
-        keep = np.delete(keep, worst)
+    keep = _noise_trim(t, s, used)
     seen.update(used=[int(i) for i in keep], frames_used=len(keep))
     if len(keep) < min_frames:
         return sc._refused(
@@ -270,9 +292,80 @@ def fit_known_sizes(
                 line_offset_px=offset)  # fmt: skip
     if sc._pinned(tk, tv):  # pylint: disable=protected-access
         return sc._refused("unconstrained", **seen)  # pylint: disable=protected-access
+    sd = scale_sd(tk, sk, u, offset, camera_matrix)
+    seen["scale_sd"] = sd
+    if sd > scale_sd_max:
+        return sc._refused("uncertain_fit", **seen)  # pylint: disable=protected-access
     origin, axis = sc.beam_from_vanishing(tv, u, offset, camera_matrix)
     return sc.LabelFreeFit(
         outcome="accepted", refusal_reason=None,
         laser_position=[float(c) for c in origin], laser_axis=[float(c) for c in axis],
         se_px=sc.bootstrap_se(tk, sk, rng=rng), o_mag_m=sc.O_DESIGN_M, **seen,
     )  # fmt: skip
+
+
+def _ranges_on(camera_matrix, position, axis, pixels) -> np.ndarray:
+    """The range (z) the beam gives each pixel: the beam's point nearest the
+    pixel's ray."""
+    ki = np.linalg.inv(np.asarray(camera_matrix, float))
+    o, a = np.asarray(position, float), np.asarray(axis, float)
+    out = []
+    for x, y in pixels:
+        r = ki @ [x, y, 1.0]
+        r /= np.linalg.norm(r)
+        m = np.array([[a @ a, -a @ r], [a @ r, -r @ r]])
+        lam, _ = np.linalg.solve(m, np.array([-(o @ a), -(o @ r)]))
+        out.append((o + lam * a)[2])
+    return np.array(out)
+
+
+def scale_sd(t, s, u, offset, camera_matrix, *, draws: int = SCALE_DRAWS,
+             rng: np.random.Generator | None = None) -> float:  # fmt: skip
+    """The length scale's SD under the noise model: the fit re-run with each
+    dot moved along the line by N(0, DOT_SIGMA_PX) and each size by
+    N(0, SIZE_SIGMA); each beam's ranges at the nominal beam's pixels for
+    0.5-5 m, against those ranges. Lengths scale with range, so this is the
+    length error a fit like this one carries. The line's direction is held
+    (a sideways error is the check's to see)."""
+    rng = rng if rng is not None else np.random.default_rng(0)
+    t, s = np.asarray(t, float), np.asarray(s, float)
+    tv = sc.fit_vanishing_position(t, s)
+    o, a = sc.beam_from_vanishing(tv, u, offset, camera_matrix)
+    k = np.asarray(camera_matrix, float)
+    zs = np.linspace(0.5, 5.0, 10)
+    pix = []
+    for z in zs:
+        p = k @ (o + ((z - o[2]) / a[2]) * a)
+        pix.append(p[:2] / p[2])
+    ratios = []
+    for _ in range(draws):
+        t2 = t + rng.normal(0.0, DOT_SIGMA_PX, len(t))
+        s2 = s * np.exp(rng.normal(0.0, SIZE_SIGMA, len(s)))
+        o2, a2 = sc.beam_from_vanishing(sc.fit_vanishing_position(t2, s2), u, offset,
+                                        camera_matrix)  # fmt: skip
+        ratios.append(float(np.median(_ranges_on(camera_matrix, o2, a2, pix) / zs)))
+    return float(np.std(ratios))
+
+
+def _noise_trim(t: np.ndarray, s: np.ndarray, keep: np.ndarray) -> np.ndarray:
+    """Drop, one at a time, the frame whose deleted residual is furthest past
+    `TRIM_SIGMAS` sigmas of what dot and size noise explain at its distance
+    from the vanishing point (the fit of the others)."""
+    keep = np.asarray(keep)
+    while len(keep) > 2:
+        z = np.empty(len(keep))
+        for j, i in enumerate(keep):
+            rest = keep[keep != i]
+            tv = sc.fit_vanishing_position(t[rest], s[rest])
+            c = np.median(np.log(s[rest]) - np.log(t[rest] - tv))
+            gap = t[i] - tv
+            if gap <= 0:
+                z[j] = np.inf
+                continue
+            sigma = np.hypot(DOT_SIGMA_PX / gap, SIZE_SIGMA)
+            z[j] = abs(np.log(s[i]) - np.log(gap) - c) / sigma
+        worst = int(np.argmax(z))
+        if z[worst] <= TRIM_SIGMAS:
+            break
+        keep = np.delete(keep, worst)
+    return keep
