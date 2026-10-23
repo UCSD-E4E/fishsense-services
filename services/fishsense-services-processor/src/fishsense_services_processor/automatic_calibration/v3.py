@@ -60,6 +60,7 @@ __all__ = [
     "beam_line",
     "calibrate_v3",
     "check",
+    "fit_known_sizes",
     "gross_screen",
     "slate_consensus",
 ]
@@ -209,3 +210,69 @@ def calibrate_v3(
             "refused", "fit_disagrees_with_mission", result, check=seen, **base
         )
     return V3Fit("accepted", None, result, check=seen, **base)
+
+
+def fit_known_sizes(
+    dots,
+    sizes,
+    camera_matrix,
+    *,
+    min_frames: int = MIN_FRAMES,
+    min_size_ratio: float = sc.MIN_SIZE_RATIO,
+    rng: np.random.Generator | None = None,
+) -> sc.LabelFreeFit:
+    """The size-constancy fit on sizes measured per frame -- the slate's SAM
+    mask, sqrt(area) (strategy 2, owner 2026-10-22) -- instead of solved from
+    SIFT pair ratios: no pair registration, so no ``too_few_matched_pairs``.
+    A frame with no size (no mask under its dot) is left out. Otherwise
+    `fit_label_free`'s steps: the direction through the dots, the
+    deleted-residual trim (`FRAME_RESIDUAL_MAX`), the size spread, the
+    bracket, the bootstrap SE. Sizes in any units: only their ratios count."""
+    xy = _xy(dots)
+    s_all = np.array([np.nan if v is None else float(v) for v in sizes])
+    used = np.flatnonzero(np.isfinite(s_all) & (s_all > 0))
+    seen = dict(used=[int(i) for i in used], frames_used=len(used), pairs=0,
+                pair_residual_sd=None)  # fmt: skip
+    if len(used) < min_frames:
+        return sc._refused("too_few_frames", **seen)  # pylint: disable=protected-access
+    u = sc.line_direction(None, xy[used])
+    t = xy @ u
+    s = s_all
+    seen["size_ratio"] = float(s[used].max() / s[used].min())
+    if seen["size_ratio"] < min_size_ratio:
+        return sc._refused(
+            "too_little_range_spread", **seen
+        )  # pylint: disable=protected-access
+    pinned = sc._pinned(
+        t[used], sc.fit_vanishing_position(t[used], s[used])
+    )  # pylint: disable=protected-access
+    keep = used
+    while len(keep) > 2:
+        r = sc.deleted_residuals(t[keep], s[keep])
+        worst = int(np.argmax(r))
+        if r[worst] <= sc.FRAME_RESIDUAL_MAX:
+            break
+        keep = np.delete(keep, worst)
+    seen.update(used=[int(i) for i in keep], frames_used=len(keep))
+    if len(keep) < min_frames:
+        return sc._refused(
+            "unconstrained" if pinned else "too_few_frames", **seen
+        )  # pylint: disable=protected-access
+    seen["size_ratio"] = float(s[keep].max() / s[keep].min())
+    if seen["size_ratio"] < min_size_ratio:
+        return sc._refused(
+            "too_little_range_spread", **seen
+        )  # pylint: disable=protected-access
+    tk, sk = t[keep], s[keep]
+    tv = sc.fit_vanishing_position(tk, sk)
+    offset = float(np.median(xy[keep] @ np.array([-u[1], u[0]])))
+    seen.update(vanishing_px=tv, line_direction=[float(c) for c in u],
+                line_offset_px=offset)  # fmt: skip
+    if sc._pinned(tk, tv):  # pylint: disable=protected-access
+        return sc._refused("unconstrained", **seen)  # pylint: disable=protected-access
+    origin, axis = sc.beam_from_vanishing(tv, u, offset, camera_matrix)
+    return sc.LabelFreeFit(
+        outcome="accepted", refusal_reason=None,
+        laser_position=[float(c) for c in origin], laser_axis=[float(c) for c in axis],
+        se_px=sc.bootstrap_se(tk, sk, rng=rng), o_mag_m=sc.O_DESIGN_M, **seen,
+    )  # fmt: skip

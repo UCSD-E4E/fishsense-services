@@ -187,3 +187,71 @@ def test_the_check_refuses_on_the_median_distance():
     r = _run(_slates(ranges), ranges, other=far)
     assert r.refusal_reason == "fit_disagrees_with_mission"
     assert r.check.median_px == pytest.approx(11.0, abs=0.01)
+
+
+# -- strategy 2 (owner, 2026-10-22): sizes from SAM masks, no pair registration ------
+
+
+def _sizes(ranges):
+    return [100.0 / z for z in ranges]  # a rigid slate: s ~ 1/Z, any units
+
+
+def test_known_sizes_recover_the_beam_without_pairs():
+    ranges = [0.8, 1.2, 1.7, 2.4]
+    f = v3.fit_known_sizes(_slates(ranges), _sizes(ranges), K)
+    assert f.outcome == "accepted" and f.pairs == 0 and f.frames_used == 4
+    assert _angle(f.laser_axis, A) < 0.05
+
+
+def test_a_frame_with_no_mask_is_left_out():
+    ranges = [0.8, 1.2, 1.7, 2.4]
+    sizes = _sizes(ranges)
+    sizes[1] = None
+    f = v3.fit_known_sizes(_slates(ranges), sizes, K)
+    assert f.outcome == "accepted" and f.used == [0, 2, 3]
+
+
+def test_a_size_that_disagrees_is_trimmed():
+    ranges = [0.8, 1.0, 1.3, 1.7, 2.2, 2.8]
+    sizes = _sizes(ranges)
+    sizes[3] *= 1.4  # SAM took the slate and the hand holding it
+    f = v3.fit_known_sizes(_slates(ranges), sizes, K)
+    assert f.outcome == "accepted" and 3 not in f.used
+    assert _angle(f.laser_axis, A) < 0.05
+
+
+def test_too_little_spread_and_too_few_are_refused():
+    near = [1.0, 1.05, 1.1]
+    assert v3.fit_known_sizes(_slates(near), _sizes(near), K).refusal_reason == (
+        "too_little_range_spread"
+    )
+    two = [0.8, 2.4]
+    assert (
+        v3.fit_known_sizes(_slates(two), _sizes(two), K).refusal_reason
+        == "too_few_frames"
+    )
+
+
+def test_v3_runs_on_known_sizes():
+    ranges = [0.8, 1.4, 2.4]
+    xy, s = _slates(ranges), _sizes(ranges)
+    r = v3.calibrate_v3(slate_xy=xy, dive_line=None, other_xy=[], camera_matrix=K,
+                        fit=lambda idx: v3.fit_known_sizes(xy[list(idx)],
+                                                           [s[i] for i in idx], K))  # fmt: skip
+    assert r.outcome == "accepted" and _angle(r.fit.laser_axis, A) < 0.05
+
+
+def test_the_replay_fits_on_sam_sizes_without_pairs():
+    ranges = [0.7, 1.2, 2.1, 2.8]
+    payload = _payload(ranges, np.linspace(0.6, 4.0, 20))
+
+    def no_pairs(features, dots):
+        raise AssertionError("no pair registration on SAM sizes")
+
+    sizes = _sizes(ranges)
+    sizes[0] = None
+    report = replay_v3(payload, [], payload.frames, sizes=sizes, draw_sizes=[3],
+                       draws_per_size=4, pairs_of=no_pairs)  # fmt: skip
+    assert report.size_source == "sam" and report.outcome == "accepted"
+    assert report.frames_used == 3 and _angle(report.laser_axis, A) < 0.05
+    assert len(report.draws) == 4

@@ -29,3 +29,12 @@ def test_a_replay_names_its_draws():
         r.draw_sizes == [3, 4]
         and ReplayCalibrationInput(payload=payload).draws_per_size == 0
     )
+
+
+def test_a_replay_may_fit_on_sam_sizes():
+    payload = FitAutomaticCalibrationInput(tenant_id=uuid.uuid4(), mission_id=uuid.uuid4(),
+                                           camera_matrix=[[1.0]], frames=[])  # fmt: skip
+    r = ReplayCalibrationInput(payload=payload, size_source="sam",
+                               sam_sizes={"a": 10.0, "b": None})  # fmt: skip
+    assert r.sam_sizes == {"a": 10.0, "b": None}
+    assert ReplayCalibrationInput(payload=payload).size_source == "sift"
