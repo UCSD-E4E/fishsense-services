@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.49.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.48.0...v0.49.0) (2026-10-23)
+
+
+### Features
+
+* calibration v4 — automatic slate pose replay (contract v18) ([f8a03ae](https://github.com/UCSD-E4E/fishsense-services/commit/f8a03ae3753a0fec2e7e39ee178a77e1874af86a))
+* **orchestrator:** calibration v4 replay mode (pose): template resolved, PDF staged, frames posed on the GPU ([cfee60d](https://github.com/UCSD-E4E/fishsense-services/commit/cfee60d423724ebf05aac720956dc5518dd9179c))
+* **processor:** calibration v4 slate pose on the GPU, and the replay fitting on its points (contract v18) ([d8ae044](https://github.com/UCSD-E4E/fishsense-services/commit/d8ae0442897cb50dafaf9fc023110a3a9ee7490c))
+* **processor:** calibration v4 slate pose pieces (board fit, ECC pattern, plane, robust beam) ([e1434da](https://github.com/UCSD-E4E/fishsense-services/commit/e1434dad1634d22009ae9da8ebdd78950f958bfb))
+
 ## [0.48.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.47.0...v0.48.0) (2026-10-23)
 
 
