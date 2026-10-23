@@ -27,6 +27,8 @@ class CalibrationDraw(BaseModel):
     laser_axis: Optional[List[float]] = None
     vanishing_px: Optional[float] = None
     frames_used: int = 0
+    #: v17: the fit's predicted length-scale SD (SAM sizes).
+    scale_sd: Optional[float] = None
     check_median_px: Optional[float] = None
     check_within_share: Optional[float] = None
 
@@ -49,6 +51,8 @@ class CalibrationV3Report(BaseModel):
     pair_count: int = 0
     size_ratio: Optional[float] = None
     se_px: Optional[float] = None
+    #: v17: the fit's predicted length-scale SD (SAM sizes).
+    scale_sd: Optional[float] = None
     gross_dropped: int = 0
     consensus_dropped: int = 0
     rival: int = 0

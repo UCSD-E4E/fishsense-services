@@ -198,7 +198,7 @@ def _sizes(ranges):
 
 def test_known_sizes_recover_the_beam_without_pairs():
     ranges = [0.8, 1.2, 1.7, 2.4]
-    f = v3.fit_known_sizes(_slates(ranges), _sizes(ranges), K)
+    f = v3.fit_known_sizes(_slates(ranges), _sizes(ranges), K, scale_sd_max=np.inf)
     assert f.outcome == "accepted" and f.pairs == 0 and f.frames_used == 4
     assert _angle(f.laser_axis, A) < 0.05
 
@@ -207,7 +207,7 @@ def test_a_frame_with_no_mask_is_left_out():
     ranges = [0.8, 1.2, 1.7, 2.4]
     sizes = _sizes(ranges)
     sizes[1] = None
-    f = v3.fit_known_sizes(_slates(ranges), sizes, K)
+    f = v3.fit_known_sizes(_slates(ranges), sizes, K, scale_sd_max=np.inf)
     assert f.outcome == "accepted" and f.used == [0, 2, 3]
 
 
@@ -215,7 +215,7 @@ def test_a_size_that_disagrees_is_trimmed():
     ranges = [0.8, 1.0, 1.3, 1.7, 2.2, 2.8]
     sizes = _sizes(ranges)
     sizes[3] *= 1.4  # SAM took the slate and the hand holding it
-    f = v3.fit_known_sizes(_slates(ranges), sizes, K)
+    f = v3.fit_known_sizes(_slates(ranges), sizes, K, scale_sd_max=np.inf)
     assert f.outcome == "accepted" and 3 not in f.used
     assert _angle(f.laser_axis, A) < 0.05
 
@@ -237,7 +237,8 @@ def test_v3_runs_on_known_sizes():
     xy, s = _slates(ranges), _sizes(ranges)
     r = v3.calibrate_v3(slate_xy=xy, dive_line=None, other_xy=[], camera_matrix=K,
                         fit=lambda idx: v3.fit_known_sizes(xy[list(idx)],
-                                                           [s[i] for i in idx], K))  # fmt: skip
+                                                           [s[i] for i in idx], K,
+                                                           scale_sd_max=np.inf))  # fmt: skip
     assert r.outcome == "accepted" and _angle(r.fit.laser_axis, A) < 0.05
 
 
@@ -255,3 +256,40 @@ def test_the_replay_fits_on_sam_sizes_without_pairs():
     assert report.size_source == "sam" and report.outcome == "accepted"
     assert report.frames_used == 3 and _angle(report.laser_axis, A) < 0.05
     assert len(report.draws) == 4
+    # The replay gates on nothing: it records the prediction, for the draws.
+    assert report.scale_sd is not None
+    assert all(d.scale_sd is not None for d in report.draws if d.outcome == "accepted")
+
+
+# -- noise-aware trim and the uncertainty gate (2026-10-23) ---------------------------
+
+
+def test_near_widely_spread_slates_predict_the_smallest_scale_error():
+    wide = [0.4, 0.6, 0.9, 1.4, 2.2, 3.0]
+    f = v3.fit_known_sizes(_slates(wide), _sizes(wide), K)
+    assert f.outcome == "accepted" and f.scale_sd < v3.SCALE_SD_MAX
+    narrow = [0.5, 0.55, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1]
+    g = v3.fit_known_sizes(_slates(narrow), _sizes(narrow), K, scale_sd_max=np.inf)
+    assert g.scale_sd > f.scale_sd
+
+
+def test_far_slates_near_the_vanishing_point_are_too_uncertain():
+    """1 px along the line is several percent of range when the slates are
+    far: the fit says so and is refused rather than trusted."""
+    ranges = [6.0, 8.0, 11.0]
+    f = v3.fit_known_sizes(_slates(ranges), _sizes(ranges), K)
+    assert (f.outcome, f.refusal_reason) == ("refused", "uncertain_fit")
+    assert f.scale_sd > v3.SCALE_SD_MAX
+
+
+def test_a_dot_off_along_the_line_is_trimmed_by_what_noise_explains():
+    """A dot a few px off along the line keeps its size: its residual is a few
+    percent -- under the fixed 10% trim, far over what 1 px of dot noise
+    explains at a near range."""
+    ranges = [0.6, 0.75, 0.9, 1.1, 1.35, 1.7]
+    xy = _slates(ranges)
+    u = (xy[-1] - xy[0]) / np.linalg.norm(xy[-1] - xy[0])
+    xy[2] += 25.0 * u  # along the beam, so no consensus line drops it
+    f = v3.fit_known_sizes(xy, _sizes(ranges), K, scale_sd_max=np.inf)
+    assert f.outcome == "accepted" and 2 not in f.used
+    assert _angle(f.laser_axis, A) < 0.05
