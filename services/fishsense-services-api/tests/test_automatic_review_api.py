@@ -103,7 +103,7 @@ async def test_a_member_reads_a_missions_run(
     assert body["frames"] == 1
     assert body["by_status"] == {"predicted": 1}
     assert body["lengths"] == 1
-    assert body["lengths_use"] == "stored"
+    assert body["lengths_use"] == "label_free"
     assert body["compared"] == 0
 
 

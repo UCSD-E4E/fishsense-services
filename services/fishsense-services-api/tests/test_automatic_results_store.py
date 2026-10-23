@@ -790,10 +790,14 @@ async def test_a_missions_own_label_free_fit_beats_its_links(owner_engine, app_e
     assert inputs.calibration.automatic_laser_calibration_id == own
 
 
-async def test_then_the_stored_calibration(owner_engine, app_engine):
+async def test_a_stored_calibration_is_never_used(owner_engine, app_engine):
+    """Automatic lengths rest on the automatic stack alone (owner, 2026-10-22):
+    a mission whose label-free fit was refused, with none to borrow through
+    its link, is not measured -- production's stored calibration is not a
+    fallback (0064; 0036 fell back to it)."""
     lab = await tenant(owner_engine)
     mission_id = await _backlog_mission(owner_engine, lab)
-    stored = await calibrate(owner_engine, lab, mission_id, axis=(0.0, 0.0, 1.0))
+    await calibrate(owner_engine, lab, mission_id, axis=(0.0, 0.0, 1.0))
     c = await capture(owner_engine, lab, mission_id)
     await _predict(app_engine, lab, mission_id, _predicted(c))
     await _in(app_engine, lab, persist_automatic_calibration, mission_id,
@@ -802,15 +806,13 @@ async def test_then_the_stored_calibration(owner_engine, app_engine):
 
     inputs = await _measure_inputs(app_engine, lab, mission_id)
 
-    assert inputs.calibration.source == "stored"
-    assert inputs.calibration.laser_calibration_id == stored
-    assert inputs.calibration.laser_position == PLAUSIBLE_POSITION
+    assert inputs.calibration is None and inputs.captures == []
 
 
 async def test_slate_frames_are_never_measured(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     mission_id = await _backlog_mission(owner_engine, lab)
-    await calibrate(owner_engine, lab, mission_id)
+    await _in(app_engine, lab, persist_automatic_calibration, mission_id, _label_free())
     c = await capture(owner_engine, lab, mission_id)
     await _predict(app_engine, lab, mission_id,
                    AutomaticHeadTailRow(capture_id=c, status="slate_frame",
@@ -826,7 +828,7 @@ async def test_a_frame_the_detector_now_calls_a_slate_is_not_measured(
     names one a slate, its mask is not measured (a version bump re-runs it)."""
     lab = await tenant(owner_engine)
     mission_id = await _backlog_mission(owner_engine, lab)
-    await calibrate(owner_engine, lab, mission_id)
+    await _in(app_engine, lab, persist_automatic_calibration, mission_id, _label_free())
     c = await capture(owner_engine, lab, mission_id)
     await _predict(app_engine, lab, mission_id, _predicted(c))
 
@@ -843,7 +845,7 @@ async def test_a_frame_the_detector_now_calls_a_slate_is_not_measured(
 
 async def _measured(owner_engine, app_engine, lab):
     mission_id = await _backlog_mission(owner_engine, lab)
-    await calibrate(owner_engine, lab, mission_id)
+    await _in(app_engine, lab, persist_automatic_calibration, mission_id, _label_free())
     c = await capture(owner_engine, lab, mission_id)
     await _predict(app_engine, lab, mission_id, _predicted(c))
     inputs = await _measure_inputs(app_engine, lab, mission_id)
@@ -872,7 +874,7 @@ async def test_a_length_is_current_and_drains_the_work(owner_engine, app_engine)
         "FROM current_automatic_measurements",
     )  # fmt: skip
     assert current == [{"capture_id": c, "length_m": 0.42, "producer": "automatic",
-                        "calibration_source": "stored"}]  # fmt: skip
+                        "calibration_source": "label_free"}]  # fmt: skip
     assert (await _measure_inputs(app_engine, lab, mission_id)).captures == []
 
 
@@ -890,7 +892,7 @@ async def test_a_new_head_tail_makes_the_length_stale(owner_engine, app_engine):
     ] == [c]
 
 
-async def test_a_label_free_calibration_makes_a_stored_length_stale(
+async def test_a_new_label_free_calibration_makes_a_length_stale(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
@@ -900,6 +902,35 @@ async def test_a_label_free_calibration_makes_a_stored_length_stale(
     assert (
         await _rows(owner_engine, "SELECT 1 FROM current_automatic_measurements") == []
     )
+
+
+async def test_a_length_on_a_stored_calibration_is_no_longer_current(
+    owner_engine, app_engine
+):
+    """Lengths 0036 measured on production's calibration stay as history but
+    leave the current results and the export (0064)."""
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    stored = await calibrate(owner_engine, lab, mission_id)
+    c = await capture(owner_engine, lab, mission_id)
+    await _predict(app_engine, lab, mission_id, _predicted(c))
+    (ht,) = await _rows(owner_engine, "SELECT id FROM automatic_head_tail_predictions")
+    camera = await _camera(app_engine, lab, mission_id)
+    await _in(app_engine, lab, persist_automatic_measurements, mission_id, [
+        AutomaticMeasurementRow(
+            capture_id=c, automatic_head_tail_prediction_id=ht["id"],
+            calibration_source="stored", laser_calibration_id=stored,
+            camera_calibration_id=camera, length_m=0.42, depth_m=2.1,
+            algorithm="laser_depth_fronto_parallel", algorithm_version="1",
+            core_version="4.1.0",
+        )
+    ])  # fmt: skip
+
+    assert await _rows(owner_engine, "SELECT 1 FROM automatic_measurements") != []
+    assert (
+        await _rows(owner_engine, "SELECT 1 FROM current_automatic_measurements") == []
+    )
+    assert await _rows(owner_engine, "SELECT 1 FROM automatic_results_export") == []
 
 
 async def test_automatic_lengths_never_reach_the_human_path(owner_engine, app_engine):
@@ -934,7 +965,7 @@ async def test_the_export_names_every_input_and_the_species(owner_engine, app_en
     assert row["species_producer"] == "automatic"
     assert row["sam_checkpoint"] == "sam3/3.1@abc"
     assert row["laser_predictor_version"] == 3
-    assert row["calibration_source"] == "stored"
+    assert row["calibration_source"] == "label_free"
     assert row["sam_score"] == 0.83
     assert row["capture_number"] is not None and row["dive_number"] is not None
 
@@ -968,11 +999,8 @@ async def test_the_export_flags_a_mission_humans_measured_since(
     (row,) = await _rows(owner_engine, "SELECT * FROM automatic_results_export")
     assert row["dive_human_measured"] is False
 
-    (cal,) = await _rows(
-        owner_engine,
-        "SELECT id FROM laser_calibrations WHERE mission_id = :d",
-        d=mission_id,
-    )
+    # The humans' own calibration, which the automatic lengths do not use.
+    cal = {"id": await calibrate(owner_engine, lab, mission_id)}
     other = await capture(owner_engine, lab, mission_id)
     await measurement(
         owner_engine, lab, other, await fish(owner_engine, lab), cal["id"]
@@ -991,11 +1019,8 @@ async def test_a_mission_whose_only_human_length_is_stale_is_not_flagged(
     dropped its automatic ones for none. It reads `current_measurements`."""
     lab = await tenant(owner_engine)
     mission_id, _ = await _measured(owner_engine, app_engine, lab)
-    (cal,) = await _rows(
-        owner_engine,
-        "SELECT id FROM laser_calibrations WHERE mission_id = :d",
-        d=mission_id,
-    )
+    # The humans' own calibration, which the automatic lengths do not use.
+    cal = {"id": await calibrate(owner_engine, lab, mission_id)}
     other = await capture(owner_engine, lab, mission_id)
     gone = await head_tail_label(owner_engine, lab, other, superseded=True)
     await measurement(owner_engine, lab, other, await fish(owner_engine, lab),
