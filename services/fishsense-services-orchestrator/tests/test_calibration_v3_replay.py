@@ -42,7 +42,7 @@ EVENTS: list = []
 IDS = {n: uuid.uuid5(uuid.NAMESPACE_OID, f"m{n}") for n in range(1, 6)}
 
 
-def _stubs(*, frames=2, broken=(), mode="gpu"):
+def _stubs(*, frames=2, broken=(), mode="gpu", template=True):
     @activity.defn(name="plan_calibration_v3_replay")
     async def plan(tenant: str, numbers: Optional[List[int]] = None) -> dict:
         ns = numbers or [1, 2, 3]
@@ -70,7 +70,21 @@ def _stubs(*, frames=2, broken=(), mode="gpu"):
         EVENTS.append(("wake gpu",))
         return mode
 
-    return [plan, resolve, wake, wake_gpu]
+    @activity.defn(name="resolve_mission_slate_template")
+    async def slate(t: AutomaticTarget) -> Optional[dict]:
+        EVENTS.append(("template",))
+        if not template:
+            return None
+        return {"slate_template_id": str(IDS[5]), "dpi": 200,
+                "reference_points": [[1.0, 2.0], [3.0, 4.0]],
+                "slate_pdf": {"bucket": "scratch", "key": f"slate_pdf/{IDS[5]}.pdf"}}  # fmt: skip
+
+    @activity.defn(name="stage_slate_pdf")
+    async def stage_pdf(target) -> bool:
+        EVENTS.append(("stage pdf", str(target["slate_template_id"])))
+        return True
+
+    return [plan, resolve, wake, wake_gpu, slate, stage_pdf]
 
 
 @workflow.defn(name="ReplayAutomaticCalibrationV3Workflow")
@@ -85,6 +99,9 @@ class _Replay:  # pylint: disable=too-few-public-methods
                         sorted(v for v in r.get("sam_sizes", {}).values() if v)],
             start_to_close_timeout=timedelta(seconds=10),
         )  # fmt: skip
+        await workflow.execute_activity(
+            "_record", ["points", r.get("pose_points", {})],
+            start_to_close_timeout=timedelta(seconds=10))  # fmt: skip
         return CalibrationV3Report(
             mission_id=r["payload"]["dive_id"], outcome="accepted"
         ).model_dump(mode="json", by_alias=True)
@@ -92,7 +109,9 @@ class _Replay:  # pylint: disable=too-few-public-methods
 
 @activity.defn(name="_record")
 async def _record(event: list) -> None:
-    if event[0] == "replay":
+    if event[0] == "points":
+        POINTS.append(event[1])
+    elif event[0] == "replay":
         EVENTS.append((event[0], event[1], tuple(event[2]), event[3]))
         SAM.append((event[4], event[5]))
     else:
@@ -100,6 +119,20 @@ async def _record(event: list) -> None:
 
 
 SAM: list = []
+POINTS: list = []
+
+
+@workflow.defn(name="SlatePoseFramesWorkflow")
+class _Pose:  # pylint: disable=too-few-public-methods
+    @workflow.run
+    async def run(self, req: dict) -> list:
+        await workflow.execute_activity(
+            "_record", ["pose", str(len(req["frames"])), req["slate_pdf"]["key"],
+                        str(req["slate_dpi"])],
+            start_to_close_timeout=timedelta(seconds=10))  # fmt: skip
+        return [{"capture_id": f["capture_id"],
+                 "status": "weak_alignment" if i == 0 else "posed",
+                 "point": [0.1, 0.0, 1.0 + i]} for i, f in enumerate(req["frames"])]  # fmt: skip
 
 
 @workflow.defn(name="SegmentSlateFramesWorkflow")
@@ -116,6 +149,7 @@ class _Segment:  # pylint: disable=too-few-public-methods
 async def _run(fn, arg, **stubs):
     EVENTS.clear()
     SAM.clear()
+    POINTS.clear()
     async with await WorkflowEnvironment.start_time_skipping(
         data_converter=DATA_CONVERTER
     ) as env:
@@ -125,7 +159,7 @@ async def _run(fn, arg, **stubs):
                    Worker(env.client, task_queue=PROCESSOR_TASK_QUEUE, activities=[_record],
                           workflows=[_Replay]), \
                    Worker(env.client, task_queue=PROCESSOR_GPU_TASK_QUEUE,
-                          activities=[_record], workflows=[_Segment]):  # fmt: skip
+                          activities=[_record], workflows=[_Segment, _Pose]):  # fmt: skip
             result = await env.client.execute_workflow(
                 fn, arg, id=f"{QUEUE}-{uuid.uuid4()}", task_queue=QUEUE
             )
@@ -176,3 +210,66 @@ async def test_sam_sizes_without_a_gpu_are_refused_unsegmented():
                            mode="cpu_fallback")  # fmt: skip
     assert (report.outcome, report.refusal_reason) == ("refused", "no_gpu")
     assert not any(e[0] in ("segment", "replay") for e in EVENTS)
+
+
+async def test_pose_points_come_from_the_gpu_and_only_strong_poses_are_fitted():
+    """Calibration v4: the mission's template staged, each slate frame posed
+    on a real GPU, the points of strong poses fitted; every pose is in the
+    report, weak ones too, for the threshold to be set from them."""
+    target = ReplayTarget(TENANT, IDS[1], size_source="pose")
+    report, _ = await _run(ReplayCalibrationV3ForMissionWorkflow.run, target, frames=3)
+    assert ("stage pdf", str(IDS[5])) in EVENTS and ("wake gpu",) in EVENTS
+    assert ("pose", "3", f"slate_pdf/{IDS[5]}.pdf", "200") in EVENTS
+    (points,) = POINTS
+    assert sorted(v[2] for v in points.values() if v) == [2.0, 3.0]
+    assert len(points) == 3 and sum(v is None for v in points.values()) == 1
+    assert [p.status for p in report.poses] == ["weak_alignment", "posed", "posed"]
+
+
+async def test_a_mission_without_a_usable_template_is_refused_and_wakes_nothing():
+    target = ReplayTarget(TENANT, IDS[1], size_source="pose")
+    report, _ = await _run(ReplayCalibrationV3ForMissionWorkflow.run, target,
+                           template=False)  # fmt: skip
+    assert (report.outcome, report.refusal_reason) == ("refused", "no_slate_template")
+    assert not any(e[0] in ("wake gpu", "wake", "pose", "stage pdf") for e in EVENTS)
+
+
+async def test_pose_points_without_a_gpu_are_refused_unposed():
+    target = ReplayTarget(TENANT, IDS[1], size_source="pose")
+    report, _ = await _run(ReplayCalibrationV3ForMissionWorkflow.run, target,
+                           mode="cpu_fallback")  # fmt: skip
+    assert (report.outcome, report.refusal_reason) == ("refused", "no_gpu")
+    assert not any(e[0] in ("pose", "replay") for e in EVENTS)
+
+
+async def test_the_template_resolves_with_where_its_pdf_is_staged():
+    from temporalio.testing import (
+        ActivityEnvironment,
+    )  # pylint: disable=import-outside-toplevel
+
+    from fishsense_services_api.slate_store import SlateTemplate
+    from fishsense_services_contracts.object_store import ObjectStoreConnection
+    from fishsense_services_orchestrator.calibration_v3.activities import (
+        CalibrationV3Activities,
+    )
+    from fishsense_services_orchestrator.object_store.layout import ObjectLayout
+
+    template = SlateTemplate(id=IDS[5], name="t", dpi=200,
+                             reference_points=[(1.0, 2.0)], source_path=None, v1_id=None)  # fmt: skip
+
+    class _Slates:
+        async def mission_slate_template(self, tenant_id, mission_id):
+            return template if mission_id == IDS[1] else None
+
+    layout = ObjectLayout(ObjectStoreConnection(
+        endpoint_url="https://s3.example.test", region="garage", access_key_id="k",
+        secret_access_key="s", bucket="scratch", labels_bucket="labels",
+        legacy_labels_prefix="x"))  # fmt: skip
+    acts = CalibrationV3Activities(catalog=None, slates=_Slates(), layout=layout)
+    env = ActivityEnvironment()
+    got = await env.run(acts.resolve_mission_slate_template,
+                        AutomaticTarget(TENANT, IDS[1]))  # fmt: skip
+    assert got["dpi"] == 200 and got["reference_points"] == [[1.0, 2.0]]
+    assert got["slate_pdf"] == layout.slate_pdf(TENANT, IDS[5]).model_dump(mode="json")
+    assert await env.run(acts.resolve_mission_slate_template,
+                         AutomaticTarget(TENANT, IDS[2])) is None  # fmt: skip

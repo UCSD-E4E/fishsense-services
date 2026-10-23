@@ -11,6 +11,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 from fishsense_services_contracts.automatic_results import FitAutomaticCalibrationInput
+from fishsense_services_contracts.calibration_v4 import SlatePose
 from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = ["CalibrationDraw", "CalibrationV3Report", "ReplayCalibrationInput"]
@@ -60,6 +61,8 @@ class CalibrationV3Report(BaseModel):
     check_median_px: Optional[float] = None
     check_within_share: Optional[float] = None
     draws: List[CalibrationDraw] = []
+    #: v18: each slate frame's pose (``size_source="pose"``).
+    poses: List[SlatePose] = []
 
 
 class ReplayCalibrationInput(BaseModel):
@@ -70,5 +73,9 @@ class ReplayCalibrationInput(BaseModel):
     #: v16 (strategy 2, owner 2026-10-22): ``sam`` fits on each slate frame's
     #: SAM mask size (`sam_sizes`, by capture id; None: no mask under the
     #: dot) instead of SIFT pair ratios.
-    size_source: Literal["sift", "sam"] = "sift"
+    size_source: Literal["sift", "sam", "pose"] = "sift"
     sam_sizes: Dict[str, Optional[float]] = {}
+    #: v18 (calibration v4): ``pose`` fits a beam through each slate frame's
+    #: dot on its automatically posed slate (`pose_points`, by capture id,
+    #: camera-space m; None: not posed).
+    pose_points: Dict[str, Optional[List[float]]] = {}

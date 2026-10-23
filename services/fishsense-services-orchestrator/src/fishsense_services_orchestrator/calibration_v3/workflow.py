@@ -17,7 +17,7 @@ import asyncio
 import uuid
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import List
+from typing import List, Optional
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
@@ -36,7 +36,14 @@ with workflow.unsafe.imports_passed_through():
         SegmentSlateFramesInput,
         SlateSegment,
     )
+    from fishsense_services_contracts.calibration_v4 import (
+        SlatePose,
+        SlatePoseFrame,
+        SlatePoseFramesInput,
+    )
+    from fishsense_services_contracts.object_store import ObjectRef
     from fishsense_services_orchestrator.nrp.gpu_fallback import MODE_GPU
+    from fishsense_services_orchestrator.slates.contracts import SlatePdfTarget
     from fishsense_services_contracts.calibration_v3 import (
         CalibrationV3Report,
         ReplayCalibrationInput,
@@ -70,7 +77,8 @@ class ReplayTarget:
     mission_id: uuid.UUID
     draw_sizes: List[int] = field(default_factory=list)
     draws_per_size: int = 0
-    #: ``sift`` (pair ratios) or ``sam`` (each slate's SAM mask: strategy 2).
+    #: ``sift`` (pair ratios), ``sam`` (each slate's SAM mask: strategy 2) or
+    #: ``pose`` (each slate posed automatically: calibration v4).
     size_source: str = "sift"
 
 
@@ -108,6 +116,17 @@ class ReplayCalibrationV3ForMissionWorkflow:
             return CalibrationV3Report(mission_id=target.mission_id, outcome="refused",
                                        refusal_reason="no_candidates")  # fmt: skip
         sam_sizes: dict = {}
+        pose_points: dict = {}
+        poses: List[SlatePose] = []
+        if target.size_source == "pose":
+            posed = await self._pose(target, plan)
+            if isinstance(posed, CalibrationV3Report):
+                return posed
+            poses = posed
+            # Every pose is reported; only a strong one is fitted (its
+            # status says so: `POSE_ECC_MIN`).
+            pose_points = {str(p.capture_id): p.point if p.status == "posed" else None
+                           for p in poses}  # fmt: skip
         if target.size_source == "sam":
             # Strategy 2: each slate frame's SAM mask under its dot, on the
             # shadow calibration's segmentation (GPU; only a real one).
@@ -138,17 +157,65 @@ class ReplayCalibrationV3ForMissionWorkflow:
                     segment.dots[0].size if ok else None
                 )
         await wake_per_image_processor()
-        return await workflow.execute_child_workflow(
+        report = await workflow.execute_child_workflow(
             "ReplayAutomaticCalibrationV3Workflow",
             ReplayCalibrationInput(payload=plan.payload, draw_sizes=target.draw_sizes,
                                    draws_per_size=target.draws_per_size,
-                                   size_source=target.size_source, sam_sizes=sam_sizes),
+                                   size_source=target.size_source, sam_sizes=sam_sizes,
+                                   pose_points=pose_points),
             id=f"{workflow.info().workflow_id}-fit",
             task_queue=PROCESSOR_TASK_QUEUE,
             execution_timeout=timedelta(hours=3),
             id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
             result_type=CalibrationV3Report,
         )  # fmt: skip
+        return report.model_copy(update={"poses": poses}) if poses else report
+
+    async def _pose(self, target: ReplayTarget, plan: AutomaticCalibrationPlan):
+        """Each slate frame posed on a real GPU (calibration v4), or the
+        refusal: no template that can pose a slate, or no GPU."""
+        template: Optional[dict] = await workflow.execute_activity(
+            "resolve_mission_slate_template",
+            AutomaticTarget(target.tenant_id, target.mission_id),
+            result_type=Optional[dict], **_DB,
+        )  # fmt: skip
+        if template is None:
+            return CalibrationV3Report(mission_id=target.mission_id, size_source="pose",
+                                       outcome="refused",
+                                       refusal_reason="no_slate_template")  # fmt: skip
+        if await wake_gpu_processor() != MODE_GPU:
+            return CalibrationV3Report(mission_id=target.mission_id, size_source="pose",
+                                       outcome="refused", refusal_reason="no_gpu")  # fmt: skip
+        await workflow.execute_activity(
+            "stage_slate_pdf",
+            SlatePdfTarget(tenant_id=target.tenant_id,
+                           slate_template_id=uuid.UUID(template["slate_template_id"])),
+            schedule_to_close_timeout=timedelta(minutes=5),
+            retry_policy=RetryPolicy(non_retryable_error_types=["NotAMember"]),
+            result_type=bool,
+        )  # fmt: skip
+        frames = [SlatePoseFrame(capture_id=f.capture_id, render_url=f.jpeg_url,
+                                 dot=[f.x, f.y])
+                  for f in plan.payload.frames if f.jpeg_url]  # fmt: skip
+        chunks = await asyncio.gather(*[
+            workflow.execute_child_workflow(
+                "SlatePoseFramesWorkflow",
+                SlatePoseFramesInput(
+                    tenant_id=target.tenant_id, mission_id=target.mission_id,
+                    camera_matrix=plan.payload.camera_matrix,
+                    slate_pdf=ObjectRef.model_validate(template["slate_pdf"]),
+                    slate_dpi=template["dpi"],
+                    reference_points=template["reference_points"],
+                    frames=frames[at : at + SEGMENT_CHUNK]),
+                id=f"{workflow.info().workflow_id}-pose-{n}",
+                task_queue=PROCESSOR_GPU_TASK_QUEUE,
+                execution_timeout=timedelta(hours=3),
+                id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
+                result_type=List[SlatePose],
+            )
+            for n, at in enumerate(range(0, len(frames), SEGMENT_CHUNK))
+        ])  # fmt: skip
+        return [p for chunk in chunks for p in chunk]
 
 
 @workflow.defn(name="ReplayCalibrationV3Workflow")
