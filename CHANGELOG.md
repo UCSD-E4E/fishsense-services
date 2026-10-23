@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.44.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.43.0...v0.44.0) (2026-10-22)
+
+
+### Features
+
+* reviews of the automatic results, with reviewers' skills (0063) ([4722f64](https://github.com/UCSD-E4E/fishsense-services/commit/4722f648700f57e3dd5d89c5f01ebb8fd66528aa))
+
+
+### Bug Fixes
+
+* close the ten gaps the review of [#293](https://github.com/UCSD-E4E/fishsense-services/issues/293) found ([80b0f71](https://github.com/UCSD-E4E/fishsense-services/commit/80b0f715e6560ee8ad44e9adb9d644218ceb8c3d))
+* renumber reviews and skills to 0063 ([c02d9e4](https://github.com/UCSD-E4E/fishsense-services/commit/c02d9e449334ad03c7c0337a2a59f2c53e29b492))
+
 ## [0.43.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.42.0...v0.43.0) (2026-10-22)
 
 
