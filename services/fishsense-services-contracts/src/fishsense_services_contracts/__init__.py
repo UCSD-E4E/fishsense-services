@@ -32,6 +32,9 @@ from fishsense_services_contracts.task_queues import (
     PROCESSOR_TASK_QUEUE,
 )
 
+#: v16 (2026-10-22): the replay may fit on SAM mask sizes
+#: (`ReplayCalibrationInput.size_source`/`sam_sizes`,
+#: `CalibrationV3Report.size_source`). Optional fields; v15 parses.
 #: v15 (2026-10-22): label-free calibration v3's read-only replay
 #: (`calibration_v3`: `ReplayCalibrationInput`, `CalibrationV3Report`). New
 #: models only.
@@ -67,7 +70,7 @@ from fishsense_services_contracts.task_queues import (
 #: JSON is unchanged -- each renamed field keeps its old name on the wire
 #: (`renamed.py`) -- so a v6 processor and a v7 orchestrator interoperate; only
 #: the published schema's model names differ.
-CONTRACT_VERSION = 15
+CONTRACT_VERSION = 16
 
 
 def _discover_models() -> tuple[type[BaseModel], ...]:

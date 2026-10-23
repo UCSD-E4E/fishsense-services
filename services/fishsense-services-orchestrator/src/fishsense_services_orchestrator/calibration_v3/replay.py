@@ -44,6 +44,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     start.add_argument("--draw-missions", default="")
     start.add_argument("--sizes", default="3,4,5,6,8")
     start.add_argument("--draws", type=int, default=20)
+    start.add_argument("--size-source", choices=["sift", "sam"], default="sift")
     collect = sub.add_parser("collect", help="gather the reports")
     collect.add_argument("--workflow-id", required=True)
     collect.add_argument("--out", required=True)
@@ -64,7 +65,8 @@ async def _run(args: argparse.Namespace) -> None:
         workflow_id = f"calibration-v3-replay-{stamp}"
         request = ReplayRequest(tenant=args.tenant, numbers=_ints(args.missions),
                                 draw_numbers=_ints(args.draw_missions),
-                                draw_sizes=_ints(args.sizes), draws_per_size=args.draws)  # fmt: skip
+                                draw_sizes=_ints(args.sizes), draws_per_size=args.draws,
+                                size_source=args.size_source)  # fmt: skip
         await client.start_workflow(ReplayCalibrationV3Workflow.run, request,
                                     id=workflow_id, task_queue=temporal.task_queue)  # fmt: skip
         print(f"replay started: {workflow_id}")

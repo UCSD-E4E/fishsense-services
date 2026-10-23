@@ -27,7 +27,16 @@ with workflow.unsafe.imports_passed_through():
     import annotated_types  # noqa: F401  pylint: disable=unused-import
     import pydantic  # noqa: F401  pylint: disable=unused-import
 
-    from fishsense_services_contracts import PROCESSOR_TASK_QUEUE
+    from fishsense_services_contracts import (
+        PROCESSOR_GPU_TASK_QUEUE,
+        PROCESSOR_TASK_QUEUE,
+    )
+    from fishsense_services_contracts.shadow_calibration import (
+        SegmentSlateFrame,
+        SegmentSlateFramesInput,
+        SlateSegment,
+    )
+    from fishsense_services_orchestrator.nrp.gpu_fallback import MODE_GPU
     from fishsense_services_contracts.calibration_v3 import (
         CalibrationV3Report,
         ReplayCalibrationInput,
@@ -36,7 +45,10 @@ with workflow.unsafe.imports_passed_through():
         AutomaticCalibrationPlan,
         AutomaticTarget,
     )
-    from fishsense_services_orchestrator.nrp.workflow import wake_per_image_processor
+    from fishsense_services_orchestrator.nrp.workflow import (
+        wake_gpu_processor,
+        wake_per_image_processor,
+    )
 
 __all__ = [
     "AT_ONCE",
@@ -58,6 +70,8 @@ class ReplayTarget:
     mission_id: uuid.UUID
     draw_sizes: List[int] = field(default_factory=list)
     draws_per_size: int = 0
+    #: ``sift`` (pair ratios) or ``sam`` (each slate's SAM mask: strategy 2).
+    size_source: str = "sift"
 
 
 @dataclass
@@ -69,6 +83,11 @@ class ReplayRequest:
     draw_numbers: List[int] = field(default_factory=list)
     draw_sizes: List[int] = field(default_factory=list)
     draws_per_size: int = 0
+    size_source: str = "sift"
+
+
+#: Slate frames per SAM child: each carries its render's presigned GET.
+SEGMENT_CHUNK = 400
 
 
 def replay_child_id(run_id: str, mission_id: str) -> str:
@@ -88,11 +107,42 @@ class ReplayCalibrationV3ForMissionWorkflow:
         if not plan.payload.frames:
             return CalibrationV3Report(mission_id=target.mission_id, outcome="refused",
                                        refusal_reason="no_candidates")  # fmt: skip
+        sam_sizes: dict = {}
+        if target.size_source == "sam":
+            # Strategy 2: each slate frame's SAM mask under its dot, on the
+            # shadow calibration's segmentation (GPU; only a real one).
+            if await wake_gpu_processor() != MODE_GPU:
+                return CalibrationV3Report(mission_id=target.mission_id,
+                                           size_source="sam", outcome="refused",
+                                           refusal_reason="no_gpu")  # fmt: skip
+            frames = [SegmentSlateFrame(capture_id=f.capture_id, render_url=f.jpeg_url,
+                                        dots=[[f.x, f.y]])
+                      for f in plan.payload.frames if f.jpeg_url]  # fmt: skip
+            chunks = await asyncio.gather(*[
+                workflow.execute_child_workflow(
+                    "SegmentSlateFramesWorkflow",
+                    SegmentSlateFramesInput(tenant_id=target.tenant_id,
+                                            mission_id=target.mission_id,
+                                            frames=frames[at : at + SEGMENT_CHUNK]),
+                    id=f"{workflow.info().workflow_id}-segment-{n}",
+                    task_queue=PROCESSOR_GPU_TASK_QUEUE,
+                    execution_timeout=timedelta(hours=3),
+                    id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
+                    result_type=List[SlateSegment],
+                )
+                for n, at in enumerate(range(0, len(frames), SEGMENT_CHUNK))
+            ])  # fmt: skip
+            for segment in (s for chunk in chunks for s in chunk):
+                ok = segment.status == "segmented" and segment.dots
+                sam_sizes[str(segment.capture_id)] = (
+                    segment.dots[0].size if ok else None
+                )
         await wake_per_image_processor()
         return await workflow.execute_child_workflow(
             "ReplayAutomaticCalibrationV3Workflow",
             ReplayCalibrationInput(payload=plan.payload, draw_sizes=target.draw_sizes,
-                                   draws_per_size=target.draws_per_size),
+                                   draws_per_size=target.draws_per_size,
+                                   size_source=target.size_source, sam_sizes=sam_sizes),
             id=f"{workflow.info().workflow_id}-fit",
             task_queue=PROCESSOR_TASK_QUEUE,
             execution_timeout=timedelta(hours=3),
@@ -122,7 +172,8 @@ class ReplayCalibrationV3Workflow:
                     ReplayCalibrationV3ForMissionWorkflow.run,
                     ReplayTarget(uuid.UUID(plan["tenant_id"]), uuid.UUID(m["mission_id"]),
                                  request.draw_sizes if draw else [],
-                                 request.draws_per_size if draw else 0),
+                                 request.draws_per_size if draw else 0,
+                                 request.size_source),
                     id=child, id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
                     result_type=CalibrationV3Report,
                 )  # fmt: skip
