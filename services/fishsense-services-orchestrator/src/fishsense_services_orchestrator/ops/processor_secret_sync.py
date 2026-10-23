@@ -145,6 +145,18 @@ PINNED: tuple[Pinned, ...] = (
             "open_clip_model.safetensors",
         ),
     ),
+    # fishsense-core 4.2.0's SimCC head/tail keypoint model (core pins it in
+    # its manifest; owner 2026-10-23: uploaded for the read-only replay).
+    Pinned(
+        "headtail-keypoints/simcc-sam-e12/simcc_sam_best_length.pt",
+        "8918034a0f84f45eb2b8224a369781468ae63497ff06b009bed958ebb82b0110",
+        142032463,
+        source=HubFile(
+            "ucsde4e/fishsense-headtail-keypoint",
+            "4a45ac41734662351a334f4992c6fede7ff859f0",
+            "simcc_sam_best_length.pt",
+        ),
+    ),
     Pinned(
         "bioclip/2/open_clip_model.safetensors",
         "b7b2bf6fbc95799e42630e394cf95803892ab447c1a8ab629dbc82fbeaf7dfef",

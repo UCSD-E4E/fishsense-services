@@ -32,6 +32,8 @@ from fishsense_services_contracts.task_queues import (
     PROCESSOR_TASK_QUEUE,
 )
 
+#: v19 (2026-10-23): the SimCC head/tail keypoint replay (`headtail_keypoints`:
+#: `KeypointFramesInput`, `KeypointResult`). New models only; v18 parses.
 #: v18 (2026-10-23): calibration v4's slate pose (`calibration_v4`:
 #: `SlatePoseFramesInput`, `SlatePose`), and the replay fitting on its points
 #: (`ReplayCalibrationInput.size_source="pose"`/`pose_points`,
@@ -77,7 +79,7 @@ from fishsense_services_contracts.task_queues import (
 #: JSON is unchanged -- each renamed field keeps its old name on the wire
 #: (`renamed.py`) -- so a v6 processor and a v7 orchestrator interoperate; only
 #: the published schema's model names differ.
-CONTRACT_VERSION = 18
+CONTRACT_VERSION = 19
 
 
 def _discover_models() -> tuple[type[BaseModel], ...]:

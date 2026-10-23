@@ -159,7 +159,7 @@ async def test_laser_depths_run_across_the_orchestrator_and_the_processor():
     (refusal,) = catalog.persisted["refusals"]
     assert (refusal.laser_label_id, refusal.reason) == (bad, "non_positive_depth")
     assert catalog.persisted["laser_calibration_id"] == GEOMETRY.laser_calibration_id
-    assert catalog.persisted["core_version"] == "4.1.0"
+    assert catalog.persisted["core_version"] == "4.2.0"
 
 
 async def test_fish_are_measured_across_the_orchestrator_and_the_processor():

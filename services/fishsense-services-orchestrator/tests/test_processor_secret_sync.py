@@ -357,3 +357,24 @@ def test_the_processor_loads_its_weights_from_what_the_sync_writes(
     BioclipSettings()
     SlateDetectorSettings()
     Sam3Settings()
+
+
+def test_the_simcc_keypoint_model_is_pinned_as_core_pins_it():
+    """The SimCC head/tail model (fishsense-core 4.2.0, owner 2026-10-23):
+    at the key the processor's verified fetch reads, with core's sha256 and
+    size, fetched from core's pinned Hugging Face revision when missing."""
+    import importlib
+
+    from fishsense_core.models import builtin_manifest
+    from fishsense_services_processor.weights import model_key
+
+    ref = builtin_manifest().resolve("headtail-keypoints", "simcc-sam-e12")
+    pins = {p.key: p for p in importlib.reload(sut).PINNED}
+    pin = pins[model_key(ref.name, ref.version, ref.filename)]
+    assert (pin.sha256, pin.size) == (ref.sha256, ref.size)
+    hub = ref.origins["huggingface"]
+    assert (pin.source.repo, pin.source.revision, pin.source.filename) == (
+        hub["repo"],
+        hub["revision"],
+        ref.filename,
+    )
