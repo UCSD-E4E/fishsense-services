@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.47.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.46.0...v0.47.0) (2026-10-23)
+
+
+### Features
+
+* calibration v3 replay on SAM mask sizes (strategy 2) ([c8c30f8](https://github.com/UCSD-E4E/fishsense-services/commit/c8c30f87f228d5020cdcd8a622a1eaef419cdd33))
+* calibration v3 replay on SAM mask sizes (strategy 2) ([107b794](https://github.com/UCSD-E4E/fishsense-services/commit/107b7944ca9378e871373b5e67bbff38c7af3996))
+* name members, and let admins set their review levels (0065) ([b393a63](https://github.com/UCSD-E4E/fishsense-services/commit/b393a639e0ec17e6a867ce25409746ae6a8cea7e))
+* name members, and let admins set their review levels (0065) ([6ddbbcc](https://github.com/UCSD-E4E/fishsense-services/commit/6ddbbccb86a9cf270f58c585caa2a0184b4cb603))
+* review a frame's automatic result on its frame page ([cd4fdec](https://github.com/UCSD-E4E/fishsense-services/commit/cd4fdec57e24a1e13ac93029eb1ca71beaee73f2))
+
 ## [0.46.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.45.0...v0.46.0) (2026-10-23)
 
 
