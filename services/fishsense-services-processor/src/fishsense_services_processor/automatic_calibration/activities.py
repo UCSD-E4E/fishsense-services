@@ -67,7 +67,7 @@ from fishsense_services_contracts.calibration_v3 import (
     CalibrationV3Report,
     ReplayCalibrationInput,
 )
-from fishsense_services_processor.automatic_calibration import v3
+from fishsense_services_processor.automatic_calibration import pose, v3
 from fishsense_services_processor.automatic_results import size_constancy as sc
 
 __all__ = [
@@ -206,12 +206,17 @@ def replay_v3(
     draws_per_size: int = 0,
     pairs_of=None,
     sizes=None,
+    points=None,
 ) -> CalibrationV3Report:
     """v3 on the mission's slate frames whose features were extracted
     (`kept`, parallel to `features`), and on random draws of them. Blocking.
     `pairs_of(features, dots)` is `size_constancy.pair_scales` (a seam).
     With `sizes` (parallel to `kept`: each frame's SAM mask size, None with
-    no mask) the fit is on those, not on pairs (strategy 2)."""
+    no mask) the fit is on those, not on pairs (strategy 2). With `points`
+    (parallel to `kept`: each frame's dot on its automatically posed slate,
+    camera-space m; None: not posed) the beam is fitted through them
+    (calibration v4, `pose.fit_pose_points`): v3's screen, consensus and
+    check are kept."""
     pairs_of = pairs_of or sc.pair_scales
     dots = np.array([[f.x, f.y] for f in kept], float).reshape(-1, 2)
     dive_line = mission_line(payload.line_dots) if payload.line_dots else None
@@ -219,6 +224,9 @@ def replay_v3(
 
     def fit(indices):
         idx = list(indices)
+        if points is not None:
+            return pose.fit_pose_points([points[i] for i in idx],
+                                        min_frames=v3.MIN_FRAMES)  # fmt: skip
         if sizes is not None:
             # No gate in the replay: its draws are what set the threshold.
             return v3.fit_known_sizes(dots[idx], [sizes[i] for i in idx],
@@ -242,7 +250,7 @@ def replay_v3(
     accepted = main.outcome == "accepted"
     report = CalibrationV3Report(
         mission_id=payload.mission_id, outcome=main.outcome,
-        size_source="sift" if sizes is None else "sam",
+        size_source="pose" if points is not None else "sift" if sizes is None else "sam",
         refusal_reason=main.refusal_reason, candidate_count=len(payload.frames),
         laser_position=f.laser_position if accepted else None,
         laser_axis=f.laser_axis if accepted else None,
@@ -386,6 +394,20 @@ class AutomaticCalibrationActivities:  # pylint: disable=too-few-public-methods
         Features from at most `MAX_CALIBRATION_FRAMES`, spread along the dots'
         travel, as v2's."""
         payload = request.payload
+        if request.size_source == "pose":
+            # Calibration v4: points on slates posed on the GPU already.
+            points = [
+                request.pose_points.get(str(f.capture_id)) for f in payload.frames
+            ]
+            report = await _while_heartbeating(
+                lambda: replay_v3(payload, [], payload.frames, points=points,
+                                  draw_sizes=request.draw_sizes,
+                                  draws_per_size=request.draws_per_size)  # fmt: skip
+            )
+            activity.logger.info("dive=%s v4 replay (pose) %s (%s): frames=%d",
+                                 payload.mission_id, report.outcome,
+                                 report.refusal_reason, report.frames_used)  # fmt: skip
+            return report
         if request.size_source == "sam":
             # Strategy 2: sizes from SAM masks, measured on the GPU already;
             # no image is read here.

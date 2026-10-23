@@ -19,9 +19,10 @@ reference points; this finds them instead:
    correlation, homography), both ways up. SIFT failed on these sparse, bold,
    symmetric patterns (2026-10-23: 31% matched, all wrong); ECC put the
    reference points a median 2.0 px from the human clicks on 326 pool frames.
-3. **Pose** (`slate_plane`): solvePnP on the template's reference points as
-   the alignment places them, as production's `plane_from_correspondences`.
-4. **Point** (`calibration.geometry.laser_point_on_plane`): the automatic dot.
+3. **Pose** (`slate_plane`): production's `plane_from_correspondences` on the
+   template's reference points as the alignment places them.
+4. **Point** (`dot_point`: production's `laser_point_on_plane`): the
+   automatic dot's ray meeting that plane.
 5. **Beam** (`fit_pose_points`): a line through the points, trimming one at a
    time the point furthest off it (relative to its range) beyond
    `TRIM_MADS` robust SDs; production's lever-arm gate (0.6 m).
@@ -42,16 +43,25 @@ import cv2
 import numpy as np
 
 from fishsense_services_processor.automatic_results import size_constancy as sc
+from fishsense_services_processor.calibration.geometry import (
+    Plane,
+    laser_point_on_plane,
+    plane_from_correspondences,
+)
 from fishsense_services_processor.calibration.consistency import (
     CalibrationUnderdeterminedError,
     check_observation_geometry,
 )
+
+#: As production's slate fit (`laser_calibration.activities`).
+INCH_TO_M = 0.0254
 
 __all__ = [
     "ASPECT",
     "BoardFit",
     "ECC_MIN",
     "align_template",
+    "dot_point",
     "fit_board",
     "fit_pose_points",
     "slate_plane",
@@ -259,7 +269,9 @@ def fit_board(mask: np.ndarray, camera_matrix) -> Optional[BoardFit]:
 #: frames aligned at 0.8-1.0 put the points a median 1.9-2.1 px from the
 #: human clicks (2026-10-23). To be checked on full resolution.
 ECC_MIN = 0.8
-BOARD_LONG_PX = 1600
+#: The board rectified to this long side for the alignment (as the 1600-px
+#: cache prototype, 2026-10-23).
+BOARD_LONG_PX = 1000
 _BOARD_LONG_IN = 12.0
 
 
@@ -316,35 +328,33 @@ def align_template(image_grey: np.ndarray, corners, page_grey: np.ndarray, dpi: 
 
 
 def slate_plane(reference_points, dpi: int, h_template_to_image, camera_matrix):
-    """``(normal, point on the plane, image points, rms px)``, or None: the
-    template's reference points placed by the alignment, and the pose they
-    give (production's `plane_from_correspondences`)."""
+    """``(plane, image points, rms px)``, or None: the template's reference
+    points as the alignment places them, through production's
+    `plane_from_correspondences` (template px / dpi, in metres). The rms is
+    how far a rigid board's pose misses those points: the alignment is a free
+    homography, so this is how much of it no real pose explains."""
     tpl = np.asarray(reference_points, np.float32).reshape(-1, 1, 2)
-    img = cv2.perspectiveTransform(tpl, np.asarray(h_template_to_image, float)).reshape(
-        -1, 2
-    )
+    h = np.asarray(h_template_to_image, float)
+    img = cv2.perspectiveTransform(tpl, h).reshape(-1, 2)
     body = np.zeros((len(img), 3))
-    body[:, :2] = np.asarray(reference_points, float) / dpi * 0.0254
+    body[:, :2] = np.asarray(reference_points, float) / float(dpi) * INCH_TO_M
     k = np.asarray(camera_matrix, float)
     try:
+        plane = plane_from_correspondences(body, img, k)
         ok, rv, tv = cv2.solvePnP(body, img.reshape(-1, 1, 2), k, np.zeros(5))
     except cv2.error:
         return None
-    if not ok:
+    if plane is None or not ok:
         return None
-    r, _ = cv2.Rodrigues(rv)
     rms = float(np.sqrt(((_project(body, rv, tv, k) - img) ** 2).sum(1).mean()))
-    return r[:, 2], r @ body[0] + tv.ravel(), img, rms
+    return plane, img, rms
 
 
-def dot_point(normal, point, dot, camera_matrix) -> Optional[np.ndarray]:
-    """The dot's ray meeting the plane (as `geometry.laser_point_on_plane`)."""
-    ray = np.linalg.inv(np.asarray(camera_matrix, float)) @ [dot[0], dot[1], 1.0]
-    den = float(np.asarray(normal) @ ray)
-    if abs(den) < 1e-12:
-        return None
-    p = ray * float(np.asarray(normal) @ np.asarray(point)) / den
-    return p if np.all(np.isfinite(p)) and p[2] > 0 else None
+def dot_point(plane: Plane, dot, camera_matrix) -> Optional[np.ndarray]:
+    """The dot's ray meeting the plane (production's `laser_point_on_plane`);
+    None behind the camera."""
+    p = laser_point_on_plane(plane, dot, np.asarray(camera_matrix, float))
+    return None if p is None or not np.all(np.isfinite(p)) or p[2] <= 0 else p
 
 
 # -- 5. the beam ------------------------------------------------------------------------

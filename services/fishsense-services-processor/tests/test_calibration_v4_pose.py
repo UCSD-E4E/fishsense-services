@@ -131,13 +131,13 @@ def test_the_plane_and_the_dot_point_are_recovered():
     rv, tv = _pose(25.0)
     page, refs = _page()
     h = _h_body_to_image(rv, tv) @ _template_to_body(page.shape)
-    normal, p0, img_pts, rms = pose.slate_plane(refs, DPI, h, K)
+    plane, _, rms = pose.slate_plane(refs, DPI, h, K)
     r = cv2.Rodrigues(rv)[0]
-    assert abs(abs(normal @ r[:, 2]) - 1) < 1e-6 and rms < 0.01
+    assert abs(abs(plane.normal @ r[:, 2]) - 1) < 1e-6 and rms < 0.01
     # a laser point on the board, seen at its pixel, meets the plane there
     target = r @ np.array([0.1, 0.08, 0.0]) + tv
     dot = (K @ target)[:2] / target[2]
-    assert np.allclose(pose.dot_point(normal, p0, dot, K), target, atol=1e-6)
+    assert np.allclose(pose.dot_point(plane, dot, K), target, atol=1e-6)
 
 
 @pytest.mark.parametrize("h", [np.zeros((3, 3)), np.full((3, 3), np.nan)])

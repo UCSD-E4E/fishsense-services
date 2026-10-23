@@ -32,6 +32,10 @@ from fishsense_services_contracts.task_queues import (
     PROCESSOR_TASK_QUEUE,
 )
 
+#: v18 (2026-10-23): calibration v4's slate pose (`calibration_v4`:
+#: `SlatePoseFramesInput`, `SlatePose`), and the replay fitting on its points
+#: (`ReplayCalibrationInput.size_source="pose"`/`pose_points`,
+#: `CalibrationV3Report.poses`). New models and optional fields; v17 parses.
 #: v17 (2026-10-23): the replay records each SAM-size fit's predicted
 #: length-scale SD (`CalibrationV3Report.scale_sd`, `CalibrationDraw.scale_sd`).
 #: Optional fields; v16 parses.
@@ -73,7 +77,7 @@ from fishsense_services_contracts.task_queues import (
 #: JSON is unchanged -- each renamed field keeps its old name on the wire
 #: (`renamed.py`) -- so a v6 processor and a v7 orchestrator interoperate; only
 #: the published schema's model names differ.
-CONTRACT_VERSION = 17
+CONTRACT_VERSION = 18
 
 
 def _discover_models() -> tuple[type[BaseModel], ...]:

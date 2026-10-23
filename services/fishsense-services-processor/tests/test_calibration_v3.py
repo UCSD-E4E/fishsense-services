@@ -293,3 +293,77 @@ def test_a_dot_off_along_the_line_is_trimmed_by_what_noise_explains():
     f = v3.fit_known_sizes(xy, _sizes(ranges), K, scale_sd_max=np.inf)
     assert f.outcome == "accepted" and 2 not in f.used
     assert _angle(f.laser_axis, A) < 0.05
+
+
+# -- calibration v4 (2026-10-23): points on automatically posed slates ---------------
+
+
+def _points(ranges):
+    return [list(O + ((z - O[2]) / A[2]) * A) for z in ranges]
+
+
+def test_the_replay_fits_a_beam_through_pose_points():
+    """No sizes, no pairs, no vanishing point: the beam through each slate
+    frame's dot on its plane, checked by the dive as v3's."""
+    ranges = [0.7, 1.2, 1.7, 2.1, 2.8]
+    payload = _payload(ranges, np.linspace(0.6, 4.0, 20))
+
+    def no_pairs(features, dots):
+        raise AssertionError("no pair registration on pose points")
+
+    points = _points(ranges)
+    points[0] = None
+    report = replay_v3(payload, [], payload.frames, points=points, draw_sizes=[3],
+                       draws_per_size=10, pairs_of=no_pairs)  # fmt: skip
+    assert report.size_source == "pose" and report.outcome == "accepted"
+    assert report.frames_used == 4 and _angle(report.laser_axis, A) < 0.01
+    assert np.allclose(report.laser_position, O, atol=1e-6)
+    assert report.check_dots == 20 and report.check_median_px < 0.5
+    # each draw fits its own frames' points (a draw without frame 0 has 3)
+    assert len(report.draws) == 10
+    assert any(d.outcome == "accepted" and d.frames_used == 3 for d in report.draws)
+
+
+def test_pose_points_too_close_in_range_are_refused_by_the_lever_arm():
+    ranges = [1.0, 1.1, 1.2, 1.3]
+    payload = _payload(ranges, [])
+    report = replay_v3(payload, [], payload.frames, points=_points(ranges))
+    assert (report.outcome, report.refusal_reason) == (
+        "refused",
+        "lever_arm_below_0.6m",
+    )
+
+
+async def test_the_activity_maps_pose_points_by_capture_and_reads_no_image():
+    """Frame 2's dot is off the others' line, so v3's consensus drops it,
+    and with it its (wrong) point: only a point mapped to its own capture
+    goes with its frame."""
+    from temporalio.testing import (
+        ActivityEnvironment,
+    )  # pylint: disable=import-outside-toplevel
+
+    from fishsense_services_contracts.calibration_v3 import ReplayCalibrationInput
+    from fishsense_services_processor.automatic_calibration.activities import (
+        AutomaticCalibrationActivities,
+    )
+
+    ranges = [0.7, 1.2, 1.7, 2.8]
+    payload = _payload(ranges, [])
+    f2 = payload.frames[2]
+    payload.frames[2] = f2.model_copy(update={"x": f2.x + OFF[0], "y": f2.y + OFF[1]})
+    payload.line_dots[2] = [payload.frames[2].x, payload.frames[2].y]
+    pts = _points(ranges)
+    pts[2] = list(np.array(pts[2]) + [0.08, 0.0, 0.0])
+    points = dict(zip((str(f.capture_id) for f in payload.frames), pts))
+    points = dict(reversed(points.items()))  # by capture id, not by order
+
+    def no_store():
+        raise AssertionError("no image is read for pose points")
+
+    acts = AutomaticCalibrationActivities(store_factory=no_store)
+    report = await ActivityEnvironment().run(
+        acts.replay_automatic_calibration_v3,
+        ReplayCalibrationInput(payload=payload, size_source="pose", pose_points=points),
+    )
+    assert report.outcome == "accepted" and report.consensus_dropped == 1
+    assert report.frames_used == 3 and _angle(report.laser_axis, A) < 0.01
