@@ -50,6 +50,7 @@ from fishsense_services_api.service_principal import ServicePrincipal
 from fishsense_services_api.slate_presence_store import detector_slate_frame
 
 __all__ = [
+    "missions_with_automatic_dots",
     "AUTOMATIC_PRODUCER",
     "AUTOMATIC_RESULTS_COHORT",
     "AUTOMATIC_FRAME_MAX_FAILURES",
@@ -984,6 +985,26 @@ async def automatic_calibration_inputs(
     )
 
 
+async def missions_with_automatic_dots(
+    conn: AsyncConnection, tenant_id: uuid.UUID
+) -> list[tuple[uuid.UUID, int]]:
+    """``(mission id, number)`` of every mission with a current automatic dot,
+    by number: label-free calibration v3's replay (2026-10-22)."""
+    rows = await conn.execute(
+        text("""
+            SELECT d.id, d.number FROM missions d
+            WHERE d.tenant_id = :t AND EXISTS (
+                SELECT 1 FROM current_automatic_head_tail_predictions a
+                JOIN captures c ON c.tenant_id = a.tenant_id AND c.id = a.capture_id
+                WHERE a.tenant_id = d.tenant_id AND c.mission_id = d.id
+                  AND a.laser_x IS NOT NULL)
+            ORDER BY d.number
+            """),
+        {"t": tenant_id},
+    )
+    return [(r.id, r.number) for r in rows]
+
+
 @dataclass(frozen=True)
 class AutomaticCalibrationRow:
     outcome: str
@@ -1242,6 +1263,10 @@ class AutomaticResultsCatalog(ServicePrincipal):
     ) -> int:
         async with self._tenant(tenant_id) as conn:
             return await persist_automatic_species(conn, tenant_id, mission_id, rows)
+
+    async def missions_with_automatic_dots(self, tenant_id):
+        async with self._tenant(tenant_id) as conn:
+            return await missions_with_automatic_dots(conn, tenant_id)
 
     async def automatic_calibration_inputs(
         self, tenant_id: uuid.UUID, mission_id: uuid.UUID
