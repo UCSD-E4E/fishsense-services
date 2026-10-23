@@ -370,6 +370,28 @@ async def slate_template(
     return None if row is None else _template(row)
 
 
+async def mission_slate_template(
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
+) -> SlateTemplate | None:
+    """The mission's slate template if it can pose a slate (a DPI and
+    reference points), else None. Read-only (calibration v4's replay,
+    2026-10-23)."""
+    row = (
+        await conn.execute(
+            text("""
+                SELECT st.id, st.name, st.dpi, st.reference_points, st.source_path,
+                       st.v1_id
+                FROM missions d JOIN slate_templates st ON st.id = d.slate_template_id
+                WHERE d.tenant_id = :tenant AND d.id = :mission
+                """),
+            {"tenant": tenant_id, "mission": mission_id},
+        )
+    ).one_or_none()
+    if row is None or row.dpi is None or not row.reference_points:
+        return None
+    return _template(row)
+
+
 async def _mission_setup(conn, tenant_id, mission_id):
     """The dive's slate template and its device's current camera calibration."""
     row = (
@@ -717,6 +739,12 @@ class SlateCatalog(ServicePrincipal):
     ) -> SlateTemplate | None:
         async with self._tenant(tenant_id) as conn:
             return await slate_template(conn, slate_template_id)
+
+    async def mission_slate_template(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
+    ) -> SlateTemplate | None:
+        async with self._tenant(tenant_id) as conn:
+            return await mission_slate_template(conn, tenant_id, mission_id)
 
     async def clear_slate_reprocess_flags(
         self,

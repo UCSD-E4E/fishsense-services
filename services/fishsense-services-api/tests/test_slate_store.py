@@ -1028,3 +1028,39 @@ async def test_a_mission_not_behind_the_corrective_optic_is_not_offered(
     await restate_port(owner_engine, mission_id, port)
 
     assert await _next(app_engine, lab) is None
+
+
+# ---------- calibration v4: the mission's template, read-only ----------
+
+
+async def _mission_template(app_engine, lab, mission_id):
+    from fishsense_services_api.slate_store import mission_slate_template
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        return await mission_slate_template(conn, lab, mission_id)
+
+
+async def test_a_missions_slate_template_is_found_with_its_points(
+    owner_engine, app_engine
+):
+    lab = await tenant(owner_engine)
+    only, slate, _ = await _resolver_scene(owner_engine, lab)
+    found = await _mission_template(app_engine, lab, only)
+    assert found.id == slate and found.dpi == 300
+    assert found.reference_points == [tuple(p) for p in TEMPLATE_POINTS]
+
+
+async def test_no_usable_template_is_none(owner_engine, app_engine):
+    lab = await tenant(owner_engine)
+    device, _ = await device_with_camera(owner_engine, lab)
+    bare = await mission(owner_engine, lab, device=device)
+    assert await _mission_template(app_engine, lab, bare) is None
+    for template in ({"dpi": None}, {"reference_points": []}):
+        only, _, _ = await _resolver_scene(owner_engine, lab, **template)
+        assert await _mission_template(app_engine, lab, only) is None
+
+
+async def test_another_tenants_mission_has_no_template_here(owner_engine, app_engine):
+    lab, other = await tenant(owner_engine), await tenant(owner_engine, "reef")
+    theirs, _, _ = await _resolver_scene(owner_engine, other)
+    assert await _mission_template(app_engine, lab, theirs) is None

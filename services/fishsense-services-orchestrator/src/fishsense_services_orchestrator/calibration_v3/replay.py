@@ -44,7 +44,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     start.add_argument("--draw-missions", default="")
     start.add_argument("--sizes", default="3,4,5,6,8")
     start.add_argument("--draws", type=int, default=20)
-    start.add_argument("--size-source", choices=["sift", "sam"], default="sift")
+    start.add_argument("--size-source", choices=["sift", "sam", "pose"], default="sift")
     collect = sub.add_parser("collect", help="gather the reports")
     collect.add_argument("--workflow-id", required=True)
     collect.add_argument("--out", required=True)
