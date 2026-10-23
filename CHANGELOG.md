@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.44.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.44.0...v0.44.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* **web:** home renews an expired token instead of showing Sign in ([0203078](https://github.com/UCSD-E4E/fishsense-services/commit/02030782e8c28f3130fd7bc6cf260a1871130ce5))
+
 ## [0.44.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.43.0...v0.44.0) (2026-10-22)
 
 
