@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.46.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.45.0...v0.46.0) (2026-10-23)
+
+
+### Features
+
+* label-free calibration v3, as a read-only replay ([f5f1758](https://github.com/UCSD-E4E/fishsense-services/commit/f5f17581ca16b9d14279661f2bec1b2bfcdf6ef8))
+* label-free calibration v3, as a read-only replay ([14310dd](https://github.com/UCSD-E4E/fishsense-services/commit/14310ddd350ffe1aadaa58e7da7424c414b0fec5))
+
 ## [0.45.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.44.1...v0.45.0) (2026-10-23)
 
 
