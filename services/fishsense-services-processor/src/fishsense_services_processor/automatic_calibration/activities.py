@@ -62,6 +62,12 @@ from fishsense_services_contracts.automatic_results import (
     AutomaticCalibrationResult,
     FitAutomaticCalibrationInput,
 )
+from fishsense_services_contracts.calibration_v3 import (
+    CalibrationDraw,
+    CalibrationV3Report,
+    ReplayCalibrationInput,
+)
+from fishsense_services_processor.automatic_calibration import v3
 from fishsense_services_processor.automatic_results import size_constancy as sc
 
 __all__ = [
@@ -72,6 +78,7 @@ __all__ = [
     "SECOND_LINE_SHARE",
     "mission_line",
     "on_line",
+    "replay_v3",
     "second_line",
     "spread",
 ]
@@ -175,6 +182,94 @@ def _fit(features, kept, line, camera_matrix):
     )
 
 
+def _others(line_dots, frames) -> list:
+    """The dive's dots that are not its slate frames' (each slate dot is in
+    `line_dots` once: the same row)."""
+    slate: dict = {}
+    for f in frames:
+        slate[(f.x, f.y)] = slate.get((f.x, f.y), 0) + 1
+    out = []
+    for x, y in line_dots:
+        if slate.get((x, y), 0):
+            slate[(x, y)] -= 1
+        else:
+            out.append([x, y])
+    return out
+
+
+def replay_v3(
+    payload: FitAutomaticCalibrationInput,
+    features: list,
+    kept: list,
+    *,
+    draw_sizes=(),
+    draws_per_size: int = 0,
+    pairs_of=None,
+) -> CalibrationV3Report:
+    """v3 on the mission's slate frames whose features were extracted
+    (`kept`, parallel to `features`), and on random draws of them. Blocking.
+    `pairs_of(features, dots)` is `size_constancy.pair_scales` (a seam)."""
+    pairs_of = pairs_of or sc.pair_scales
+    dots = np.array([[f.x, f.y] for f in kept], float).reshape(-1, 2)
+    dive_line = mission_line(payload.line_dots) if payload.line_dots else None
+    others = _others(payload.line_dots, payload.frames)
+
+    def fit(indices):
+        idx = list(indices)
+        return sc.fit_label_free(
+            dots=dots[idx], pairs=pairs_of([features[i] for i in idx], dots[idx]),
+            camera_matrix=payload.camera_matrix, min_frames=v3.MIN_FRAMES,
+        )  # fmt: skip
+
+    def run(indices):
+        idx = list(indices)
+
+        def sub_fit(local):
+            return fit([idx[i] for i in local])
+
+        return v3.calibrate_v3(slate_xy=dots[idx], dive_line=dive_line, other_xy=others,
+                               camera_matrix=payload.camera_matrix, fit=sub_fit)  # fmt: skip
+
+    main = run(range(len(kept)))
+    f = main.fit
+    accepted = main.outcome == "accepted"
+    report = CalibrationV3Report(
+        mission_id=payload.mission_id, outcome=main.outcome,
+        refusal_reason=main.refusal_reason, candidate_count=len(payload.frames),
+        laser_position=f.laser_position if accepted else None,
+        laser_axis=f.laser_axis if accepted else None,
+        vanishing_px=None if f is None else f.vanishing_px,
+        line_direction=None if f is None else f.line_direction,
+        line_offset_px=None if f is None else f.line_offset_px,
+        frames_used=0 if f is None else f.frames_used,
+        pair_count=0 if f is None else f.pairs,
+        size_ratio=None if f is None else f.size_ratio,
+        se_px=None if f is None else f.se_px,
+        gross_dropped=main.gross_dropped, consensus_dropped=main.consensus_dropped,
+        rival=main.rival, check_dots=main.check.dots,
+        check_median_px=main.check.median_px,
+        check_within_share=main.check.within_share,
+    )  # fmt: skip
+    draws = []
+    for size in draw_sizes:
+        if size > len(kept):
+            continue
+        for seed in range(draws_per_size):
+            rng = np.random.default_rng([size, seed])
+            d = run(sorted(rng.choice(len(kept), size, replace=False).tolist()))
+            ok = d.outcome == "accepted"
+            draws.append(CalibrationDraw(
+                size=size, seed=seed, outcome=d.outcome, refusal_reason=d.refusal_reason,
+                laser_position=d.fit.laser_position if ok else None,
+                laser_axis=d.fit.laser_axis if ok else None,
+                vanishing_px=None if d.fit is None else d.fit.vanishing_px,
+                frames_used=0 if d.fit is None else d.fit.frames_used,
+                check_median_px=d.check.median_px,
+                check_within_share=d.check.within_share,
+            ))  # fmt: skip
+    return report.model_copy(update={"draws": draws})
+
+
 class AutomaticCalibrationActivities:  # pylint: disable=too-few-public-methods
     def __init__(self, *, store_factory: Callable[[], Any]) -> None:
         self._store_factory = store_factory
@@ -271,3 +366,40 @@ class AutomaticCalibrationActivities:  # pylint: disable=too-few-public-methods
             capture_ids=[kept[i].capture_id for i in fit.used],
             **base,
         )
+
+    @activity.defn(name="replay_automatic_calibration_v3")
+    async def replay_automatic_calibration_v3(
+        self, request: ReplayCalibrationInput
+    ) -> CalibrationV3Report:
+        """What label-free calibration v3 would make of the mission, and of
+        random draws of its slate frames: read-only, nothing is stored.
+        Features from at most `MAX_CALIBRATION_FRAMES`, spread along the dots'
+        travel, as v2's."""
+        payload = request.payload
+        store = self._object_store()
+        chosen = [payload.frames[i] for i in
+                  spread([[f.x, f.y] for f in payload.frames], MAX_CALIBRATION_FRAMES)]  # fmt: skip
+        features, kept = [], []
+        for frame in chosen:
+            try:
+                jpeg = await store.download_image(frame.jpeg, frame.jpeg_url)
+                features.append(
+                    await asyncio.to_thread(_features, jpeg, (frame.x, frame.y))
+                )
+                kept.append(frame)
+            except Exception as exc:  # pylint: disable=broad-except
+                activity.logger.warning(
+                    "capture=%s: no features (%s)", frame.capture_id, exc
+                )
+            activity.heartbeat()
+        report = await _while_heartbeating(
+            lambda: replay_v3(payload, features, kept, draw_sizes=request.draw_sizes,
+                              draws_per_size=request.draws_per_size)  # fmt: skip
+        )
+        activity.logger.info(
+            "dive=%s v3 replay %s (%s): frames=%d check=%s/%s draws=%d",
+            payload.mission_id, report.outcome, report.refusal_reason,
+            report.frames_used, report.check_median_px, report.check_within_share,
+            len(report.draws),
+        )  # fmt: skip
+        return report

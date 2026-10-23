@@ -1713,3 +1713,25 @@ async def test_a_missions_inputs_read_each_frames_current_rows_by_its_index(
         and "capture_id" in n.get("Index Cond", "")
         for n in reads
     ), [(n["Node Type"], n["Relation Name"], n.get("Index Cond")) for n in reads]
+
+
+async def test_the_missions_with_automatic_dots(owner_engine, app_engine):
+    """Calibration v3's replay (2026-10-22): every mission a dot was found in."""
+    from fishsense_services_api.automatic_results_store import (
+        missions_with_automatic_dots,
+    )
+
+    lab = await tenant(owner_engine)
+    dotted, dotless, untouched = [
+        await _backlog_mission(owner_engine, lab) for _ in range(3)
+    ]
+    await _predict(
+        app_engine, lab, dotted, _predicted(await capture(owner_engine, lab, dotted))
+    )
+    await _predict(app_engine, lab, dotless, _predicted(
+        await capture(owner_engine, lab, dotless), status="no_laser_dot", laser_x=None,
+        laser_y=None, head_x=None, head_y=None, tail_x=None, tail_y=None,
+        mask_area_px=None, crop_x=None, crop_y=None, mask_bbox=None, sam_score=None))  # fmt: skip
+
+    found = await _in(app_engine, lab, missions_with_automatic_dots)
+    assert [m for m, _ in found] == [dotted]

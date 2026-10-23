@@ -13,8 +13,16 @@ with workflow.unsafe.imports_passed_through():
         AutomaticCalibrationResult,
         FitAutomaticCalibrationInput,
     )
+    from fishsense_services_contracts.calibration_v3 import (
+        CalibrationV3Report,
+        ReplayCalibrationInput,
+    )
 
-__all__ = ["FIT_TIMEOUT", "FitAutomaticCalibrationWorkflow"]
+__all__ = [
+    "FIT_TIMEOUT",
+    "FitAutomaticCalibrationWorkflow",
+    "ReplayAutomaticCalibrationV3Workflow",
+]
 
 #: The fit's budget, retries included. Pairwise registration is quadratic in
 #: frames, capped at 40 (780 pairs, seconds each at worst); the activity
@@ -43,4 +51,22 @@ class FitAutomaticCalibrationWorkflow:
                 maximum_attempts=3, non_retryable_error_types=["ValueError"]
             ),
             result_type=AutomaticCalibrationResult,
+        )
+
+
+@workflow.defn
+class ReplayAutomaticCalibrationV3Workflow:
+    """Calibration v3, read-only (2026-10-22): what it would make of the dive,
+    and of draws of its slate frames. Nothing is stored."""
+
+    # pylint: disable=too-few-public-methods
+    @workflow.run
+    async def run(self, request: ReplayCalibrationInput) -> CalibrationV3Report:
+        return await workflow.execute_activity(
+            "replay_automatic_calibration_v3",
+            request,
+            schedule_to_close_timeout=FIT_TIMEOUT,
+            heartbeat_timeout=timedelta(minutes=5),
+            retry_policy=RetryPolicy(maximum_attempts=2),
+            result_type=CalibrationV3Report,
         )
