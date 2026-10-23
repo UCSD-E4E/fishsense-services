@@ -12,6 +12,7 @@ compare with the human ones on the same frames.
 
 import pytest
 from depth_measure_seed import (  # noqa: F401  (forget_identities: a fixture)
+    calibrate,
     capture,
     exec_,
     fish,
@@ -94,7 +95,7 @@ async def test_a_predicted_frame_shows_what_the_run_made_of_it(
     assert (found.render_bucket, found.render_key) == ("fishsense-tenant-lab", key)
     assert (found.render_width, found.render_height) == (4014, 3016)
     assert (found.length_m, found.depth_m) == (0.42, 2.1)
-    assert found.calibration_source == "stored"
+    assert found.calibration_source == "label_free"
     assert found.refusal is None
 
 
@@ -227,7 +228,8 @@ async def test_a_missions_label_free_calibration_and_its_outcome(
 
     assert run.calibration.outcome == "refused"
     assert run.calibration.refusal_reason == "too few pairs"
-    assert run.lengths_use == "stored"
+    # The automatic stack alone (0064): with its fit refused, nothing to measure on.
+    assert run.lengths_use is None
 
 
 async def test_its_lengths_are_compared_with_the_human_ones_on_the_same_frames(
@@ -237,7 +239,7 @@ async def test_its_lengths_are_compared_with_the_human_ones_on_the_same_frames(
     mission_id, c = await _measured(owner_engine, app_engine, lab)  # 0.42 m
     calibration = await _in(app_engine, lab, mission_automatic, mission_id)
     the_fish = await fish(owner_engine, lab)
-    cal = await _laser_calibration(owner_engine, mission_id)
+    cal = await calibrate(owner_engine, lab, mission_id)  # the humans' own
     await measurement(owner_engine, lab, c, the_fish, cal, length_m=0.39)
 
     run = await _in(app_engine, lab, mission_automatic, mission_id)
@@ -247,18 +249,6 @@ async def test_its_lengths_are_compared_with_the_human_ones_on_the_same_frames(
     assert run.within_5_pct == 0
     assert run.within_10_pct == 1
     assert calibration.compared == 0
-
-
-async def _laser_calibration(owner_engine, mission_id):
-    from sqlalchemy import text
-
-    async with owner_engine.connect() as conn:
-        return (
-            await conn.execute(
-                text("SELECT id FROM laser_calibrations WHERE mission_id = :m"),
-                {"m": mission_id},
-            )
-        ).scalar_one()
 
 
 async def test_a_missions_failures_are_listed(owner_engine, app_engine):
@@ -280,8 +270,8 @@ async def test_a_missions_failures_are_listed(owner_engine, app_engine):
 async def test_a_length_whose_calibration_is_no_longer_current_is_not_shown(
     owner_engine, app_engine
 ):
-    """An accepted label-free fit replaces the stored calibration the length
-    used: that length is stale until the run measures again."""
+    """A newer accepted label-free fit replaces the one the length used: that
+    length is stale until the run measures again."""
     lab = await tenant(owner_engine)
     mission_id, c = await _measured(owner_engine, app_engine, lab)
     await _in(app_engine, lab, persist_automatic_calibration, mission_id, _label_free())
