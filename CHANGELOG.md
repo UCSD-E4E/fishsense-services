@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.48.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.47.0...v0.48.0) (2026-10-23)
+
+
+### Features
+
+* noise-aware trim and a predicted scale error for SAM-size fits ([6f6011b](https://github.com/UCSD-E4E/fishsense-services/commit/6f6011b49a63e9e0157bcb3565474da0463098f9))
+* noise-aware trim and a predicted scale error for SAM-size fits ([70599c8](https://github.com/UCSD-E4E/fishsense-services/commit/70599c8f558dcd554337973dda3faf43850401bb))
+
 ## [0.47.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.46.0...v0.47.0) (2026-10-23)
 
 
