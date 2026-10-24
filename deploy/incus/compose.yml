@@ -52,15 +52,14 @@ services:
     volumes:
       - /run/tenant/tls:/etc/traefik/tls:ro          # fishsense.vm.{crt,key} — vault-agent (#428)
       - ./traefik-dynamic.yml:/etc/traefik/dynamic.yml:ro
-    # The analytics route's superset is profile-gated and started separately, so
-    # it is not a depends_on here (v1: "so init delay can't block traefik").
     depends_on: [web, api]
     networks: [interior]
 
   # ── in-slot Postgres: v1's container, v1's volume ──────────────────────────────────────
   # Databases: `fishsense_services` (v2, made by db-bootstrap), `fishsense` (v1's:
   # the rollback, then the read-only archive and migrate-v1's source), `superset`
-  # (Superset's metadata, v1's and still Superset's). Same image as v1: no major
+  # (the metadata of Superset, retired 2026-10-23: kept, and backed up, as its
+  # archive). Same image as v1: no major
   # upgrade rides the cutover.
   postgres:
     image: postgres:17.10
@@ -87,7 +86,7 @@ services:
   # ── v2's database and roles, as the admin role, every converge (idempotent) ────────────
   # Creates `fishsense_services` and v2's roles if missing, and re-asserts their
   # attributes and passwords (so an OpenBao rotation reaches Postgres on the next
-  # converge). Binds Superset's login to the lab once migrate-v1 has made it.
+  # converge). Superset's retired login, where it exists, can no longer log in.
   # Never touches v1's database or roles. See db_bootstrap/bootstrap.sh.
   db-bootstrap:
     image: postgres:17.10
@@ -291,7 +290,7 @@ services:
 
   # ── nightly Postgres → NAS backups (v1's backup-worker's job) ───────────────────────────
   # Its own process and queue with the backup role, which the orchestrator never
-  # holds. Dumps v2's database, v1's archive and Superset's.
+  # holds. Dumps v2's database, v1's archive and retired Superset's.
   backup:
     image: ghcr.io/ucsd-e4e/fishsense-services-backup:v0.50.0
     group_add: ["0"]
@@ -422,119 +421,10 @@ services:
       - /run/tenant/temporal:/run/tenant/temporal:ro
     networks: [interior]
 
-  # ── analytics → analytics.fishsense.e4e.ucsd.edu (in-app OIDC) — profile `superset` ─────
-  # Kept from v1 (image, bootstrap scripts, the `superset` metadata DB and its
-  # role), behind the `superset` profile: OFF until docs/cutover.md's "Superset"
-  # step (the analytics login is bound to the lab only after migrate-v1), then
-  # on by `COMPOSE_PROFILES=superset` in compose.env. The dashboards' database
-  # connection is v2's, as `fishsense_superset` (assets/databases/FishSense.yaml);
-  # the metadata DB is still reached as v1's `superset` role. `superset-init`
-  # runs `db upgrade` + creates the local `admin` user + imports the committed
-  # dashboards on startup; the `superset` DB must be OWNED BY the `superset` role
-  # (v1's init failure).
-  superset:
-    image: &superset-image apache/superset:6.0.0
-    profiles: [superset]
-    container_name: fishsense_superset
-    command: ["/app/docker/docker-bootstrap.sh", "app-gunicorn"]
-    user: "root"
-    restart: unless-stopped
-    env_file:
-      - path: ./superset_volumes/docker/.env   # committed non-secret superset config (repo IaC)
-        required: true
-      - path: /run/tenant/secrets/superset.env # vault-agent render (secrets.nix)
-        required: true
-    volumes: &superset-volumes
-      - ./superset_volumes/docker:/app/docker   # committed bootstrap scripts/config (repo IaC)
-      - superset_home:/app/superset_home        # v1's named volume — persistent, docker-owned
-    expose: ["8088"]
-    depends_on:
-      superset-init:
-        condition: service_completed_successfully
-    networks: [interior]
-
-  superset-init:
-    image: *superset-image
-    profiles: [superset]
-    container_name: superset_init
-    command: ["/app/docker/docker-init.sh"]
-    user: "root"
-    env_file:
-      - path: ./superset_volumes/docker/.env
-        required: true
-      - path: /run/tenant/secrets/superset.env
-        required: true
-    volumes: *superset-volumes
-    depends_on:
-      postgres:
-        condition: service_started
-      valkey:
-        condition: service_started
-    healthcheck:
-      disable: true
-    networks: [interior]
-
-  superset-worker:
-    image: *superset-image
-    profiles: [superset]
-    container_name: superset_worker
-    command: ["/app/docker/docker-bootstrap.sh", "worker"]
-    user: "root"
-    restart: unless-stopped
-    env_file:
-      - path: ./superset_volumes/docker/.env
-        required: true
-      - path: /run/tenant/secrets/superset.env
-        required: true
-    volumes: *superset-volumes
-    depends_on:
-      superset-init:
-        condition: service_completed_successfully
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "celery -A superset.tasks.celery_app:app inspect ping -d celery@$$HOSTNAME",
-        ]
-    networks: [interior]
-
-  superset-worker-beat:
-    image: *superset-image
-    profiles: [superset]
-    container_name: superset_worker_beat
-    command: ["/app/docker/docker-bootstrap.sh", "beat"]
-    user: "root"
-    restart: unless-stopped
-    env_file:
-      - path: ./superset_volumes/docker/.env
-        required: true
-      - path: /run/tenant/secrets/superset.env
-        required: true
-    volumes: *superset-volumes
-    depends_on:
-      superset-init:
-        condition: service_completed_successfully
-    healthcheck:
-      disable: true
-    networks: [interior]
-
-  # Valkey — the BSD-licensed OSS fork of Redis (post-2024 relicense); a drop-in,
-  # protocol-compatible replacement for superset's cache + celery broker.
-  valkey:
-    image: valkey/valkey:9.1.0
-    profiles: [superset]
-    container_name: superset_cache   # only superset uses it (cache + celery broker)
-    restart: unless-stopped
-    volumes:
-      - valkey_data:/data   # v1's named volume — persistent, docker-owned
-    networks: [interior]
-
 # v1's named volumes, by v1's names (see the header): data survives the switch
 # because the project and these keys are the same.
 volumes:
   pgdata:
-  superset_home:
-  valkey_data:
 
 networks:
   interior:

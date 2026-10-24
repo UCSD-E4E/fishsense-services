@@ -164,10 +164,9 @@ def test_a_credential_given_opens_exactly_its_own_host(tmp_path):
 
 @needs_compose
 def test_fixed_container_names_are_the_rehearsals_own(tmp_path):
-    """compose.yml names a few containers (the cert sync's, v1's Superset
-    ones). Those names are global to the docker host, so the rehearsal's must
-    not be production's."""
-    dc = sut.stage(tmp_path / "rehearsal", local_images=True, profiles="superset")
+    """compose.yml names a few containers (the cert syncs'). Those names are
+    global to the docker host, so the rehearsal's must not be production's."""
+    dc = sut.stage(tmp_path / "rehearsal", local_images=True)
 
     names = [
         s["container_name"]
