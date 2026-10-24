@@ -28,6 +28,7 @@ from fishsense_services_api.headtail_store import (
     PredictionCandidate,
     PreprocessCapture,
 )
+from fishsense_services_contracts.headtail import HEADTAIL_FALLBACK_PREDICTOR_VERSION
 from fishsense_services_contracts.object_store import ObjectStoreConnection
 from fishsense_services_orchestrator.headtail.activities import (
     HeadtailActivities,
