@@ -41,11 +41,11 @@ human dots 1.7 px.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields
-from itertools import combinations
 from typing import Callable, Optional, Sequence
 
 import numpy as np
 from fishsense_core import size_constancy as sc
+from fishsense_core.line_fit import consensus_line
 
 __all__ = [
     "CHECK_MEDIAN_PX",
@@ -103,14 +103,6 @@ def _xy(dots) -> np.ndarray:
     return np.asarray(dots, float).reshape(-1, 2)
 
 
-def _line_through(xy: np.ndarray) -> np.ndarray:
-    """``(a, b, c)``, unit normal, of the total-least-squares line."""
-    m = xy.mean(axis=0)
-    u = np.linalg.svd(xy - m)[2][0]
-    n = np.array([-u[1], u[0]])
-    return np.array([n[0], n[1], -n @ m])
-
-
 def _distances(xy: np.ndarray, line) -> np.ndarray:
     a, b, c = line
     return np.abs(xy @ np.array([a, b]) + c) / np.hypot(a, b)
@@ -128,27 +120,18 @@ def gross_screen(slate_xy, dive_line, gross_px: float = GROSS_PX) -> list[int]:
 def slate_consensus(slate_xy, tol: float = OFF_LINE_PX):
     """``(kept indices, line)``: the line the most dots agree on within `tol`
     -- every pair's line tried, ties to the smaller summed distance -- refitted
-    through its inliers. Fewer than two dots: all kept, no line."""
+    through its inliers. Fewer than two dots: all kept, no line.
+
+    The search is fishsense-core's `line_fit.consensus_line` (core #100),
+    which was ported from this function and reproduces it bit for bit; its
+    re-scored ``inliers`` are the dots kept."""
     xy = _xy(slate_xy)
-    if len(xy) < 2:
+    fit = consensus_line(xy, tol_px=tol) if len(xy) >= 2 else None
+    if fit is None:  # under two dots, or every dot at one pixel: no direction
         return list(range(len(xy))), None
-    best = None
-    for i, j in combinations(range(len(xy)), 2):
-        d = xy[j] - xy[i]
-        if np.hypot(*d) < 1.0:
-            continue
-        line = _line_through(xy[[i, j]])
-        dist = _distances(xy, line)
-        inl = dist <= tol
-        key = (int(inl.sum()), -float(dist[inl].sum()))
-        if best is None or key > best[0]:
-            best = (key, inl)
-    if best is None:  # every dot at one pixel: they agree, on no direction
-        return list(range(len(xy))), None
-    inl = best[1]
-    line = _line_through(xy[inl])
-    inl = _distances(xy, line) <= tol
-    return [int(i) for i in np.flatnonzero(inl)], line
+    return [int(i) for i in np.flatnonzero(fit.inliers)], np.array(
+        [fit.a, fit.b, fit.c]
+    )
 
 
 def beam_line(camera_matrix, position, axis) -> np.ndarray:

@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from fishsense_core import size_constancy as sc
+from fishsense_core.line_fit import fit_line_pca
 
 from fishsense_services_processor.automatic_calibration import v3
 
@@ -80,7 +81,7 @@ def test_a_slate_dot_off_the_others_is_left_out():
 def test_the_dive_line_drops_only_gross_outliers():
     ranges = [0.8, 1.1, 1.5, 2.0]
     xy = np.vstack([_slates(ranges), [[300.0, 2900.0]]])  # a speck far from the beam
-    line = v3._line_through(_slates([0.6, 5.0]))
+    line = np.array(fit_line_pca(_slates([0.6, 5.0])))
     near = xy.copy()
     near[1] += OFF  # within the wide margin: left to the slates to judge
     assert v3.gross_screen(xy, line) == [0, 1, 2, 3]
