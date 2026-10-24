@@ -1,5 +1,5 @@
 """The SimCC keypoint replay as a processor stage on the GPU role. The model
-is fishsense-core 4.2.0's pinned checkpoint, fetched from Garage's
+is fishsense-core's pinned checkpoint (since 4.2.0; the same in 4.3.0), fetched from Garage's
 model-weights bucket through core's verified fetch (the processor-secret sync
 uploads it there from its pinned Hugging Face revision), loaded once per
 worker. Read-only: run by the replay alone."""
@@ -22,7 +22,8 @@ from fishsense_services_processor.registry import ROLE_GPU, Stage
 
 __all__ = ["CHECKPOINT", "STAGE"]
 
-#: core 4.2.0's manifest entry (name/version) for the model.
+#: core's manifest entry (name/version) for the model: pinned since 4.2.0,
+#: unchanged in 4.3.0 (simcc-sam-e12 8918034a0f84).
 CHECKPOINT = "headtail-keypoints/simcc-sam-e12"
 
 _DETECTOR: Any = None

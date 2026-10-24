@@ -17,7 +17,7 @@ members = [
 ]
 overrides = [
     { name = "numpy" },
-    { name = "opencv-python-headless", specifier = ">=5.0.0.93" },
+    { name = "opencv-python-headless", specifier = ">=5.0.0.93,<6" },
 ]
 
 [[package]]

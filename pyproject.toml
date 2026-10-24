@@ -19,7 +19,10 @@ override-dependencies = [
     # cannot resolve together. The orchestrator uses only the SDK's API client
     # (`label_studio_sdk.client`, `.core`), not its image converters, and its
     # suite passes on OpenCV 5. Revisit if label-studio-sdk lifts its cap.
-    "opencv-python-headless>=5.0.0.93",
+    # Bounded above: an override replaces core's own constraint too, so an
+    # open range would let a lock refresh take OpenCV 6 unchecked (review of
+    # #348). tests/test_dependency_pins.py checks each reason still holds.
+    "opencv-python-headless>=5.0.0.93,<6",
 ]
 
 [tool.uv.workspace]

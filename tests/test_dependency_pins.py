@@ -94,3 +94,68 @@ def test_the_gpu_image_can_compile_triton_kernels():
     assert " gcc" in before_user and "libc6-dev" in before_user
     check = stage[stage.index("USER app") :]
     assert "shutil.which('gcc')" in check
+
+
+#: The workspace override that lifts label-studio-sdk's OpenCV cap (root
+#: pyproject `[tool.uv] override-dependencies`), for fishsense-core 4.3.0.
+OPENCV_OVERRIDE_BOUNDS = (">=5.0.0.93", "<6")
+
+
+def _override(name: str) -> str:
+    pyproject = tomllib.loads((LOCK.parent / "pyproject.toml").read_text())
+    (entry,) = [
+        d
+        for d in pyproject["tool"]["uv"]["override-dependencies"]
+        if d.replace(" ", "").startswith(name)
+    ]
+    return entry
+
+
+def test_the_opencv_override_is_bounded_above():
+    """An override replaces *every* constraint on the package, core's own
+    included: an open range would also let a lock refresh take OpenCV 6 for
+    both the processor and the orchestrator, and hide a later core's own
+    bound (review of #348)."""
+    entry = _override("opencv-python-headless")
+    for bound in OPENCV_OVERRIDE_BOUNDS:
+        assert bound in entry.replace(" ", ""), f"{entry!r} lacks {bound!r}"
+    for version in _locked()["opencv-python-headless"]:
+        assert version.split(".")[0] == "5", f"locked OpenCV {version} is not 5.x"
+
+
+def test_the_opencv_override_is_still_needed_and_still_safe():
+    """Why the override exists, each reason checked so it can't outlive them:
+    fishsense-core needs OpenCV 5, label-studio-sdk still caps it below 5, and
+    the orchestrator reaches only the SDK's API client (not its cv2
+    converters), which imports on the OpenCV 5 the lock holds."""
+    import importlib
+    import re
+    from importlib.metadata import requires
+
+    def opencv_reqs(dist: str) -> list[str]:
+        return [r for r in requires(dist) or [] if r.startswith("opencv-python")]
+
+    assert any(
+        ">=5" in r for r in opencv_reqs("fishsense-core")
+    ), "fishsense-core no longer needs OpenCV 5: drop the override"
+    assert any(
+        re.search(r"<\s*(5|4\.)", r) for r in opencv_reqs("label-studio-sdk")
+    ), "label-studio-sdk no longer caps OpenCV below 5: drop the override"
+
+    orchestrator = LOCK.parent / "services/fishsense-services-orchestrator/src"
+    imported = set()
+    for path in orchestrator.rglob("*.py"):
+        imported |= set(
+            re.findall(
+                r"^\s*from (label_studio_sdk[\w.]*) import", path.read_text(), re.M
+            )
+        )
+        imported |= set(
+            re.findall(r"^\s*import (label_studio_sdk[\w.]*)", path.read_text(), re.M)
+        )
+    assert imported <= {
+        "label_studio_sdk.client",
+        "label_studio_sdk.core",
+    }, f"the orchestrator now imports {sorted(imported)}: check them on OpenCV 5"
+    for module in sorted(imported):
+        importlib.import_module(module)

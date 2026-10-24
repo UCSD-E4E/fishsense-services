@@ -1,5 +1,5 @@
 """The SimCC head/tail keypoint replay (v19, owner 2026-10-23): fishsense-core
-4.2.0's snout/fork model run on each automatic head/tail prediction's frame,
+4.3.0's snout/fork model (pinned since 4.2.0, unchanged) run on each automatic head/tail prediction's frame,
 read-only, to compare its lengths with the SAM rule's before any switch.
 
 Each frame is the render the prediction was made on and its SAM mask box (the

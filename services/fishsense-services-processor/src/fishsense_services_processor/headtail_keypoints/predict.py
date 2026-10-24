@@ -1,4 +1,4 @@
-"""One frame through fishsense-core 4.2.0's SimCC snout/fork model, read-only
+"""One frame through fishsense-core's SimCC snout/fork model (pinned since 4.2.0, unchanged in 4.3.0), read-only
 (owner, 2026-10-23: compare it with the SAM rule before any switch).
 
 The frame is the render the automatic prediction was made on, decoded; the box
