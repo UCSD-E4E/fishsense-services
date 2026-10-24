@@ -1021,7 +1021,7 @@ async def test_a_migrated_measurement_under_the_effective_calibration_is_current
 
 @pytest.mark.parametrize(
     "reason",
-    # The last three since contract v21 (0067): the dot failed fishsense-core's
+    # The last three since contract v21 (0068): the dot failed fishsense-core's
     # `LaserPoint.is_measurable()`, so no length was taken.
     [
         "zero_length",

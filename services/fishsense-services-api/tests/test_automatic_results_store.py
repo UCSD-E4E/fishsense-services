@@ -902,7 +902,7 @@ async def test_a_length_is_current_and_drains_the_work(owner_engine, app_engine)
 async def test_a_low_parallax_refusal_is_recorded_and_drains_the_work(
     owner_engine, app_engine
 ):
-    """Measurement version 2 (contract v21, 0067): a dot too near the laser's
+    """Measurement version 2 (contract v21, 0068): a dot too near the laser's
     vanishing point is refused, and the refusal answers the frame's work."""
     lab = await tenant(owner_engine)
     mission_id = await _backlog_mission(owner_engine, lab)

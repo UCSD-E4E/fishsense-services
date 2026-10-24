@@ -112,7 +112,7 @@ class LaserDepth(BaseModel):
 #: finite; at or behind the camera; or (v21, core #96) the camera ray and the
 #: laser too near parallel -- a dot near the laser's vanishing point, whose
 #: finite, often positive depth is untrustworthy. Shared by `measurement`.
-#: The API's CHECKs repeat it (migration 0067).
+#: The API's CHECKs repeat it (migration 0068).
 DotRefusal = Literal["non_finite_depth", "non_positive_depth", "low_parallax"]
 
 

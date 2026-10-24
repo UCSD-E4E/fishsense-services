@@ -80,7 +80,10 @@ __all__ = [
 #:   1 -- the original stage: no output gate, no colour, "Red Laser" always.
 #:   2 -- 2026-08-28: predictions outside `LASER_REGION_POLYGON` are rejected,
 #:        and the laser's colour is read off the dot.
-LASER_PREDICTOR_VERSION: int = 2
+#:   3 -- 2026-10-24: the colour is fishsense-core 4.3.0's `laser_color`; a
+#:        saturated dot's margin is scaled by the brightest usable pixel, so
+#:        some saturated abstentions now vote.
+LASER_PREDICTOR_VERSION: int = 3
 
 
 def laser_model_version_tag(version: int = LASER_PREDICTOR_VERSION) -> str:

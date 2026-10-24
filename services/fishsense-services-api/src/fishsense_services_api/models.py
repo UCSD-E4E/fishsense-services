@@ -1174,7 +1174,7 @@ class Measurement(Base):
 
 class LaserDepthRefusal(Base):
     """A laser label tried under a calibration that gave no measurable depth
-    (migration 0025; `low_parallax` since 0067): "tried, made no progress"."""
+    (migration 0025; `low_parallax` since 0068): "tried, made no progress"."""
 
     __tablename__ = "laser_depth_refusals"
     __table_args__ = (
@@ -1219,7 +1219,7 @@ class LaserDepthRefusal(Base):
 
 
 class MeasurementRefusal(Base):
-    """A capture's measurement inputs that gave no usable length -- since 0067
+    """A capture's measurement inputs that gave no usable length -- since 0068
     including a laser dot that is not measurable -- or a real fish no name
     could be read from (migration 0025)."""
 

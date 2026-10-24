@@ -328,7 +328,7 @@ class AutomaticLength(BaseModel):
     #: Why no length: `non_positive_depth` (the depth not finite, or at or
     #: behind the camera), `low_parallax` (version 2: a dot too near the
     #: laser's vanishing point), `non_finite_length`, `zero_length`. The API's
-    #: CHECK repeats them (migration 0067).
+    #: CHECK repeats them (migration 0068).
     refusal: Optional[str] = None
 
 

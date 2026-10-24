@@ -685,7 +685,7 @@ async def test_persist_records_a_fallback_labels_refusal_and_its_siblings_depth(
 async def test_a_low_parallax_refusal_keeps_its_positive_depth_and_drops_the_label(
     owner_engine, app_engine
 ):
-    """Contract v21 (0067): a dot too near the laser's vanishing point is
+    """Contract v21 (0068): a dot too near the laser's vanishing point is
     refused with the finite, positive depth the solve gave -- a number no
     other refusal may hold -- and the cohort stops offering its label."""
     lab = await tenant(owner_engine)

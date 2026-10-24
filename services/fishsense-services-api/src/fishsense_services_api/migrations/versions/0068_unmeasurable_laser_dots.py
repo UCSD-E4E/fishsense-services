@@ -24,16 +24,16 @@ restores 0025's and 0036's definitions exactly, and fails -- rather than
 deletes anything -- once a row holds a reason they do not name: these tables
 are append-only history.
 
-Revision ID: 0067
-Revises: 0066
+Revision ID: 0068
+Revises: 0067
 """
 
 from alembic import op
 
-revision = "0067"
-down_revision = "0066"
+revision = "0068"
+down_revision = "0067"
 
-#: (table, constraint, 0025/0036's definition, 0067's).
+#: (table, constraint, 0025/0036's definition, 0068's).
 _CHECKS = (
     (
         "laser_depth_refusals",

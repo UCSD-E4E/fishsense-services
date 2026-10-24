@@ -44,6 +44,7 @@ from depth_measure_seed import restate_port
 
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.laser_store import (
+    LASER_PREDICTOR_VERSION,
     ForeignRows,
     GateVerdict,
     LaserCatalog,
@@ -143,7 +144,8 @@ class Seed:
             n=number,
         )  # fmt: skip
 
-    async def prediction(self, capture, *, x=10.0, y=20.0, version=2, color=None,
+    async def prediction(self, capture, *, x=10.0, y=20.0,
+                         version=LASER_PREDICTOR_VERSION, color=None,
                          gate_verdict=None, auto_accept=False, v1_id=None,
                          width=4000, height=3000):  # fmt: skip
         return await self._one(
@@ -649,7 +651,7 @@ async def test_a_re_prediction_is_what_makes_a_prediction_current(lab, app_engin
     mission = await lab.mission()
     capture = await lab.capture(mission)
     await lab.prediction(capture, version=1)
-    await lab.prediction(capture, version=2)
+    await lab.prediction(capture, version=LASER_PREDICTOR_VERSION)
     await lab.label(capture, completed=False)
 
     assert await _next(app_engine, lab, next_mission_for_laser_prediction) is None
@@ -808,7 +810,7 @@ async def test_gate_inputs_are_the_missions_current_predictions(lab, app_engine)
         for p in inputs.predictions
     ]
     assert (prediction_id, capture_number, x, y, version) == (
-        current, 5_132_158, 5.0, 6.0, 2)  # fmt: skip
+        current, 5_132_158, 5.0, 6.0, LASER_PREDICTOR_VERSION)  # fmt: skip
 
 
 async def _gated(lab, prediction):

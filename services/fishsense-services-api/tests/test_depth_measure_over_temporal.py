@@ -186,7 +186,7 @@ async def test_a_length_that_crossed_temporal_answers_its_work(
 async def test_a_low_parallax_refusal_that_crossed_temporal_is_recorded(
     owner_engine, app_engine, seed_memberships
 ):
-    """Contract v21 to 0067, end to end but for the processor: a dot too near
+    """Contract v21 to 0068, end to end but for the processor: a dot too near
     the laser's vanishing point comes back refused with its positive depth,
     and the orchestrator's persist records it under the widened CHECKs."""
     lab = (await seed_memberships({ORCHESTRATOR: {"lab": "member"}}))["lab"]

@@ -1,13 +1,13 @@
-"""0067 widens the three refusal CHECKs, and its downgrade puts 0066's back.
+"""0067 recreates `dive_pipeline_status_rows()` with the laser stage's v3, and
+its downgrade puts 0063's body back.
 
-The new reasons are contract v21's (fishsense-core #96): a laser dot that fails
-`LaserPoint.is_measurable()`. The widened CHECKs are tested against inserts at
-head (test_depth_measure_schema.py, test_laser_depth_store.py,
-test_measurement_store.py, test_automatic_results_store.py); here, the
-constraint text itself, before, after and after the downgrade, so a downgrade
-that drifted from 0025/0036's definitions would fail. Its own database: the
-session's is at head and shared, and must not be downgraded under the other
-tests.
+A SQL function's body is frozen text (0029), so the laser stale term's
+`IS DISTINCT FROM 2` stays in every existing database until a migration
+rewrites it. The parity tests (test_mission_pipeline_status_view.py) run at
+head on a fresh database; here, the function as Postgres holds it, before,
+after and after the downgrade, and the grants the view's readers (the app,
+Superset's analytics role) depend on. Its own database: the session's is at
+head and shared, and must not be downgraded under the other tests.
 """
 
 from __future__ import annotations
@@ -25,32 +25,45 @@ from fishsense_services_api import migrations
 pytestmark = pytest.mark.integration
 
 APP_ROLE = "fishsense_app"
-
-CONSTRAINTS = (
-    "laser_depth_refusals_reason_check",
-    "laser_depth_refusals_depth_m_check",
-    "measurement_refusals_reason_check",
-    "automatic_measurements_refusal_check",
-)
+ANALYTICS_ROLE = "fishsense_analytics"
+LASER_TERM = "ORDER BY p.seq DESC LIMIT 1\n) IS DISTINCT FROM {}"
+HEADTAIL_TERM = "p.predictor_version IS DISTINCT FROM 2"
 
 
-async def _definitions(url: str) -> dict[str, str]:
+async def _state(url: str) -> dict:
     engine = create_async_engine(url)
     try:
         async with engine.connect() as conn:
-            rows = await conn.execute(
-                text(
-                    "SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint "
-                    "WHERE conname = ANY(:names)"
-                ),
-                {"names": list(CONSTRAINTS)},
-            )
-            return dict(rows.all())
+            row = (await conn.execute(text("""
+                    SELECT pg_get_functiondef(p.oid) AS body, p.proconfig,
+                           p.prosecdef, p.proacl::text AS acl
+                    FROM pg_proc p WHERE p.proname = 'dive_pipeline_status_rows'
+                    """))).one()
+            grants = {}
+            for role in (APP_ROLE, ANALYTICS_ROLE):
+                grants[role] = (
+                    await conn.execute(
+                        text(
+                            "SELECT has_table_privilege(:r, "
+                            "'dive_pipeline_status', 'SELECT')"
+                        ),
+                        {"r": role},
+                    )
+                ).scalar_one()
+            # The view still reads through the recreated function.
+            await conn.execute(text("SELECT * FROM dive_pipeline_status"))
+            return {
+                "body": row.body,
+                "config": row.proconfig,
+                "secdef": row.prosecdef,
+                "acl": row.acl,
+                "grants": grants,
+            }
     finally:
         await engine.dispose()
 
 
-async def test_0067_widens_the_refusal_checks_and_the_downgrade_restores_them():
+async def test_0067_moves_the_laser_term_to_v3_and_the_downgrade_restores_it():
     with PostgresContainer("postgres:17.10", driver="asyncpg") as pg:
         url = pg.get_connection_url()
         engine = create_async_engine(url)
@@ -59,25 +72,28 @@ async def test_0067_widens_the_refusal_checks_and_the_downgrade_restores_them():
         await engine.dispose()
 
         await migrations.upgrade(url, app_role=APP_ROLE, revision="0066")
-        before = await _definitions(url)
+        before = await _state(url)
         await migrations.upgrade(url, app_role=APP_ROLE, revision="0067")
-        upgraded = await _definitions(url)
+        upgraded = await _state(url)
         await asyncio.to_thread(
             command.downgrade, migrations._config(url, APP_ROLE), "0066"
         )
-        restored = await _definitions(url)
+        restored = await _state(url)
 
-    assert set(before) == set(CONSTRAINTS)
-    assert "low_parallax" not in "".join(before.values())
-    assert "'low_parallax'" in upgraded["laser_depth_refusals_reason_check"]
-    assert "'low_parallax'" in upgraded["laser_depth_refusals_depth_m_check"]
-    for reason in ("non_finite_depth", "non_positive_depth", "low_parallax"):
-        assert f"'{reason}'" in upgraded["measurement_refusals_reason_check"]
-    assert "'low_parallax'" in upgraded["automatic_measurements_refusal_check"]
-    # The reasons that were there still are.
-    for name in CONSTRAINTS:
-        for reason in ("non_finite_depth", "non_positive_depth", "zero_length",
-                       "non_finite_length", "unparseable_species"):  # fmt: skip
-            if f"'{reason}'" in before[name]:
-                assert f"'{reason}'" in upgraded[name], (name, reason)
+    assert before["body"].count(LASER_TERM.format(2)) == 1
+    assert LASER_TERM.format(3) not in before["body"]
+
+    assert upgraded["body"].count(LASER_TERM.format(3)) == 1
+    assert LASER_TERM.format(2) not in upgraded["body"]
+    # Only the laser term moved: head/tail keeps its own version.
+    assert HEADTAIL_TERM in upgraded["body"]
+    assert upgraded["body"].replace(LASER_TERM.format(3), LASER_TERM.format(2)) == (
+        before["body"]
+    )
+    # CREATE OR REPLACE keeps the function's settings and grants, and the
+    # view's readers keep reading it.
+    for key in ("config", "secdef", "acl", "grants"):
+        assert upgraded[key] == before[key], key
+    assert before["grants"] == {APP_ROLE: True, ANALYTICS_ROLE: True}
+
     assert restored == before

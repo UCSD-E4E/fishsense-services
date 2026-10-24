@@ -285,7 +285,7 @@
     {
       "name": "predict_laser_image",
       "file": "D/activities/predict_laser_image.py",
-      "purpose": "LinearRawImage -> LaserDetector.predict(rectify_output=True). Read the colour at the dot after rectified_to_sensor_point. Drop x/y when the dot is outside the laser_region (rejected_out_of_region=True). Stamp predictor_version=2, checkpoint basename, core_version",
+      "purpose": "LinearRawImage -> LaserDetector.predict (sensor pixels). Read the colour at the dot there, then rectify it once with fishsense_core.laser.rectify_prediction (v2, review of #352; v1 predicted rectified and mapped back with rectified_to_sensor_point). Drop x/y when the dot is outside the laser_region (rejected_out_of_region=True). Stamp predictor_version (3 from 2026-10-24), checkpoint basename, core_version",
       "touches": [
         "object-store: GET raw/{checksum}.ORF",
         "model: LaserDetector checkpoint /e4efs/models/run3_epoch_021.pt (env E4EFS_LASER_DETECTOR__CHECKPOINT; baked from HF ucsde4e/fishsense-laser-detector)",
@@ -659,7 +659,7 @@
     "Laser colour is a per-dive majority vote over prediction.color. A tie or no votes falls back to 'Red Laser'. Computed over ALL of the dive's predictions so top-up runs agree",
     "Backfill idempotency keys on the LS model_version tag; attaching is not showing -- set the project's model_version to the majority tag, and only on per-dive projects (title contains #{dive_id}); never raises",
     "LS project title '{name} #{dive_id} - Laser Calibration Labeling': names are not unique, so the #id is mandatory; truncate the name, never the id, to fit 50 chars; the lookup is scoped to the configured workspace; the labeling config self-heals",
-    "Predict: the detector's x/y are rectified pixels but LinearRawImage is in sensor coordinates, so convert with rectified_to_sensor_point before reading the colour (up to ~48 px off); the region test is on rectified x/y; a degenerate region admits nothing",
+    "Predict: LinearRawImage is in sensor coordinates and labels are rectified, so read the colour at the detector's sensor point and only then rectify it (up to ~48 px apart; v1 mapped a rectified prediction back with rectified_to_sensor_point); the region test is on rectified x/y; a degenerate region admits nothing",
     "predictor_version is bumped BY HAND whenever the stage output would change for an unchanged image; it versions behaviour, not the checkpoint",
     "The detector is loaded once per process under a threading.Lock (double-checked); without it a cold pod loads N copies of the checkpoint onto the GPU",
     "Stage 0.1 keeps both bbox and polygon for rolling-deploy skew; the bbox path must stay cv2.rectangle (notebook byte parity), not a 4-vertex polyline",
