@@ -33,6 +33,7 @@ from __future__ import annotations
 from uuid import UUID
 
 import numpy as np
+import pytest
 from temporalio.testing import ActivityEnvironment
 
 from fishsense_services_contracts.slate_calibration import (
@@ -318,7 +319,12 @@ async def test_mismatched_labels_are_skipped_not_fatal():
     assert float(np.linalg.norm(fitted_pos[:2] - laser_origin[:2])) < 0.001
 
 
-async def test_a_label_with_too_few_points_for_a_pose_is_skipped_not_fatal():
+@pytest.mark.parametrize(
+    "skipped", [[1, 3, 5], [0, 1, 2, 3, 4, 5]], ids=["three-left", "none-left"]
+)
+async def test_a_label_with_too_few_points_for_a_pose_is_skipped_not_fatal(
+    skipped, caplog
+):
     """A label that skips three of the template's six points leaves three
     correspondences: the count agrees, but no pose. v0.51.0's own
     `calibration/geometry.py` handed them to `solvePnP`, which raises
@@ -326,6 +332,11 @@ async def test_a_label_with_too_few_points_for_a_pose_is_skipped_not_fatal():
     shape again, by a different route. fishsense-core's
     `plane_from_correspondences` returns None below four, so the label is
     skipped and the other observations still fit.
+
+    A label that skips every point (model-assisted labeling's multi-skip)
+    leaves none, and `np.array([])` is 1-D, which core refuses as malformed
+    with a ValueError (review of #350). Either way the skip is logged with
+    the capture, as the count-mismatch skip is.
     """
     laser_origin = np.array([-0.03, -0.10, 0.0])
     laser_axis = np.array([0.005, -0.02, 1.0])
@@ -337,13 +348,44 @@ async def test_a_label_with_too_few_points_for_a_pose_is_skipped_not_fatal():
         slate_distances=[0.40, 0.55, 0.70, 0.85, 1.00, 1.15, 1.30, 1.45],
     )
     short = observations[3]
-    short.skipped_points = [1, 3, 5]
-    short.reference_points = [short.reference_points[i] for i in (0, 2, 4)]
+    kept = [i for i in range(len(TEMPLATE)) if i not in skipped]
+    short.skipped_points = skipped
+    short.reference_points = [short.reference_points[i] for i in kept]
 
-    result = await _run(_payload(observations))
+    with caplog.at_level("WARNING"):
+        result = await _run(_payload(observations))
 
     assert result.outcome == "accepted"
     assert result.observation_count == 7
+    assert str(short.capture_id) in caplog.text
+
+
+async def test_a_laser_point_that_is_not_finite_is_skipped(monkeypatch, caplog):
+    """`fishsense_core.plane.laser_point_on_plane` checks the ray for NaN but
+    not its answer: a near-parallel plane or an infinite dot gives an
+    enormous or non-finite point. v0.48.0's own copy dropped a NaN point;
+    the observation is dropped here too, not fitted (review of #350)."""
+    observations = _build_synthetic_scene(
+        n_observations=8,
+        laser_origin_world=np.array([-0.03, -0.10, 0.0]),
+        laser_axis_world=np.array([0.0, 0.0, 1.0]),
+        slate_distances=[0.40, 0.55, 0.70, 0.85, 1.00, 1.15, 1.30, 1.45],
+    )
+    bad = observations[3]
+    real = sut.laser_point_on_plane
+
+    def laser_point_on_plane(plane, laser_xy, matrix):
+        if tuple(laser_xy) == (bad.laser_x, bad.laser_y):
+            return np.array([np.nan, 0.0, np.inf])
+        return real(plane, laser_xy, matrix)
+
+    monkeypatch.setattr(sut, "laser_point_on_plane", laser_point_on_plane)
+    with caplog.at_level("WARNING"):
+        result = await _run(_payload(observations))
+
+    assert result.outcome == "accepted"
+    assert result.observation_count == 7
+    assert str(bad.capture_id) in caplog.text
 
 
 async def test_mismatched_labels_that_starve_the_mission_record_a_refusal():
