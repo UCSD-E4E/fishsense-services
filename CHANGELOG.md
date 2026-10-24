@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.50.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.49.0...v0.50.0) (2026-10-23)
+
+
+### Features
+
+* SimCC head/tail keypoint replay, read-only (fishsense-core 4.2.0, contract v19) ([cc0d086](https://github.com/UCSD-E4E/fishsense-services/commit/cc0d0863303fc99c36b6428948c0e1c13b7c62da))
+* SimCC head/tail keypoint replay, read-only (fishsense-core 4.2.0, contract v19) ([bfe6d1d](https://github.com/UCSD-E4E/fishsense-services/commit/bfe6d1d6490d7002577274c08fe7aed6bb4a7a83))
+
 ## [0.49.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.48.0...v0.49.0) (2026-10-23)
 
 
