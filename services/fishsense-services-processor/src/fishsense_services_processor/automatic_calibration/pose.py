@@ -275,11 +275,37 @@ BOARD_LONG_PX = 1000
 _BOARD_LONG_IN = 12.0
 
 
+#: How far the coarse search looks for the page on the board, beyond any
+#: overhang of a page larger than the board.
+SEARCH_IN = 3.0
+
+
+def _page_at(board_blur: np.ndarray, page_blur: np.ndarray, reach: int):
+    """``(dx, dy, score)``: where the page's top-left sits on the board (board
+    px, may be negative) by normalised cross-correlation, the board padded by
+    `reach` px of its mean so the page may overhang it."""
+    pad = cv2.copyMakeBorder(board_blur, reach, reach, reach, reach,
+                             cv2.BORDER_CONSTANT, value=float(board_blur.mean()))  # fmt: skip
+    if page_blur.shape[0] > pad.shape[0] or page_blur.shape[1] > pad.shape[1]:
+        return None
+    scores = cv2.matchTemplate(pad, page_blur, cv2.TM_CCOEFF_NORMED)
+    _, best, _, (x, y) = cv2.minMaxLoc(scores)
+    return x - reach, y - reach, float(best)
+
+
 def align_template(image_grey: np.ndarray, corners, page_grey: np.ndarray, dpi: int):
     """``(H, correlation)``: H maps template pixels (the page at `dpi`) to
     image pixels, or ``(None, None)``. `corners` are the board's TL, TR, BR,
-    BL in the image; the page is placed centred on the front-on board at the
-    board's scale, then refined by ECC, both ways up."""
+    BL in the image.
+
+    The board is rectified front-on at its known size (12 in long), so the
+    page's scale on it is known from `dpi`; where the page sits is not. The
+    templates are scans of the physical slates, some larger than the board
+    (the V-Slates: 14 in, the board ~1.9 in from the edge), so the page is
+    first found on the board by cross-correlation (`_page_at`, within
+    `SEARCH_IN` beyond any overhang), both ways up, then refined by ECC.
+    (Until 2026-10-23 it was centred on the board, ~1 in off for a V-Slate:
+    mission 436's poses settled the wrong way round.)"""
     corners = np.asarray(corners, np.float32)
     s01 = np.linalg.norm(corners[1] - corners[0])
     s12 = np.linalg.norm(corners[2] - corners[1])
@@ -293,20 +319,27 @@ def align_template(image_grey: np.ndarray, corners, page_grey: np.ndarray, dpi: 
     rotate = (pw >= ph) != (w >= h)
     page = cv2.rotate(page_grey, cv2.ROTATE_90_CLOCKWISE) if rotate else page_grey
     rh, rw = page.shape
-    f = max(w, h) / _BOARD_LONG_IN / dpi
-    hinit = np.array(
-        [[f, 0, (w - rw * f) / 2], [0, f, (h - rh * f) / 2], [0, 0, 1]], np.float32
-    )
-    on_board = cv2.warpPerspective(
-        page, hinit, (w, h), flags=cv2.INTER_AREA, borderValue=255
-    )
+    px_per_in = max(w, h) / _BOARD_LONG_IN
+    f = px_per_in / dpi
+    sw, sh = int(round(rw * f)), int(round(rh * f))
+    scaled = cv2.resize(page, (sw, sh), interpolation=cv2.INTER_AREA)
+    over = max(sw - w, sh - h, 0)
+    reach = int(over + SEARCH_IN * px_per_in)
     a = cv2.GaussianBlur(cv2.equalizeHist(board), (0, 0), 3).astype(np.float32)
     best = None
     for flip in (False, True):
-        fl = (np.array([[-1, 0, w], [0, -1, h], [0, 0, 1]], np.float32) if flip
-              else np.eye(3, dtype=np.float32))  # fmt: skip
-        b = cv2.GaussianBlur(cv2.warpPerspective(on_board, fl, (w, h), borderValue=255),
-                             (0, 0), 3).astype(np.float32)  # fmt: skip
+        fl = (np.array([[-1, 0, sw], [0, -1, sh], [0, 0, 1]], np.float64) if flip
+              else np.eye(3))  # fmt: skip
+        shown = cv2.rotate(scaled, cv2.ROTATE_180) if flip else scaled
+        at = _page_at(a, cv2.GaussianBlur(shown, (0, 0), 3).astype(np.float32), reach)
+        if at is None:
+            continue
+        dx, dy, _ = at
+        hinit = (np.array([[1, 0, dx], [0, 1, dy], [0, 0, 1]], np.float64) @ fl
+                 @ np.diag([f, f, 1.0])).astype(np.float32)  # fmt: skip
+        on_board = cv2.warpPerspective(page, hinit, (w, h), flags=cv2.INTER_AREA,
+                                       borderValue=255)  # fmt: skip
+        b = cv2.GaussianBlur(on_board, (0, 0), 3).astype(np.float32)
         try:
             cc, warp = cv2.findTransformECC(
                 b, a, np.eye(3, dtype=np.float32), cv2.MOTION_HOMOGRAPHY,
@@ -314,11 +347,10 @@ def align_template(image_grey: np.ndarray, corners, page_grey: np.ndarray, dpi: 
         except cv2.error:
             continue
         if best is None or cc > best[0]:
-            best = (float(cc), warp @ fl)
+            best = (float(cc), warp @ hinit)
     if best is None:
         return None, None
-    cc, warp = best
-    ht = warp @ hinit
+    cc, ht = best
     if rotate:  # unrotated page px -> rotated: (x, y) -> (ph - 1 - y, x)
         ht = ht @ np.array([[0, -1, ph - 1], [1, 0, 0], [0, 0, 1]], np.float32)
     return np.linalg.inv(hb) @ ht, cc
