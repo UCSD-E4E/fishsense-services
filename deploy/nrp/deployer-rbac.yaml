@@ -70,9 +70,8 @@ rules:
     verbs: ["get", "patch"]
   # The processor-secret sync (ops.processor_secret_sync, 2026-10-15), on the
   # slot with this identity: it keeps the processor's own Secret -- the Garage
-  # keys and the weights' pins -- reading it (to keep SAM 3.1's recorded pin,
-  # and skip a write when nothing changed) and patching it. Pinned by name;
-  # still no `list`.
+  # keys and the weights' pins -- reading it (to skip a write when nothing
+  # changed) and patching it. Pinned by name; still no `list`.
   - apiGroups: [""]
     resources: ["secrets"]
     resourceNames: ["fishsense-processor-secrets"]

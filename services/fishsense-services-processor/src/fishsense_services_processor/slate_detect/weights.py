@@ -1,8 +1,9 @@
 """The slate detector's weights: fetched through fishsense-core, pinned from
 settings.
 
-New in v2, built as the head/tail stage's SAM 3.1 weights are
-(`headtail_predict.weights`), for the same reasons: PLAN.md §9.12 puts model
+New in v2, built as the head/tail stage's SAM 3.1 weights were
+(`headtail_predict.weights`, pinned from settings until core pinned SAM 3.1
+on 2026-10-23), for the same reasons: PLAN.md §9.12 puts model
 weights in Garage's `model-weights` behind core's `WeightStore`
 (`weights.GarageWeightStore`), and a manifest's sha256 decides what loads.
 
