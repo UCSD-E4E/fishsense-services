@@ -154,8 +154,9 @@ with no edits to shared files beyond registering it.
   a 1600-px long side, as the port's render cache did (`render.py`: rectify,
   then downscale, JPEG q95).
 - It runs SAM 3.1 through the existing pinned loader (`get_segmenter`, the
-  head/tail stage's checkpoint `sam3/3.1@<sha12>`), with
-  `ScoredSam3Adapter(..., prompt=…)`.
+  head/tail stage's checkpoint `sam3/3.1@<sha12>`), through
+  `ScoredSam3Adapter(processor)`: the image is encoded once (`encoded`), then
+  each prompt asked of that encoding (`prompted(state, prompt)`).
   - Prompts are tried in the port's order, `("slate", "white board")`, at the
     port's confidence threshold of **0.3**. On the pool, "white board" won 253
     of 258 frames.

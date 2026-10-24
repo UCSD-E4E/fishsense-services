@@ -61,7 +61,7 @@ from fishsense_services_processor.automatic_frames.workflow import (
 from fishsense_services_processor.automatic_results.frames import (
     automatic_frame_result,
 )
-from fishsense_services_processor.headtail_predict.geometry import crop_origin
+from fishsense_core.fish.fish_at_dot import crop_origin
 
 FRAME_W, FRAME_H = 4014, 3016
 CROP_W, CROP_H = 1800, 1350
@@ -84,7 +84,15 @@ def _mask_at(x, y, half_len=200, half_h=60):
     return m
 
 
-class _Scored:
+class _ScoredSeam:
+    """core's `ScoredSegmenter` needs both seams: `segment` is `segment_scored`'s
+    masks, written once."""
+
+    def segment(self, image):
+        return [mask for mask, _ in self.segment_scored(image)]
+
+
+class _Scored(_ScoredSeam):
     """A scored segmenter: (mask, score) pairs, crop-local."""
 
     def __init__(self, pairs):
@@ -149,25 +157,37 @@ def test_the_kept_masks_score_is_the_one_under_the_dot():
     assert r.status == "predicted" and r.sam_score == pytest.approx(0.7)
 
 
-def test_a_kept_mask_whose_score_cannot_be_named_is_not_predicted(monkeypatch, caplog):
-    """The gate is SAM's score on the mask under the dot. If the kernel keeps
-    a mask but the score can't be named for it (the kernel's crop and ours
-    disagree), the row carried `predicted` with `sam_score` NULL -- and NULL
-    passed the table's gate (2026-10-15 gap audit). It is its own abstention,
-    `mask_unscored`, logged: a mismatch to count and fix, never the
-    scientific answer `laser_off_all_fish` (review of #85)."""
-    from fishsense_services_processor.automatic_results import frames
+class _BrokenScores(_ScoredSeam):
+    """A SAM build whose mask and score counts disagree: core's segmenter
+    raises ValueError before the gate."""
 
-    monkeypatch.setattr(frames._Gated, "score_at", lambda self, point: None)
+    def segment_scored(self, image):
+        raise ValueError("SAM 3.1 returned 2 masks but 1 scores")
 
+
+@pytest.mark.parametrize(
+    "segmenter",
+    [
+        _Scored([(_mask_at(*DOT), None)]),
+        _Scored([(_mask_at(*DOT), float("nan"))]),
+        _BrokenScores(),
+    ],
+    ids=["no-score", "nan-score", "counts-disagree"],
+)
+def test_a_mask_whose_score_is_unusable_is_its_own_abstention(segmenter, caplog):
+    """The gate is SAM's score on the mask under the dot (core #93). A score
+    that is missing, NaN, or not one per mask cannot be gated: core raises
+    ValueError, and the frame records `mask_unscored`, logged (review of
+    #349). Raised out of the activity, the frame would retry until the child
+    timed out and stall the dive's backlog behind it."""
     with caplog.at_level("WARNING"):
-        r = _result(_Scored([(_mask_at(*DOT), 0.81)]))
+        r = _result(segmenter)
 
     assert r.status == "mask_unscored"
-    assert any("unscored" in rec.getMessage() for rec in caplog.records)
     assert r.sam_score is None
     assert (r.head_x, r.head_y, r.tail_x, r.tail_y) == (None, None, None, None)
     assert r.laser_x == DOT[0]  # the dot itself is still the detector's
+    assert any("unscored" in rec.getMessage() for rec in caplog.records)
 
 
 def test_no_dot_is_an_abstention_and_nothing_is_segmented():
@@ -208,7 +228,7 @@ def _window_of(frame_mask, dot=DOT):
     return np.ascontiguousarray(frame_mask[oy : oy + CROP_H, ox : ox + CROP_W])
 
 
-class _Windowed:
+class _Windowed(_ScoredSeam):
     """A scored segmenter that answers the window and the whole frame each
     with their own masks, as SAM would see them."""
 
@@ -634,12 +654,12 @@ async def test_each_frame_logs_its_peak_gpu_memory(monkeypatch, caplog):
     assert any("peak_gpu_gib=5.00" in r.getMessage() for r in caplog.records)
 
 
-class _CudaDies:
+class _CudaDies(_ScoredSeam):
     def segment_scored(self, image):
         raise RuntimeError("CUDA error: unspecified launch failure")
 
 
-class _SomethingElse:
+class _SomethingElse(_ScoredSeam):
     def segment_scored(self, image):
         raise RuntimeError("shapes do not match")
 
@@ -740,23 +760,14 @@ async def test_a_frame_that_kept_no_mask_stores_nothing(segmenter, status):
     assert r.status == status and r.mask is None
 
 
-async def test_an_unscored_mask_passed_no_gate_and_is_not_stored():
-    class _Unscorable(_Scored):
-        def segment_scored(self, image):
-            return [(_mask_at(*DOT), 0.8)]
+async def test_an_unscored_mask_is_recorded_by_the_activity_and_not_stored():
+    """The real path (review of #349): SAM hands back a mask with no score;
+    the activity returns `mask_unscored` instead of raising, and stores no
+    mask."""
+    acts = _activities(_Store(), segmenter=_Scored([(_mask_at(*DOT), None)]))
 
-    acts = _activities(_Store(), segmenter=_Unscorable([]))
-    original = automatic_frames_module.automatic_frame_result
+    r = await ActivityEnvironment().run(acts.predict_automatic_frame, _with_mask())
 
-    def unscored(**kwargs):
-        r = original(**kwargs)
-        return r.model_copy(update={"status": "mask_unscored", "sam_score": None})
-
-    automatic_frames_module.automatic_frame_result = unscored
-    try:
-        r = await ActivityEnvironment().run(acts.predict_automatic_frame, _with_mask())
-    finally:
-        automatic_frames_module.automatic_frame_result = original
     assert r.status == "mask_unscored" and r.mask is None
 
 
@@ -775,3 +786,36 @@ async def test_a_mask_that_cannot_be_stored_costs_only_itself(failure):
         _activities(_Store(), put=put).predict_automatic_frame, _with_mask()
     )
     assert r.status == "predicted" and r.mask is None
+
+
+def test_the_shadow_adapter_refuses_masks_and_scores_that_do_not_pair():
+    """`ScoredSam3Adapter.prompted` pairs each mask with its score through
+    `pair_masks_and_scores`; a count mismatch would pair a mask with another's
+    score, and the shadow stage would keep the wrong slate (review of #349).
+    Core's segmenter refuses it; so does this."""
+    from fishsense_services_processor.automatic_results.frames import (
+        pair_masks_and_scores,
+    )
+
+    masks = [np.ones((4, 4), bool), np.zeros((4, 4), bool)]
+
+    with pytest.raises(ValueError, match="2 masks but 1 scores"):
+        pair_masks_and_scores(masks, [0.9])
+    assert [s for _, s in pair_masks_and_scores(masks, [0.9, 0.2])] == [0.9, 0.2]
+
+
+def test_the_shadow_adapter_refuses_missing_scores_before_copying_masks():
+    from fishsense_services_processor.automatic_results.frames import (
+        pair_masks_and_scores,
+    )
+
+    class _Mask:
+        copied = 0
+
+        def __array__(self, *args, **kwargs):
+            _Mask.copied += 1
+            return np.ones((4, 4), bool)
+
+    with pytest.raises(ValueError, match="without scores"):
+        pair_masks_and_scores([_Mask(), _Mask()], None)
+    assert _Mask.copied == 0
