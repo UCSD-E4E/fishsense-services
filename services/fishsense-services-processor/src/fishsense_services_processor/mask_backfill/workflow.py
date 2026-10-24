@@ -1,7 +1,8 @@
 """The mask backfill's GPU workflow: a chunk of predictions, one activity
 each, in parallel. A frame that fails every try is left out (its prediction
 keeps no mask, and is asked again by a later run); a worker that cannot run
-SAM fails the chunk, as the automatic frames stage's does."""
+SAM -- no GPU, or its weights cannot load (2026-10-24) -- fails the chunk, as
+the automatic frames stage's does."""
 
 from __future__ import annotations
 
@@ -17,6 +18,8 @@ with workflow.unsafe.imports_passed_through():
     import annotated_types  # noqa: F401  pylint: disable=unused-import
     import pydantic  # noqa: F401  pylint: disable=unused-import
 
+    from fishsense_services_contracts.refusals import SAM3_REFUSALS
+
     from fishsense_services_contracts.mask_backfill import (
         BackfilledMask,
         BackfillMasksInput,
@@ -25,7 +28,7 @@ with workflow.unsafe.imports_passed_through():
 __all__ = ["BackfillMasksWorkflow", "FRAME_ATTEMPTS"]
 
 FRAME_ATTEMPTS = 3
-_WORKER_REFUSALS = ("NoGpuForSam3",)
+_WORKER_REFUSALS = SAM3_REFUSALS
 
 
 @workflow.defn

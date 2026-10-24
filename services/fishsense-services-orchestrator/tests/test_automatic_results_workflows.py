@@ -359,6 +359,28 @@ class _FailingFrames:  # pylint: disable=too-few-public-methods
         raise ApplicationError("cannot finish", type="Boom", non_retryable=True)
 
 
+@activity.defn(name="_refuse")
+async def _refuse(error_type: str) -> None:
+    raise ApplicationError("the weights cannot load", type=error_type,
+                           non_retryable=True)  # fmt: skip
+
+
+@workflow.defn(name="PredictAutomaticFramesWorkflow")
+class _RefusingFrames:  # pylint: disable=too-few-public-methods
+    """The processor's refusal as it arrives: its frame activity's
+    non-retryable weights failure, re-raised by the child (the processor's
+    `automatic_frames.workflow`)."""
+
+    @workflow.run
+    async def run(self, payload: dict) -> list:
+        await _record_child()
+        await workflow.execute_activity(
+            "_refuse", "Sam3WeightsCorrupt",
+            start_to_close_timeout=timedelta(seconds=10),
+        )  # fmt: skip
+        return []
+
+
 @workflow.defn(name="PredictAutomaticFramesWorkflow")
 class _PartialFrames:  # pylint: disable=too-few-public-methods
     """One frame failed every try and is left out (the processor's rule)."""
@@ -412,7 +434,7 @@ class _Measure:  # pylint: disable=too-few-public-methods
 
 async def _run(
     workflow_cls=AutomaticResultsForMissionWorkflow, *args, species_fails=False,
-    frames_fail=False, frames_partial=False, **stubs,
+    frames_fail=False, frames_partial=False, frames_refuse=False, **stubs,
 ):  # fmt: skip
     EVENTS.clear()
     SELECTS.clear()
@@ -426,8 +448,9 @@ async def _run(
                    workflows=[AutomaticResultsForMissionWorkflow,
                               AutomaticResultsParentWorkflow]),
             Worker(env.client, task_queue=PROCESSOR_GPU_TASK_QUEUE,
-                   activities=[_record, _record_masks],
-                   workflows=[_FailingFrames if frames_fail
+                   activities=[_record, _record_masks, _refuse],
+                   workflows=[_RefusingFrames if frames_refuse
+                              else _FailingFrames if frames_fail
                               else _PartialFrames if frames_partial else _Frames,
                               _FailingSpecies if species_fails else _Species]),
             Worker(env.client, task_queue=PROCESSOR_TASK_QUEUE, activities=[_record],
@@ -621,6 +644,41 @@ async def test_a_mission_whose_step_fails_is_recorded_cleaned_up_and_passed_over
     ]
     assert [e[0] for e in EVENTS].count("cleanup") == 2
     assert not [e for e in EVENTS if e[0] == "persist calibration"]
+
+
+async def test_a_worker_refusal_is_no_strike_and_stops_the_drain():
+    """2026-10-24: a processor whose weights cannot load (or with no GPU)
+    refuses every frame alike. The frames child failing on it was recorded
+    as the dive's failure -- and the drain went on to the next dive, and the
+    next, a strike against each (at three the cohort leaves a dive for an
+    operator) for a fault in the pod. It is the worker's: nothing is recorded
+    against the dive or its frames, the scratch is cleaned up, the run stops
+    at the first dive, and says why."""
+    missions = [_target(), _target(), _target()]
+    report = await _run(
+        AutomaticResultsParentWorkflow, selected=missions, frames_refuse=True
+    )
+    assert report.stopped == "worker refused (Sam3WeightsCorrupt)"
+    assert [d.mission_id for d in report.missions] == [missions[0].mission_id]
+    (mission,) = report.missions
+    assert mission.failed is None
+    assert mission.refused.startswith("frames: Sam3WeightsCorrupt")
+    assert not [e for e in EVENTS if e[0] in ("failed", "frame failures")]
+    assert ("cleanup",) in EVENTS
+    assert len(SELECTS) == 1
+
+
+async def test_a_worker_refusal_fails_a_mission_run_by_hand_unrecorded():
+    """By hand, a refused dive must not read as done either -- but it is not
+    the dive's failure, so nothing is recorded against it."""
+    try:
+        await _run(AutomaticResultsForMissionWorkflow, TARGET, frames_refuse=True)
+    except WorkflowFailureError as exc:
+        assert exc.cause.type == "AutomaticWorkerRefused"
+    else:
+        raise AssertionError("a refused dive run by hand must fail")
+    assert not [e for e in EVENTS if e[0] in ("failed", "frame failures")]
+    assert ("cleanup",) in EVENTS
 
 
 async def test_a_mission_handed_back_twice_ends_the_run():

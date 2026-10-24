@@ -114,6 +114,8 @@ async def _pose(req: SlatePoseFramesInput) -> SlatePose:
     (frame,) = req.frames
     if frame.capture_id in FAIL:
         raise ApplicationError("boom")
+    if str(frame.capture_id).startswith("11111111"):
+        raise ApplicationError("weights", type="Sam3WeightsCorrupt", non_retryable=True)
     if str(frame.capture_id).startswith("00000000"):
         raise ApplicationError("no GPU", type="NoGpuForSam3", non_retryable=True)
     return SlatePose(capture_id=frame.capture_id, status="posed")
@@ -146,3 +148,11 @@ async def test_each_frame_is_posed_and_one_failing_every_try_is_recorded():
 async def test_a_worker_that_cannot_run_sam_fails_the_child():
     with pytest.raises(WorkflowFailureError):
         await _run([uuid.UUID(int=1)])
+
+
+async def test_a_weights_failure_fails_the_child_rather_than_its_frames():
+    """2026-10-24: weights that cannot load are the worker's, as no GPU is;
+    charged to each frame, every frame of the mission was failed for it."""
+    with pytest.raises(WorkflowFailureError) as e:
+        await _run([uuid.UUID("11111111-0000-0000-0000-000000000001"), uuid.uuid4()])
+    assert e.value.cause.cause.type == "Sam3WeightsCorrupt"

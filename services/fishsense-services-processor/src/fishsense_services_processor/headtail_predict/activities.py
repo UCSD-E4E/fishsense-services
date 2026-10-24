@@ -29,10 +29,7 @@ from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
-from fishsense_core.models import ModelIntegrityError, ModelUnavailable
-from pydantic import ValidationError
 from temporalio import activity
-from temporalio.exceptions import ApplicationError
 
 from fishsense_services_contracts.headtail import (
     HEADTAIL_FALLBACK_PREDICTOR_VERSION,
@@ -42,8 +39,10 @@ from fishsense_services_contracts.headtail import (
     PredictHeadtailImage,
 )
 from fishsense_services_contracts.masks import KEPT_MASK_STATUSES
+from fishsense_services_contracts.refusals import SAM3
 from fishsense_services_processor.masks import MaskSink, Put, store_mask_or_none
 from fishsense_services_processor.renders.activities import http_put
+from fishsense_services_processor.weights import refuse_unloadable_weights
 from fishsense_services_processor.headtail_predict.predict import (
     FALLBACK_CHECKPOINT,
     PredictOptions,
@@ -60,24 +59,6 @@ __all__ = ["HeadtailPredictActivities"]
 
 def _core_version() -> str:
     return version("fishsense-core")
-
-
-#: Why SAM 3.1's weights cannot load, by what the fetch raised: each its own
-#: Temporal error type, so a failed child says which (see
-#: `_verified_sam3_checkpoint`). The weights' settings (`ValidationError`) are
-#: read on first use, inside the fetch; `KeyError` is a fishsense-core whose
-#: manifest has no SAM 3.1 entry. `Sam3SettingsInvalid` keeps its name from
-#: when it also covered the `FISHSENSE_SAM3_*` pin (gone 2026-10-23, now
-#: core's), so failures already recorded under it still read the same.
-_WEIGHTS_FAILURES: tuple[tuple[type[BaseException], str, str], ...] = (
-    (ValidationError, "Sam3SettingsInvalid",
-     "FISHSENSE_MODEL_WEIGHTS_* is missing or invalid"),
-    (ModelIntegrityError, "Sam3WeightsCorrupt",
-     "the checkpoint in model-weights is not the pinned file"),
-    (ModelUnavailable, "Sam3WeightsUnavailable",
-     "the checkpoint is not in model-weights"),
-    (KeyError, "Sam3NotInManifest", "the manifest has no SAM 3.1 entry"),
-)  # fmt: skip
 
 
 class HeadtailPredictActivities:  # pylint: disable=too-few-public-methods
@@ -103,23 +84,19 @@ class HeadtailPredictActivities:  # pylint: disable=too-few-public-methods
         return self._store
 
     async def _verified_sam3_checkpoint(self) -> tuple[Path, str]:
-        """SAM 3.1's checkpoint, or a non-retryable failure naming why not.
+        """SAM 3.1's checkpoint, or a non-retryable failure naming why not
+        (``Sam3SettingsInvalid``, ``Sam3WeightsCorrupt``,
+        ``Sam3WeightsUnavailable``, ``Sam3NotInManifest``; the shared
+        `weights.refuse_unloadable_weights` since 2026-10-24).
 
         None of these is the image's, and none passes on a retry: left plain,
-        every image of the dive retries without limit (the child workflow
-        sets no retry policy) until its timeout, each attempt re-downloading
-        and re-hashing gigabytes, since core caches only a verified file."""
-        try:
+        every image of the dive retried (without limit until 2026-10-24, when
+        the workflow had no retry policy), each attempt re-downloading and
+        re-hashing gigabytes, since core caches only a verified file. The
+        automatic frames, mask backfill, slate pose and shadow stages reuse
+        this method for their SAM 3.1."""
+        with refuse_unloadable_weights(SAM3, "SAM 3.1"):
             return await self._sam3_checkpoint()
-        except tuple(cause for cause, _, _ in _WEIGHTS_FAILURES) as exc:
-            error_type, why = next(
-                (t, w) for cause, t, w in _WEIGHTS_FAILURES if isinstance(exc, cause)
-            )
-            raise ApplicationError(
-                f"SAM 3.1's weights cannot load: {why}: {exc}",
-                type=error_type,
-                non_retryable=True,
-            ) from exc
 
     @activity.defn(name="predict_headtail_image")
     async def predict_headtail_image(

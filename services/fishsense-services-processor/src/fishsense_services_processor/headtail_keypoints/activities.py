@@ -2,7 +2,9 @@
 (`predict.keypoints_frame`), its render read by presigned GET. A render not
 there or not decoding is the frame's status; a worker without CUDA refuses
 (the model was trained and evaluated under CUDA bf16 autocast, which core
-uses only on CUDA)."""
+uses only on CUDA). Weights that cannot load are the worker's too, a
+non-retryable ``HeadtailKeypoints{kind}`` (2026-10-24: before, each frame
+retried the load three times and was recorded ``failed``)."""
 
 from __future__ import annotations
 
@@ -17,7 +19,9 @@ from fishsense_services_contracts.headtail_keypoints import (
     KeypointFrame,
     KeypointResult,
 )
+from fishsense_services_contracts.refusals import HEADTAIL_KEYPOINTS
 from fishsense_services_processor.headtail_keypoints.predict import keypoints_frame
+from fishsense_services_processor.weights import refuse_unloadable_weights
 
 __all__ = ["HeadtailKeypointActivities"]
 
@@ -56,7 +60,8 @@ class HeadtailKeypointActivities:  # pylint: disable=too-few-public-methods
             activity.logger.warning("capture=%s: render unavailable: %s",
                                     frame.capture_id, exc)  # fmt: skip
             return KeypointResult(**ids, status="render_unavailable")
-        detector = await asyncio.to_thread(self._detector)
+        with refuse_unloadable_weights(HEADTAIL_KEYPOINTS, "the keypoint model"):
+            detector = await asyncio.to_thread(self._detector)
         try:
             found = await asyncio.to_thread(
                 keypoints_frame, jpeg, frame.mask_bbox, detector

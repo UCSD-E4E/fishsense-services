@@ -50,6 +50,7 @@ async def _planner(tenant: str, numbers: List[int]) -> dict:
 
 
 NO_GPU: List[str] = []
+REFUSED: List[str] = []
 
 
 @workflow.defn(name="AutomaticResultsForDiveWorkflow")
@@ -66,6 +67,11 @@ class _ForMission:  # pylint: disable=too-few-public-methods
                 "species_failed": False,
                 "no_gpu": "unavailable",
             }
+        if target["dive_id"] in REFUSED:
+            raise ApplicationError(
+                "frames: Sam3WeightsCorrupt: ...", type="AutomaticWorkerRefused",
+                non_retryable=True,
+            )  # fmt: skip
         if target["dive_id"] == str(MISSIONS[1]):
             raise ApplicationError(
                 "boom", type="AutomaticStepFailed", non_retryable=True
@@ -180,6 +186,23 @@ async def test_apply_stops_at_the_first_mission_with_no_gpu():
     assert RAN == [f"automatic-results-{MISSIONS[0]}"]
     assert report["stopped"] == "no GPU (unavailable)"
     assert [d["mission_id"] for d in report["missions"]] == [str(MISSIONS[0])]
+
+
+async def test_apply_stops_at_the_first_mission_the_processor_refuses():
+    """2026-10-24: a processor whose weights cannot load (or with no GPU)
+    refuses every dive alike; the run stops at the first, and says why,
+    rather than walking every dive into the same refusal."""
+    REFUSED[:] = [str(MISSIONS[0])]
+    try:
+        report = await _run(sut.RunAutomaticMissionsInput(
+            tenant="lab", numbers=[60, 61, 62], apply=True,
+            expected_plan_sha256=sut.plan_digest(_plan())))  # fmt: skip
+    finally:
+        REFUSED.clear()
+
+    assert RAN == [f"automatic-results-{MISSIONS[0]}"]
+    assert report["stopped"] == "worker refused"
+    assert "Sam3WeightsCorrupt" in report["missions"][0]["error"]
 
 
 def test_a_plan_from_before_the_rename_reads_the_same_and_keeps_its_digest():

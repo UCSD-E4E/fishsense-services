@@ -29,20 +29,41 @@ v2 changes:
 fishsense-core 4.1.0's manifest had no SAM 3.1 entry, so the head/tail stage
 passed its own one-entry manifest from settings; core pins it since 4.2.0, and
 every model here now resolves through core's built-in manifest (2026-10-23).
+
+**Weights that cannot load are the worker's, not the frame's**
+(`refuse_unloadable_weights`, 2026-10-24). Every stage loads its model inside
+it, so bad settings, bytes that aren't the pinned file, an object missing
+from the bucket, or no manifest entry fail the activity non-retryably as
+``{model}{kind}`` (`fishsense_services_contracts.refusals`). Before, the
+head/tail, slate and species stages each kept a copy of the mapping, and the
+laser detector and the keypoint model had none: each frame re-downloaded and
+re-hashed the checkpoint on every try, and the workflows that leave a
+failing frame out charged the pod's fault to every frame of the mission.
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
-from fishsense_core.models import Manifest, ModelRef, ModelUnavailable, fetch
-from pydantic import SecretStr, field_validator
+from fishsense_core.models import (
+    Manifest,
+    ModelIntegrityError,
+    ModelRef,
+    ModelUnavailable,
+    fetch,
+)
+from pydantic import SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from temporalio.exceptions import ApplicationError
+
+from fishsense_services_contracts.refusals import WEIGHTS_FAILURE_KINDS
 
 __all__ = [
     "GarageWeightStore",
@@ -50,6 +71,7 @@ __all__ = [
     "afetch_weights",
     "fetch_weights",
     "model_key",
+    "refuse_unloadable_weights",
 ]
 
 # botocore surfaces a missing key as one of these `Error.Code` values,
@@ -212,3 +234,50 @@ async def afetch_weights(
         cache_dir=cache_dir,
         manifest=manifest,
     )
+
+
+#: What a load raises when the weights cannot load, and why, in
+#: `WEIGHTS_FAILURE_KINDS`' order. The settings (`ValidationError`) are read
+#: on first use, inside the load; `KeyError` is a manifest with no such entry.
+#: `ModelUnavailable` is final too: this store raises it only for a key the
+#: bucket lacks (`GarageWeightStore.download_to`), which a retry cannot add;
+#: any other S3 error (an outage, a 5xx, a 403) propagates as itself, and
+#: stays retryable.
+_CAUSES: tuple[tuple[type[BaseException], str], ...] = tuple(
+    zip(
+        (ValidationError, ModelIntegrityError, ModelUnavailable, KeyError),
+        (
+            "{settings} is missing or invalid",
+            "the file in model-weights is not the pinned one",
+            "the file is not in model-weights",
+            "the manifest has no entry for it",
+        ),
+    )
+)
+
+
+@contextmanager
+def refuse_unloadable_weights(
+    model: str,
+    label: str,
+    *,
+    settings: str = "FISHSENSE_MODEL_WEIGHTS_*",
+) -> Iterator[None]:
+    """Run a model's load; weights that cannot load leave it as a
+    non-retryable `ApplicationError` of type ``{model}{kind}`` (``model`` is
+    one of `fishsense_services_contracts.refusals`' names), saying which
+    cause. ``label`` names the model in the message, ``settings`` the
+    settings it reads. Anything else propagates unchanged."""
+    try:
+        yield
+    except tuple(cause for cause, _ in _CAUSES) as exc:
+        kind, why = next(
+            (kind, why)
+            for (cause, why), kind in zip(_CAUSES, WEIGHTS_FAILURE_KINDS)
+            if isinstance(exc, cause)
+        )
+        raise ApplicationError(
+            f"{label}'s weights cannot load: {why.format(settings=settings)}: {exc}",
+            type=f"{model}{kind}",
+            non_retryable=True,
+        ) from exc

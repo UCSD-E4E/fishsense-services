@@ -12,7 +12,12 @@ workflow, and every other frame's work with it. Each frame now gets
 `FRAME_ATTEMPTS` tries; one that fails them all is missing from the result,
 which the orchestrator persists, recording each frame left out against the
 frame (0044) -- not the dive. A worker's refusal (`NoGpuForSam3`) is not a
-frame's: it fails this run with its cause (review of #85).
+frame's: it fails this run with its cause (review of #85). Nor are weights
+that cannot load, SAM 3.1's or the laser detector's (2026-10-24): left out,
+every frame of the mission was recorded as a frame failure for a fault in
+the pod, and given up as ``frame_failed`` at three runs. The refusals are
+`fishsense_services_contracts.refusals.AUTOMATIC_FRAME_REFUSALS`, which the
+orchestrator reads too.
 """
 
 import asyncio
@@ -27,6 +32,8 @@ with workflow.unsafe.imports_passed_through():
     import annotated_types  # noqa: F401  pylint: disable=unused-import
     import pydantic  # noqa: F401  pylint: disable=unused-import
 
+    from fishsense_services_contracts.refusals import AUTOMATIC_FRAME_REFUSALS
+
     from fishsense_services_contracts.automatic_results import (
         AutomaticFrameResult,
         PredictAutomaticFrameInput,
@@ -38,7 +45,7 @@ __all__ = ["FRAME_ATTEMPTS", "PredictAutomaticFramesWorkflow"]
 FRAME_ATTEMPTS = 3
 #: The worker's refusals, not a frame's: every frame would refuse alike, so
 #: the run fails with the cause rather than leaving each frame out.
-_WORKER_REFUSALS = ("NoGpuForSam3",)
+_WORKER_REFUSALS = AUTOMATIC_FRAME_REFUSALS
 _FRAME_RETRY = RetryPolicy(
     initial_interval=timedelta(seconds=10),
     maximum_attempts=FRAME_ATTEMPTS,

@@ -25,8 +25,10 @@ counts, which drift as frames are done). Then it runs each dive's
 uses -- and reports each: one dive failing (its failure is recorded against
 the dive) stops none of the others, but a dive whose GPU steps were skipped
 for want of a GPU stops the run (`stopped`): every dive behind it would wait
-out the wake and skip too. `apply` starts the run and returns its
-workflow id; the report is the workflow's result.
+out the wake and skip too. So does a dive the processor refused (no GPU for
+SAM 3.1, weights that cannot load: `AutomaticWorkerRefused`, 2026-10-24):
+every dive behind it would be refused alike. `apply` starts the run and
+returns its workflow id; the report is the workflow's result.
 """
 
 from __future__ import annotations
@@ -42,7 +44,10 @@ from typing import List, Optional, Sequence
 
 from temporalio import workflow
 
-from fishsense_services_orchestrator.automatic_results.workflow import RUN_TIMEOUT
+from fishsense_services_orchestrator.automatic_results.workflow import (
+    REFUSAL_PATCH,
+    RUN_TIMEOUT,
+)
 from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
 from temporalio.exceptions import (
     ApplicationError,
@@ -146,6 +151,7 @@ class RunAutomaticMissionsWorkflow:
             }
             row = {"number": mission["number"], "mission_id": mission["mission_id"],
                    "report": None, "error": None}  # fmt: skip
+            refused = False
             try:
                 row["report"] = await workflow.execute_child_workflow(
                     "AutomaticResultsForDiveWorkflow",
@@ -157,12 +163,20 @@ class RunAutomaticMissionsWorkflow:
                 )
             except ChildWorkflowError as exc:
                 row["error"] = str(exc.cause or exc)
+                refused = (
+                    isinstance(exc.cause, ApplicationError)
+                    and exc.cause.type == "AutomaticWorkerRefused"
+                )
             except WorkflowAlreadyStartedError:
                 row["error"] = "already running (another by-hand run has it)"
             workflow.logger.info(
                 "automatic run: dive %s %s", mission["number"], row["error"] or "done"
             )
             report["missions"].append(row)
+            # A processor's refusal is every dive's alike (2026-10-24): stop.
+            if refused and workflow.patched(REFUSAL_PATCH):
+                report["stopped"] = "worker refused"
+                break
             # With no GPU every dive behind this one would wait out the wake
             # and skip too (2026-10-18, the first validation run): stop, as
             # the backlog's drain does.

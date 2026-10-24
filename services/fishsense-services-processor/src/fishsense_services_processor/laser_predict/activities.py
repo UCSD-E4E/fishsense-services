@@ -31,7 +31,14 @@ v2 changes:
   the GPU role loads this model;
 * the raw frame is an `ObjectRef`, streamed to a temporary file;
 * the checkpoint recorded is core's canonical name for it (resolved by
-  content), not a path's basename.
+  content), not a path's basename;
+* **weights that cannot load are final** (2026-10-24): settings missing,
+  bytes that aren't the pinned file, an object not in the bucket, or no
+  manifest entry fail non-retryably as ``LaserDetector{kind}``
+  (`weights.refuse_unloadable_weights`). Before, each frame retried the
+  download until its tries ran out -- without limit here, where the
+  workflow sets no retry policy -- and in the automatic frames (whose dot
+  comes from this detector) every frame of the mission was left out for it.
 
 torch and the checkpoint are only needed at run time, so `fishsense_core.laser`
 and `LinearRawImage` are imported lazily, as in v1.
@@ -54,6 +61,7 @@ from fishsense_services_contracts.laser import (
     LaserPredictionResult,
 )
 from fishsense_services_contracts.laser_region import point_in_laser_region
+from fishsense_services_contracts.refusals import LASER_DETECTOR
 from fishsense_services_contracts.object_store import ObjectStoreConnection
 from fishsense_services_processor.laser_predict.laser_color import (
     classify_laser_color,
@@ -63,6 +71,7 @@ from fishsense_services_processor.laser_predict.workflow import (
     PredictLaserImageInput,
 )
 from fishsense_services_processor.object_store import ProcessorObjectStore
+from fishsense_services_processor.weights import refuse_unloadable_weights
 
 __all__ = ["predict_laser_image"]
 
@@ -91,14 +100,17 @@ def _load_detector() -> Any:
 
 
 def _get_detector() -> Any:
-    """The process-wide detector, loaded on first use (double-checked lock)."""
+    """The process-wide detector, loaded on first use (double-checked lock).
+    Weights that cannot load are a non-retryable ``LaserDetector{kind}``,
+    and nothing is cached, so a fixed pod loads on its next try."""
     global _DETECTOR  # pylint: disable=global-statement
     if _DETECTOR is not None:
         return _DETECTOR
     with _DETECTOR_LOCK:
         if _DETECTOR is None:
             _log.info("loading LaserDetector from the model-weights store")
-            _DETECTOR = _load_detector()
+            with refuse_unloadable_weights(LASER_DETECTOR, "the laser detector"):
+                _DETECTOR = _load_detector()
     return _DETECTOR
 
 
