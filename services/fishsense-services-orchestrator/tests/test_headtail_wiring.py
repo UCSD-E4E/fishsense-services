@@ -304,7 +304,9 @@ async def test_prediction_runs_across_the_orchestrator_and_the_processor(monkeyp
         "predicted",
         laser,
     )
-    assert row.predictor_version == -1, "the fallback tier, so it stays stale"
+    assert (
+        row.predictor_version == HEADTAIL_FALLBACK_PREDICTOR_VERSION
+    ), "the fallback tier, so it stays stale"
     assert backfilled == [target]
     # v2 (contract 5): the kept mask's box reaches the row, around the dot --
     # what the species pre-annotation stage crops by.

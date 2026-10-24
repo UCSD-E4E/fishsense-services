@@ -229,9 +229,12 @@ def predict_from_jpeg(
     given, names one label per laser point: the result names the label of the
     dot core reports (`FishAtDot.dot`)."""
     if laser_label_ids and len(laser_label_ids) != len(laser_points):
-        raise ValueError(
+        # A caller's bug: every retry gets the same payload (review of #349).
+        raise ApplicationError(
             f"{len(laser_label_ids)} laser label ids for {len(laser_points)} "
-            "laser points: one per dot, or none"
+            "laser points: one per dot, or none",
+            type="LaserLabelsMismatch",
+            non_retryable=True,
         )
     options = options or PredictOptions()
     found = find_fish_in_jpeg(jpeg_bytes, laser_points, segmenter, options, mask_sink)

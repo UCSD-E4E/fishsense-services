@@ -191,9 +191,14 @@ def test_a_label_for_every_dot_or_none_at_all():
     """The label is looked up by the dot core names (`FishAtDot.dot`), so a
     list of labels that does not match the dots is a caller's bug, refused.
     The old `zip` truncated it silently and named no label."""
-    with pytest.raises(ValueError, match="laser"):
+    from temporalio.exceptions import ApplicationError
+
+    with pytest.raises(ApplicationError, match="laser") as raised:
         _predict(_jpeg(), [(1800.0, 1500.0), (2300.0, 1500.0)], _Stub([]),
                  laser_label_ids=[uuid.uuid4()])  # fmt: skip
+    # Deterministic: a retry gets the same payload (review of #349).
+    assert raised.value.non_retryable
+    assert raised.value.type == "LaserLabelsMismatch"
 
 
 def test_the_kernel_is_cores():

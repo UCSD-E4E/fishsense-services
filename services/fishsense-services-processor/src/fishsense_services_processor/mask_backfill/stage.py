@@ -34,9 +34,9 @@ _ACTIVITIES = MaskBackfillActivities(
     store_factory=_store,
     sam3_checkpoint=_SAM3,
     cuda_available=cuda_available,
-    # Core's SAM 3.1 seam scores its masks too: one class for both paths.
-    scored_segmenter=lambda path: Sam3Segmenter(get_segmenter(path)),
-    plain_segmenter=lambda path: Sam3Segmenter(get_segmenter(path)),
+    # Core's SAM 3.1 seam serves both paths: scored for the automatic gate,
+    # plain for head/tail.
+    segmenter=lambda path: Sam3Segmenter(get_segmenter(path)),
 )
 
 STAGE = Stage(

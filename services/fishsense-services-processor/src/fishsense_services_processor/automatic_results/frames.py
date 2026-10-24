@@ -21,15 +21,18 @@ re-implemented; what this adds is
 grow_cut_masks=True, score_gate=AUTOMATIC_SAM_SCORE_GATE)`, core #93): masks
 under it are dropped before the laser gate, on both passes, and the kept
 mask's score comes back on `FishAtDot.score`. That is the rule this module's
-`_Gated` wrapper applied, so outputs are unchanged. Under a gate core always
-reports the kept mask's score, and refuses a SAM build that returns none on
-its first frame (`ValueError`), so `mask_unscored` is no longer produced.
+`_Gated` wrapper applied, so outputs are unchanged for usable scores. A score
+that is missing, NaN, or not one per mask cannot be gated: core raises
+`ValueError`, and the frame records `mask_unscored`, logged, rather than
+retrying until its child times out (review of #349; `_Gated` dropped a NaN
+mask silently and paired mismatched counts by `zip`).
 `ScoredSam3Adapter` keeps only `encoded` / `prompted` (several prompts on one
 encoding), which core did not port and the shadow calibration uses.
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from typing import Any, List, Optional, Tuple
@@ -48,6 +51,8 @@ from fishsense_services_processor.headtail_predict.predict import (
 )
 
 __all__ = ["LaserDot", "ScoredSam3Adapter", "automatic_frame_result"]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -93,19 +98,25 @@ def automatic_frame_result(
     if is_slate:
         return AutomaticFrameResult(status="slate_frame", **base)
 
-    found = find_fish_in_jpeg(
-        jpeg_bytes,
-        [[dot.x, dot.y]],
-        segmenter,
-        PredictOptions(
-            checkpoint=checkpoint,
-            core_version=core_version,
-            predictor_version=AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
-            grow_cut_masks=True,
-        ),
-        mask_sink=mask_sink,
-        score_gate=gate,
-    )
+    try:
+        found = find_fish_in_jpeg(
+            jpeg_bytes,
+            [[dot.x, dot.y]],
+            segmenter,
+            PredictOptions(
+                checkpoint=checkpoint,
+                core_version=core_version,
+                predictor_version=AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
+                grow_cut_masks=True,
+            ),
+            mask_sink=mask_sink,
+            score_gate=gate,
+        )
+    except ValueError as exc:
+        # SAM's scores cannot be gated (missing, NaN, or not one per mask).
+        # Recorded, not raised: the same frame fails the same way every try.
+        logger.warning("automatic frame capture=%s: mask unscored: %s", capture_id, exc)
+        return AutomaticFrameResult(status="mask_unscored", **base)
     if found is None:
         return AutomaticFrameResult(status="decode_failed", **base)
     head = found.head or (None, None)
@@ -166,10 +177,22 @@ class ScoredSam3Adapter:
             state = self._processor.set_text_prompt(prompt, state)
         if not hasattr(state, "get") or state.get("masks") is None:
             return []
-        scores = state.get("scores")
-        masks = [to_numpy(m).squeeze() for m in state["masks"]]
-        if scores is None:
-            raise ValueError("SAM 3.1 returned masks without scores")
-        if getattr(scores, "float", None) is not None:
-            scores = scores.float()  # numpy has no bfloat16
-        return list(zip(masks, (float(s) for s in to_numpy(scores).reshape(-1))))
+        return pair_masks_and_scores(state["masks"], state.get("scores"))
+
+
+def pair_masks_and_scores(masks: Any, scores: Any) -> List[Tuple[np.ndarray, float]]:
+    """SAM's masks, each with its own score, as core's `Sam3Segmenter` pairs
+    them: refused when there are no scores (checked before any mask is copied
+    to the host) or when the counts differ, which `zip` would have paired
+    wrongly (review of #349)."""
+    if scores is None:
+        raise ValueError("SAM 3.1 returned masks without scores")
+    if getattr(scores, "float", None) is not None:
+        scores = scores.float()  # numpy has no bfloat16
+    values = [float(s) for s in to_numpy(scores).reshape(-1)]
+    masks = list(masks)
+    if len(values) != len(masks):
+        raise ValueError(
+            f"SAM 3.1 returned {len(masks)} masks but {len(values)} scores"
+        )
+    return [(to_numpy(m).squeeze(), v) for m, v in zip(masks, values)]
