@@ -34,15 +34,22 @@ the api excludes stored calibrations on the same numbers), and
 `REFUSAL_REMEDIES`, the operator text core no longer carries -- passed to
 every gate, so stored refusal messages are byte-identical to before the move
 (`tests/test_calibration_refusal_messages.py`). Two departures come with
-core's versions: a non-finite observation is dropped by the trim (and counted
-as trimmed) instead of being fitted, and a malformed array raises `TypeError`
-rather than a refusal. `fit_laser` reshapes its inputs, so the second cannot
-reach it.
+core's versions: a non-finite observation is dropped instead of being fitted,
+and a malformed array raises `TypeError` rather than a refusal. `fit_laser`
+reshapes its inputs, so the second cannot reach it.
+
+A non-finite observation (a failed pose or depth) is not an observation, so
+`fit_laser` drops it with its dot before anything counts (review of #351):
+too few real observations get the producer's own refusal rather than a bare
+`ValueError` from the kernel or the geometry gate's, `observation_count`
+counts only real ones, and `observations_trimmed` stays the outlier count the
+producers log it as. Neither producer hands the fit such a row today.
 """
 
 from __future__ import annotations
 
 import importlib.metadata
+import logging
 from collections.abc import Callable
 
 import numpy as np
@@ -111,6 +118,8 @@ GATES = (
 REFUSED = "refused"
 NOT_RUN = "not_run"
 
+_log = logging.getLogger(__name__)
+
 _REFUSALS = (
     CalibrationUnderdeterminedError,
     CalibrationInconsistentError,
@@ -125,11 +134,28 @@ def _core_version() -> str:
 
 def _lever_arm(points: np.ndarray) -> float:
     """The observations' spread along the optical axis: what fixes the fitted
-    direction (`check_observation_geometry`'s quantity)."""
+    direction (`check_observation_geometry`'s quantity). Core keeps its own
+    copy inside the gate and does not expose it;
+    `test_the_recorded_lever_arm_is_the_one_the_gate_judges` pins the two
+    together."""
     finite = points[np.isfinite(points).all(axis=1)] if len(points) else points
     if len(finite) < 2:
         return 0.0
     return float(finite[:, 2].max() - finite[:, 2].min())
+
+
+def _kept(observations: np.ndarray, fitted: np.ndarray) -> np.ndarray:
+    """Which rows of `observations` the trim kept, as a mask. Core's trim
+    returns the kept rows themselves, in order, so they are matched back."""
+    kept = np.zeros(len(observations), dtype=bool)
+    j = 0
+    for i, row in enumerate(observations):
+        if j < len(fitted) and np.array_equal(row, fitted[j]):
+            kept[i] = True
+            j += 1
+    if j != len(fitted):
+        raise AssertionError("the trim returned rows it was not given")
+    return kept
 
 
 def fit_laser(
@@ -148,7 +174,15 @@ def fit_laser(
     `InsufficientCheckerboardPoints` for the board). The reason is built from
     `(count, minimum)`, so each keeps v1's wording.
     """
-    observations = np.asarray(points, dtype=float).reshape(-1, 3)
+    given = np.asarray(points, dtype=float).reshape(-1, 3)
+    finite = np.isfinite(given).all(axis=1)
+    if not finite.all():
+        _log.warning(
+            "dropping %d non-finite of %d laser observations before the fit",
+            int((~finite).sum()),
+            len(given),
+        )
+    observations = given[finite]
     count = len(observations)
     core = _core_version()
     not_run = dict.fromkeys(GATES, NOT_RUN)
@@ -173,18 +207,25 @@ def fit_laser(
     # the line -- and because the fit reports the z=0 crossing, a metre or
     # more behind the observations, a small angular error is levered into a
     # large baseline error. Dive 103's 6.25 cm baseline came from 17
-    # otherwise clean observations. Core's trim also drops non-finite rows,
-    # which count as trimmed.
+    # otherwise clean observations.
     fitted_points = trim_outlying_observations(observations)
     trimmed = count - len(fitted_points)
+    kept = _kept(observations, fitted_points)
     # `calibrate_laser` casts to the kernel's float32 itself.
     origin, orientation = _calibrate_laser(fitted_points)
     # The Rust kernel returns the origin with z=0 implicit; pad to a 3-vector.
     laser_position = np.array([float(origin[0]), float(origin[1]), 0.0])
     laser_axis = np.asarray(orientation, dtype=float)
     matrix = np.asarray(camera_matrix, dtype=float)
-    fit_dots = np.asarray(dots, dtype=float).reshape(-1, 2)
-    dive_dots = np.asarray(mission_dots, dtype=float).reshape(-1, 2)
+
+    # The dots are read only by the gates that need them, so a malformed
+    # payload cannot pre-empt an earlier gate's recorded refusal. The fit's
+    # own dots are those of the points it fitted.
+    def fit_dots() -> np.ndarray:
+        return np.asarray(dots, dtype=float).reshape(-1, 2)[finite][kept]
+
+    def dive_dots() -> np.ndarray:
+        return np.asarray(mission_dots, dtype=float).reshape(-1, 2)
 
     verdicts = dict(not_run)
     gates = (
@@ -202,7 +243,7 @@ def fit_laser(
                 laser_position,
                 laser_axis,
                 matrix,
-                fit_dots,
+                fit_dots(),
                 remedies=REFUSAL_REMEDIES,
             ),
         ),
@@ -226,7 +267,7 @@ def fit_laser(
                 laser_position,
                 laser_axis,
                 matrix,
-                dive_dots,
+                dive_dots(),
                 remedies=REFUSAL_REMEDIES,
             ),
         ),
