@@ -120,6 +120,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{slug}/automatic/lengths": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Lengths
+         * @description The tenant's current automatic lengths, by mission and capture
+         *     number; ``species`` keeps one, by scientific name. Unvalidated.
+         */
+        get: operations["list_automatic_lengths"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{slug}/captures/{capture_id}/automatic": {
         parameters: {
             query?: never;
@@ -369,6 +390,26 @@ export interface paths {
         };
         /** Get Mission */
         get: operations["get_mission_automatic"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/missions/{number}/automatic/lengths": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Mission Lengths
+         * @description One mission's current automatic lengths, by capture number.
+         */
+        get: operations["list_mission_automatic_lengths"];
         put?: never;
         post?: never;
         delete?: never;
@@ -894,6 +935,53 @@ export interface components {
             status: string;
             tail: components["schemas"]["PixelPoint"] | null;
         };
+        /** AutomaticLengthPageView */
+        AutomaticLengthPageView: {
+            /** Lengths */
+            lengths: components["schemas"]["AutomaticLengthView"][];
+            /** Next */
+            next: string | null;
+        };
+        /** AutomaticLengthView */
+        AutomaticLengthView: {
+            /** Calibration Source */
+            calibration_source: string;
+            /**
+             * Capture Id
+             * Format: uuid
+             */
+            capture_id: string;
+            /** Capture Number */
+            capture_number: number;
+            /** Captured At */
+            captured_at: string | null;
+            /** Depth M */
+            depth_m: number | null;
+            /** Human Length M */
+            human_length_m: number | null;
+            /** Laser Confidence */
+            laser_confidence: number | null;
+            /** Length M */
+            length_m: number;
+            /** Mission Human Measured */
+            mission_human_measured: boolean;
+            /** Mission Number */
+            mission_number: number;
+            /** Reviews */
+            reviews: {
+                [key: string]: components["schemas"]["KindReviewView"];
+            };
+            /** Sam Score */
+            sam_score: number | null;
+            /** Scientific Name */
+            scientific_name: string | null;
+            /** Species */
+            species: string | null;
+            /** Species Margin */
+            species_margin: number | null;
+            /** Species Probability */
+            species_probability: number | null;
+        };
         /** CaptureCardPage */
         CaptureCardPage: {
             /** Captures */
@@ -1167,6 +1255,15 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** KindReviewView */
+        KindReviewView: {
+            /** Action */
+            action: string | null;
+            /** Pending */
+            pending: boolean;
+            /** Reason */
+            reason: string | null;
         };
         /** LaserEvidenceView */
         LaserEvidenceView: {
@@ -2078,6 +2175,41 @@ export interface operations {
             };
         };
     };
+    list_automatic_lengths: {
+        parameters: {
+            query?: {
+                species?: string | null;
+                after?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutomaticLengthPageView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_automatic_frame: {
         parameters: {
             query?: never;
@@ -2622,6 +2754,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MissionAutomaticView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_mission_automatic_lengths: {
+        parameters: {
+            query?: {
+                after?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                number: number;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutomaticLengthPageView"];
                 };
             };
             /** @description Validation Error */
