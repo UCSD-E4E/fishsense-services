@@ -48,7 +48,7 @@ from fishsense_services_processor.calibration.geometry import (
     laser_point_on_plane,
     plane_from_correspondences,
 )
-from fishsense_services_processor.calibration.consistency import (
+from fishsense_core.calibration_checks import (
     CalibrationUnderdeterminedError,
     check_observation_geometry,
 )
