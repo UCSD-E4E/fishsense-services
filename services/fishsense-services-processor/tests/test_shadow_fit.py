@@ -10,7 +10,10 @@ between their axes (`angle_deg`), and the bootstrap SE (`se_deg`).
 The fixture (`fixtures/shadow_pool.json`, built by
 analysis/shadow_calibration/build_pool_fixture.py from cscw's own loaders)
 holds each session's inputs and the published rows, which have 5 decimals:
-the port must match each to the last printed digit.
+the port must match each to the last printed digit. The estimator under
+`port_fit` is fishsense-core's `size_constancy` (core #97), whose own suite
+tests the bounded search this file used to (`fit_tv`); the rows here are what
+the shadow stage reports, so they stay.
 """
 
 from __future__ import annotations
@@ -26,7 +29,6 @@ from fishsense_services_processor.shadow_calibration.fit import (
     F_PX,
     N_BOOT,
     VARIANT_INDEX,
-    fit_tv,
     port_fit,
 )
 
@@ -86,15 +88,6 @@ def test_the_pool_medians_are_the_papers():
     assert statistics.median(f.angle_deg for f in pred) == pytest.approx(
         0.047, abs=5e-4
     )
-
-
-def test_fit_tv_is_the_scripts_bounded_search():
-    """slate_unknown.fit_tv: Brent on [t_min - 4005, t_min - 5]. Size and the
-    dot's distance from the vanishing point both go as 1/range, so on exact
-    sizes ``s = c (t - tv)`` it recovers tv."""
-    t = np.linspace(200.0, 900.0, 12)
-    for tv in (-500.0, -2000.0, -3000.0):
-        assert fit_tv(t, 0.07 * (t - tv)) == pytest.approx(tv, abs=0.05)
 
 
 def test_the_offset_at_the_cameras_own_fx_is_kept_beside_f2850():

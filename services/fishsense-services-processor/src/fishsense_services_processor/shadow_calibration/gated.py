@@ -29,6 +29,9 @@ from typing import Any, Optional, Sequence
 
 import numpy as np
 
+from fishsense_core import size_constancy as sc
+from fishsense_core.line_fit import fit_line_pca, ransac_line
+
 from fishsense_services_processor.calibration.consistency import (
     CalibrationUnderdeterminedError,
     check_observation_geometry,
@@ -36,8 +39,6 @@ from fishsense_services_processor.calibration.consistency import (
 from fishsense_services_processor.shadow_calibration.fit import (
     O_DESIGN_M,
     PortFit,
-    beam,
-    fit_tv,
     port_fit,
 )
 
@@ -110,27 +111,33 @@ class DetectorGate:
     ambiguous_line: bool
 
 
-def _ransac_line(xy: np.ndarray, rng, tol: float, iters: int = 500):
+def _ransac_line(xy: np.ndarray, tol: float):
     """size_constancy_sam.prediction_lines: RANSAC, then TLS through the
-    inliers; u oriented to negative y. None when no two points are a pixel
-    apart: coincident dots define no line (review of #261)."""
-    best = None
-    for _ in range(iters):
-        i, j = rng.choice(len(xy), 2, replace=False)
-        d = xy[j] - xy[i]
-        if np.hypot(*d) < 1:
-            continue
-        nn = np.array([-d[1], d[0]]) / np.hypot(*d)
-        inl = np.abs(xy @ nn - nn @ xy[i]) <= tol
-        if best is None or inl.sum() > best.sum():
-            best = inl
-    if best is None:
+    inliers; ``(u, offset, inliers)``, u oriented to negative y. None when no
+    two points are a pixel apart: coincident dots define no line (review of
+    #261).
+
+    The search is fishsense-core's `line_fit.ransac_line` (core #100), ported
+    from this function: 500 iterations from ``default_rng(0)``, inclusive at
+    `tol`, pairs under 1 px apart skipped, refitted by `fit_line_pca` (the
+    same SVD as here). The inliers are its ``consensus``, the winning pair's
+    line's points, as here. It scores distances as ``|a x + b y + c|`` where
+    this scored ``|xy @ n - n @ p_i|``: equal to rounding, so the two can
+    disagree only on a dot within rounding of exactly `tol` px off."""
+    fit = ransac_line(
+        xy, tol_px=tol, max_iters=500, rng=0, inclusive=True,
+        min_separation_px=1, refit=fit_line_pca,
+    )  # fmt: skip
+    if fit is None:
         return None
-    q = xy[best]
-    m = q.mean(0)
-    u = np.linalg.svd(q - m)[2][0]
-    u = u if u[1] < 0 else -u
-    return u, float(m @ np.array([-u[1], u[0]])), best
+    # fit_line_pca's normal is the principal direction u turned 90 degrees,
+    # (a, b) = (-u_y, u_x), and c = -(a, b) . centroid: so u = (b, -a), and
+    # the offset (the centroid along u's normal) is -c, or c once u is
+    # turned to negative y.
+    u = np.array([fit.b, -fit.a])
+    if u[1] < 0:
+        return u, -fit.c, fit.consensus
+    return -u, fit.c, fit.consensus
 
 
 def detector_gate(
@@ -147,11 +154,7 @@ def detector_gate(
     th = thresholds
     md = np.asarray(mission_dots, float).reshape(-1, 3)
     confident = md[md[:, 2] >= th.min_confidence][:, :2]
-    line = (
-        _ransac_line(confident, np.random.default_rng(0), th.off_line_px)
-        if len(confident) >= 2
-        else None
-    )
+    line = _ransac_line(confident, th.off_line_px) if len(confident) >= 2 else None
     if line is None:
         return None
     u, off, inl = line
@@ -167,9 +170,7 @@ def detector_gate(
             kept.append(capture)
     second = 0
     if len(off_dots) >= 2:
-        second_line = _ransac_line(
-            np.array(off_dots, float), np.random.default_rng(0), th.off_line_px
-        )
+        second_line = _ransac_line(np.array(off_dots, float), th.off_line_px)
         second = 0 if second_line is None else int(second_line[2].sum())
     ambiguous = second >= max(th.second_line_min, th.second_line_share * len(kept))
     return DetectorGate(
@@ -194,24 +195,14 @@ def laser_points(xy, K, origin, axis) -> np.ndarray:
     return np.array(pts)
 
 
-def _deleted_residuals(t: np.ndarray, s: np.ndarray) -> np.ndarray:
-    log_s = np.log(s)
-    out = np.empty(len(t))
-    for i in range(len(t)):
-        rest = np.arange(len(t)) != i
-        tv = fit_tv(t[rest], s[rest])
-        c = np.median(log_s[rest] - np.log(t[rest] - tv))
-        gap = t[i] - tv
-        out[i] = np.inf if gap <= 0 else abs(log_s[i] - np.log(gap) - c)
-    return out
-
-
 def trim(t: np.ndarray, s: np.ndarray, residual_max: float) -> np.ndarray:
     """Indices kept: drop, one at a time, the frame whose deleted residual is
-    largest while it exceeds `residual_max`."""
+    largest while it exceeds `residual_max`. The residual is fishsense-core's
+    `size_constancy.deleted_residuals` (core #97), which this module's own
+    copy was line for line."""
     keep = np.arange(len(t))
     while len(keep) > 2:
-        r = _deleted_residuals(t[keep], s[keep])
+        r = sc.deleted_residuals(t[keep], s[keep])
         worst = int(np.argmax(r))
         if r[worst] <= residual_max:
             break
@@ -302,7 +293,7 @@ def gated_fit(
     lever_prod = None
     if reference_position is not None:
         o_prod = float(np.linalg.norm(np.asarray(reference_position, float)[:2]))
-        origin_p, _ = beam(fit.tv, u, off, K, o_prod)
+        origin_p, _ = sc.beam_from_vanishing(fit.tv, u, off, K, o_prod)
         zp = laser_points(xy, K, origin_p, fit.axis)[:, 2]
         lever_prod = float(zp.max() - zp.min())
     scores = [f.sam_score for f in sized if f.sam_score is not None]

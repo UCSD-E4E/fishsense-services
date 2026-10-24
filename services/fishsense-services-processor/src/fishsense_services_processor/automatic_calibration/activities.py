@@ -4,7 +4,8 @@ New in v2. cscw-fishsense2027@96a8da07 calibration_analysis/
 e1j_size_constancy/register.py ran it in two passes (SIFT from the NAS, then
 the fit); here one activity per dive reads each slate frame's rectified JPEG
 (the head/tail rendering the GPU stage wrote), takes SIFT around its automatic
-dot, registers every pair and fits (`automatic_results.size_constancy`).
+dot, registers every pair and fits (fishsense-core's `size_constancy`, which
+absorbed this repo's port, core #97).
 
 The dive line is fishsense-core's `fit_dive_line` through every automatic dot
 of the dive -- cscw used production's dive line, fitted by the same function
@@ -55,6 +56,7 @@ from importlib.metadata import version
 from typing import Any, Optional
 
 import numpy as np
+from fishsense_core import size_constancy as sc
 from temporalio import activity
 
 from fishsense_services_contracts.automatic_results import (
@@ -68,7 +70,6 @@ from fishsense_services_contracts.calibration_v3 import (
     ReplayCalibrationInput,
 )
 from fishsense_services_processor.automatic_calibration import pose, v3
-from fishsense_services_processor.automatic_results import size_constancy as sc
 
 __all__ = [
     "AutomaticCalibrationActivities",
@@ -231,10 +232,10 @@ def replay_v3(
             # No gate in the replay: its draws are what set the threshold.
             return v3.fit_known_sizes(dots[idx], [sizes[i] for i in idx],
                                       payload.camera_matrix, scale_sd_max=np.inf)  # fmt: skip
-        return sc.fit_label_free(
+        return v3.LabelFreeFit.of(sc.fit_label_free(
             dots=dots[idx], pairs=pairs_of([features[i] for i in idx], dots[idx]),
             camera_matrix=payload.camera_matrix, min_frames=v3.MIN_FRAMES,
-        )  # fmt: skip
+        ))  # fmt: skip
 
     def run(indices):
         idx = list(indices)
