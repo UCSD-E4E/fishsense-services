@@ -79,7 +79,14 @@ def _install_fake_linear_raw_image(monkeypatch, captured):
 # ----------------------------- _predict_from_raw -----------------------------
 
 
-def test_predict_from_raw_calls_detector_with_rectified_output(monkeypatch):
+def test_predict_from_raw_predicts_in_sensor_pixels_and_rectifies_once(monkeypatch):
+    """The detector answers in sensor pixels (its default), where the frame
+    is; the stored point is rectified once, with core's `rectify_prediction`,
+    the call `predict(rectify_output=True)` makes itself (review of #352)."""
+    from fishsense_core.laser import (  # pylint: disable=import-outside-toplevel
+        rectify_prediction,
+    )
+
     captured: dict = {}
     _install_fake_linear_raw_image(monkeypatch, captured)
     predict_calls: dict = {}
@@ -101,16 +108,47 @@ def test_predict_from_raw_calls_detector_with_rectified_output(monkeypatch):
         wavelength="red",
     )
 
-    assert (pred.x, pred.y, pred.confidence) == (12.5, 34.0, 0.9)
+    assert (pred.x, pred.y) == rectify_prediction(
+        12.5, 34.0, np.array(_K), np.array([0.1, -0.2, 0.0, 0.0, 0.0])
+    )
+    assert pred.confidence == 0.9
     assert (width, height) == (400, 300)  # from image.data.shape (H, W)
     assert (color, margin) in ((None, None), (None, 0.0))
     assert checkpoint == "run3_epoch_021.pt"
     assert captured["source"] == Path("/scratch/abc123.ORF")
-    kw = predict_calls["kwargs"]
-    assert kw["rectify_output"] is True
-    assert kw["wavelength"] == "red"
-    assert kw["camera_matrix"].shape == (3, 3)
-    assert kw["distortion"].shape == (5,)
+    assert predict_calls["kwargs"] == {"wavelength": "red"}
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+def test_a_non_finite_dot_is_a_non_detection(monkeypatch, bad):
+    """A NaN passes `is not None`: v0.48.0's colour code raised on it, and it
+    would otherwise be rectified, gated and stored. It is no dot (review of
+    #352)."""
+    _install_fake_linear_raw_image(monkeypatch, {})
+    monkeypatch.setattr(sut, "_get_detector", _detector_at(bad, 34.0))
+
+    pred, _, _, color, margin, _ = sut._predict_from_raw(
+        Path("/scratch/abc123.ORF"), _K, _D, None
+    )
+
+    assert (pred.x, pred.y, color, margin) == (None, None, None, None)
+    assert pred.confidence == 0.9
+
+
+def test_importing_the_activity_loads_no_detector_module():
+    """The colour and rectification imports are lazy: importing the stage
+    registry must not load core's detector module (cv2, the weights
+    manifest) on roles that never predict (review of #352)."""
+    import subprocess  # pylint: disable=import-outside-toplevel
+
+    code = (
+        "import sys; import fishsense_services_processor.laser_predict.activities; "
+        "print('fishsense_core._laser_detector' in sys.modules)"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+    assert out.stdout.strip() == "False"
 
 
 # ------------------------------- _get_detector -------------------------------
@@ -412,8 +450,8 @@ async def test_workflow_with_no_images_returns_empty_and_calls_nothing():
 #
 # The colour rule itself is fishsense-core's (`fishsense_core.laser_color`,
 # core #94) and is tested there. What is pinned here is how this activity
-# calls it: on the uint16 `LinearRawImage`, at the *sensor* point of a
-# rectified prediction.
+# calls it: on the uint16 `LinearRawImage`, at the detector's own sensor
+# point, before the point is rectified for storage.
 
 _DISTORTED = [-0.28, 0.12, 0.0005, -0.0003, -0.03]
 _K_FULL = [[2833.0, 0.0, 2010.0], [0.0, 2858.0, 1450.0], [0.0, 0.0, 1.0]]
@@ -446,31 +484,38 @@ def _paint_dot(img, x, y, bgr, radius):
     return img
 
 
-def test_colour_is_read_at_the_sensor_point_of_a_rectified_prediction(monkeypatch):
-    """The prediction is rectified and the frame is not. Near the laser region
-    the two are ~48 px apart, so sampling the frame at the rectified point
-    misses the dot and reads the blue-green scene instead."""
+@pytest.mark.parametrize(
+    "sensor", [(1580.0, 395.0), (2010.0, 1450.0), (300.0, 200.0), (3700.0, 2700.0)]
+)
+def test_colour_is_read_where_the_detector_found_the_dot(monkeypatch, sensor):
+    """Near the laser region rectified and sensor pixels are ~48 px apart, so
+    sampling the frame at the rectified point misses the dot and reads the
+    blue-green scene. The colour is read at the detector's sensor point, with
+    no inverse map, and only the stored point is rectified: across the frame,
+    corners included."""
     import cv2  # pylint: disable=import-outside-toplevel
 
-    sensor = (1580.0, 395.0)
     rectified = cv2.undistortPoints(
-        np.array([[sensor]], dtype=np.float64),
-        np.array(_K_FULL),
-        np.array(_DISTORTED),
-        P=np.array(_K_FULL),
+        np.array([[sensor]], dtype=np.float32),
+        np.array(_K_FULL, dtype=np.float32),
+        np.array(_DISTORTED, dtype=np.float32),
+        P=np.array(_K_FULL, dtype=np.float32),
     ).reshape(2)
-    frame = np.full((2000, 3000, 3), (400, 800, 120), dtype=np.uint16)
+    frame = np.full((3000, 4000, 3), (400, 800, 120), dtype=np.uint16)
     _paint_dot(frame, *sensor, (200, 300, 4000), radius=4)
     _install_linear_raw_image_with(monkeypatch, frame)
-    monkeypatch.setattr(
-        sut, "_get_detector", _detector_at(float(rectified[0]), float(rectified[1]))
-    )
+    monkeypatch.setattr(sut, "_get_detector", _detector_at(*sensor))
 
-    _, _, _, color, margin, _ = sut._predict_from_raw(
+    pred, _, _, color, margin, _ = sut._predict_from_raw(
         Path("/scratch/abc123.ORF"), _K_FULL, _DISTORTED, None
     )
 
     assert color == "red" and margin > 0
+    assert (pred.x, pred.y) == (float(rectified[0]), float(rectified[1]))
+
+
+#: The saturated dot's margin under core 4.3.0's rule (v2's was -3.1).
+MARGIN_V3 = -680.0 / 3.0
 
 
 def test_a_saturated_dot_votes_from_its_halo(monkeypatch):
@@ -489,3 +534,6 @@ def test_a_saturated_dot_votes_from_its_halo(monkeypatch):
     )
 
     assert color == "green" and margin < -4.0
+    # The magnitude is what `laser_predictions.color_margin` stores, under
+    # LASER_PREDICTOR_VERSION 3: a change in core's scaling must show here.
+    assert margin == pytest.approx(MARGIN_V3, rel=1e-6)
