@@ -20,13 +20,16 @@ in [`docs/cutover.md`](../../docs/cutover.md) §0, which is also the runbook.
 | `web` | `fishsense.e4e.ucsd.edu` | in-app OIDC (`oidc/web`); API calls as the user, or the web's service account |
 | `api` | `api.fishsense.e4e.ucsd.edu` | bearer tokens validated in-app (issuer + audience = the web's client). **No forwardAuth.** |
 | `orchestrator` | every schedule; stands the NRP processor up and down | app role; krg-prod Temporal (mTLS) |
-| `backup` | nightly dumps of `fishsense_services`, `fishsense` (v1's archive), `superset` → NAS | backup role (BYPASSRLS + pg_read_all_data); krg-prod Temporal |
+| `backup` | nightly dumps of `fishsense_services`, `fishsense` (v1's archive), `superset` (retired Superset's archive) → NAS | backup role (BYPASSRLS + pg_read_all_data); krg-prod Temporal |
 | `nrp-temporal-cert-sync` | one-shot: forwards the rotated Temporal leaf to NRP | the orchestrator's NRP kubeconfig |
 | `db-bootstrap` | one-shot, every converge: v2's database and roles | the admin `postgres` role |
 | `migrate` | one-shot, every converge: schema to head + tenancy audit | the owner role |
 | `postgres` | v1's container and `pgdata` volume | — |
 | `smoke` (profile `ops`) | by hand: GO / NO-GO | owner + research login |
-| `superset` ×4 + `valkey` (profile `superset`) | `analytics.fishsense.e4e.ucsd.edu` | in-app OIDC (`oidc/analytics`); data as `fishsense_superset` |
+
+**Retired:** Superset (`analytics.fishsense.e4e.ucsd.edu`), 2026-10-23. Its
+`superset` database is kept and backed up as its archive; its login can no longer
+log in (`db_bootstrap/bootstrap.sh`).
 
 **Off-slot:** the processor on NRP (`deploy/nrp/`, applied and deleted by the
 orchestrator), Garage (`s3.e4e.ucsd.edu`), Temporal (krg-prod), Label Studio
@@ -41,11 +44,10 @@ orchestrator), Garage (`s3.e4e.ucsd.edu`), Temporal (krg-prod), Label Studio
 | `workdir.nix` | links the committed config into `/var/lib/krg/fishsense` (compose's project directory). |
 | `prune.nix` | v1's image prune after each converge (the 20 GB disk). |
 | `cert-sync-timer.nix` | re-runs the NRP cert sync every 6 h, between rotations. |
-| `compose.env` | the project's `.env`: `COMPOSE_PROFILES` (Superset's switch). |
+| `compose.env` | the project's `.env`: `COMPOSE_PROFILES`. |
 | `traefik-dynamic.yml` | TLS + Host → service; no middlewares. |
 | `db_bootstrap/bootstrap.sh` | v2's roles and database, idempotent, as the admin. |
 | `pg_volumes/config/` | v1's `postgres.conf` and `pg_hba.conf`, plus one line for v2's roles. |
-| `superset_volumes/docker/` | v1's Superset bootstrap, and the dashboards-as-code bundle repointed at v2. |
 
 ## Rolling back a release
 

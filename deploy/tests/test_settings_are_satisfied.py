@@ -142,19 +142,6 @@ def _web(env):
     assert required - set(env) == set()
 
 
-def _superset(env):
-    """What superset_config.py and docker-init.sh read."""
-    for name in (
-        "SUPERSET_SECRET_KEY",
-        "DATABASE_PASSWORD",
-        "AUTHENTIK_KEY",
-        "AUTHENTIK_SECRET",
-        "AUTHENTIK_ISSUER",
-        "ANALYTICS_DATABASE_PASSWORD",
-    ):
-        assert env.get(name), name
-
-
 def _postgres(env):
     assert env["POSTGRES_PASSWORD"]
 
@@ -168,7 +155,7 @@ def _bootstrap(env):
 
 
 def _nothing(env):
-    """Configured entirely in the compose (traefik, valkey)."""
+    """Configured entirely in the compose (traefik)."""
 
 
 VALIDATORS: dict[str, Callable[[dict], None]] = {
@@ -180,14 +167,9 @@ VALIDATORS: dict[str, Callable[[dict], None]] = {
     "nrp-processor-secret-sync": _processor_secret_sync,
     "smoke": _smoke,
     "web": _web,
-    "superset": _superset,
-    "superset-init": _superset,
-    "superset-worker": _superset,
-    "superset-worker-beat": _superset,
     "postgres": _postgres,
     "db-bootstrap": _bootstrap,
     "traefik": _nothing,
-    "valkey": _nothing,
 }
 
 
@@ -198,13 +180,6 @@ def test_every_service_is_checked():
 @pytest.mark.parametrize("name", sorted(VALIDATORS))
 def test_the_service_starts_with_what_the_slot_gives_it(name):
     env = service_env(services()[name])
-    if name.startswith("superset"):
-        # The committed, non-secret half (v1's superset_volumes/docker/.env).
-        committed = INCUS / "superset_volumes" / "docker" / ".env"
-        for line in committed.read_text().splitlines():
-            if "=" in line and not line.lstrip().startswith("#"):
-                key, value = line.split("=", 1)
-                env.setdefault(key.strip(), value.strip())
     with _only(env):
         VALIDATORS[name](env)
 

@@ -29,8 +29,9 @@
 #                      NOLOGIN groups. Migrations 0030/0032 create them if
 #                      missing; made here first, with the same attributes, so
 #                      the logins below can join them before the first migrate.
-#   fishsense_superset LOGIN in fishsense_analytics: Superset's connection to v2,
-#                      bound to the lab tenant once the lab exists (0030).
+#   fishsense_superset Superset's login, retired 2026-10-23: where it exists it
+#                      is made NOLOGIN, with no password and no tenant binding.
+#                      Not created on a new cluster.
 #   fishsense_smoke    LOGIN in fishsense_research: the smoke test reads a dive
 #                      the way the research repos do (ops/smoke.py).
 #
@@ -52,7 +53,6 @@ set -eu
 : "${FISHSENSE_OWNER_PASSWORD:?}"
 : "${FISHSENSE_APP_PASSWORD:?}"
 : "${FISHSENSE_BACKUP_PASSWORD:?}"
-: "${FISHSENSE_ANALYTICS_PASSWORD:?}"
 : "${FISHSENSE_SMOKE_PASSWORD:?}"
 DB="${FISHSENSE_DATABASE:-fishsense_services}"
 
@@ -77,7 +77,6 @@ psql_ -d postgres \
     -v owner_password="$FISHSENSE_OWNER_PASSWORD" \
     -v app_password="$FISHSENSE_APP_PASSWORD" \
     -v backup_password="$FISHSENSE_BACKUP_PASSWORD" \
-    -v analytics_password="$FISHSENSE_ANALYTICS_PASSWORD" \
     -v smoke_password="$FISHSENSE_SMOKE_PASSWORD" <<'SQL'
 DO $$
 DECLARE
@@ -86,7 +85,7 @@ BEGIN
     FOREACH name IN ARRAY ARRAY[
         'fishsense_owner', 'fishsense_app', 'fishsense_backup',
         'fishsense_analytics', 'fishsense_research',
-        'fishsense_superset', 'fishsense_smoke'
+        'fishsense_smoke'
     ] LOOP
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = name) THEN
             EXECUTE format('CREATE ROLE %I NOLOGIN', name);
@@ -107,9 +106,13 @@ GRANT pg_read_all_data TO fishsense_backup;
 ALTER ROLE fishsense_analytics NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
 ALTER ROLE fishsense_research NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
 
-ALTER ROLE fishsense_superset LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS
-    PASSWORD :'analytics_password';
-GRANT fishsense_analytics TO fishsense_superset;
+DO $$
+BEGIN
+    IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'fishsense_superset') THEN
+        ALTER ROLE fishsense_superset NOLOGIN PASSWORD NULL;
+    END IF;
+END
+$$;
 ALTER ROLE fishsense_smoke LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS
     PASSWORD :'smoke_password';
 GRANT fishsense_research TO fishsense_smoke;
@@ -134,23 +137,12 @@ GRANT CONNECT ON DATABASE :"db"
 ALTER DATABASE :"db" SET jit = off;
 SQL
 
-# Superset's login reads the lab's rows: the canonical tenant policy reads
-# app.tenant_id, and a setting on the group would reach no member (0030). The
-# lab exists only once migrate-v1 has run, so until then this is skipped, and
-# the converge after it binds (docs/cutover.md). Per database, so the login's
-# other connections carry no stray setting.
-has_tenants="$(psql_ -d "$DB" -tA -c "SELECT to_regclass('public.tenants') IS NOT NULL")"
-lab=""
-if [ "$has_tenants" = "t" ]; then
-    lab="$(psql_ -d "$DB" -tA -c "SELECT id FROM public.tenants WHERE slug = 'lab'")"
-fi
-if [ -n "$lab" ]; then
-    echo "db-bootstrap: binding fishsense_superset to the lab ($lab)"
-    psql_ -d postgres -v db="$DB" -v lab="$lab" <<'SQL'
-ALTER ROLE fishsense_superset IN DATABASE :"db" SET app.tenant_id = :'lab';
+# Superset's retired login carries no tenant binding in v2's database (it had
+# app.tenant_id = the lab until 2026-10-23).
+psql_ -d postgres -v db="$DB" <<'SQL'
+SELECT format('ALTER ROLE fishsense_superset IN DATABASE %I RESET ALL', :'db')
+WHERE EXISTS (SELECT FROM pg_roles WHERE rolname = 'fishsense_superset')
+\gexec
 SQL
-else
-    echo "db-bootstrap: no lab tenant yet - fishsense_superset left unbound (run migrate-v1, then converge)"
-fi
 
 echo "db-bootstrap: done"

@@ -34,7 +34,7 @@ const LABELING_KINDS: { key: keyof ProjectsByKind; title: string }[] = [
 
 export function buildSections(
   active: ProjectsByKind,
-  staticLinks: { results: StaticLink[]; admin: StaticLink[] },
+  staticLinks: { admin: StaticLink[] },
 ): Section[] {
   const sections: Section[] = [];
   const base = labelerBase();
@@ -52,9 +52,6 @@ export function buildSections(
     });
   }
 
-  if (staticLinks.results.length > 0) {
-    sections.push({ title: "Results", links: staticLinks.results });
-  }
   if (staticLinks.admin.length > 0) {
     sections.push({ title: "Administration", links: staticLinks.admin });
   }
