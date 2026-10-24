@@ -17,6 +17,9 @@ import {
   formatError,
   getObservation,
   getObservationPage,
+  getObservationSpecies,
+  speciesFilter,
+  speciesLabel,
   knownLengthError,
   methodLabel,
   observationHref,
@@ -315,5 +318,45 @@ describe("observationHref", () => {
     expect(observationHref("lab", observation())).toBe(
       `/lab/fish/${CAPTURE}/${FISH}`,
     );
+  });
+});
+
+// The Fish page filters by species, offering only the species the tenant
+// has (the owner, 2026-10-23).
+describe("by species", () => {
+  it("lists one species' fish", async () => {
+    const fetchMock = vi.fn<FetchSig>(async () => jsonResponse({ observations: [], next: null, total: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getObservationPage("t", "lab", { species: "Scarus coeruleus", device: "lite" });
+
+    const url = new URL(fetchMock.mock.calls[0][0].url);
+    expect(url.searchParams.get("species")).toBe("Scarus coeruleus");
+    expect(url.searchParams.get("device")).toBe("lite");
+  });
+
+  it("asks the tenant which species it has, with the device filter", async () => {
+    const species = [{ scientific_name: "Lachnolaimus maximus", common_name: "Hogfish", count: 2 }];
+    const fetchMock = vi.fn<FetchSig>(async () => jsonResponse(species));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await getObservationSpecies("tok", "lab", "mobile")).toEqual(species);
+    const [request] = fetchMock.mock.calls[0];
+    expect(request.url).toBe("http://api.test/tenants/lab/observations/species?device=mobile");
+    expect(request.headers.get("authorization")).toBe("Bearer tok");
+  });
+
+  it("reads a species from the URL only as a name", () => {
+    expect(speciesFilter("  Scarus coeruleus ")).toBe("Scarus coeruleus");
+    expect(speciesFilter("")).toBeUndefined();
+    expect(speciesFilter(undefined)).toBeUndefined();
+    expect(speciesFilter("x".repeat(201))).toBeUndefined();
+  });
+
+  it("names a choice by its common name, then its scientific one, with its count", () => {
+    expect(speciesLabel({ scientific_name: "Lachnolaimus maximus", common_name: "Hogfish", count: 12 })).toBe(
+      "Hogfish (Lachnolaimus maximus) · 12",
+    );
+    expect(speciesLabel({ scientific_name: "Scarus sp.", common_name: null, count: 1 })).toBe("Scarus sp. · 1");
   });
 });

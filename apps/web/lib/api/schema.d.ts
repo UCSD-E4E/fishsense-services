@@ -637,6 +637,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{slug}/observations/species": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Species
+         * @description The species the tenant's measured fish are, most first, with how
+         *     many of each: what the Fish page offers to filter by. Only the
+         *     tenant's own (the owner, 2026-10-23).
+         */
+        get: operations["list_observation_species"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{slug}/observations/{capture_id}/{fish_id}": {
         parameters: {
             query?: never;
@@ -1647,6 +1669,15 @@ export interface components {
             level: "learning" | "trusted" | "expert";
             /** Note */
             note?: string | null;
+        };
+        /** SpeciesCountView */
+        SpeciesCountView: {
+            /** Common Name */
+            common_name: string | null;
+            /** Count */
+            count: number;
+            /** Scientific Name */
+            scientific_name: string;
         };
         /** SpeciesView */
         SpeciesView: {
@@ -2960,6 +2991,7 @@ export interface operations {
             query?: {
                 device?: ("lite" | "mobile" | "other") | null;
                 mission?: number | null;
+                species?: string | null;
                 limit?: number;
                 before?: string | null;
                 page?: number | null;
@@ -2979,6 +3011,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ObservationPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_observation_species: {
+        parameters: {
+            query?: {
+                device?: ("lite" | "mobile" | "other") | null;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeciesCountView"][];
                 };
             };
             /** @description Validation Error */
