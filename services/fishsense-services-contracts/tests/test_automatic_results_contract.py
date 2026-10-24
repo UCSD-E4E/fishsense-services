@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from fishsense_services_contracts.automatic_results import (
+    AUTOMATIC_CALIBRATION_VERSION,
     AUTOMATIC_HEADTAIL_STATUSES,
     AUTOMATIC_SAM_SCORE_GATE,
     AutomaticFrameResult,
@@ -15,6 +16,13 @@ from fishsense_services_contracts.automatic_results import (
 def test_the_sam_gate_is_the_papers():
     """cscw-fishsense2027@96a8da07 PAPER.md §6.3: 0.5, SAM's own confidence."""
     assert AUTOMATIC_SAM_SCORE_GATE == 0.5
+
+
+def test_the_calibration_version_is_core_4_3s_fit():
+    """3 (2026-10-23): size-constancy from fishsense-core 4.3.0, whose fit can
+    differ from 2's (session 114's frame 7 has no size). The cohort re-fits
+    every dive whose current automatic calibration is not at this version."""
+    assert AUTOMATIC_CALIBRATION_VERSION == "3"
 
 
 def test_every_abstention_is_a_status():
