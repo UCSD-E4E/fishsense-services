@@ -59,7 +59,8 @@ from fishsense_services_contracts.object_store import ObjectRef
 from fishsense_services_processor.headtail_predict import activities as act
 from fishsense_services_processor.headtail_predict import predict as sut
 from fishsense_services_processor.headtail_predict import weights as sam3_weights
-from fishsense_services_processor.headtail_predict.geometry import crop_origin
+from fishsense_core.fish import fish_at_dot as core_fish_at_dot
+from fishsense_core.fish.fish_at_dot import FishialSegmenter, crop_origin
 from fishsense_services_processor.headtail_predict.workflow import (
     PredictHeadtailImagesWorkflow,
 )
@@ -186,6 +187,28 @@ def test_records_which_laser_label_chose_the_fish():
     assert result.laser_label_id == b
 
 
+def test_a_label_for_every_dot_or_none_at_all():
+    """The label is looked up by the dot core names (`FishAtDot.dot`), so a
+    list of labels that does not match the dots is a caller's bug, refused.
+    The old `zip` truncated it silently and named no label."""
+    with pytest.raises(ValueError, match="laser"):
+        _predict(_jpeg(), [(1800.0, 1500.0), (2300.0, 1500.0)], _Stub([]),
+                 laser_label_ids=[uuid.uuid4()])  # fmt: skip
+
+
+def test_the_kernel_is_cores():
+    """Crop, gate and keypoint are fishsense-core's `find_fish_at_dot`
+    (core #89): none of services' own copies remain."""
+    for gone in (
+        "crop_origin",
+        "_keypoint",
+        "_FishialAdapter",
+        "_Sam3Adapter",
+        "_to_numpy",
+    ):
+        assert not hasattr(sut, gone), gone
+
+
 def test_crop_is_centred_on_the_first_laser_point_only():
     """A second dot outside that window cannot be gated on; in the corpus that
     never happens, which is why cropping on the first point is safe."""
@@ -229,11 +252,7 @@ def test_an_unfittable_mask_is_a_headtail_failure_not_an_error(monkeypatch):
         def find_head_tail_img(self, _mask):
             raise RuntimeError("native detector failed")
 
-    monkeypatch.setitem(
-        sys.modules,
-        "fishsense_core.fish",
-        types.SimpleNamespace(FishHeadTailDetector=_Exploding),
-    )
+    monkeypatch.setattr(core_fish_at_dot, "FishHeadTailDetector", _Exploding)
     laser = (2000.0, 1500.0)
     ox, oy = crop_origin(*laser, FRAME_W, FRAME_H, CROP_W, CROP_H)
 
@@ -283,11 +302,7 @@ class TestAnAbstentionNamesItsDot:
             def find_head_tail_img(self, _mask):
                 raise RuntimeError("native detector failed")
 
-        monkeypatch.setitem(
-            sys.modules,
-            "fishsense_core.fish",
-            types.SimpleNamespace(FishHeadTailDetector=_Exploding),
-        )
+        monkeypatch.setattr(core_fish_at_dot, "FishHeadTailDetector", _Exploding)
         miss, hit = (1800.0, 1500.0), (2300.0, 1500.0)
         ox, oy = crop_origin(*miss, FRAME_W, FRAME_H, CROP_W, CROP_H)
         mask = _fish_mask(int(hit[0] - ox), int(hit[1] - oy), 120, 50)
@@ -351,11 +366,7 @@ class TestTheKeptMasksBox:
             def find_head_tail_img(self, _mask):
                 raise RuntimeError("native detector failed")
 
-        monkeypatch.setitem(
-            sys.modules,
-            "fishsense_core.fish",
-            types.SimpleNamespace(FishHeadTailDetector=_Exploding),
-        )
+        monkeypatch.setattr(core_fish_at_dot, "FishHeadTailDetector", _Exploding)
         mask, box = self._mask()
 
         result = _predict(_jpeg(), [self.LASER], _Stub([mask]))
@@ -368,103 +379,6 @@ class TestTheKeptMasksBox:
             masks = [_fish_mask(100, 100, 40, 20)]
         result = _predict(_jpeg(), [self.LASER], _Stub(masks))
         assert result.mask_bbox is None
-
-
-# -- mask conversion ---------------------------------------------------------------
-
-
-class TestMaskConversion:
-    """SAM3 returns device tensors; `np.asarray` on a CUDA tensor raises."""
-
-    def test_detaches_and_moves_a_device_tensor(self):
-        class _DeviceTensor:
-            def __init__(self, data):
-                self._data = data
-                self.detached = False
-
-            def __array__(self, *args, **kwargs):
-                raise TypeError("can't convert cuda:0 device type tensor to numpy")
-
-            def detach(self):
-                self.detached = True
-                return self
-
-            def cpu(self):
-                return np.asarray(self._data)
-
-        tensor = _DeviceTensor([[1, 0], [0, 1]])
-        out = sut._to_numpy(tensor)  # pylint: disable=protected-access
-        assert tensor.detached
-        assert out.tolist() == [[1, 0], [0, 1]]
-
-    def test_passes_a_plain_array_through(self):
-        assert sut._to_numpy(np.zeros((2, 2))).shape == (
-            2,
-            2,
-        )  # pylint: disable=protected-access
-
-
-# -- the fallback backend (v1's TestFishialFallbackAdapter) --------------------------
-
-
-class TestFishialFallbackAdapter:
-    class _Recording:
-        def __init__(self, labels):
-            self._labels = labels
-            self.seen = None
-
-        def inference(self, image):
-            self.seen = image
-            return self._labels
-
-    def _adapter(self, segmentation):
-        return sut._FishialAdapter(segmentation)  # pylint: disable=protected-access
-
-    def test_splits_the_instance_label_map_into_binary_masks(self):
-        labels = np.zeros((40, 60), dtype=np.int32)
-        labels[5:10, 5:15] = 1
-        labels[20:25, 30:50] = 7  # ids are arbitrary, not contiguous
-
-        masks = self._adapter(self._Recording(labels)).segment(
-            np.zeros((40, 60, 3), dtype=np.uint8)
-        )
-
-        assert len(masks) == 2
-        assert sorted(int(np.asarray(m).sum()) for m in masks) == [50, 100]
-        assert all(np.asarray(m).dtype == bool for m in masks)
-
-    def test_background_is_not_returned_as_a_mask(self):
-        labels = np.zeros((20, 40), dtype=np.int32)
-        assert (
-            self._adapter(self._Recording(labels)).segment(
-                np.zeros((20, 40, 3), dtype=np.uint8)
-            )
-            == []
-        )
-
-    def test_the_frame_is_passed_through_as_bgr(self):
-        frame = np.zeros((20, 40, 3), dtype=np.uint8)
-        frame[:, :, 0] = 255  # blue channel only, in BGR
-        recorder = self._Recording(np.zeros((20, 40), dtype=np.int32))
-
-        self._adapter(recorder).segment(frame)
-
-        assert np.array_equal(recorder.seen, frame), "frame was converted"
-
-    def test_a_non_landscape_crop_is_refused_rather_than_silently_empty(self):
-        recorder = self._Recording(np.ones((40, 20), dtype=np.int32))
-
-        masks = self._adapter(recorder).segment(np.zeros((40, 20, 3), dtype=np.uint8))
-
-        assert masks == []
-        assert recorder.seen is None, "the model should not have been called"
-
-    def test_a_square_crop_is_refused_too(self):
-        """`width <= height`: a square is not landscape either."""
-        recorder = self._Recording(np.ones((30, 30), dtype=np.int32))
-
-        assert self._adapter(recorder).segment(np.zeros((30, 30, 3), np.uint8)) == []
-        assert recorder.seen is None
 
 
 class TestSam3RequiresAGpu:
@@ -523,7 +437,7 @@ class TestFallbackSegmenterIsLoaded:
         assert got is built
         assert built.loaded is True, "load_model() was never called"
         assert (
-            sut._FishialAdapter(got).segment(
+            FishialSegmenter(got).segment(
                 np.zeros((4, 8, 3), dtype=np.uint8)
             )  # pylint: disable=protected-access
             == []
@@ -739,7 +653,7 @@ async def test_on_a_gpu_sam3_runs_with_the_verified_checkpoint(monkeypatch):
             return []
 
     monkeypatch.setattr(act, "get_segmenter", fake_get_segmenter)
-    monkeypatch.setattr(act, "_Sam3Adapter", _Adapter)
+    monkeypatch.setattr(act, "Sam3Segmenter", _Adapter)
     fetches = []
 
     result = await ActivityEnvironment().run(
