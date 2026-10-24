@@ -13,6 +13,13 @@ override-dependencies = [
     # processor cannot resolve at all (fishsense-lite's root pyproject, same
     # override). Revisit if SAM3 publishes a wheel with an honest pin.
     "numpy",
+    # fishsense-core 4.3.0 requires OpenCV 5 (its checkerboard detector), and
+    # every label-studio-sdk caps it below 5 (2.0.19: <5; 2.0.20+: <4.13). One
+    # workspace, one lock: without this the processor and the orchestrator
+    # cannot resolve together. The orchestrator uses only the SDK's API client
+    # (`label_studio_sdk.client`, `.core`), not its image converters, and its
+    # suite passes on OpenCV 5. Revisit if label-studio-sdk lifts its cap.
+    "opencv-python-headless>=5.0.0.93",
 ]
 
 [tool.uv.workspace]

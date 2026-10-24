@@ -16,6 +16,7 @@ length come back known.
 from __future__ import annotations
 
 import uuid
+from importlib.metadata import version
 from datetime import UTC, datetime
 
 import numpy as np
@@ -159,7 +160,8 @@ async def test_laser_depths_run_across_the_orchestrator_and_the_processor():
     (refusal,) = catalog.persisted["refusals"]
     assert (refusal.laser_label_id, refusal.reason) == (bad, "non_positive_depth")
     assert catalog.persisted["laser_calibration_id"] == GEOMETRY.laser_calibration_id
-    assert catalog.persisted["core_version"] == "4.2.0"
+    # The core that ran, whichever is pinned (it moved 4.2.0 -> 4.3.0).
+    assert catalog.persisted["core_version"] == version("fishsense-core")
 
 
 async def test_fish_are_measured_across_the_orchestrator_and_the_processor():
