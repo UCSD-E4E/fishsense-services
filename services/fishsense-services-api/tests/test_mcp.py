@@ -47,6 +47,8 @@ EXPECTED_TOOLS = {
     "list_mission_captures",
     "get_mission_automatic",
     "get_capture_automatic",
+    "list_automatic_lengths",
+    "list_mission_automatic_lengths",
     "list_capture_reviews",
     "list_observations",
     "get_observation",
@@ -284,6 +286,32 @@ async def test_automatic_results_are_marked_unvalidated(agent, tenants, owner_en
     assert result["validated"] is False
     assert "not reviewed" in result["note"]
     assert "result" in result
+
+
+async def test_automatic_lengths_come_unvalidated_with_their_reviews(
+    agent, tenants, owner_engine, app_engine
+):
+    from test_automatic_results_store import _measured
+
+    mission_id, c = await _measured(owner_engine, app_engine, tenants["lab"])
+    async with owner_engine.connect() as conn:
+        number = (
+            await conn.execute(
+                text("SELECT number FROM missions WHERE id = :m"), {"m": mission_id}
+            )
+        ).scalar_one()
+
+    tenant_wide = await agent.call("list_automatic_lengths", slug="lab")
+    one_mission = await agent.call(
+        "list_mission_automatic_lengths", slug="lab", number=number
+    )
+
+    for result in (tenant_wide, one_mission):
+        assert result["validated"] is False
+        assert "not reviewed" in result["note"]
+        assert [r["capture_id"] for r in result["lengths"]] == [str(c)]
+        assert result["lengths"][0]["reviews"] == {}
+        assert result["next"] is None
 
 
 async def test_an_inner_failure_is_a_tool_error(agent):

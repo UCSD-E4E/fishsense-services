@@ -145,8 +145,10 @@ PINNED: tuple[Pinned, ...] = (
             "open_clip_model.safetensors",
         ),
     ),
-    # fishsense-core 4.2.0's SimCC head/tail keypoint model (core pins it in
-    # its manifest; owner 2026-10-23: uploaded for the read-only replay).
+    # fishsense-core's SimCC head/tail keypoint model, as core's manifest pins
+    # it (owner 2026-10-23: uploaded for the read-only replay). Pinned since
+    # core 4.2.0; 4.3.0 pins the same file, which
+    # test_the_simcc_keypoint_model_is_pinned_as_core_pins_it checks.
     Pinned(
         "headtail-keypoints/simcc-sam-e12/simcc_sam_best_length.pt",
         "8918034a0f84f45eb2b8224a369781468ae63497ff06b009bed958ebb82b0110",

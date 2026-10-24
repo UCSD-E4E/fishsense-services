@@ -5,19 +5,26 @@ Read-only, for any member of the tenant; the web shows it as automatic and
 unvalidated. The rules are in ``automatic_review_store``. Here: a frame's
 render and mask go out as presigned links when they are in the tenant's
 current bucket, and a frame or mission the caller can't see, or the run never
-reached, is 404.
+reached, is 404. Lengths are listed a page at a time, for the tenant or one
+mission, each with its reviews and the human length on its frame
+(``automatic_lengths_store``; the owner, 2026-10-24).
 """
 
 import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Path, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Path, Query, Response, status
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from fishsense_services_api.automatic_lengths_store import (
+    AutomaticLengthPage,
+    automatic_lengths,
+    parse_cursor,
+)
 from fishsense_services_api.automatic_review_store import (
     automatic_frame,
     mission_automatic,
@@ -106,6 +113,69 @@ class MissionAutomaticView(BaseModel):
     mean_abs_error_pct: float | None
     within_5_pct: int
     within_10_pct: int
+
+
+class KindReviewView(BaseModel):
+    #: The latest review that counts: it decided the frame's label of this
+    #: kind. None while none counts.
+    action: str | None
+    reason: str | None
+    #: A newer review waits for a Trusted reviewer, or a second learner.
+    pending: bool
+
+
+class AutomaticLengthView(BaseModel):
+    mission_number: int
+    capture_id: uuid.UUID
+    capture_number: int
+    captured_at: datetime | None
+    length_m: float
+    depth_m: float | None
+    #: Always ``label_free`` (0064): the automatic stack alone.
+    calibration_source: str
+    laser_confidence: float | None
+    sam_score: float | None
+    #: The predicted choice, as Label Studio spells it.
+    species: str | None
+    scientific_name: str | None
+    species_probability: float | None
+    species_margin: float | None
+    #: The frame's human length, when it has exactly one laser-measured fish.
+    human_length_m: float | None
+    #: The mission has a current human length somewhere.
+    mission_human_measured: bool
+    #: By kind (``laser``, ``head_tail``, ``species``); unreviewed kinds absent.
+    reviews: dict[str, KindReviewView]
+
+
+class AutomaticLengthPageView(BaseModel):
+    lengths: list[AutomaticLengthView]
+    #: Pass as ``after`` for the next page; None at the end. A page can hold
+    #: fewer than ``limit`` lengths and still have a next.
+    next: str | None
+
+
+def _page(page: AutomaticLengthPage) -> AutomaticLengthPageView:
+    return AutomaticLengthPageView(
+        lengths=[
+            AutomaticLengthView(
+                **{**vars(r), "reviews": {k: vars(v) for k, v in r.reviews.items()}}
+            )
+            for r in page.lengths
+        ],
+        next=page.next,
+    )
+
+
+def _cursor(after: str | None) -> tuple[int, int] | None:
+    try:
+        return parse_cursor(after)
+    except ValueError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from None
+
+
+Limit = Annotated[int, Query(ge=1, le=500)]
+After = Annotated[str | None, Query(max_length=40)]
 
 
 def _point(p) -> PixelPoint | None:
@@ -206,6 +276,46 @@ def add_automatic_routes(
         )
 
     @app.get(
+        "/tenants/{slug}/automatic/lengths",
+        operation_id="list_automatic_lengths",
+        response_model=AutomaticLengthPageView,
+    )
+    async def list_lengths(
+        member: Member,
+        species: Annotated[str | None, Query(min_length=1, max_length=200)] = None,
+        after: After = None,
+        limit: Limit = 200,
+    ) -> AutomaticLengthPageView:
+        """The tenant's current automatic lengths, by mission and capture
+        number; ``species`` keeps one, by scientific name. Unvalidated."""
+        cursor = _cursor(after)
+        async with tenant_transaction(engine, member.tenant_id) as conn:
+            page = await automatic_lengths(
+                conn, member.tenant_id, species=species, after=cursor, limit=limit
+            )
+        return _page(page)
+
+    @app.get(
+        "/tenants/{slug}/missions/{number}/automatic/lengths",
+        operation_id="list_mission_automatic_lengths",
+        response_model=AutomaticLengthPageView,
+    )
+    async def list_mission_lengths(
+        number: Annotated[int, Path(ge=0)],
+        member: Member,
+        after: After = None,
+        limit: Limit = 200,
+    ) -> AutomaticLengthPageView:
+        """One mission's current automatic lengths, by capture number."""
+        cursor = _cursor(after)
+        async with tenant_transaction(engine, member.tenant_id) as conn:
+            mission_id = await _mission_id(conn, member.tenant_id, number)
+            page = await automatic_lengths(
+                conn, member.tenant_id, mission_id=mission_id, after=cursor, limit=limit
+            )
+        return _page(page)
+
+    @app.get(
         "/tenants/{slug}/missions/{number}/automatic",
         operation_id="get_mission_automatic",
         response_model=MissionAutomaticView,
@@ -214,16 +324,7 @@ def add_automatic_routes(
         number: Annotated[int, Path(ge=0)], member: Member
     ) -> MissionAutomaticView:
         async with tenant_transaction(engine, member.tenant_id) as conn:
-            mission_id = (
-                await conn.execute(
-                    text(
-                        "SELECT id FROM missions WHERE tenant_id = :t AND number = :n"
-                    ),
-                    {"t": member.tenant_id, "n": number},
-                )
-            ).scalar_one_or_none()
-            if mission_id is None:
-                raise HTTPException(status.HTTP_404_NOT_FOUND, "no such mission")
+            mission_id = await _mission_id(conn, member.tenant_id, number)
             run = await mission_automatic(conn, member.tenant_id, mission_id)
         return MissionAutomaticView(
             frames=run.frames,
@@ -245,3 +346,15 @@ def add_automatic_routes(
             within_5_pct=run.within_5_pct,
             within_10_pct=run.within_10_pct,
         )
+
+
+async def _mission_id(conn, tenant_id: uuid.UUID, number: int) -> uuid.UUID:
+    mission_id = (
+        await conn.execute(
+            text("SELECT id FROM missions WHERE tenant_id = :t AND number = :n"),
+            {"t": tenant_id, "n": number},
+        )
+    ).scalar_one_or_none()
+    if mission_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such mission")
+    return mission_id
