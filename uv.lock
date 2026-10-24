@@ -601,7 +601,7 @@ provides-extras = ["denoise", "headtail-keypoints", "laser-detector", "rectified
 
 [[package]]
 name = "fishsense-services"
-version = "0.51.0"
+version = "0.52.0"
 source = { virtual = "." }
 
 [package.dev-dependencies]
@@ -628,7 +628,7 @@ dev = [
 
 [[package]]
 name = "fishsense-services-api"
-version = "0.51.0"
+version = "0.52.0"
 source = { editable = "services/fishsense-services-api" }
 dependencies = [
     { name = "alembic" },
@@ -663,7 +663,7 @@ requires-dist = [
 
 [[package]]
 name = "fishsense-services-contracts"
-version = "0.51.0"
+version = "0.52.0"
 source = { editable = "services/fishsense-services-contracts" }
 dependencies = [
     { name = "pydantic" },
@@ -680,7 +680,7 @@ requires-dist = [
 
 [[package]]
 name = "fishsense-services-orchestrator"
-version = "0.51.0"
+version = "0.52.0"
 source = { editable = "services/fishsense-services-orchestrator" }
 dependencies = [
     { name = "boto3" },
@@ -721,7 +721,7 @@ dev = [{ name = "fishsense-services-processor", editable = "services/fishsense-s
 
 [[package]]
 name = "fishsense-services-processor"
-version = "0.51.0"
+version = "0.52.0"
 source = { editable = "services/fishsense-services-processor" }
 dependencies = [
     { name = "boto3" },
