@@ -11,7 +11,8 @@ planar.
 These tests pin that seam, because a second producer (checkerboard laser
 calibration, `docs/plans/checkerboard-laser-calibration.md`) is about to be
 built on it and the alternative is a second transcription of the projection —
-which is exactly the drift `laser_geometry` was extracted to prevent.
+which is exactly the drift `laser_geometry` (now fishsense-core `world_point`)
+was extracted to prevent.
 
 Conventions match `test_perform_laser_calibration_activity`: +Z is depth,
 projection is a plain pinhole through `CAMERA_MATRIX`, and `solvePnP` is given

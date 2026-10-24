@@ -136,3 +136,13 @@ def test_the_result_names_what_made_it():
         captures=[_length()],
     )
     assert MeasureFishResult.model_validate_json(result.model_dump_json()) == result
+
+
+def test_a_dot_that_is_not_measurable_is_a_refusal():
+    """v21 (core #96): stage 14 gates on `LaserPoint.is_measurable()`, and a
+    dot that fails it is refused with the depth stage's reasons."""
+    _length(length_m=None, depth_m=None, refusal="non_finite_depth")
+    _length(length_m=None, depth_m=-0.4, refusal="non_positive_depth")
+    _length(length_m=None, depth_m=52.2, refusal="low_parallax")
+    with pytest.raises(ValidationError):
+        _length(length_m=None, refusal="bored")

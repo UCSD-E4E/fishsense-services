@@ -114,6 +114,30 @@ async def test_a_refusal_never_holds_a_usable_depth(owner_engine):
         )
 
 
+async def test_only_a_low_parallax_refusal_may_hold_a_positive_depth(owner_engine):
+    """0067: near the laser's vanishing point the solve's depth is finite and
+    positive but untrustworthy; that refusal records it. Every other reason
+    still may not, and an unknown reason is still refused."""
+    lab = await tenant(owner_engine)
+    mission_id, calibration = await calibrated_dive(owner_engine, lab)
+    capture_id = await capture(owner_engine, lab, mission_id)
+    label = await laser_label(owner_engine, lab, capture_id)
+    insert = (
+        "INSERT INTO laser_depth_refusals (tenant_id, capture_id, "
+        "laser_label_id, laser_x, laser_y, laser_calibration_id, reason, "
+        "depth_m, core_version) VALUES (:t, :c, :l, 1, 2, :cal, :reason, "
+        ":depth, '4.3.0')"
+    )
+    ids = dict(t=lab, c=capture_id, l=label, cal=calibration)
+
+    await exec_(owner_engine, insert, reason="low_parallax", depth=52.2, **ids)
+    await exec_(owner_engine, insert, reason="low_parallax", depth=-30.0, **ids)
+    with pytest.raises(DBAPIError, match="laser_depth_refusals_depth_m_check"):
+        await exec_(owner_engine, insert, reason="non_finite_depth", depth=1.2, **ids)
+    with pytest.raises(DBAPIError, match="laser_depth_refusals_reason_check"):
+        await exec_(owner_engine, insert, reason="bored", depth=None, **ids)
+
+
 # -- species and fish models: find or create, nothing more ------------------------
 
 

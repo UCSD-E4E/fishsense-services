@@ -22,9 +22,10 @@ Everything from here down is shared:
                                 ->  LaserExtrinsics
 
 The alternative — transcribing the ray-plane intersection a second time for the
-checkerboard path — is precisely the drift `laser_geometry` was extracted to
-prevent, and `duplicate-code` would not catch it: swapping `MissionSlateLabel` for
-a checkerboard DTO is a systematic rename, which is textually invisible.
+checkerboard path — is precisely the drift `laser_geometry` (now fishsense-core
+`world_point`) was extracted to prevent, and `duplicate-code` would not catch
+it: swapping `MissionSlateLabel` for a checkerboard DTO is a systematic rename,
+which is textually invisible.
 
 **`solvePnP` is given zero distortion on purpose.** The pipeline only ever feeds
 it rectified imagery (`RectifiedImage` applies `cv2.undistort`), so the
