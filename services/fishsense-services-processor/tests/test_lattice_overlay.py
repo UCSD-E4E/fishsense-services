@@ -10,7 +10,7 @@ apart, or two?**
 structural. A uniformly mis-latticed grid (every corner two squares apart,
 `body_points` labelling them one apart) is still a perfect grid, so it is an
 exact homography of the modelled grid and the residual is ~0. The guard in
-`checkerboard_detection` catches a grid whose spacing is *mixed*, which breaks
+the detector's residual gate catches a grid whose spacing is *mixed*, which breaks
 regularity; the uniform case sails through it, through `_fits_declared_board`
 (a coarse lattice is smaller than the declared board, so it passes an upper
 bound), and through `check_fit_self_consistency` (which compares 2-D dots that
