@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.50.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.50.0...v0.50.1) (2026-10-24)
+
+
+### Bug Fixes
+
+* **web:** the tenant switcher closes on a click elsewhere, Escape, or a pick ([11aefb5](https://github.com/UCSD-E4E/fishsense-services/commit/11aefb5bfe070dff214bc07f76f9b1c324466b8b))
+* **web:** the tenant switcher closes on a click elsewhere, Escape, or a pick ([74bd5cd](https://github.com/UCSD-E4E/fishsense-services/commit/74bd5cd45f4c462c1f8b290659293328b937e31d))
+
 ## [0.50.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.49.0...v0.50.0) (2026-10-23)
 
 
