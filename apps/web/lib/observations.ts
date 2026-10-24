@@ -28,10 +28,26 @@ export function deviceFilter(value: string | undefined): Device | undefined {
 export async function getObservationPage(
   accessToken: string,
   slug: string,
-  options: { device?: Device; before?: string; mission?: number; limit?: number; page?: number } = {},
+  options: {
+    device?: Device;
+    species?: string;
+    before?: string;
+    mission?: number;
+    limit?: number;
+    page?: number;
+  } = {},
 ): Promise<ObservationPage> {
-  const query: { device?: Device; before?: string; mission?: number; limit?: number; page?: number } = {};
+  const query: {
+    device?: Device;
+    species?: string;
+    before?: string;
+    mission?: number;
+    limit?: number;
+    page?: number;
+  } = {};
   if (options.device) query.device = options.device;
+  // A query value, never a path: the API matches it as a name.
+  if (options.species) query.species = options.species;
   // The API bounds it (and says so in its schema); a number can't forge a path.
   if (options.limit !== undefined) query.limit = options.limit;
   if (options.mission !== undefined) {
@@ -49,6 +65,37 @@ export async function getObservationPage(
   if (data === undefined)
     throw failure("fishsense-api observations failed", response, error);
   return data;
+}
+
+export type SpeciesCount = Schemas["SpeciesCountView"];
+
+/** The species the tenant's measured fish are, most first, with how many of
+ *  each (following the device filter): what the Fish page offers. Only the
+ *  tenant's own (the owner, 2026-10-23). */
+export async function getObservationSpecies(
+  accessToken: string,
+  slug: string,
+  device?: Device,
+): Promise<SpeciesCount[]> {
+  const { data, error, response } = await apiClient(accessToken).GET(
+    "/tenants/{slug}/observations/species",
+    { params: { path: { slug: safeSlug(slug) }, query: device ? { device } : {} } },
+  );
+  if (data === undefined) throw failure("fishsense-api species failed", response, error);
+  return data;
+}
+
+/** A species from the URL (`?species=`): a name of at most 200 characters. */
+export function speciesFilter(raw: string | undefined): string | undefined {
+  const name = raw?.trim();
+  return name && name.length <= 200 ? name : undefined;
+}
+
+/** A species as the filter offers it: its common name and scientific name,
+ *  and how many fish. */
+export function speciesLabel(s: SpeciesCount): string {
+  const name = s.common_name ? `${s.common_name} (${s.scientific_name})` : s.scientific_name;
+  return `${name} · ${s.count.toLocaleString()}`;
 }
 
 /** One fish in one capture, with its evidence; null when there is none (the

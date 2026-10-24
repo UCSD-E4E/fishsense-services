@@ -3454,6 +3454,36 @@
         "title": "SkillBody",
         "type": "object"
       },
+      "SpeciesCountView": {
+        "properties": {
+          "common_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Common Name"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "scientific_name": {
+            "title": "Scientific Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scientific_name",
+          "common_name",
+          "count"
+        ],
+        "title": "SpeciesCountView",
+        "type": "object"
+      },
       "SpeciesView": {
         "properties": {
           "common_name": {
@@ -6072,6 +6102,24 @@
           },
           {
             "in": "query",
+            "name": "species",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Species"
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
@@ -6144,6 +6192,76 @@
           }
         ],
         "summary": "List "
+      }
+    },
+    "/tenants/{slug}/observations/species": {
+      "get": {
+        "description": "The species the tenant's measured fish are, most first, with how\nmany of each: what the Fish page offers to filter by. Only the\ntenant's own (the owner, 2026-10-23).",
+        "operationId": "list_observation_species",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "device",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "lite",
+                    "mobile",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Device"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SpeciesCountView"
+                  },
+                  "title": "Response List Observation Species",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Species"
       }
     },
     "/tenants/{slug}/observations/{capture_id}/{fish_id}": {

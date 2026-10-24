@@ -261,6 +261,7 @@ async def test_every_operation_has_an_explicit_operation_id(offline_client):
         "list_missions",
         "list_my_memberships",
         "list_my_tokens",
+        "list_observation_species",
         "list_observations",
         "raise_needs_reprocess",
         "record_review",

@@ -46,6 +46,7 @@ __all__ = [
     "mission_captures",
     "observation",
     "observation_page",
+    "observation_species",
 ]
 
 Point = tuple[float, float]
@@ -174,11 +175,13 @@ async def list_observations(
     device: str | None = None,
     photo_bucket: str | None = None,
     mission: int | None = None,
+    species: str | None = None,
 ) -> list[Observation]:
     """Newest first; ``before`` is the previous page's last ``cursor``;
     ``device`` keeps one of :data:`DEVICE_GROUPS` or ``other`` (None: all);
     ``mission`` keeps one mission's, by number (phase 7b: how a phone's fish
     are reached once /captures is retired);
+    ``species`` keeps one species', by scientific name (2026-10-23);
     ``photo_bucket`` is the tenant's current bucket (None: no Lite photos)."""
     found = await observation_page(
         conn,
@@ -188,6 +191,7 @@ async def list_observations(
         device=device,
         photo_bucket=photo_bucket,
         mission=mission,
+        species=species,
     )
     return found.observations
 
@@ -202,6 +206,7 @@ async def observation_page(
     device: str | None = None,
     photo_bucket: str | None = None,
     mission: int | None = None,
+    species: str | None = None,
 ) -> ObservationPage:
     """:func:`list_observations`, from the ``offset``-th, with the total.
 
@@ -216,6 +221,7 @@ async def observation_page(
         "tenant_id": tenant_id,
         "device": device,
         "mission": mission,
+        "species": species,
         "named": _NAMED_KINDS,
         "kinds": list(DEVICE_GROUPS.get(device, ())),
         "before_at": before[0] if before else None,
@@ -270,7 +276,46 @@ _KEPT = """
                     OR o.device_kind <> ALL(CAST(:named AS text[]))))
            OR o.device_kind = ANY(CAST(:kinds AS text[])))
       AND (CAST(:mission AS integer) IS NULL OR o.mission_number = :mission)
+      AND (CAST(:species AS text) IS NULL OR o.scientific_name = :species)
 """
+
+
+@dataclass(frozen=True)
+class SpeciesCount:
+    scientific_name: str
+    common_name: str | None
+    #: The tenant's measured fish of it (with the device filter, if any).
+    count: int
+
+
+async def observation_species(
+    conn: AsyncConnection, tenant_id: uuid.UUID, *, device: str | None = None
+) -> list[SpeciesCount]:
+    """The species the tenant's measured fish are, most first: what the Fish
+    page offers to filter by (the owner, 2026-10-23: "only show species the
+    tenant has"). ``device`` as :func:`observation_page`'s. Fish models and
+    fish without a species aren't species."""
+    if device is not None and device != "other" and device not in DEVICE_GROUPS:
+        raise ValueError(f"no device group {device!r}")
+    rows = await conn.execute(
+        text(f"""
+            SELECT o.scientific_name, max(o.common_name) AS common_name,
+                   count(*) AS count
+            FROM ({_KEPT}) o
+            WHERE o.scientific_name IS NOT NULL
+            GROUP BY o.scientific_name
+            ORDER BY count(*) DESC, o.scientific_name
+            """),
+        {
+            "tenant_id": tenant_id,
+            "device": device,
+            "mission": None,
+            "species": None,
+            "named": _NAMED_KINDS,
+            "kinds": list(DEVICE_GROUPS.get(device, ())),
+        },
+    )
+    return [SpeciesCount(r.scientific_name, r.common_name, r.count) for r in rows]
 
 
 async def observation(
