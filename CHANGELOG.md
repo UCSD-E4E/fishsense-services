@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.53.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.52.0...v0.53.0) (2026-10-24)
+
+
+### Features
+
+* BioCLIP with fish-model classes, read-only replay (contract v20) ([a0c7a4b](https://github.com/UCSD-E4E/fishsense-services/commit/a0c7a4b1b944ad3f7212994d0eac35704fc18e18))
+* BioCLIP with fish-model classes, read-only replay (contract v20) ([9036186](https://github.com/UCSD-E4E/fishsense-services/commit/9036186dd9c15a3a34aa72eb2c7eb969f5e7d94b))
+* **deploy:** retire Superset ([88c9615](https://github.com/UCSD-E4E/fishsense-services/commit/88c96157bdb8c4df149f9699069b3ff4640b36cb))
+
 ## [0.52.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.51.0...v0.52.0) (2026-10-24)
 
 
