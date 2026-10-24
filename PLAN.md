@@ -1223,7 +1223,9 @@ overridable)*
 - `species`, `fishmodelreference`, `calibrationtarget` are global reference data (§4.3) —
   confirm that no tenant needs its own.
 
-**9.18 — Analytics (Superset) under RLS** — *open*
+**9.18 — Analytics (Superset) under RLS** — *closed 2026-10-23: Superset retired.* No sign-in since 2026-10-02; per-tenant analytics are the portal's (tenant-scoped API). Its `superset` database is kept and backed up; `fishsense_analytics` and its policies remain, to be dropped by a migration of their own.
+
+*As it stood before:*
 - v1's Superset connects directly to Postgres as its own role, through views. Under RLS
   that connection sees nothing (no tenant variable set) or everything (`BYPASSRLS`).
 - *Options:* keep Superset lab-internal on a BYPASSRLS read role (and say so), or give each

@@ -1,17 +1,16 @@
 // Ported from fishsense-lite@77e8f8e5 apps/fishsense-lite-web/app/page.tsx: the
 // labeling projects with work waiting, and the dashboards and workflows.
-// Shown on Today: the labeling to staff, and the dashboards (Superset,
-// Temporal) to system admins only (0056; the owner, 2026-10-20).
+// Shown on Today: the labeling to staff, and Temporal to system admins only
+// (0056; the owner, 2026-10-20). Superset's links went with it (2026-10-23).
 import { getActiveProjects } from "@/lib/active-projects";
 import { buildSections, type Section, type SectionLink } from "@/lib/sections";
-import { ADMIN_LINKS, RESULTS_LINKS } from "@/lib/static-links";
+import { ADMIN_LINKS } from "@/lib/static-links";
 
 const FETCH_REVALIDATE_SECONDS = 300;
 
 export async function WorkSections({ dashboards }: { dashboards: boolean }) {
   const active = await getActiveProjects(FETCH_REVALIDATE_SECONDS);
   const sections = buildSections(active, {
-    results: dashboards ? RESULTS_LINKS : [],
     admin: dashboards ? ADMIN_LINKS : [],
   });
   return (
