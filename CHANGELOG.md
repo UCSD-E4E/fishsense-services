@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.52.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.51.0...v0.52.0) (2026-10-24)
+
+
+### Features
+
+* **api:** personal API tokens and a read-only MCP endpoint ([da0aa57](https://github.com/UCSD-E4E/fishsense-services/commit/da0aa57d34d77c44c9dd1df16d104b573b525731))
+
 ## [0.51.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.50.1...v0.51.0) (2026-10-24)
 
 

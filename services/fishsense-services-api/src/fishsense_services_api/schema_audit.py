@@ -2,8 +2,9 @@
 
 Every table in ``public`` is classified, and each class has rules:
 
-- **caller-scoped** (``users``, ``memberships``, ``tenants``): resolved before any
-  tenant is active; RLS enabled and forced, and *only* their known policies.
+- **caller-scoped** (``users``, ``memberships``, ``tenants``, ``api_tokens``):
+  resolved before any tenant is active; RLS enabled and forced, and *only* their
+  known policies (``api_tokens`` has none: only its functions reach it, 0066).
 - **global reference** (e.g. species): shared by all tenants; the app role may
   read but never write.
 - **tenant-scoped** -- everything else, by default: a non-null ``tenant_id``
@@ -39,7 +40,7 @@ from collections.abc import Collection, Mapping
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-CALLER_SCOPED_TABLES = frozenset({"users", "memberships", "tenants"})
+CALLER_SCOPED_TABLES = frozenset({"users", "memberships", "tenants", "api_tokens"})
 GLOBAL_REFERENCE_TABLES = frozenset(
     {
         "species",
@@ -55,6 +56,7 @@ CALLER_POLICIES: Mapping[str, frozenset[tuple[str, str]]] = {
     "users": frozenset({("own_user", "SELECT"), ("provision_own_user", "INSERT")}),
     "memberships": frozenset({("own_memberships", "SELECT")}),
     "tenants": frozenset({("visible_tenants", "SELECT")}),
+    "api_tokens": frozenset(),
 }
 
 #: ``tenant_id = <active tenant>`` exactly as Postgres deparses it into

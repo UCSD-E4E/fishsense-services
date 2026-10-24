@@ -20,7 +20,7 @@
 # v1's paths, REUSED where the value is the same (seeded already; v1 keeps
 # reading them through the rollback window):
 #   postgres      { password }                   # the admin `postgres` role (v1's)
-#   superset      { secret_key, db_password }    # flask secret + v1's `superset` metadata role
+#   superset      { secret_key, db_password }    # NOT READ since Superset's retirement (2026-10-23)
 #   web           { auth_secret }                # next-auth cookie/JWT signing
 #   label_studio  { api_key }                    # the service account's (e4e+fishsense@ucsd.edu)
 #   object_store  { access_key, secret_key }     # Garage; also Label Studio's presign key (v1's fallback)
@@ -35,10 +35,11 @@
 # PLATFORM writes (tofu — do NOT seed):
 #   generated/services_db { owner_password, app_password, backup_password,
 #                           analytics_password, smoke_password }
+#                   # analytics_password: NOT READ since 2026-10-23 (Superset retired)
 #                   # v2's DB logins; generate-once, [a-z0-9]{64} (krg-infra terraform/secrets #554)
 #   oidc/web-service-account { username, password }   # svc_fishsense's app password (krg-infra #550)
 #   oidc/web        { client_id, client_secret, issuer_url }   (#438)
-#   oidc/analytics  { client_id, client_secret, issuer_url }   (#438)
+#   oidc/analytics  { client_id, client_secret, issuer_url }   (#438) NOT READ since 2026-10-23
 #   oidc/mobile     { client_id, issuer_url }  # the mobile app's public client (PKCE);
 #                   # SOFT -- docs/handoff/krg-infra
 #   generated/object_stores { stores_json }  # each tenant's own Garage bucket + key, as JSON
@@ -81,7 +82,6 @@
         {{ with secret "secret/data/tenants/fishsense/generated/services_db" }}FISHSENSE_OWNER_PASSWORD={{ .Data.data.owner_password }}
         FISHSENSE_APP_PASSWORD={{ .Data.data.app_password }}
         FISHSENSE_BACKUP_PASSWORD={{ .Data.data.backup_password }}
-        FISHSENSE_ANALYTICS_PASSWORD={{ .Data.data.analytics_password }}
         FISHSENSE_SMOKE_PASSWORD={{ .Data.data.smoke_password }}{{ end }}
       '';
     }
@@ -160,21 +160,6 @@
         {{ with secret "secret/data/tenants/fishsense/oidc/web-service-account" }}FISHSENSE_API_SERVICE_USERNAME={{ .Data.data.username }}
         FISHSENSE_API_SERVICE_PASSWORD={{ .Data.data.password }}{{ end }}
         {{ with secret "secret/data/tenants/fishsense/label_studio" }}LABEL_STUDIO_API_KEY={{ .Data.data.api_key }}{{ end }}
-      '';
-    }
-    {
-      # Superset x4 (profile `superset`): v1's flask secret and metadata role
-      # (superset_config.py DATABASE_USER=superset), the analytics OIDC client
-      # (names read by superset_config.py OAUTH_PROVIDERS), and the password
-      # docker-init.sh injects into the dashboards' connection to v2.
-      destination = "/run/tenant/secrets/superset.env";
-      contents = ''
-        {{ with secret "secret/data/tenants/fishsense/superset" }}SUPERSET_SECRET_KEY={{ .Data.data.secret_key }}
-        DATABASE_PASSWORD={{ .Data.data.db_password }}{{ end }}
-        {{ with secret "secret/data/tenants/fishsense/oidc/analytics" }}AUTHENTIK_KEY={{ .Data.data.client_id }}
-        AUTHENTIK_SECRET={{ .Data.data.client_secret }}
-        AUTHENTIK_ISSUER={{ .Data.data.issuer_url }}{{ end }}
-        {{ with secret "secret/data/tenants/fishsense/generated/services_db" }}ANALYTICS_DATABASE_PASSWORD={{ .Data.data.analytics_password }}{{ end }}
       '';
     }
     {
