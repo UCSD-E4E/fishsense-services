@@ -63,9 +63,14 @@ INSTRUCTIONS = (
     "with list_tenants; every other tool takes a tenant's `slug`. Missions and "
     "deployments are numbered within their tenant. A system admin sees every "
     "tenant, read-only, and each tenant they open is recorded. Automatic results "
-    "(get_mission_automatic, get_capture_automatic) come back with "
-    "`validated: false`: they have not been reviewed by a person, so say so "
-    "wherever you use one and never present it as a measurement. When you report "
+    "(get_mission_automatic, get_capture_automatic, list_automatic_lengths, "
+    "list_mission_automatic_lengths) come back with `validated: false`: they "
+    "have not been reviewed by a person, so say so wherever you use one and never "
+    "present it as a measurement. Each automatic length carries its reviews: a "
+    "laser or head_tail review whose action is accept or fix has become a human "
+    "label, and `human_length_m` is the frame's human length when there is one; "
+    "prefer it. Lengths come a page at a time: pass `next` as `after` until it "
+    "is null (a page may be short and still have a next). When you report "
     "numbers, give how many fish or frames they rest on. These tools only "
     "read; changes are made in the web app."
 )
@@ -187,6 +192,11 @@ def _error(response: httpx.Response) -> str:
 
 def _automatic(result: Any) -> dict:
     return {"validated": False, "note": UNVALIDATED, "result": result}
+
+
+def _automatic_page(page: dict) -> dict:
+    """A page of automatic lengths, marked as `_automatic` marks a result."""
+    return {"validated": False, "note": UNVALIDATED, **page}
 
 
 class McpEndpoint:
@@ -367,6 +377,48 @@ def _server(get) -> MCPServer:
         return _automatic(
             await get(ctx, _path("tenants", slug, "captures", capture_id, "automatic"))
         )
+
+    @tool
+    async def list_automatic_lengths(
+        ctx: Context,
+        slug: Slug,
+        species: Annotated[
+            str | None,
+            Field(description="A scientific name, e.g. Lachnolaimus maximus"),
+        ] = None,
+        after: Annotated[
+            str | None, Field(description="The last page's `next`, to page on")
+        ] = None,
+        limit: Annotated[int, Field(ge=1, le=500)] = 200,
+    ) -> dict:
+        """A tenant's automatic lengths, by mission and capture, a page at a
+        time: each with its species, the frame's human length if any, and its
+        reviews. Slate frames are left out. Unvalidated."""
+        page = await get(
+            ctx,
+            _path("tenants", slug, "automatic", "lengths"),
+            params={"species": species, "after": after, "limit": limit},
+        )
+        return _automatic_page(page)
+
+    @tool
+    async def list_mission_automatic_lengths(
+        ctx: Context,
+        slug: Slug,
+        number: Number,
+        after: Annotated[
+            str | None, Field(description="The last page's `next`, to page on")
+        ] = None,
+        limit: Annotated[int, Field(ge=1, le=500)] = 200,
+    ) -> dict:
+        """One mission's automatic lengths, by capture, a page at a time, as
+        list_automatic_lengths gives them. Unvalidated."""
+        page = await get(
+            ctx,
+            _path("tenants", slug, "missions", number, "automatic", "lengths"),
+            params={"after": after, "limit": limit},
+        )
+        return _automatic_page(page)
 
     @tool
     async def list_capture_reviews(
