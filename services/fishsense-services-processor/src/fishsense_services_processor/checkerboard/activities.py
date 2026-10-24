@@ -67,7 +67,7 @@ from fishsense_services_contracts.slate_calibration import (
     Point,
 )
 from fishsense_services_processor.calibration.fit import fit_laser
-from fishsense_services_processor.calibration.geometry import (
+from fishsense_core.plane import (
     laser_point_on_plane,
     plane_from_correspondences,
 )
