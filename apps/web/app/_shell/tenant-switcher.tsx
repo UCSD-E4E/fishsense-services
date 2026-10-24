@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useRef } from "react";
+import { dismissOnOutside } from "@/lib/dismiss";
 import { switchHref, tenantOf } from "@/lib/tenant-paths";
 
 export type SwitcherTenant = { slug: string; name: string; role: string | null };
@@ -9,7 +11,8 @@ export type SwitcherTenant = { slug: string; name: string; role: string | null }
 /**
  * The tenant beside the mark (docs/design/README.md, Tenants): its name, and
  * for a member of several, the others with the user's role in each. Switching
- * keeps the section (`switchHref`), not the record.
+ * keeps the section (`switchHref`), not the record. The menu closes on a click
+ * outside it, on Escape, and once a tenant is picked (`dismissOnOutside`).
  */
 export function TenantSwitcher({
   tenants,
@@ -22,6 +25,15 @@ export function TenantSwitcher({
   lastTenant: string | null;
 }) {
   const pathname = usePathname() ?? "/";
+  const menu = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const element = menu.current;
+    return element ? dismissOnOutside(element, document) : undefined;
+  }, []);
+  // The header outlives a page change: picking a tenant must close the menu.
+  useEffect(() => {
+    if (menu.current) menu.current.open = false;
+  }, [pathname]);
   const slug = tenantOf(pathname) ?? lastTenant;
   const current = [...tenants, ...others].find((t) => t.slug === slug);
   if (!current) return null;
@@ -42,7 +54,7 @@ export function TenantSwitcher({
     );
   }
   return (
-    <details className="group relative">
+    <details ref={menu} className="group relative">
       <summary className="inline-flex h-10 cursor-pointer list-none items-center gap-2 rounded-control border border-line px-2.5 font-semibold hover:bg-raised group-open:border-teal">
         {badge}
         {current.name}
