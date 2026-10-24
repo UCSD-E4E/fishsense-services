@@ -19,6 +19,7 @@ export const RESERVED_SLUGS = [
   "fish",
   "missions",
   "portal",
+  "tokens",
   "favicon",
   "logo",
   "world",
