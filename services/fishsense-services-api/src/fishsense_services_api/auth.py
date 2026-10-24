@@ -44,6 +44,15 @@ class Principal:
     #: tenants' admins see a name, not a hash (0065).
     name: str | None = None
     email: str | None = None
+    #: Set when they came in on a personal API token (0066): its kind,
+    #: ``read`` or ``edit``. None for a signed-in session.
+    token_scope: str | None = None
+
+
+#: The ASGI scope key under which the MCP endpoint hands its already
+#: authenticated caller to the routes it calls in-process (0066). Only the
+#: server builds a scope, so no request from outside can set it.
+IN_PROCESS_PRINCIPAL = "fishsense.in_process_principal"
 
 
 class KeySource(Protocol):

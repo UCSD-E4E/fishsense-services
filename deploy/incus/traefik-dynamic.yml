@@ -43,15 +43,6 @@ http:
       service: api
       tls: {}
 
-    # Superset analytics — auth is in-app OIDC (fishsense_analytics provider).
-    # Its backend runs only with the `superset` profile (compose.env); until
-    # then this route answers 502.
-    superset:
-      rule: "Host(`analytics.fishsense.e4e.ucsd.edu`)"
-      entryPoints: [websecure]
-      service: superset
-      tls: {}
-
   services:
     web:
       loadBalancer:
@@ -61,7 +52,3 @@ http:
       loadBalancer:
         servers:
           - url: "http://api:8000"
-    superset:
-      loadBalancer:
-        servers:
-          - url: "http://superset:8088"

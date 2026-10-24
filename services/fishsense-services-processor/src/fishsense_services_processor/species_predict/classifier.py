@@ -52,6 +52,7 @@ __all__ = [
     "is_original_bioclip",
     "is_out_of_memory",
     "mean_text_embedding",
+    "probabilities",
     "rank",
     "validate_model_id",
 ]
@@ -120,6 +121,15 @@ class Ranking:
     margin: float
 
 
+def probabilities(image_features, text_features, logit_scale: float) -> np.ndarray:
+    """Every choice's probability: the softmax `rank` takes its top-5 from."""
+    image = _normalise(np.asarray(image_features, dtype=np.float64))
+    text = _normalise(np.asarray(text_features, dtype=np.float64))
+    logits = logit_scale * (text @ image)
+    probs = np.exp(logits - logits.max())
+    return probs / probs.sum()
+
+
 def rank(
     image_features: np.ndarray,
     text_features: np.ndarray,
@@ -127,11 +137,7 @@ def rank(
     choices: Sequence[str],
 ) -> Ranking:
     """Softmax of the logit-scaled cosine similarities over the closed set."""
-    image = _normalise(np.asarray(image_features, dtype=np.float64))
-    text = _normalise(np.asarray(text_features, dtype=np.float64))
-    logits = logit_scale * (text @ image)
-    probs = np.exp(logits - logits.max())
-    probs /= probs.sum()
+    probs = probabilities(image_features, text_features, logit_scale)
     order = np.argsort(-probs, kind="stable")[: min(SPECIES_TOP_K, len(choices))]
     top = [(choices[int(i)], float(probs[i])) for i in order]
     top2 = top[1][1] if len(top) > 1 else 0.0
@@ -230,6 +236,35 @@ class BioclipClassifier:
                 ]
             )
         return self._text[key]
+
+    def _prompted_features(
+        self, choices: Sequence[tuple[str, Sequence[str]]]
+    ) -> np.ndarray:
+        key = ("prompted",) + tuple((c, tuple(p)) for c, p in choices)
+        if key not in self._text:
+            self._text[key] = np.stack(
+                [
+                    mean_text_embedding(self._encoder.encode_text(list(p)))
+                    for _, p in choices
+                ]
+            )
+        return self._text[key]
+
+    def score_sets(
+        self, image: Any, sets: dict[str, Sequence[tuple[str, Sequence[str]]]]
+    ) -> dict[str, tuple[Ranking, dict[str, float]]]:
+        """One image encoding ranked against several choice sets, each choice
+        given by its own prompts: per set, its `Ranking` and every choice's
+        probability (the model-class replay, 2026-10-23)."""
+        features = self._encoder.encode_image(image)
+        out = {}
+        for name, choices in sets.items():
+            text = self._prompted_features(choices)
+            labels = [c for c, _ in choices]
+            probs = probabilities(features, text, self._encoder.logit_scale)
+            out[name] = (rank(features, text, self._encoder.logit_scale, labels),
+                         {c: float(p) for c, p in zip(labels, probs)})  # fmt: skip
+        return out
 
     def classify(self, image: Any, candidates: Sequence[SpeciesCandidate]) -> Ranking:
         text = self._text_features(candidates)

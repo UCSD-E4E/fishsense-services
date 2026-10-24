@@ -5,7 +5,7 @@ fishsense-lite@77e8f8e5 `apps/fishsense-lite-web` onto the v2 API (PLAN.md §6.1
 Two surfaces:
 
 - **Public landing (`/`)**: the Label Studio projects that still hold labeling
-  work (laser, head/tail, species, slate), then the Superset and Temporal links.
+  work (laser, head/tail, species, slate), then the Temporal link.
 - **Portal (`/portal/*`)**, for the tenant's **admins**: laser and head/tail
   **triage** (accept or skip a model's prediction, straight into Label Studio),
   and **dive calibration links** (a slate-less dive borrows a sibling's

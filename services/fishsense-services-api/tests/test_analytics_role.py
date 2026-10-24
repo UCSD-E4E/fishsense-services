@@ -213,16 +213,3 @@ async def test_every_tenant_table_it_reads_holds_it_to_the_lab(owner_engine):
             ).scalars()
         )
     assert unbound == []
-
-
-async def test_the_superset_datasets_run_as_a_member(owner_engine, analyst):
-    """What Superset runs, as Superset would: the view and everything under it
-    are readable, or the dataset errors."""
-    from test_superset_datasets import DATASETS
-
-    lab = await _tenant(owner_engine)
-    await _dive(owner_engine, lab)
-    engine = await analyst(lab)
-    for dataset in sorted(DATASETS.glob("*.sql")):
-        async with engine.connect() as conn:
-            await conn.execute(text(dataset.read_text()))

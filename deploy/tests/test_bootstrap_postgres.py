@@ -36,7 +36,6 @@ PASSWORDS = {
     "FISHSENSE_OWNER_PASSWORD": secrets.token_hex(8),
     "FISHSENSE_APP_PASSWORD": secrets.token_hex(8),
     "FISHSENSE_BACKUP_PASSWORD": secrets.token_hex(8),
-    "FISHSENSE_ANALYTICS_PASSWORD": secrets.token_hex(8),
     "FISHSENSE_SMOKE_PASSWORD": secrets.token_hex(8),
 }
 #: v1's own login roles on the slot-shaped cluster.
@@ -139,7 +138,6 @@ def _login(cluster, role: str, database: str = V2) -> str:
         "fishsense_owner": "FISHSENSE_OWNER_PASSWORD",
         "fishsense_app": "FISHSENSE_APP_PASSWORD",
         "fishsense_backup": "FISHSENSE_BACKUP_PASSWORD",
-        "fishsense_superset": "FISHSENSE_ANALYTICS_PASSWORD",
         "fishsense_smoke": "FISHSENSE_SMOKE_PASSWORD",
     }[role]
     return _url(cluster, role, PASSWORDS[key], database)
@@ -187,14 +185,14 @@ def test_the_owner_has_no_statement_timeout(migrated):
 
 @pytest.mark.parametrize(
     "role",
-    ["fishsense_owner", "fishsense_app", "fishsense_superset", "fishsense_smoke"],
+    ["fishsense_owner", "fishsense_app", "fishsense_smoke"],
 )
 def test_nothing_in_v2s_database_runs_with_jit(migrated, role):
     """v2's views stack `DISTINCT ON`s whose estimated cost crosses the JIT
     thresholds, and compiling costs more than running: 9.0 s of the Today
     summary's 13.5 s on production (2026-10-21), and 12-17 s for a 2 s
     pipeline-status query (0029). Off for the database, so it holds for
-    every role and driver: the API, the orchestrator, the CLI and Superset."""
+    every role and driver: the API, the orchestrator and the CLI."""
     assert _scalar(_login(migrated, role), "SHOW jit") == "off"
 
 
@@ -273,13 +271,13 @@ def test_a_missing_password_refuses_to_run(migrated):
     assert "FISHSENSE_SMOKE_PASSWORD" in output
 
 
-# --- after migrate-v1: the analytics and research logins ---------------------------------
+# --- after migrate-v1: Superset's login, retired --------------------------------------
 
 
 @pytest.fixture(scope="module")
 def with_lab(migrated):
-    """What migrate-v1 leaves: the lab tenant (and a dive in it), then the
-    converge after it, which binds Superset's login."""
+    """The lab tenant, and Superset's login as production has it until this
+    converge: logging in, bound to the lab. Then a converge."""
     lab = uuid.uuid4()
     owner = create_engine(_login(migrated, "fishsense_owner"))
     with owner.begin() as conn:
@@ -288,86 +286,41 @@ def with_lab(migrated):
             {"id": lab},
         )
     owner.dispose()
+    admin = _admin(migrated)
+    with admin.connect() as conn:
+        conn.execute(text("CREATE ROLE fishsense_superset LOGIN PASSWORD 'old'"))
+        conn.execute(text("GRANT fishsense_analytics TO fishsense_superset"))
+        conn.execute(
+            text(f"ALTER ROLE fishsense_superset IN DATABASE {V2} "
+                 f"SET app.tenant_id = '{lab}'")
+        )  # fmt: skip
+    admin.dispose()
     code, output = _bootstrap(migrated)
     assert code == 0, output
-    assert "binding fishsense_superset to the lab" in output
     return migrated, lab
 
 
-def test_superset_is_bound_to_the_lab_in_v2s_database_only(with_lab):
-    cluster, lab = with_lab
-    superset = _login(cluster, "fishsense_superset")
-    assert _scalar(superset, "SELECT current_setting('app.tenant_id', true)") == str(
-        lab
-    )
+def test_supersets_login_is_retired_and_bound_to_no_tenant(with_lab):
+    """Superset was retired on 2026-10-23. Its login, where it exists, can no
+    longer log in and is bound to no tenant; the bootstrap never drops a role."""
+    cluster, _ = with_lab
     admin = _admin(cluster)
     with admin.connect() as conn:
+        login = conn.execute(
+            text(
+                "SELECT rolcanlogin FROM pg_roles WHERE rolname = 'fishsense_superset'"
+            )
+        ).scalar_one()
         settings = conn.execute(
             text(
-                "SELECT d.datname, s.setconfig FROM pg_db_role_setting s "
+                "SELECT count(*) FROM pg_db_role_setting s "
                 "JOIN pg_roles r ON r.oid = s.setrole "
-                "JOIN pg_database d ON d.oid = s.setdatabase "
                 "WHERE r.rolname = 'fishsense_superset'"
             )
-        ).all()
+        ).scalar_one()
     admin.dispose()
-    assert settings == [(V2, [f"app.tenant_id={lab}"])]
-
-
-@pytest.mark.parametrize(
-    "dataset", ["pipeline_labeling_queue", "pipeline_partial_dives"]
-)
-def test_the_pipeline_dashboards_datasets_run_as_superset(with_lab, dataset):
-    cluster, _ = with_lab
-    sql = (REPO / "deploy" / "superset" / "datasets" / f"{dataset}.sql").read_text()
-    engine = create_engine(_login(cluster, "fishsense_superset"))
-    try:
-        with engine.connect() as conn:
-            conn.execute(text(sql)).all()
-    finally:
-        engine.dispose()
-
-
-def test_the_physical_dataset_has_every_column_the_bundle_names(with_lab):
-    import yaml
-
-    cluster, _ = with_lab
-    bundle = INCUS / "superset_volumes/docker/assets/datasets/FishSense"
-    wanted = {c["column_name"] for c in yaml.safe_load((bundle / "dive_pipeline_status.yaml").read_text())["columns"]}  # fmt: skip
-    engine = create_engine(_login(cluster, "fishsense_superset"))
-    try:
-        with engine.connect() as conn:
-            have = set(conn.execute(text("SELECT * FROM dive_pipeline_status LIMIT 0")).keys())  # fmt: skip
-    finally:
-        engine.dispose()
-    assert wanted <= have, wanted - have
-
-
-def test_fish_measurements_needs_the_research_grant(with_lab):
-    """What breaks from v1's bundle: fishsense_analytics reads the pipeline
-    views only (0030), not the `v1` research views the fish-measurements
-    dataset needs. docs/cutover.md: granting `fishsense_research` to the
-    Superset login is the owner's call (PLAN.md §9.18); this pins both sides."""
-    import yaml
-
-    cluster, _ = with_lab
-    bundle = INCUS / "superset_volumes/docker/assets/datasets/FishSense"
-    sql = yaml.safe_load((bundle / "fish_measurements.yaml").read_text())["sql"]
-    url = _login(cluster, "fishsense_superset")
-    with pytest.raises(ProgrammingError, match="permission denied"):
-        _scalar(url, sql)
-    admin = _admin(cluster)
-    with admin.connect() as conn:
-        conn.execute(text("GRANT fishsense_research TO fishsense_superset"))
-    try:
-        engine = create_engine(url)
-        with engine.connect() as conn:
-            conn.execute(text(sql)).all()
-        engine.dispose()
-    finally:
-        with admin.connect() as conn:
-            conn.execute(text("REVOKE fishsense_research FROM fishsense_superset"))
-        admin.dispose()
+    assert login is False
+    assert settings == 0
 
 
 def test_the_smoke_login_reads_the_research_views(with_lab):
