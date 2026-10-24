@@ -2,7 +2,7 @@
 
 Ported from fishsense-lite@77e8f8e5 services/fishsense-data-processing-
 workflow-worker/tests/test_perform_checkerboard_calibration_workflow.py. The
-detection kernel is covered by `test_checkerboard_detection.py` and the
+detection kernel is fishsense-core's (`fishsense_core.checkerboard`) and the
 geometry by `test_calibration_geometry.py`. What is left, and what these pin
 down, is the wiring: that the fan-out hands every frame the board geometry it
 was dispatched with, that unusable frames are dropped rather than failing the

@@ -2,7 +2,7 @@
 
 Ported from fishsense-lite@77e8f8e5 services/fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/lattice_overlay.py.
 
-`checkerboard_detection` decides *that* a grid is present; this module shows a
+`fishsense_core.checkerboard` decides *that* a grid is present; this module shows a
 person **which** grid, so they can answer the one question no automated check
 here can: are the detected corners one board square apart, or two?
 
@@ -23,12 +23,20 @@ multiple of the consensus 10.4 cm — 4.00x, 2.16x, 2.12x, 1.51x and 0.47x — a
 their dives read -75% to +45% on length. A scale error of exactly 2x or 4x is
 what a coarse lattice produces and what noise does not.
 
+Since fishsense-core 4.3.0 (#98) the detector does see the uniform case:
+`checker_parity` reads the grey level at each detected cell's centre, which
+alternates dark and light only when the cells are single squares, and refuses
+a lattice that does not. That gate is what fixed the every-other-row
+detection a 16 px laser dot provoked on a warped board. The overlay stays the
+independent check: the parity gate was measured on synthetic boards, and the
+argument above about the residual and the self-consistency gate still holds.
+
 **The connecting lines are the instrument, not decoration.** Corner dots alone
 turn "every corner, or every other one?" into a counting exercise at high zoom.
 Lines make it self-evident: a wrong lattice draws cells that visibly span two
 board squares.
 
-Kept out of `checkerboard_detection` deliberately. That module is on the
+Kept out of the detector deliberately. That module is on the
 calibration path and must stay free of drawing concerns; this one is only ever
 called by the verification stage.
 """

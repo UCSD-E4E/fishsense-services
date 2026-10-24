@@ -3,7 +3,7 @@
 Ported from fishsense-lite@77e8f8e5 services/fishsense-data-processing-
 workflow-worker/tests/test_verify_checkerboard_lattice_workflow.py; names and
 reasons are v1's. The drawing is covered by `test_lattice_overlay.py` and the
-detector by `test_checkerboard_detection.py`. What is left is the wiring, and
+detector by fishsense-core's own tests. What is left is the wiring, and
 two pieces of it carry real consequence:
 
 * **the board geometry travels per frame from the dispatch**, exactly as the

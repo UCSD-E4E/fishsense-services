@@ -38,7 +38,16 @@ v2 changes:
   nothing to keep retryable);
 * the board carries its pitch per axis (`CheckerboardTarget`);
 * the JPEG encoder is the shared `jpeg.encode_jpeg` (v1's
-  `encode_rectified_jpeg`), and the region test is the contracts' one.
+  `encode_rectified_jpeg`), and the region test is the contracts' one;
+* the detector is `fishsense_core.checkerboard` (fishsense-core 4.3.0, #98;
+  services kept its own copy, `checkerboard/detection.py`, until v0.51.0).
+  Core's copy adds a checker-parity gate, and that fixes a live 2x scale
+  error: on a warped board a saturated laser dot of >=16 px radius made
+  OpenCV return every other row (~66 px steps on ~33 px squares), a perfect
+  homography that services' copy accepted. Those frames are now
+  `no_usable_board`. Detection is also seeded (the same frame gives the same
+  grid), the residual is the worst corner's not the median's, pitches within
+  0.1 % count as equal, and a non-uint8 frame raises `TypeError`.
 """
 
 from __future__ import annotations
@@ -52,6 +61,11 @@ from uuid import UUID
 
 import numpy as np
 from fishsense_core.camera_intrinsics import CameraIntrinsics
+from fishsense_core.checkerboard import (
+    board_hull,
+    detect_checkerboard,
+    median_corner_spacing,
+)
 from fishsense_core.image.raw_image import RawImage
 from fishsense_core.image.rectified_image import RectifiedImage
 from pydantic import BaseModel, ConfigDict
@@ -70,11 +84,6 @@ from fishsense_services_processor.calibration.fit import fit_laser
 from fishsense_services_processor.calibration.geometry import (
     laser_point_on_plane,
     plane_from_correspondences,
-)
-from fishsense_services_processor.checkerboard.detection import (
-    board_hull,
-    detect_checkerboard,
-    median_corner_spacing,
 )
 from fishsense_services_processor.checkerboard.lattice_overlay import (
     draw_lattice_overlay,
@@ -105,7 +114,7 @@ class DetectCheckerboardLaserPointInput(BaseModel):
     camera_matrix: List[List[float]]
     distortion_coefficients: List[float]
     #: The declared board: its INTERIOR corners are an upper bound on what may
-    #: be detected, not the grid asked for. See `checkerboard.detection`.
+    #: be detected, not the grid asked for. See `fishsense_core.checkerboard`.
     target: CheckerboardTarget
 
 
