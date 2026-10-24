@@ -206,11 +206,18 @@ async def test_fish_are_measured_across_the_orchestrator_and_the_processor():
 
 
 def _pinned_core() -> str:
-    """fishsense-core's version as the processor's pyproject pins it."""
+    """fishsense-core's version as the processor pins it. Its `==` pins and
+    its wheel URL (what uv installs on 3.13) must name one version: any
+    disagreement is named here, not left to a later mismatch."""
     pyproject = (
         Path(__file__).resolve().parents[2]
         / "fishsense-services-processor"
         / "pyproject.toml"
     ).read_text()
-    (pin,) = set(re.findall(r'"fishsense-core(?:\[[^\]]*\])?==([^"]+)"', pyproject))
-    return pin
+    pins = set(re.findall(r'"fishsense-core(?:\[[^\]]*\])?==([^"]+)"', pyproject))
+    wheels = set(re.findall(r"fishsense_core-([0-9][^-+]*)[-+]", pyproject))
+    named = pins | wheels
+    assert (
+        len(named) == 1
+    ), f"the processor's core pins {pins} and wheel URLs {wheels} disagree"
+    return named.pop()

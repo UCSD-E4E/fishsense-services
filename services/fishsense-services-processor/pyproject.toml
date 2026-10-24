@@ -16,7 +16,10 @@ dependencies = [
     # adopts in place of its own copies: find_fish_at_dot with SAM's score
     # gate, plane geometry, laser point and length, the calibration guards,
     # laser colour, the reflection split, checkerboard detection, size
-    # constancy and the line fitters. It needs OpenCV 5 (the root override).
+    # constancy and the line fitters. It needs OpenCV 5 (the root override),
+    # so a row's recorded core_version also names its OpenCV: 4.3.0 rows are
+    # OpenCV 5, earlier rows OpenCV 4 (test_dependency_pins checks core's
+    # requirement).
     # Base install only -- torch is behind the `torch` extra below.
     "fishsense-core==4.3.0",
     "boto3>=1.35.0",

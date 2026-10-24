@@ -1,6 +1,6 @@
 """The SimCC keypoint replay as a processor stage on the GPU role. The model
-is fishsense-core's pinned checkpoint (since 4.2.0; the same in 4.3.0), fetched from Garage's
-model-weights bucket through core's verified fetch (the processor-secret sync
+is fishsense-core's pinned checkpoint (the same in 4.2.0 and 4.3.0),
+fetched from Garage's model-weights bucket through core's verified fetch (the processor-secret sync
 uploads it there from its pinned Hugging Face revision), loaded once per
 worker. Read-only: run by the replay alone."""
 
