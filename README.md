@@ -174,7 +174,10 @@ claude mcp add --transport http fishsense https://api.fishsense.e4e.ucsd.edu/mcp
 
 Each tool is a thin wrapper over a REST read: tenants, summaries, regions,
 missions and their captures, observations, deployments, devices, reviews, and
-automatic results. Automatic results come back marked `validated: false`. The
+automatic results. Automatic lengths are listed a page at a time, for a tenant
+(optionally one species) or a mission. Each length comes with its reviews and
+with the human length on the same frame. Automatic results come back marked
+`validated: false`. The
 design follows e4e-reference-manager@a12bcca's (`api/app/mcp_server.py`);
 [`mcp_server.py`](services/fishsense-services-api/src/fishsense_services_api/mcp_server.py)
 says what differs.

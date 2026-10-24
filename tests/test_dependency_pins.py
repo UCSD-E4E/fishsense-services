@@ -94,3 +94,134 @@ def test_the_gpu_image_can_compile_triton_kernels():
     assert " gcc" in before_user and "libc6-dev" in before_user
     check = stage[stage.index("USER app") :]
     assert "shutil.which('gcc')" in check
+
+
+#: The workspace override that lifts label-studio-sdk's OpenCV cap (root
+#: pyproject `[tool.uv] override-dependencies`), for fishsense-core 4.3.0.
+OPENCV = "opencv-python-headless"
+OPENCV_FLOOR, OPENCV_CEILING_MAJOR = "5.0.0.93", 6
+
+
+def _override(name: str) -> str:
+    pyproject = tomllib.loads((LOCK.parent / "pyproject.toml").read_text())
+    (entry,) = [
+        d
+        for d in pyproject["tool"]["uv"]["override-dependencies"]
+        if d.replace(" ", "").startswith(name)
+    ]
+    return entry
+
+
+def _requirements(dist: str, name: str):
+    """`dist`'s requirements on exactly `name` (a distribution name, so the
+    plain `opencv-python` never stands in for the headless one)."""
+    from importlib.metadata import requires
+
+    from packaging.requirements import Requirement
+
+    reqs = [Requirement(r) for r in requires(dist) or []]
+    return [r for r in reqs if r.name.lower() == name]
+
+
+def test_the_opencv_override_is_bounded_above():
+    """An override replaces *every* constraint on the package, core's own
+    included: an open range would also let a lock refresh take OpenCV 6 for
+    both the processor and the orchestrator, and hide a later core's own
+    bound (review of #348). The lock's majors are read off the same bound."""
+    entry = _override(OPENCV).replace(" ", "")
+    assert f">={OPENCV_FLOOR}" in entry, entry
+    assert f"<{OPENCV_CEILING_MAJOR}" in entry, entry
+    for version in _locked()[OPENCV]:
+        assert int(version.split(".")[0]) < OPENCV_CEILING_MAJOR, version
+
+
+def test_only_the_headless_opencv_is_locked():
+    """Two OpenCV distributions both install `cv2`, and the one installed last
+    wins file by file (review of #348)."""
+    locked = _locked()
+    clashing = {
+        "opencv-python",
+        "opencv-contrib-python",
+        "opencv-contrib-python-headless",
+    }
+    assert not clashing & set(locked), sorted(clashing & set(locked))
+
+
+def _sdk_imports(root: Path) -> set[str]:
+    """Every label_studio_sdk module a source tree names: imports, and the
+    module strings handed to importlib / __import__."""
+    import re
+
+    found = set()
+    for path in root.rglob("*.py"):
+        text = path.read_text()
+        found |= set(
+            re.findall(r"^\s*from (label_studio_sdk[\w.]*) import", text, re.M)
+        )
+        found |= set(re.findall(r"^\s*import (label_studio_sdk[\w.]*)", text, re.M))
+        found |= set(
+            re.findall(
+                r"""(?:import_module|__import__)\(\s*["'](label_studio_sdk[\w.]*)""",
+                text,
+            )
+        )
+    return found
+
+
+def test_the_opencv_override_is_still_needed_and_still_safe():
+    """Why the override exists, each reason checked so it can't outlive them:
+    fishsense-core needs OpenCV 5, label-studio-sdk still caps the headless
+    OpenCV below 5, and every service reaches only the SDK's API client (not
+    its cv2 converters), which imports on the OpenCV 5 the lock holds."""
+    import importlib
+
+    from packaging.version import Version
+
+    def capped_below_5(dist: str) -> bool:
+        return any(
+            not r.specifier.contains(Version("5.0.0.93"))
+            for r in _requirements(dist, OPENCV)
+        )
+
+    assert not capped_below_5("fishsense-core") and _requirements(
+        "fishsense-core", OPENCV
+    ), "fishsense-core no longer needs the headless OpenCV 5: drop the override"
+    assert capped_below_5(
+        "label-studio-sdk"
+    ), "label-studio-sdk no longer caps the headless OpenCV below 5: drop the override"
+
+    imported = set()
+    for src in sorted((LOCK.parent / "services").glob("*/src")):
+        imported |= _sdk_imports(src)
+    assert imported <= {
+        "label_studio_sdk.client",
+        "label_studio_sdk.core",
+    }, f"a service now reaches {sorted(imported)}: check them on OpenCV 5"
+    for module in sorted(imported):
+        importlib.import_module(module)
+
+
+def _cv2_names(paths) -> set[str]:
+    import re
+
+    names = set()
+    for path in paths:
+        names |= set(re.findall(r"\bcv2\.([A-Za-z_]\w*)", path.read_text()))
+    return names
+
+
+def test_every_cv2_name_our_code_and_cores_use_exists():
+    """OpenCV 5 moved and dropped names (review of #348): an import check
+    cannot see that, a call does, on a production frame. Every `cv2.<name>`
+    in the processor and in fishsense-core must exist in the locked OpenCV.
+    The GPU image checks SAM 3.1 and core's GPU extras the same way."""
+    import cv2
+
+    import fishsense_core
+
+    sources = list(
+        (LOCK.parent / "services/fishsense-services-processor/src").rglob("*.py")
+    )
+    sources += list(Path(fishsense_core.__file__).parent.rglob("*.py"))
+    missing = sorted(n for n in _cv2_names(sources) if not hasattr(cv2, n))
+    assert not missing, f"cv2 {cv2.__version__} has no {missing}"
