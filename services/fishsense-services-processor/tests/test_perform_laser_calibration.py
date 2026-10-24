@@ -318,6 +318,34 @@ async def test_mismatched_labels_are_skipped_not_fatal():
     assert float(np.linalg.norm(fitted_pos[:2] - laser_origin[:2])) < 0.001
 
 
+async def test_a_label_with_too_few_points_for_a_pose_is_skipped_not_fatal():
+    """A label that skips three of the template's six points leaves three
+    correspondences: the count agrees, but no pose. v0.51.0's own
+    `calibration/geometry.py` handed them to `solvePnP`, which raises
+    (`npoints >= 4`), and the raise failed the whole dive -- the dive-526
+    shape again, by a different route. fishsense-core's
+    `plane_from_correspondences` returns None below four, so the label is
+    skipped and the other observations still fit.
+    """
+    laser_origin = np.array([-0.03, -0.10, 0.0])
+    laser_axis = np.array([0.005, -0.02, 1.0])
+    laser_axis = laser_axis / np.linalg.norm(laser_axis)
+    observations = _build_synthetic_scene(
+        n_observations=8,
+        laser_origin_world=laser_origin,
+        laser_axis_world=laser_axis,
+        slate_distances=[0.40, 0.55, 0.70, 0.85, 1.00, 1.15, 1.30, 1.45],
+    )
+    short = observations[3]
+    short.skipped_points = [1, 3, 5]
+    short.reference_points = [short.reference_points[i] for i in (0, 2, 4)]
+
+    result = await _run(_payload(observations))
+
+    assert result.outcome == "accepted"
+    assert result.observation_count == 7
+
+
 async def test_mismatched_labels_that_starve_the_mission_record_a_refusal():
     """Skipping must not silently wedge the cohort either.
 
