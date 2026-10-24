@@ -43,10 +43,13 @@ v2 changes:
   tested for saturation against its own maximum (no effect here:
   `LinearRawImage` is uint16). Core measured it on 1,600 synthetic dots:
   unsaturated dots are identical, and 6 saturated abstentions became votes
-  (5 right, 1 wrong). `LASER_PREDICTOR_VERSION` was deliberately
-  not bumped for it: the version gates re-prediction and the auto-accept
-  gate's staleness check for the whole stage, the dot itself is unchanged,
-  and colour is taken as a dive-level majority. A NaN or infinite point now
+  (5 right, 1 wrong). `LASER_PREDICTOR_VERSION` was at first left at 2 for
+  it (2026-10-23: the version gates re-prediction and the auto-accept gate's
+  staleness check for the whole stage, the dot itself is unchanged, and
+  colour is taken as a dive-level majority). The colour rule is one of the
+  version's inputs, though, and the owner approved the bump: it is 3 from
+  2026-10-24, so the open frames of missions still being labelled are
+  re-predicted and re-judged under core's rule. A NaN or infinite point now
   abstains, which the `x is not None` guard below never reaches anyway.
 
 torch and the checkpoint are only needed at run time, so `fishsense_core.laser`
