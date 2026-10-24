@@ -126,6 +126,14 @@ import os; os.makedirs(os.path.expanduser('~/.triton/cache'), exist_ok=True); \
 import shutil, sysconfig; \
 assert shutil.which('gcc'), 'no C compiler for Triton'; \
 assert os.path.exists(os.path.join(sysconfig.get_paths()['include'], 'Python.h')), 'no Python.h'"
+# Every cv2 name SAM 3.1 and fishsense-core (its GPU extras included) use must
+# exist in the image's OpenCV: OpenCV 5 moved and dropped names, which only a
+# call on a production frame would show (review of #348).
+RUN python -c "import re, pathlib, cv2, sam3, fishsense_core; \
+roots = [pathlib.Path(sam3.__file__).parent, pathlib.Path(fishsense_core.__file__).parent]; \
+used = {n for r in roots for p in r.rglob('*.py') for n in re.findall(r'\bcv2\.([A-Za-z_]\w*)', p.read_text())}; \
+missing = sorted(n for n in used if not hasattr(cv2, n)); \
+assert not missing, f'cv2 {cv2.__version__} lacks {missing}'"
 CMD ["fishsense-services-processor"]
 
 FROM runtime AS api

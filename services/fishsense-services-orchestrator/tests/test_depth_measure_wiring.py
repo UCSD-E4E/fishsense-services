@@ -15,8 +15,10 @@ length come back known.
 
 from __future__ import annotations
 
+import re
 import uuid
 from importlib.metadata import version
+from pathlib import Path
 from datetime import UTC, datetime
 
 import numpy as np
@@ -160,8 +162,11 @@ async def test_laser_depths_run_across_the_orchestrator_and_the_processor():
     (refusal,) = catalog.persisted["refusals"]
     assert (refusal.laser_label_id, refusal.reason) == (bad, "non_positive_depth")
     assert catalog.persisted["laser_calibration_id"] == GEOMETRY.laser_calibration_id
-    # The core that ran, whichever is pinned (it moved 4.2.0 -> 4.3.0).
-    assert catalog.persisted["core_version"] == version("fishsense-core")
+    # The core that ran is the one the processor pins (review of #348: the
+    # installed version alone would also pass a drifted lock).
+    assert (
+        catalog.persisted["core_version"] == _pinned_core() == version("fishsense-core")
+    )
 
 
 async def test_fish_are_measured_across_the_orchestrator_and_the_processor():
@@ -198,3 +203,21 @@ async def test_fish_are_measured_across_the_orchestrator_and_the_processor():
     # Within 1 mm of the constructed fish (v1's end-to-end tolerance).
     assert abs(length.length_m - 0.30) < 1e-3
     assert catalog.persisted["algorithm"] == "laser_depth_fronto_parallel"
+
+
+def _pinned_core() -> str:
+    """fishsense-core's version as the processor pins it. Its `==` pins and
+    its wheel URL (what uv installs on 3.13) must name one version: any
+    disagreement is named here, not left to a later mismatch."""
+    pyproject = (
+        Path(__file__).resolve().parents[2]
+        / "fishsense-services-processor"
+        / "pyproject.toml"
+    ).read_text()
+    pins = set(re.findall(r'"fishsense-core(?:\[[^\]]*\])?==([^"]+)"', pyproject))
+    wheels = set(re.findall(r"fishsense_core-([0-9][^-+]*)[-+]", pyproject))
+    named = pins | wheels
+    assert (
+        len(named) == 1
+    ), f"the processor's core pins {pins} and wheel URLs {wheels} disagree"
+    return named.pop()

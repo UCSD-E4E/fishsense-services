@@ -260,15 +260,36 @@ async def test_a_mission_with_no_capture_has_no_work(owner_engine, app_engine):
     assert await _next(app_engine, lab) is None
 
 
-async def test_a_mission_with_a_human_measurement_is_never_selected(
+async def test_a_mission_with_a_human_measurement_is_selected_too(
     owner_engine, app_engine
 ):
+    """The owner, 2026-10-24: human-measured missions are where automatic
+    results are checked against people, so they are kept current like any
+    other (until then they were skipped, and a cut-mask fix at version 4
+    never reached them)."""
     lab = await tenant(owner_engine)
     measured, cal = await calibrated_dive(owner_engine, lab, priority="low")
     c = await measurable_capture(owner_engine, lab, measured)
     await measurement(owner_engine, lab, c, await fish(owner_engine, lab), cal)
 
-    assert await _next(app_engine, lab) is None
+    assert await _next(app_engine, lab) == measured
+
+
+async def test_a_mission_without_a_human_measurement_goes_first(
+    owner_engine, app_engine
+):
+    """The backlog -- missions nobody has measured -- still comes first, even
+    behind a human-measured mission that is older."""
+    lab = await tenant(owner_engine)
+    measured, cal = await calibrated_dive(owner_engine, lab, priority="low")
+    c = await measurable_capture(owner_engine, lab, measured)
+    await measurement(owner_engine, lab, c, await fish(owner_engine, lab), cal)
+    backlog = await _backlog_mission(owner_engine, lab)
+    await capture(owner_engine, lab, backlog)
+    await exec_(owner_engine, "UPDATE missions SET created_at = created_at + "
+                "interval '1 day' WHERE id = :d", d=backlog)  # fmt: skip
+
+    assert await _next(app_engine, lab) == backlog
 
 
 async def test_oldest_first(owner_engine, app_engine):
