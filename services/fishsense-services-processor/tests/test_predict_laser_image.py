@@ -406,3 +406,86 @@ async def test_workflow_with_no_images_returns_empty_and_calls_nothing():
 
     assert not calls
     assert results == []
+
+
+# ------------------------- colour at the call site ---------------------------
+#
+# The colour rule itself is fishsense-core's (`fishsense_core.laser_color`,
+# core #94) and is tested there. What is pinned here is how this activity
+# calls it: on the uint16 `LinearRawImage`, at the *sensor* point of a
+# rectified prediction.
+
+_DISTORTED = [-0.28, 0.12, 0.0005, -0.0003, -0.03]
+_K_FULL = [[2833.0, 0.0, 2010.0], [0.0, 2858.0, 1450.0], [0.0, 0.0, 1.0]]
+
+
+def _install_linear_raw_image_with(monkeypatch, data):
+    mod = types.ModuleType("fishsense_core.image.linear_raw_image")
+
+    class _LinearRawImage:  # pylint: disable=too-few-public-methods
+        def __init__(self, source, *, bayer_upsample="repeat"):
+            self.data = data
+
+    mod.LinearRawImage = _LinearRawImage
+    monkeypatch.setitem(sys.modules, "fishsense_core.image.linear_raw_image", mod)
+
+
+def _detector_at(x, y):
+    class _FakeDetector:  # pylint: disable=too-few-public-methods
+        checkpoint_name = "run3_epoch_021.pt"
+
+        def predict(self, image, **kwargs):
+            return SimpleNamespace(x=x, y=y, confidence=0.9)
+
+    return _FakeDetector
+
+
+def _paint_dot(img, x, y, bgr, radius):
+    ys, xs = np.ogrid[: img.shape[0], : img.shape[1]]
+    img[((xs - x) ** 2 + (ys - y) ** 2) <= radius**2] = bgr
+    return img
+
+
+def test_colour_is_read_at_the_sensor_point_of_a_rectified_prediction(monkeypatch):
+    """The prediction is rectified and the frame is not. Near the laser region
+    the two are ~48 px apart, so sampling the frame at the rectified point
+    misses the dot and reads the blue-green scene instead."""
+    import cv2  # pylint: disable=import-outside-toplevel
+
+    sensor = (1580.0, 395.0)
+    rectified = cv2.undistortPoints(
+        np.array([[sensor]], dtype=np.float64),
+        np.array(_K_FULL),
+        np.array(_DISTORTED),
+        P=np.array(_K_FULL),
+    ).reshape(2)
+    frame = np.full((2000, 3000, 3), (400, 800, 120), dtype=np.uint16)
+    _paint_dot(frame, *sensor, (200, 300, 4000), radius=4)
+    _install_linear_raw_image_with(monkeypatch, frame)
+    monkeypatch.setattr(
+        sut, "_get_detector", _detector_at(float(rectified[0]), float(rectified[1]))
+    )
+
+    _, _, _, color, margin, _ = sut._predict_from_raw(
+        Path("/scratch/abc123.ORF"), _K_FULL, _DISTORTED, None
+    )
+
+    assert color == "red" and margin > 0
+
+
+def test_a_saturated_dot_votes_from_its_halo(monkeypatch):
+    """fishsense-core 4.3.0 (#94): a blown-out core no longer sets the margin's
+    scale. Before, a 16-bit frame's 65535 core shrank the halo's margin ~70x
+    here (-800 levels -> -3.1, under the 4.0 threshold), so a close green dot
+    abstained; scaled by the brightest *usable* pixel it votes green."""
+    frame = np.full((400, 400, 3), (90, 70, 60), dtype=np.uint16)
+    _paint_dot(frame, 200, 200, (100, 900, 100), radius=7)  # green halo
+    _paint_dot(frame, 200, 200, (65535, 65535, 65535), radius=3)  # blown core
+    _install_linear_raw_image_with(monkeypatch, frame)
+    monkeypatch.setattr(sut, "_get_detector", _detector_at(200.0, 200.0))
+
+    _, _, _, color, margin, _ = sut._predict_from_raw(
+        Path("/scratch/abc123.ORF"), _K, _D, None
+    )
+
+    assert color == "green" and margin < -4.0
