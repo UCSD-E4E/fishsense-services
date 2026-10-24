@@ -1183,8 +1183,8 @@ async def test_reselects_a_stale_or_null_version(owner_engine, app_engine, versi
 async def test_reselects_when_the_predictions_laser_was_superseded(
     owner_engine, app_engine
 ):
-    """A prediction naming a label no longer in the live set was made from a
-    dot since dead-lettered; the surviving dot is the one to use."""
+    """A prediction naming a dot since superseded (dead-lettered) may be of
+    the wrong fish; the surviving dot is the one to use."""
     lab = await _tenant(owner_engine)
     mission = await _dive(owner_engine, lab)
     capture = await _capture(owner_engine, lab, mission)
@@ -1199,6 +1199,39 @@ async def test_reselects_when_the_predictions_laser_was_superseded(
         True,
         True,
     )
+
+
+@pytest.mark.parametrize(
+    "dot",
+    [{}, {"superseded": True}, {"completed": False}, {"x": None, "y": None}],
+    ids=["live", "superseded", "incomplete", "no-coordinates"],
+)
+@pytest.mark.parametrize("version", [V, FALLBACK])
+async def test_the_resolver_and_the_cohort_agree_on_a_predictions_dot(
+    owner_engine, app_engine, dot, version
+):
+    """Resolvers mirror their selectors exactly (v1's rule). The cohort calls
+    a current-version row stale when its dot is *superseded*; the resolver
+    once called it stale when its dot was merely not live, so a dot reopened
+    in Label Studio (sync sets `completed` false, never `superseded`) left a
+    row the cohort called fresh -- the dive never selected for it, nor counted
+    pending in `dive_pipeline_status` -- that the resolver re-predicted
+    whenever other work brought the dive up, and that a GPU-less worker then
+    rewrote (`existing_laser_superseded` defeats NO_UPGRADE_AVAILABLE)."""
+    lab = await _tenant(owner_engine)
+    mission = await _dive(owner_engine, lab)
+    capture = await _capture(owner_engine, lab, mission)
+    used = await _laser(owner_engine, lab, capture, **dot)
+    await _laser(owner_engine, lab, capture, x=11.0, y=21.0)  # still live
+    await _prediction(owner_engine, lab, capture, laser=used, version=version)
+
+    selected = await _next_predict(app_engine, lab) == mission
+    needing = await _needing(app_engine, lab, mission)
+
+    assert selected == bool(needing)
+    assert selected == (version != V or dot == {"superseded": True})
+    for picked in needing:
+        assert picked.existing_laser_superseded == (dot == {"superseded": True})
 
 
 async def test_skips_non_canonical_images(owner_engine, app_engine):
