@@ -31,7 +31,23 @@ v2 changes:
   the GPU role loads this model;
 * the raw frame is an `ObjectRef`, streamed to a temporary file;
 * the checkpoint recorded is core's canonical name for it (resolved by
-  content), not a path's basename.
+  content), not a path's basename;
+* **the colour rule is fishsense-core's** (`fishsense_core.laser_color`,
+  core #94, from 4.3.0): `classify_laser_color`, and `rectified_to_sensor_point`
+  (core's `fishsense_core.laser.unrectify_prediction` under services' name).
+  Services carried its own copy, ported verbatim from fishsense-lite@77e8f8e5,
+  until 2026-10-23. Core's copy departs from it on purpose in two places: a
+  saturated dot's margin is scaled by its brightest *usable* pixel, not the
+  blown-out core (on this uint16 frame a 65535 core shrank the halo's margin
+  by 65535 over the halo's own brightest level), and a float image is not
+  tested for saturation against its own maximum (no effect here:
+  `LinearRawImage` is uint16). Core measured it on 1,600 synthetic dots:
+  unsaturated dots are identical, and 6 saturated abstentions became votes
+  (5 right, 1 wrong). `LASER_PREDICTOR_VERSION` was deliberately
+  not bumped for it: the version gates re-prediction and the auto-accept
+  gate's staleness check for the whole stage, the dot itself is unchanged,
+  and colour is taken as a dive-level majority. A NaN or infinite point now
+  abstains, which the `x is not None` guard below never reaches anyway.
 
 torch and the checkpoint are only needed at run time, so `fishsense_core.laser`
 and `LinearRawImage` are imported lazily, as in v1.
@@ -54,11 +70,12 @@ from fishsense_services_contracts.laser import (
     LaserPredictionResult,
 )
 from fishsense_services_contracts.laser_region import point_in_laser_region
-from fishsense_services_contracts.object_store import ObjectStoreConnection
-from fishsense_services_processor.laser_predict.laser_color import (
+from fishsense_core.laser_color import (
     classify_laser_color,
     rectified_to_sensor_point,
 )
+
+from fishsense_services_contracts.object_store import ObjectStoreConnection
 from fishsense_services_processor.laser_predict.workflow import (
     PredictLaserImageInput,
 )

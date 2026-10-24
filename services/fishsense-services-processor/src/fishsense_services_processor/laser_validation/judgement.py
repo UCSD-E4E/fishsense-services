@@ -21,6 +21,13 @@ v2 change: labels are the contract's `LaserLabelRow`s. v1's `(image_id, id)`
 is `(capture_number, number)` -- both v1's ids for a migrated row, so a
 migrated dive is ordered, and so fitted, exactly as v1 fitted it -- and the
 ids the judgement speaks in (`flagged_ids`, `kept_ids`) are label numbers.
+
+The reflection split detector is fishsense-core's
+(`fishsense_core.laser_reflection`, core #92, from 4.3.0). Services carried a
+verbatim copy (`laser_validation/reflection.py`, from fishsense-lite@77e8f8e5)
+until 2026-10-23; core's differs only in importing the line fit from
+`fishsense_core.line_fit`, so the API and outputs are the same. What to do
+about a suspect (abstain, report it) stays here: that is pipeline policy.
 """
 
 from __future__ import annotations
@@ -35,12 +42,12 @@ from fishsense_core.laser import (
     fit_dive_line,
     flag_outliers,
 )
-
-from fishsense_services_contracts.laser import LaserLabelRow
-from fishsense_services_processor.laser_validation.reflection import (
+from fishsense_core.laser_reflection import (
     ReflectionSuspect,
     detect_reflection_split,
 )
+
+from fishsense_services_contracts.laser import LaserLabelRow
 
 __all__ = [
     "FLAGGED",
