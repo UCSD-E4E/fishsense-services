@@ -60,6 +60,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 __all__ = [
     "AGREE_PX",
+    "COUNTS_SQL",
     "FrameNotFound",
     "KINDS",
     "LEVELS",
@@ -326,7 +327,7 @@ async def capture_reviews(
     rows = (
         await conn.execute(
             text(f"""
-                SELECT r.*, {_COUNTS_SQL} AS counts
+                SELECT r.*, {COUNTS_SQL} AS counts
                 FROM reviews r WHERE r.tenant_id = :t AND r.capture_id = :c
                 ORDER BY r.seq
                 """),
@@ -355,7 +356,7 @@ async def capture_reviews(
 
 #: Whether review ``r`` counts: its reviewer's level, a confirm, or backed by
 #: (or itself backing) another review.
-_COUNTS_SQL = """(
+COUNTS_SQL = """(
     r.level IN ('trusted', 'expert') OR r.confirms_review_id IS NOT NULL
     OR EXISTS (SELECT 1 FROM reviews b
                WHERE b.tenant_id = r.tenant_id AND b.confirms_review_id = r.id)
@@ -387,7 +388,7 @@ async def _newer_counts(conn, tenant_id, target) -> bool:
                 SELECT EXISTS (
                     SELECT 1 FROM reviews r
                     WHERE r.tenant_id = :t AND r.capture_id = :c AND r.kind = :k
-                      AND r.seq > :seq AND {_COUNTS_SQL}
+                      AND r.seq > :seq AND {COUNTS_SQL}
                 )
                 """),
             {"t": tenant_id, "c": target.capture_id, "k": target.kind,
@@ -400,7 +401,7 @@ async def _counts(conn, tenant_id, row) -> bool:
     return (
         await conn.execute(
             text(
-                f"SELECT {_COUNTS_SQL} FROM reviews r WHERE r.tenant_id = :t AND r.id = :r"
+                f"SELECT {COUNTS_SQL} FROM reviews r WHERE r.tenant_id = :t AND r.id = :r"
             ),
             {"t": tenant_id, "r": row.id},
         )
