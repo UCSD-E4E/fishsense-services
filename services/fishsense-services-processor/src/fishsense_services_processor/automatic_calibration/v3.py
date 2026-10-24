@@ -40,13 +40,12 @@ human dots 1.7 px.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from itertools import combinations
 from typing import Callable, Optional, Sequence
 
 import numpy as np
-
-from fishsense_services_processor.automatic_results import size_constancy as sc
+from fishsense_core import size_constancy as sc
 
 __all__ = [
     "CHECK_MEDIAN_PX",
@@ -60,12 +59,14 @@ __all__ = [
     "OFF_LINE_PX",
     "RIVAL_SHARE",
     "Check",
+    "LabelFreeFit",
     "V3Fit",
     "beam_line",
     "calibrate_v3",
     "check",
     "fit_known_sizes",
     "gross_screen",
+    "refused",
     "slate_consensus",
 ]
 
@@ -161,6 +162,35 @@ def beam_line(camera_matrix, position, axis) -> np.ndarray:
 
 
 @dataclass(frozen=True)
+class LabelFreeFit(sc.LabelFreeFit):
+    """fishsense-core's `size_constancy.LabelFreeFit`, plus `scale_sd`, which
+    v3 sets and core does not carry (core #97 left services-only fields to
+    services): the length scale's predicted SD from dot and size noise
+    (calibration v3 on SAM sizes, 2026-10-23); None where not predicted."""
+
+    scale_sd: Optional[float] = None
+
+    @classmethod
+    def of(cls, fit: sc.LabelFreeFit) -> "LabelFreeFit":
+        """`fit` as this type (unchanged if it already is one)."""
+        if isinstance(fit, cls):
+            return fit
+        return cls(**{f.name: getattr(fit, f.name) for f in fields(sc.LabelFreeFit)})
+
+
+def refused(reason: str, *, o_mag_m: float = sc.O_DESIGN_M, **seen) -> LabelFreeFit:
+    """A refused fit, with what it saw: every field not in `seen` empty."""
+    values = {
+        "laser_position": None, "laser_axis": None, "vanishing_px": None,
+        "line_direction": None, "line_offset_px": None, "used": [],
+        "frames_used": 0, "pairs": 0, "size_ratio": None, "se_px": None,
+        "pair_residual_sd": None, "o_mag_m": o_mag_m,
+    }  # fmt: skip
+    values.update(seen)
+    return LabelFreeFit(outcome="refused", refusal_reason=reason, **values)
+
+
+@dataclass(frozen=True)
 class Check:
     dots: int
     median_px: Optional[float]
@@ -189,7 +219,7 @@ class V3Fit:
     outcome: str
     refusal_reason: Optional[str]
     #: The size-constancy fit, when one ran (its indices are into `kept`).
-    fit: Optional[sc.LabelFreeFit]
+    fit: Optional[LabelFreeFit]
     #: Indices (into the slate dots given) the fit was given.
     kept: list[int] = field(default_factory=list)
     gross_dropped: int = 0
@@ -204,7 +234,7 @@ def calibrate_v3(
     dive_line,
     other_xy,
     camera_matrix,
-    fit: Callable[[Sequence[int]], sc.LabelFreeFit],
+    fit: Callable[[Sequence[int]], LabelFreeFit],
 ) -> V3Fit:
     """Steps 1-3 for one dive. `fit(indices)` runs the size-constancy fit on
     those slate frames (direction through their own dots, at least
@@ -242,7 +272,7 @@ def fit_known_sizes(
     min_size_ratio: float = sc.MIN_SIZE_RATIO,
     rng: np.random.Generator | None = None,
     scale_sd_max: float = SCALE_SD_MAX,
-) -> sc.LabelFreeFit:
+) -> LabelFreeFit:
     """The size-constancy fit on sizes measured per frame -- the slate's SAM
     mask, sqrt(area) (strategy 2, owner 2026-10-22) -- instead of solved from
     SIFT pair ratios: no pair registration, so no ``too_few_matched_pairs``.
@@ -262,42 +292,36 @@ def fit_known_sizes(
     seen = dict(used=[int(i) for i in used], frames_used=len(used), pairs=0,
                 pair_residual_sd=None)  # fmt: skip
     if len(used) < min_frames:
-        return sc._refused("too_few_frames", **seen)  # pylint: disable=protected-access
+        return refused("too_few_frames", **seen)
     u = sc.line_direction(None, xy[used])
     t = xy @ u
     s = s_all
     seen["size_ratio"] = float(s[used].max() / s[used].min())
     if seen["size_ratio"] < min_size_ratio:
-        return sc._refused(
-            "too_little_range_spread", **seen
-        )  # pylint: disable=protected-access
+        return refused("too_little_range_spread", **seen)
     pinned = sc._pinned(
         t[used], sc.fit_vanishing_position(t[used], s[used])
     )  # pylint: disable=protected-access
     keep = _noise_trim(t, s, used)
     seen.update(used=[int(i) for i in keep], frames_used=len(keep))
     if len(keep) < min_frames:
-        return sc._refused(
-            "unconstrained" if pinned else "too_few_frames", **seen
-        )  # pylint: disable=protected-access
+        return refused("unconstrained" if pinned else "too_few_frames", **seen)
     seen["size_ratio"] = float(s[keep].max() / s[keep].min())
     if seen["size_ratio"] < min_size_ratio:
-        return sc._refused(
-            "too_little_range_spread", **seen
-        )  # pylint: disable=protected-access
+        return refused("too_little_range_spread", **seen)
     tk, sk = t[keep], s[keep]
     tv = sc.fit_vanishing_position(tk, sk)
     offset = float(np.median(xy[keep] @ np.array([-u[1], u[0]])))
     seen.update(vanishing_px=tv, line_direction=[float(c) for c in u],
                 line_offset_px=offset)  # fmt: skip
     if sc._pinned(tk, tv):  # pylint: disable=protected-access
-        return sc._refused("unconstrained", **seen)  # pylint: disable=protected-access
+        return refused("unconstrained", **seen)
     sd = scale_sd(tk, sk, u, offset, camera_matrix)
     seen["scale_sd"] = sd
     if sd > scale_sd_max:
-        return sc._refused("uncertain_fit", **seen)  # pylint: disable=protected-access
+        return refused("uncertain_fit", **seen)
     origin, axis = sc.beam_from_vanishing(tv, u, offset, camera_matrix)
-    return sc.LabelFreeFit(
+    return LabelFreeFit(
         outcome="accepted", refusal_reason=None,
         laser_position=[float(c) for c in origin], laser_axis=[float(c) for c in axis],
         se_px=sc.bootstrap_se(tk, sk, rng=rng), o_mag_m=sc.O_DESIGN_M, **seen,

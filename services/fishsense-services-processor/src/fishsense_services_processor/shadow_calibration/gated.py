@@ -29,6 +29,8 @@ from typing import Any, Optional, Sequence
 
 import numpy as np
 
+from fishsense_core import size_constancy as sc
+
 from fishsense_services_processor.calibration.consistency import (
     CalibrationUnderdeterminedError,
     check_observation_geometry,
@@ -36,8 +38,6 @@ from fishsense_services_processor.calibration.consistency import (
 from fishsense_services_processor.shadow_calibration.fit import (
     O_DESIGN_M,
     PortFit,
-    beam,
-    fit_tv,
     port_fit,
 )
 
@@ -194,24 +194,14 @@ def laser_points(xy, K, origin, axis) -> np.ndarray:
     return np.array(pts)
 
 
-def _deleted_residuals(t: np.ndarray, s: np.ndarray) -> np.ndarray:
-    log_s = np.log(s)
-    out = np.empty(len(t))
-    for i in range(len(t)):
-        rest = np.arange(len(t)) != i
-        tv = fit_tv(t[rest], s[rest])
-        c = np.median(log_s[rest] - np.log(t[rest] - tv))
-        gap = t[i] - tv
-        out[i] = np.inf if gap <= 0 else abs(log_s[i] - np.log(gap) - c)
-    return out
-
-
 def trim(t: np.ndarray, s: np.ndarray, residual_max: float) -> np.ndarray:
     """Indices kept: drop, one at a time, the frame whose deleted residual is
-    largest while it exceeds `residual_max`."""
+    largest while it exceeds `residual_max`. The residual is fishsense-core's
+    `size_constancy.deleted_residuals` (core #97), which this module's own
+    copy was line for line."""
     keep = np.arange(len(t))
     while len(keep) > 2:
-        r = _deleted_residuals(t[keep], s[keep])
+        r = sc.deleted_residuals(t[keep], s[keep])
         worst = int(np.argmax(r))
         if r[worst] <= residual_max:
             break
@@ -302,7 +292,7 @@ def gated_fit(
     lever_prod = None
     if reference_position is not None:
         o_prod = float(np.linalg.norm(np.asarray(reference_position, float)[:2]))
-        origin_p, _ = beam(fit.tv, u, off, K, o_prod)
+        origin_p, _ = sc.beam_from_vanishing(fit.tv, u, off, K, o_prod)
         zp = laser_points(xy, K, origin_p, fit.axis)[:, 2]
         lever_prod = float(zp.max() - zp.min())
     scores = [f.sam_score for f in sized if f.sam_score is not None]

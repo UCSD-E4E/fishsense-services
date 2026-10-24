@@ -8,8 +8,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from fishsense_core import size_constancy as sc
+
 from fishsense_services_processor.automatic_calibration import v3
-from fishsense_services_processor.automatic_results import size_constancy as sc
 
 K = np.array([[2850.0, 0, 2007.0], [0, 2850.0, 1508.0], [0, 0, 1.0]])
 O = np.array([-0.031, -0.099, 0.0])

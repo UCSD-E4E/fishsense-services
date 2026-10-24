@@ -42,7 +42,7 @@ from typing import Optional, Sequence
 import cv2
 import numpy as np
 
-from fishsense_services_processor.automatic_results import size_constancy as sc
+from fishsense_services_processor.automatic_calibration.v3 import LabelFreeFit, refused
 from fishsense_services_processor.calibration.geometry import (
     Plane,
     laser_point_on_plane,
@@ -371,7 +371,7 @@ def _line_through(points: np.ndarray):
     return c, (d if d[2] > 0 else -d)
 
 
-def fit_pose_points(points, *, min_frames: int = 3) -> sc.LabelFreeFit:
+def fit_pose_points(points, *, min_frames: int = 3) -> LabelFreeFit:
     """The beam through the slate points (camera space, metres): trimmed one
     at a time, the lever-arm gate, the origin where the beam crosses the
     camera's plane (z = 0), as the label-free fits report it."""
@@ -381,7 +381,7 @@ def fit_pose_points(points, *, min_frames: int = 3) -> sc.LabelFreeFit:
     seen = dict(used=[idx[i] for i in keep], frames_used=len(keep), pairs=0,
                 pair_residual_sd=None)  # fmt: skip
     if len(pts) < min_frames:
-        return sc._refused("too_few_frames", **seen)  # pylint: disable=protected-access
+        return refused("too_few_frames", **seen)
     while len(keep) > max(min_frames, 3):
         c, d = _line_through(pts[keep])
         r = np.linalg.norm(np.cross(pts[keep] - c, d), axis=1) / pts[keep][:, 2]
@@ -394,12 +394,10 @@ def fit_pose_points(points, *, min_frames: int = 3) -> sc.LabelFreeFit:
     try:
         check_observation_geometry(pts[keep])
     except CalibrationUnderdeterminedError:
-        return sc._refused(
-            "lever_arm_below_0.6m", **seen
-        )  # pylint: disable=protected-access
+        return refused("lever_arm_below_0.6m", **seen)
     c, d = _line_through(pts[keep])
     origin = c - (c[2] / d[2]) * d
-    return sc.LabelFreeFit(
+    return LabelFreeFit(
         outcome="accepted", refusal_reason=None,
         laser_position=[float(v) for v in origin], laser_axis=[float(v) for v in d],
         vanishing_px=None, line_direction=None, line_offset_px=None, size_ratio=None,
