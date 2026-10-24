@@ -381,7 +381,7 @@ def test_the_processor_loads_its_weights_from_what_the_sync_writes(
 
 
 def test_the_simcc_keypoint_model_is_pinned_as_core_pins_it():
-    """The SimCC head/tail model (fishsense-core 4.2.0, owner 2026-10-23):
+    """The SimCC head/tail model (fishsense-core, pinned since 4.2.0; owner 2026-10-23):
     at the key the processor's verified fetch reads, with core's sha256 and
     size, fetched from core's pinned Hugging Face revision when missing."""
     import importlib
