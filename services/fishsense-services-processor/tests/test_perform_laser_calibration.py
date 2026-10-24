@@ -181,7 +181,7 @@ async def test_reflection_contaminated_scene_is_rejected_not_persisted():
     fit that reprojects onto NEITHER dot population. The self-consistency
     gate must refuse — the old behavior shipped the broken calibration, and a
     borrowing fish-model dive measured +31..+137% length errors."""
-    from fishsense_services_processor.calibration.consistency import (
+    from fishsense_core.calibration_checks import (
         CalibrationInconsistentError,
     )
 
