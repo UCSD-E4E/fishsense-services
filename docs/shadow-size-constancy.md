@@ -37,7 +37,7 @@ These change what the stage must reproduce, so they come first.
      FishSense Lite (IMWUT) paper, §5.3, requires calibration photographs to
      span at least 0.6 m of range (`papers/fishsense-lite-imwut/Sections/results.tex:133`).
      Production enforces it as the lever-arm refusal:
-     `calibration.consistency.check_observation_geometry`,
+     `fishsense_core.calibration_checks.check_observation_geometry` (services' `calibration.consistency` until 2026-10-24),
      `MIN_OBSERVATION_LEVER_M = 0.60`, the spread along the optical axis
      (max z − min z) of the camera-space laser points fitted. The shadow stage
      calls that function on its own fitted laser points. It reuses the
