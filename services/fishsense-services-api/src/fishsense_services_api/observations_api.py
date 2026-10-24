@@ -38,6 +38,7 @@ from fishsense_services_api.observation_store import (
     Observation,
     observation_page,
     observation,
+    observation_species,
     mission_captures,
 )
 from fishsense_services_api.place_naming import PlaceNamer
@@ -94,6 +95,13 @@ class ObservationView(BaseModel):
     #: A presigned GET of the photo, valid for an hour: a phone's own image,
     #: or a Lite frame's render; None until a Lite frame is rendered.
     photo_url: str | None
+
+
+class SpeciesCountView(BaseModel):
+    scientific_name: str
+    common_name: str | None
+    #: The tenant's measured fish of it.
+    count: int
 
 
 class ObservationPage(BaseModel):
@@ -317,6 +325,22 @@ def add_observation_routes(
         )
 
     @app.get(
+        "/tenants/{slug}/observations/species",
+        operation_id="list_observation_species",
+        response_model=list[SpeciesCountView],
+    )
+    async def list_species(
+        member: Member,
+        device: Literal["lite", "mobile", "other"] | None = None,
+    ) -> list[SpeciesCountView]:
+        """The species the tenant's measured fish are, most first, with how
+        many of each: what the Fish page offers to filter by. Only the
+        tenant's own (the owner, 2026-10-23)."""
+        async with tenant_transaction(engine, member.tenant_id) as conn:
+            found = await observation_species(conn, member.tenant_id, device=device)
+        return [SpeciesCountView(**vars(s)) for s in found]
+
+    @app.get(
         "/tenants/{slug}/observations",
         operation_id="list_observations",
         response_model=ObservationPage,
@@ -327,6 +351,7 @@ def add_observation_routes(
         background: BackgroundTasks,
         device: Literal["lite", "mobile", "other"] | None = None,
         mission: Annotated[int | None, Query(ge=0)] = None,
+        species: Annotated[str | None, Query(min_length=1, max_length=200)] = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         before: str | None = None,
         page: Annotated[int | None, Query(ge=1)] = None,
@@ -350,6 +375,7 @@ def add_observation_routes(
                 device=device,
                 photo_bucket=bucket(slug),
                 mission=mission,
+                species=species,
             )
         listed, more = found.observations[:limit], len(found.observations) > limit
         if namer is not None:

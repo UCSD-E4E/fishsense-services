@@ -70,9 +70,12 @@ def create_app_from_env() -> FastAPI:
         geocoder=geocoder,
     )
 
+    serve = app.router.lifespan_context  # the MCP endpoint's session manager
+
     @asynccontextmanager
-    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        yield
+    async def lifespan(running: FastAPI) -> AsyncIterator[None]:
+        async with serve(running):
+            yield
         await engine.dispose()
 
     app.router.lifespan_context = lifespan

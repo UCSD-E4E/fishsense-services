@@ -114,6 +114,33 @@ class SystemAdminAccess(Base):
     until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class ApiToken(Base):
+    """A personal token for a script or agent, acting as its owner (0066)."""
+
+    __tablename__ = "api_tokens"
+    __table_args__ = (
+        CheckConstraint("btrim(name) <> '' AND length(name) <= 100"),
+        CheckConstraint("scope IN ('read', 'edit')"),
+        Index("api_tokens_user_id_idx", "user_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE")
+    )
+    name: Mapped[str] = mapped_column(Text)
+    #: ``read`` (the default) or ``edit``; fixed once made (a trigger).
+    scope: Mapped[str] = mapped_column(Text, server_default=text("'read'"))
+    #: The token's first characters, to tell tokens apart; never the secret.
+    prefix: Mapped[str] = mapped_column(Text)
+    #: SHA-256 of the token: the token itself is shown once and never kept.
+    token_hash: Mapped[str] = mapped_column(Text, unique=True)
+    created_at: Mapped[datetime] = _created_at()
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Membership(Base):
     __tablename__ = "memberships"
 

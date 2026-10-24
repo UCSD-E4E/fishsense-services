@@ -461,3 +461,76 @@ class TestSummary:
         response = await _get(client, "/tenants/lab/summary", sub=OUTSIDER)
 
         assert response.status_code == 404
+
+
+class TestBySpecies:
+    """The Fish page filters by species, and offers only the species the
+    tenant has (the owner, 2026-10-23)."""
+
+    async def _seed(self, owner_engine, tenants):
+        await lite(
+            owner_engine,
+            tenants["lab"],
+            species=("Lachnolaimus maximus", "Hogfish"),
+            device_name="FSL-01",
+        )
+        await lite(
+            owner_engine,
+            tenants["lab"],
+            species=("Scarus coeruleus", "Blue Parrotfish"),
+            device_name="FSL-02",
+            at=T0 + timedelta(days=1),
+        )
+        await lite(owner_engine, tenants["partner"], species=("Partneria only", "Other"),
+                   device_name="FSL-03")  # fmt: skip
+
+    async def test_the_list_keeps_one_species(self, client, owner_engine, tenants):
+        await self._seed(owner_engine, tenants)
+
+        response = await _get(
+            client, "/tenants/lab/observations", species="Scarus coeruleus"
+        )
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert [o["species"]["scientific_name"] for o in body["observations"]] == [
+            "Scarus coeruleus"
+        ]
+        assert body["total"] == 1
+
+    async def test_the_species_offered_are_the_tenants_own(
+        self, client, owner_engine, tenants
+    ):
+        await self._seed(owner_engine, tenants)
+
+        response = await _get(client, "/tenants/lab/observations/species")
+
+        assert response.status_code == 200, response.text
+        assert response.json() == [
+            {
+                "scientific_name": "Lachnolaimus maximus",
+                "common_name": "Hogfish",
+                "count": 1,
+            },
+            {
+                "scientific_name": "Scarus coeruleus",
+                "common_name": "Blue Parrotfish",
+                "count": 1,
+            },
+        ]
+
+    async def test_they_follow_the_device_filter(self, client, owner_engine, tenants):
+        await self._seed(owner_engine, tenants)
+
+        response = await _get(
+            client, "/tenants/lab/observations/species", device="mobile"
+        )
+
+        assert response.json() == []
+
+    async def test_a_non_member_sees_none(self, client, owner_engine, tenants):
+        await self._seed(owner_engine, tenants)
+
+        response = await _get(client, "/tenants/lab/observations/species", sub=OUTSIDER)
+
+        assert response.status_code == 404
