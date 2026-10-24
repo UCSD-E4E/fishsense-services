@@ -11,10 +11,10 @@ tag tests moved with the version to the contract package.
 What is new here pins the activity itself, which v1 never unit-tested, and
 the v2 changes:
 
-* **the weights come through fishsense-core's manifest**: SAM 3.1 has no entry
-  in fishsense-core 4.1.0, so the stage builds one from required settings
-  (`FISHSENSE_SAM3_SHA256`, `FISHSENSE_SAM3_SIZE`) and fetches through
-  `weights.GarageWeightStore`; bytes that aren't the pinned file never load
+* **the weights come through fishsense-core's manifest**, which pins SAM 3.1
+  since 4.2.0 (until then the stage pinned it from `FISHSENSE_SAM3_*`
+  settings), fetched through `weights.GarageWeightStore`; bytes that aren't
+  the pinned file never load
   (v1's checkpoint cache trusted whatever the key held); **a weights failure
   is final**, one non-retryable type per cause, not a retry per image;
 * the JPEG is read from the ref the orchestrator hands over;
@@ -40,7 +40,6 @@ import numpy as np
 import pytest
 from fishsense_core.models import ModelIntegrityError, ModelUnavailable
 from moto import mock_aws
-from pydantic import ValidationError
 from temporalio import activity
 from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.exceptions import ApplicationError
@@ -63,7 +62,10 @@ from fishsense_services_processor.headtail_predict.geometry import crop_origin
 from fishsense_services_processor.headtail_predict.workflow import (
     PredictHeadtailImagesWorkflow,
 )
-from fishsense_services_processor.weights import GarageWeightStore
+from fishsense_services_processor.weights import (
+    GarageWeightStore,
+    ModelWeightsSettings,
+)
 
 FRAME_W, FRAME_H = 4014, 3016
 CROP_W, CROP_H = 1800, 1350
@@ -530,51 +532,76 @@ class TestFallbackSegmenterIsLoaded:
         )
 
 
-# -- SAM 3.1's weights through the manifest -----------------------------------------
+# -- SAM 3.1's weights through core's manifest ---------------------------------------
 
-WEIGHTS = b"pretend these are gigabytes of SAM 3.1"
-SAM3_ENV = {
-    "FISHSENSE_SAM3_SHA256": hashlib.sha256(WEIGHTS).hexdigest(),
-    "FISHSENSE_SAM3_SIZE": str(len(WEIGHTS)),
+#: fishsense-core's pin for SAM 3.1 (4.2.0+), the `model-weights` copy v1
+#: uploaded: the owner matched the processor Secret's recorded
+#: FISHSENSE_SAM3_* against it before the shim went (2026-10-23).
+CORE_SAM3_SHA256 = "0567debeec80ba4ac6369540c6c248025283cb3ff2b92827509e57e2b3541cb6"
+CORE_SAM3_SIZE = 3502755717
+#: What every SAM 3.1 row has recorded as its checkpoint since the cutover.
+CORE_SAM3_ID = "sam3/3.1@0567debeec80"
+WEIGHTS_ENV = {
+    "FISHSENSE_MODEL_WEIGHTS_ENDPOINT_URL": "https://s3.test",
+    "FISHSENSE_MODEL_WEIGHTS_ACCESS_KEY_ID": "k",
+    "FISHSENSE_MODEL_WEIGHTS_SECRET_ACCESS_KEY": "s",
 }
 
 
+class _NoStore:
+    """A store a cache hit must never reach."""
+
+    def download_to(self, ref, dest):
+        raise AssertionError(f"{ref.id} was a cache hit; nothing to download")
+
+
+def _cached_core_sam3(cache_dir: Path) -> Path:
+    """A cache entry as core's `fetch` leaves one: the file, at the pinned
+    size (sparse, not 3.5 GB of disk), and its verification stamp."""
+    path = cache_dir / "sam3" / "3.1" / "sam3.1_multiplex.pt"
+    path.parent.mkdir(parents=True)
+    with path.open("wb") as handle:
+        handle.truncate(CORE_SAM3_SIZE)
+    path.with_name(path.name + ".sha256").write_text(CORE_SAM3_SHA256 + "\n")
+    return path
+
+
 class TestSam3Weights:
-    """fishsense-core 4.1.0's manifest has no SAM 3.1 entry, so the stage pins
-    one from settings until core does. Nothing unverified loads."""
+    """fishsense-core pins SAM 3.1 itself since 4.2.0, so the stage fetches
+    through core's manifest: no settings of its own, and nothing that isn't
+    core's pinned file loads."""
 
-    @pytest.mark.parametrize("missing", sorted(SAM3_ENV))
-    def test_the_hash_and_size_are_required(self, monkeypatch, missing):
-        for name, value in SAM3_ENV.items():
-            if name != missing:
-                monkeypatch.setenv(name, value)
-        monkeypatch.delenv(missing, raising=False)
+    async def test_the_checkpoint_is_cores_pinned_file(self, tmp_path):
+        """`sam3.1_multiplex.pt`, version 3.1, at v1's `model-weights/sam3/3.1/`
+        key (not `sam3.pt`, which loads just as quietly and degrades every
+        mask), recorded as the id every SAM 3.1 row has carried."""
+        cached = _cached_core_sam3(tmp_path)
 
-        with pytest.raises(ValidationError):
-            sam3_weights.Sam3Settings()
-
-    def test_a_hash_must_look_like_one(self, monkeypatch):
-        monkeypatch.setenv("FISHSENSE_SAM3_SHA256", "not-a-hash")
-        monkeypatch.setenv("FISHSENSE_SAM3_SIZE", "10")
-
-        with pytest.raises(ValidationError):
-            sam3_weights.Sam3Settings()
-
-    def test_the_manifest_pins_v1s_checkpoint(self, monkeypatch):
-        """`sam3.1_multiplex.pt`, version 3.1, at v1's
-        `model-weights/sam3/3.1/` key -- not `sam3.pt`, which loads just as
-        quietly and degrades every mask."""
-        for name, value in SAM3_ENV.items():
-            monkeypatch.setenv(name, value)
-
-        ref = sam3_weights.sam3_manifest(sam3_weights.Sam3Settings()).resolve("sam3")
-
-        assert (ref.name, ref.version, ref.filename) == (
-            "sam3",
-            "3.1",
-            "sam3.1_multiplex.pt",
+        path, model_id = await sam3_weights.fetch_sam3(
+            store=_NoStore(), cache_dir=tmp_path
         )
-        assert (ref.sha256, ref.size) == (hashlib.sha256(WEIGHTS).hexdigest(), 38)
+
+        assert Path(path) == cached
+        assert model_id == CORE_SAM3_ID
+
+    async def test_the_stage_needs_no_sam3_settings(self, monkeypatch, tmp_path):
+        """The wiring every SAM stage shares reads only `FISHSENSE_MODEL_WEIGHTS_*`:
+        a pod without FISHSENSE_SAM3_* (the sync no longer writes them) loads."""
+        from fishsense_services_processor.headtail_predict import stage
+
+        for name in ("FISHSENSE_SAM3_SHA256", "FISHSENSE_SAM3_SIZE"):
+            monkeypatch.delenv(name, raising=False)
+        for name, value in WEIGHTS_ENV.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.setenv("FISHSENSE_MODEL_WEIGHTS_CACHE_DIR", str(tmp_path))
+        _cached_core_sam3(tmp_path)
+        stage._weights.cache_clear()
+        try:
+            _, model_id = await stage._sam3_checkpoint()
+        finally:
+            stage._weights.cache_clear()
+
+        assert model_id == CORE_SAM3_ID
 
     @pytest.fixture
     def models_bucket(self, monkeypatch):
@@ -585,39 +612,20 @@ class TestSam3Weights:
             s3.create_bucket(Bucket="model-weights")
             yield s3
 
-    async def test_the_pinned_bytes_are_fetched_and_verified(
-        self, monkeypatch, models_bucket, tmp_path
-    ):
-        for name, value in SAM3_ENV.items():
-            monkeypatch.setenv(name, value)
-        models_bucket.put_object(
-            Bucket="model-weights", Key="sam3/3.1/sam3.1_multiplex.pt", Body=WEIGHTS
-        )
-
-        path, model_id = await sam3_weights.fetch_sam3(
-            store=GarageWeightStore(models_bucket, "model-weights"),
-            cache_dir=tmp_path,
-            settings=sam3_weights.Sam3Settings(),
-        )
-
-        assert Path(path).read_bytes() == WEIGHTS
-        assert model_id.startswith("sam3/3.1@")
-
-    async def test_other_bytes_never_load(self, monkeypatch, models_bucket, tmp_path):
-        for name, value in SAM3_ENV.items():
-            monkeypatch.setenv(name, value)
+    async def test_other_bytes_never_load(self, models_bucket, tmp_path):
         models_bucket.put_object(
             Bucket="model-weights",
             Key="sam3/3.1/sam3.1_multiplex.pt",
-            Body=b"tampered " + WEIGHTS[9:],
+            Body=b"not SAM 3.1",
         )
 
         with pytest.raises(ModelIntegrityError):
             await sam3_weights.fetch_sam3(
                 store=GarageWeightStore(models_bucket, "model-weights"),
                 cache_dir=tmp_path,
-                settings=sam3_weights.Sam3Settings(),
             )
+
+        assert [p for p in tmp_path.rglob("*") if p.is_file()] == []
 
 
 # -- the activity ---------------------------------------------------------------------
@@ -753,9 +761,9 @@ async def test_on_a_gpu_sam3_runs_with_the_verified_checkpoint(monkeypatch):
     assert result.checkpoint == "sam3/3.1@0123456789ab", "the model, not a path"
 
 
-def _unset_sam3_settings():
-    # Raises the ValidationError a pod without FISHSENSE_SAM3_* raises.
-    return sam3_weights.Sam3Settings()
+def _unset_weights_settings():
+    # Raises the ValidationError a pod without FISHSENSE_MODEL_WEIGHTS_* raises.
+    return ModelWeightsSettings()
 
 
 class TestAWeightsFailureIsFinal:
@@ -769,7 +777,7 @@ class TestAWeightsFailureIsFinal:
     @pytest.mark.parametrize(
         ("failure", "error_type"),
         [
-            (_unset_sam3_settings, "Sam3SettingsInvalid"),
+            (_unset_weights_settings, "Sam3SettingsInvalid"),
             (ModelIntegrityError("sam3/3.1: expected sha256 ..."), "Sam3WeightsCorrupt"),
             (ModelUnavailable("sam3/3.1: not in s3://model-weights"), "Sam3WeightsUnavailable"),
             (KeyError("sam3"), "Sam3NotInManifest"),
@@ -778,7 +786,7 @@ class TestAWeightsFailureIsFinal:
     )  # fmt: skip
     async def test_is_non_retryable_and_named(self, monkeypatch, failure, error_type):
         monkeypatch.setattr(act, "cuda_available", lambda: True)
-        for name in SAM3_ENV:
+        for name in (*WEIGHTS_ENV, "FISHSENSE_MODEL_WEIGHTS_CACHE_DIR"):
             monkeypatch.delenv(name, raising=False)
 
         async def fetch():

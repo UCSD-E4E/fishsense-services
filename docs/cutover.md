@@ -230,8 +230,7 @@ kubectl -n e4e-fishsense create secret generic fishsense-processor-secrets \
   --from-literal=FISHSENSE_OBJECT_STORE_SECRET_ACCESS_KEY="$(bao kv get -field=secret_key secret/tenants/fishsense/object_store)" \
   --from-literal=FISHSENSE_MODEL_WEIGHTS_ENDPOINT_URL=https://s3.e4e.ucsd.edu \
   --from-literal=FISHSENSE_MODEL_WEIGHTS_ACCESS_KEY_ID="$(bao kv get -field=access_key secret/tenants/fishsense/model_weights)" \
-  --from-literal=FISHSENSE_MODEL_WEIGHTS_SECRET_ACCESS_KEY="$(bao kv get -field=secret_key secret/tenants/fishsense/model_weights)" \
-  --from-literal=FISHSENSE_SAM3_SHA256="<§1.5>" --from-literal=FISHSENSE_SAM3_SIZE="<§1.5>"
+  --from-literal=FISHSENSE_MODEL_WEIGHTS_SECRET_ACCESS_KEY="$(bao kv get -field=secret_key secret/tenants/fishsense/model_weights)"
 ```
 
 > **Since 2026-10-15 the converge keeps this Secret** (`nrp-processor-secret-sync`,
@@ -256,14 +255,12 @@ into the orchestrator image): role, krg-prod Temporal, `/certs`, the weights cac
   aws s3 cp weights/laser-detector/run3/run3_epoch_021.pt \
     s3://model-weights/laser-detector/run3/run3_epoch_021.pt --endpoint-url https://s3.e4e.ucsd.edu
   ```
-- **SAM 3.1** — already in the bucket from v1 (`sam3/3.1/sam3.1_multiplex.pt`).
-  fishsense-core 4.1.0 has no manifest entry for it, so v2 pins it from
-  settings; **measure it once**:
-
-  ```bash
-  aws s3 cp s3://model-weights/sam3/3.1/sam3.1_multiplex.pt . --endpoint-url https://s3.e4e.ucsd.edu
-  sha256sum sam3.1_multiplex.pt; stat -c %s sam3.1_multiplex.pt   # -> FISHSENSE_SAM3_SHA256 / _SIZE (§1.4c)
-  ```
+- **SAM 3.1** — already in the bucket from v1 (`sam3/3.1/sam3.1_multiplex.pt`),
+  verified against fishsense-core's manifest (`sam3/3.1@0567debeec80`,
+  3 502 755 717 bytes). Nothing to measure or set. (At the cutover core 4.1.0
+  had no entry for it, so v2 pinned it from `FISHSENSE_SAM3_SHA256`/`_SIZE` in
+  the processor's Secret; core pins it since 4.2.0 and the processor stopped
+  reading those keys on 2026-10-23.)
 - **BioCLIP** — not needed at cutover (ships disabled). Since 2026-10-15 the automatic-results
   track's species step uses it: the converge's `nrp-processor-secret-sync` uploads BioCLIP 2.5
   (ViT-H/14) and BioCLIP 2 to `model-weights/bioclip/{2.5-vith14,2}/` from Hugging Face at pinned

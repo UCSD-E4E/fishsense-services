@@ -64,11 +64,14 @@ def _core_version() -> str:
 
 #: Why SAM 3.1's weights cannot load, by what the fetch raised: each its own
 #: Temporal error type, so a failed child says which (see
-#: `_verified_sam3_checkpoint`). The settings (`ValidationError`) are read on
-#: first use, inside the fetch; `KeyError` is a manifest with no SAM 3.1 entry.
+#: `_verified_sam3_checkpoint`). The weights' settings (`ValidationError`) are
+#: read on first use, inside the fetch; `KeyError` is a fishsense-core whose
+#: manifest has no SAM 3.1 entry. `Sam3SettingsInvalid` keeps its name from
+#: when it also covered the `FISHSENSE_SAM3_*` pin (gone 2026-10-23, now
+#: core's), so failures already recorded under it still read the same.
 _WEIGHTS_FAILURES: tuple[tuple[type[BaseException], str, str], ...] = (
     (ValidationError, "Sam3SettingsInvalid",
-     "FISHSENSE_SAM3_* or FISHSENSE_MODEL_WEIGHTS_* is missing or invalid"),
+     "FISHSENSE_MODEL_WEIGHTS_* is missing or invalid"),
     (ModelIntegrityError, "Sam3WeightsCorrupt",
      "the checkpoint in model-weights is not the pinned file"),
     (ModelUnavailable, "Sam3WeightsUnavailable",

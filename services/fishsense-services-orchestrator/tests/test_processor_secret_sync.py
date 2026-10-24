@@ -13,9 +13,11 @@ Pinned here:
   public source (BioCLIP, at its Hugging Face revision) is fetched, checked
   against its sha256 and size, and uploaded; one without (run3, the slate
   detector) must already be there. Anything wrong writes nothing;
-* **SAM 3.1's pin is the one already recorded**, measured from Garage only
-  when there is none (its checkpoint was uploaded by hand; nothing else pins
-  it);
+* **SAM 3.1 has no pin here any more**: fishsense-core pins it (4.2.0+) and
+  the processor fetches through core's manifest, so the sync neither writes
+  `FISHSENSE_SAM3_*` nor downloads the checkpoint to measure it; the keys an
+  earlier sync wrote are left as they are, never deleted (until 2026-10-23
+  the sync kept the recorded pin, measured from Garage when there was none);
 * the Secret carries the credentials and the pins in one write, with a
   fingerprint, so a converge that changed nothing writes nothing; a rotated
   key is written on the next converge;
@@ -69,7 +71,12 @@ class FakeCore:
         if self.secret is None:
             raise NotFound()
         self.writes.append("patch")
-        self.secret["data"].update(body.get("data", {}))
+        # A merge patch: a key it leaves out is kept, a null deletes it.
+        for key, value in body.get("data", {}).items():
+            if value is None:
+                self.secret["data"].pop(key, None)
+            else:
+                self.secret["data"][key] = value
         annotations = self.secret["metadata"].setdefault("annotations", {})
         for key, value in body["metadata"].get("annotations", {}).items():
             if value is None:
@@ -116,6 +123,8 @@ FALLBACK = b"bioclip-2 weights"
 RUN3 = b"run3 weights"
 SLATE = b"slate weights"
 SAM = b"sam 3.1 weights"
+SAM_KEY = "sam3/3.1/sam3.1_multiplex.pt"
+SAM_PIN = ("FISHSENSE_SAM3_SHA256", "FISHSENSE_SAM3_SIZE")
 HUB = {
     "https://huggingface.co/imageomics/a/resolve/r1/open_clip_model.safetensors": BIOCLIP,
     "https://huggingface.co/imageomics/b/resolve/r2/open_clip_model.safetensors": FALLBACK,
@@ -144,7 +153,7 @@ def _garage(**missing) -> FakeS3:
         "slate-detector/q1/slate_efficientnet_b0.pt": SLATE,
         "bioclip/2.5-vith14/open_clip_model.safetensors": BIOCLIP,
         "bioclip/2/open_clip_model.safetensors": FALLBACK,
-        sut.SAM_KEY: SAM,
+        SAM_KEY: SAM,
     }
     for key in missing.get("keys", ()):
         objects.pop(key)
@@ -204,9 +213,6 @@ def test_the_first_converge_writes_every_key_the_processor_reads(tmp_path):
     assert env["FISHSENSE_BIOCLIP_SIZE"] == str(len(BIOCLIP))
     assert env["FISHSENSE_BIOCLIP_FALLBACK_SHA256"] == _sha(FALLBACK)
     assert env["FISHSENSE_SLATE_DETECTOR_SHA256"] == _sha(SLATE)
-    # SAM 3.1: no recorded pin, so measured from Garage.
-    assert env["FISHSENSE_SAM3_SHA256"] == _sha(SAM)
-    assert env["FISHSENSE_SAM3_SIZE"] == str(len(SAM))
 
 
 def test_a_converge_that_changed_nothing_writes_nothing(tmp_path):
@@ -227,16 +233,33 @@ def test_a_rotated_key_is_written_on_the_next_converge(tmp_path):
     assert _env(core)["FISHSENSE_OBJECT_STORE_ACCESS_KEY_ID"] == "ak2"
 
 
-def test_the_recorded_sam_pin_is_kept_and_sam_is_not_downloaded(tmp_path):
-    core = FakeCore()
-    s3 = _garage()
+def test_sam_3_1_is_neither_pinned_nor_measured(tmp_path):
+    """Core pins SAM 3.1 and the processor fetches through its manifest: the
+    sync writes no `FISHSENSE_SAM3_*` and never downloads 3.5 GB to measure
+    it."""
+    core, s3 = FakeCore(), _garage()
+
     _sync(_settings(tmp_path), core, s3)
-    s3.downloads.clear()
 
-    _sync(_settings(tmp_path, keys=("ak2", "sk", "mk", "ms")), core, s3)
-
+    assert not [k for k in _env(core) if k.startswith("FISHSENSE_SAM3_")]
     assert s3.downloads == []
-    assert _env(core)["FISHSENSE_SAM3_SHA256"] == _sha(SAM)
+
+
+def test_the_sam_pin_an_earlier_sync_wrote_is_left_alone(tmp_path):
+    """Dropping the pin from the sync deletes nothing: the next write is a
+    patch of the keys it still keeps, and the stale `FISHSENSE_SAM3_*` stay
+    until an operator removes them (harmless: the processor no longer reads
+    them)."""
+    recorded = {"FISHSENSE_SAM3_SHA256": _sha(SAM), "FISHSENSE_SAM3_SIZE": "15"}
+    core = FakeCore({
+        "metadata": {"annotations": {}},
+        "data": {k: base64.b64encode(v.encode()).decode() for k, v in recorded.items()},
+    })  # fmt: skip
+
+    assert _sync(_settings(tmp_path), core, _garage()) is sut.Outcome.WRITTEN
+
+    assert core.writes == ["patch"]
+    assert {k: _env(core)[k] for k in SAM_PIN} == recorded
 
 
 # -- the weights ------------------------------------------------------------------------
@@ -331,7 +354,6 @@ def test_the_processor_loads_its_weights_from_what_the_sync_writes(
     settings, and BioCLIP lands where the processor fetches it."""
     import importlib
 
-    from fishsense_services_processor.headtail_predict.weights import Sam3Settings
     from fishsense_services_processor.slate_detect.weights import SlateDetectorSettings
     from fishsense_services_processor.species_predict.weights import (
         BIOCLIP_FILENAME,
@@ -348,15 +370,14 @@ def test_the_processor_loads_its_weights_from_what_the_sync_writes(
     core = FakeCore()
     monkeypatch.setattr(sut, "PINNED", real)
     objects = {p.key: b"" for p in real}
-    s3 = FakeS3({**objects, sut.SAM_KEY: SAM})
-    s3.size = lambda key: next((p.size for p in real if p.key == key), len(SAM))
+    s3 = FakeS3(objects)
+    s3.size = lambda key: next((p.size for p in real if p.key == key), None)
     _sync(_settings(tmp_path), core, s3)
 
     for key, value in _env(core).items():
         monkeypatch.setenv(key, value)
     BioclipSettings()
     SlateDetectorSettings()
-    Sam3Settings()
 
 
 def test_the_simcc_keypoint_model_is_pinned_as_core_pins_it():

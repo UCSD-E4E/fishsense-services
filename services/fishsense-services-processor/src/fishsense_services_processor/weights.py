@@ -26,9 +26,9 @@ v2 changes:
 * the settings are the weights' own (`FISHSENSE_MODEL_WEIGHTS_*`), not a
   section of a shared object-store config, and the cache directory is required.
 
-Not every model core serves can come from here yet: fishsense-core 4.1.0's
-manifest has no SAM 3.1 entry, so `fetch("sam3", "3.1")` is a `KeyError` until
-core pins its hash (see the head/tail stage).
+fishsense-core 4.1.0's manifest had no SAM 3.1 entry, so the head/tail stage
+passed its own one-entry manifest from settings; core pins it since 4.2.0, and
+every model here now resolves through core's built-in manifest (2026-10-23).
 """
 
 from __future__ import annotations
@@ -188,7 +188,7 @@ def fetch_weights(
 ) -> Path:
     """A local path to the verified weights for ``(name, version)``, fetched
     from ``store`` on a cache miss. ``version=None`` is core's pinned default;
-    ``manifest`` overrides core's (tests, or a model core does not pin yet)."""
+    ``manifest`` overrides core's (tests)."""
     return fetch(name, version, store=store, cache_dir=cache_dir, manifest=manifest)
 
 
