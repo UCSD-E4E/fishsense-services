@@ -61,7 +61,7 @@ from fishsense_services_processor.automatic_frames.workflow import (
 from fishsense_services_processor.automatic_results.frames import (
     automatic_frame_result,
 )
-from fishsense_services_processor.headtail_predict.geometry import crop_origin
+from fishsense_core.fish.fish_at_dot import crop_origin
 
 FRAME_W, FRAME_H = 4014, 3016
 CROP_W, CROP_H = 1800, 1350
@@ -90,6 +90,10 @@ class _Scored:
     def __init__(self, pairs):
         self.pairs = pairs
         self.calls = 0
+
+    def segment(self, image):
+        # core's ScoredSegmenter: the plain seam, the same masks
+        return [mask for mask, _ in self.segment_scored(image)]
 
     def segment_scored(self, image):
         self.calls += 1
@@ -149,25 +153,14 @@ def test_the_kept_masks_score_is_the_one_under_the_dot():
     assert r.status == "predicted" and r.sam_score == pytest.approx(0.7)
 
 
-def test_a_kept_mask_whose_score_cannot_be_named_is_not_predicted(monkeypatch, caplog):
-    """The gate is SAM's score on the mask under the dot. If the kernel keeps
-    a mask but the score can't be named for it (the kernel's crop and ours
-    disagree), the row carried `predicted` with `sam_score` NULL -- and NULL
-    passed the table's gate (2026-10-15 gap audit). It is its own abstention,
-    `mask_unscored`, logged: a mismatch to count and fix, never the
-    scientific answer `laser_off_all_fish` (review of #85)."""
-    from fishsense_services_processor.automatic_results import frames
-
-    monkeypatch.setattr(frames._Gated, "score_at", lambda self, point: None)
-
-    with caplog.at_level("WARNING"):
-        r = _result(_Scored([(_mask_at(*DOT), 0.81)]))
-
-    assert r.status == "mask_unscored"
-    assert any("unscored" in rec.getMessage() for rec in caplog.records)
-    assert r.sam_score is None
-    assert (r.head_x, r.head_y, r.tail_x, r.tail_y) == (None, None, None, None)
-    assert r.laser_x == DOT[0]  # the dot itself is still the detector's
+def test_a_mask_with_no_score_is_refused_not_recorded_unscored():
+    """The gate is SAM's score on the mask under the dot (core #93). A build
+    that hands back a mask with no score cannot be gated, so core refuses the
+    frame (`ValueError`) rather than keep an unscored mask. Under the old
+    wrapper that was the `mask_unscored` abstention (2026-10-15 gap audit);
+    it is no longer produced."""
+    with pytest.raises(ValueError):
+        _result(_Scored([(_mask_at(*DOT), None)]))
 
 
 def test_no_dot_is_an_abstention_and_nothing_is_segmented():
@@ -215,6 +208,10 @@ class _Windowed:
     def __init__(self, window, frame):
         self.answers = {(CROP_H, CROP_W): window, (FRAME_H, FRAME_W): frame}
         self.shapes = []
+
+    def segment(self, image):
+        # core's ScoredSegmenter: the plain seam, the same masks
+        return [mask for mask, _ in self.segment_scored(image)]
 
     def segment_scored(self, image):
         self.shapes.append(image.shape[:2])
@@ -635,11 +632,19 @@ async def test_each_frame_logs_its_peak_gpu_memory(monkeypatch, caplog):
 
 
 class _CudaDies:
+    def segment(self, image):
+        # core's ScoredSegmenter: the plain seam, the same masks
+        return [mask for mask, _ in self.segment_scored(image)]
+
     def segment_scored(self, image):
         raise RuntimeError("CUDA error: unspecified launch failure")
 
 
 class _SomethingElse:
+    def segment(self, image):
+        # core's ScoredSegmenter: the plain seam, the same masks
+        return [mask for mask, _ in self.segment_scored(image)]
+
     def segment_scored(self, image):
         raise RuntimeError("shapes do not match")
 
@@ -742,6 +747,10 @@ async def test_a_frame_that_kept_no_mask_stores_nothing(segmenter, status):
 
 async def test_an_unscored_mask_passed_no_gate_and_is_not_stored():
     class _Unscorable(_Scored):
+        def segment(self, image):
+            # core's ScoredSegmenter: the plain seam, the same masks
+            return [mask for mask, _ in self.segment_scored(image)]
+
         def segment_scored(self, image):
             return [(_mask_at(*DOT), 0.8)]
 

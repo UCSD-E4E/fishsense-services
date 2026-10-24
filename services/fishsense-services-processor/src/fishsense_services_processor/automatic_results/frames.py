@@ -16,16 +16,26 @@ re-implemented; what this adds is
   gate here makes it the stage's, not a library default's;
 * **slate frames** keep their dot for the calibration and are never
   segmented as fish.
+
+2026-10-24: the gate is fishsense-core's (`find_fish_at_dot(...,
+grow_cut_masks=True, score_gate=AUTOMATIC_SAM_SCORE_GATE)`, core #93): masks
+under it are dropped before the laser gate, on both passes, and the kept
+mask's score comes back on `FishAtDot.score`. That is the rule this module's
+`_Gated` wrapper applied, so outputs are unchanged. Under a gate core always
+reports the kept mask's score, and refuses a SAM build that returns none on
+its first frame (`ValueError`), so `mask_unscored` is no longer produced.
+`ScoredSam3Adapter` keeps only `encoded` / `prompted` (several prompts on one
+encoding), which core did not port and the shadow calibration uses.
 """
 
 from __future__ import annotations
 
-import logging
 import uuid
 from dataclasses import dataclass
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any, List, Optional, Tuple
 
 import numpy as np
+from fishsense_core.fish.fish_at_dot import to_numpy
 
 from fishsense_services_contracts.automatic_results import (
     AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
@@ -34,13 +44,10 @@ from fishsense_services_contracts.automatic_results import (
 )
 from fishsense_services_processor.headtail_predict.predict import (
     PredictOptions,
-    _to_numpy,
-    predict_from_jpeg,
+    find_fish_in_jpeg,
 )
 
 __all__ = ["LaserDot", "ScoredSam3Adapter", "automatic_frame_result"]
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -52,34 +59,6 @@ class LaserDot:
     confidence: float
     predictor_version: int
     checkpoint: Optional[str]
-
-
-class _Gated:
-    """A `segment` seam over a scored segmenter: only masks at or above the
-    gate pass, and their scores are kept to name the kept one's."""
-
-    def __init__(self, scored: Any, gate: float):
-        self._scored = scored
-        self._gate = gate
-        self.kept: List[Tuple[np.ndarray, float]] = []
-
-    def segment(self, image_bgr: np.ndarray) -> List[np.ndarray]:
-        self.kept = [
-            (np.asarray(m), float(s))
-            for m, s in self._scored.segment_scored(image_bgr)
-            if float(s) >= self._gate
-        ]
-        return [m for m, _ in self.kept]
-
-    def score_at(self, local_point: Sequence[float]) -> Optional[float]:
-        """The kernel's choice, by its own rule: the first kept mask whose
-        pixel at the dot is set."""
-        xi, yi = int(round(local_point[0])), int(round(local_point[1]))
-        for mask, score in self.kept:
-            m = np.asarray(mask)
-            if 0 <= yi < m.shape[0] and 0 <= xi < m.shape[1] and m[yi, xi]:
-                return score
-        return None
 
 
 def automatic_frame_result(
@@ -114,13 +93,10 @@ def automatic_frame_result(
     if is_slate:
         return AutomaticFrameResult(status="slate_frame", **base)
 
-    gated = _Gated(segmenter, gate)
-    r = predict_from_jpeg(
+    found = find_fish_in_jpeg(
         jpeg_bytes,
         [[dot.x, dot.y]],
-        gated,
-        capture_id,
-        None,
+        segmenter,
         PredictOptions(
             checkpoint=checkpoint,
             core_version=core_version,
@@ -128,40 +104,26 @@ def automatic_frame_result(
             grow_cut_masks=True,
         ),
         mask_sink=mask_sink,
+        score_gate=gate,
     )
-    kept = r.status in ("predicted", "headtail_failed")
-    score = (
-        gated.score_at((dot.x - r.crop_x, dot.y - r.crop_y))
-        if kept and r.crop_x is not None
-        else None
-    )
-    if r.status == "predicted" and score is None:
-        # A kept mask whose score can't be named under the dot passed no gate
-        # we can show (2026-10-15 gap audit). Its own abstention, logged: a
-        # kernel/score mismatch to count and fix, not "the dot is on no fish"
-        # (review of #85).
-        logger.warning(
-            "automatic frame capture=%s: kept mask unscored under the dot "
-            "(crop %s,%s)",
-            capture_id,
-            r.crop_x,
-            r.crop_y,
-        )
-        return AutomaticFrameResult(status="mask_unscored", **base)
+    if found is None:
+        return AutomaticFrameResult(status="decode_failed", **base)
+    head = found.head or (None, None)
+    tail = found.tail or (None, None)
     return AutomaticFrameResult(
-        status=r.status,
-        head_x=r.head_x,
-        head_y=r.head_y,
-        tail_x=r.tail_x,
-        tail_y=r.tail_y,
-        width=r.width,
-        height=r.height,
-        mask_area_px=r.mask_area_px,
-        silhouette_ratio=r.silhouette_ratio,
-        crop_x=r.crop_x,
-        crop_y=r.crop_y,
-        mask_bbox=r.mask_bbox,
-        sam_score=score,
+        status=found.status,
+        head_x=head[0],
+        head_y=head[1],
+        tail_x=tail[0],
+        tail_y=tail[1],
+        width=found.width,
+        height=found.height,
+        mask_area_px=found.mask_area_px,
+        silhouette_ratio=found.silhouette_ratio,
+        crop_x=found.crop_x,
+        crop_y=found.crop_y,
+        mask_bbox=list(found.mask_bbox) if found.mask_bbox is not None else None,
+        sam_score=found.score,
         checkpoint=checkpoint,
         **base,
     )
@@ -174,17 +136,13 @@ def _device_type() -> str:
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
-class ScoredSam3Adapter:  # pylint: disable=too-few-public-methods
-    """The SAM 3.1 processor behind a scored seam: the head/tail stage's
-    `_Sam3Adapter` (bfloat16 autocast as a context manager, a PIL image,
-    prompt "fish"), returning each mask with its score."""
+class ScoredSam3Adapter:
+    """SAM 3.1 asked several prompts on one encoding (bfloat16 autocast as a
+    context manager, a PIL image): the shadow calibration's (review of #261).
+    The chain's own scored segmentation is core's `Sam3Segmenter`."""
 
-    def __init__(self, processor: Any, prompt: str = "fish"):
+    def __init__(self, processor: Any):
         self._processor = processor
-        self._prompt = prompt
-
-    def segment_scored(self, image_bgr: np.ndarray) -> List[Tuple[np.ndarray, float]]:
-        return self.prompted(self.encoded(image_bgr), self._prompt)
 
     def encoded(self, image_bgr: np.ndarray) -> Any:
         """The image through SAM's encoder once: `prompted` asks it each
@@ -209,9 +167,9 @@ class ScoredSam3Adapter:  # pylint: disable=too-few-public-methods
         if not hasattr(state, "get") or state.get("masks") is None:
             return []
         scores = state.get("scores")
-        masks = [_to_numpy(m).squeeze() for m in state["masks"]]
+        masks = [to_numpy(m).squeeze() for m in state["masks"]]
         if scores is None:
             raise ValueError("SAM 3.1 returned masks without scores")
         if getattr(scores, "float", None) is not None:
             scores = scores.float()  # numpy has no bfloat16
-        return list(zip(masks, (float(s) for s in _to_numpy(scores).reshape(-1))))
+        return list(zip(masks, (float(s) for s in to_numpy(scores).reshape(-1))))

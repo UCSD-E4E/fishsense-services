@@ -22,7 +22,7 @@ from fishsense_services_contracts.mask_backfill import (
 )
 from fishsense_services_contracts.masks import MaskUpload, mask_key
 from fishsense_services_contracts.object_store import ObjectRef
-from fishsense_services_processor.headtail_predict.geometry import crop_origin
+from fishsense_core.fish.fish_at_dot import crop_origin
 from fishsense_services_processor.mask_backfill.activities import (
     MaskBackfillActivities,
 )
@@ -51,6 +51,10 @@ def _mask(dx=0, half_len=200, half_h=60):
 class _Scored:
     def __init__(self, pairs):
         self.pairs = pairs
+
+    def segment(self, image):
+        # core's ScoredSegmenter: the plain seam, the same masks
+        return [mask for mask, _ in self.segment_scored(image)]
 
     def segment_scored(self, image):
         return self.pairs
