@@ -6,7 +6,7 @@ perform_laser_calibration_activity.py (itself a port of
 `scripts/stage13_perform_laser_calibration.ipynb`). The Atanasov fit is
 `fishsense_core.laser.calibrate_laser`; the pose and the ray-plane
 intersection are `fishsense_core.plane` (core #95; services carried its own
-`calibration/geometry.py` until v0.52); the fit and its gates are
+`calibration/geometry.py` through v0.54.1); the fit and its gates are
 `calibration.fit`.
 
 What remains slate-specific here is only how the correspondences are
@@ -32,6 +32,10 @@ v2 changes:
 from __future__ import annotations
 
 import numpy as np
+from fishsense_core.plane import (
+    laser_point_on_plane,
+    plane_from_correspondences,
+)
 from temporalio import activity
 
 from fishsense_services_contracts.slate_calibration import (
@@ -40,10 +44,6 @@ from fishsense_services_contracts.slate_calibration import (
     SlateObservation,
 )
 from fishsense_services_processor.calibration.fit import MIN_LASER_POINTS, fit_laser
-from fishsense_core.plane import (
-    laser_point_on_plane,
-    plane_from_correspondences,
-)
 
 __all__ = ["INCH_TO_M", "MIN_LASER_POINTS", "perform_laser_calibration"]
 
@@ -116,16 +116,38 @@ def _laser_point_in_camera_space(
     # The slate's whole contribution: template points in metres. Everything
     # after `plane_from_correspondences` is target-agnostic and shared with the
     # checkerboard producer -- see `fishsense_core.plane`.
-    body_points = (np.array(source_points) / float(dpi)) * INCH_TO_M
+    # (N, 2) even when N is 0: a label that skips every point leaves
+    # `np.array([])`, 1-D, which core refuses as malformed with a ValueError
+    # and which would fail the dive (review of #350). Empty, it is just short.
+    body_points = (
+        np.array(source_points, dtype=float).reshape(-1, 2) / float(dpi)
+    ) * INCH_TO_M
+    pixels = np.array(image_points, dtype=float).reshape(-1, 2)
 
     matrix = np.asarray(camera_matrix, dtype=float)
-    plane = plane_from_correspondences(body_points, np.array(image_points), matrix)
+    plane = plane_from_correspondences(body_points, pixels, matrix)
     if plane is None:
+        activity.logger.warning(
+            "skipping slate observation capture=%s: no pose from %d points "
+            "(fewer than 4, a non-finite point, or solvePnP failed)",
+            observation.capture_id,
+            len(pixels),
+        )
         return None
 
-    return laser_point_on_plane(
+    point = laser_point_on_plane(
         plane, np.array([observation.laser_x, observation.laser_y]), matrix
     )
+    # Core checks the ray but not its answer; v0.48.0's own copy dropped a
+    # NaN point, and a near-parallel plane gives an infinite one.
+    if point is None or not np.all(np.isfinite(point)):
+        activity.logger.warning(
+            "skipping slate observation capture=%s: the dot's ray does not "
+            "meet the slate's plane",
+            observation.capture_id,
+        )
+        return None
+    return point
 
 
 def _gather_laser_points(

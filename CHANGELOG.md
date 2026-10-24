@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.55.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.54.1...v0.55.0) (2026-10-24)
+
+
+### Features
+
+* the v4 replay can pose a mission with a named slate template ([c5b68c4](https://github.com/UCSD-E4E/fishsense-services/commit/c5b68c4340a9855464519688caa5bc94fed846d7))
+* the v4 replay can pose a mission with a named slate template ([82ee3b5](https://github.com/UCSD-E4E/fishsense-services/commit/82ee3b5fc1f26565e1f31d0c1d04acdcce23f2b6))
+
+
+### Bug Fixes
+
+* **processor:** a slate label with no points left is skipped, not fatal (review of [#350](https://github.com/UCSD-E4E/fishsense-services/issues/350)) ([ce95d31](https://github.com/UCSD-E4E/fishsense-services/commit/ce95d314e88e3d7fd74a35dfa3574aa8cb0a6009))
+* **processor:** a slate label with no points left is skipped, not fatal (review of [#350](https://github.com/UCSD-E4E/fishsense-services/issues/350)) ([77d1045](https://github.com/UCSD-E4E/fishsense-services/commit/77d10450dbd4f13fb113400ef45c8a3f04b53832))
+* **processor:** unusable SAM scores are an abstention, mismatched labels never retry (review of [#349](https://github.com/UCSD-E4E/fishsense-services/issues/349)) ([d5e7487](https://github.com/UCSD-E4E/fishsense-services/commit/d5e748774d95141bd231c399971f1be004a0e1c4))
+
 ## [0.54.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.54.0...v0.54.1) (2026-10-24)
 
 
