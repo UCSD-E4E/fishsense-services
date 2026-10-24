@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.54.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.53.0...v0.54.0) (2026-10-24)
+
+
+### Features
+
+* **api:** list automatic lengths, per tenant and per mission, with their reviews ([88670de](https://github.com/UCSD-E4E/fishsense-services/commit/88670de63b817c1677d05d1c18bd2331a1a3bf6c))
+* **api:** list automatic lengths, per tenant and per mission, with their reviews ([e70a368](https://github.com/UCSD-E4E/fishsense-services/commit/e70a36880e83cab43c414506913dd34601ba7f1a))
+
 ## [0.53.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.52.0...v0.53.0) (2026-10-24)
 
 
