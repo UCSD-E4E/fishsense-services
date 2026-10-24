@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.54.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.54.0...v0.54.1) (2026-10-24)
+
+
+### Bug Fixes
+
+* **api:** the automatic drain keeps human-measured missions current too ([7c19a51](https://github.com/UCSD-E4E/fishsense-services/commit/7c19a51a56636460c633f07549c46e5752a9e0f0))
+* **api:** the automatic drain keeps human-measured missions current too ([1da8318](https://github.com/UCSD-E4E/fishsense-services/commit/1da831887f6ca6421f4733dc30d2e8803116bfe8))
+
 ## [0.54.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.53.0...v0.54.0) (2026-10-24)
 
 

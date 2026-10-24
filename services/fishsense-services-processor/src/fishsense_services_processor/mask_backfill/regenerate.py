@@ -38,26 +38,26 @@ def regenerate(  # pylint: disable=too-many-arguments
     frame: BackfillMaskFrame,
     image: bytes,
     *,
-    scored: Any,
-    plain: Any,
+    segmenter: Any,
     checkpoint: str,
     core_version: str,
 ) -> tuple[str, Optional[MaskExpectation], Optional[FrameMask]]:
     """``(outcome, what the re-run got, the mask when reproduced)``. Blocking.
-    `scored` is the automatic track's segmenter (``segment_scored``), `plain`
-    the head/tail stage's (``segment``)."""
+    `segmenter` is core's `Sam3Segmenter`, which serves both paths: the
+    automatic track's gate reads its ``segment_scored``, the head/tail stage
+    its ``segment``."""
     sink = MaskSink()
     if source == "automatic":
         x, y = frame.dots[0]
         r = automatic_frame_result(
             capture_id=frame.capture_id,
             dot=LaserDot(float(x), float(y), 0.0, 0, None),
-            jpeg_bytes=image, segmenter=scored, checkpoint=checkpoint,
+            jpeg_bytes=image, segmenter=segmenter, checkpoint=checkpoint,
             core_version=core_version, mask_sink=sink,
         )  # fmt: skip
     elif source == "headtail":
         r = predict_from_jpeg(
-            image, frame.dots, plain, frame.capture_id, frame.laser_label_ids,
+            image, frame.dots, segmenter, frame.capture_id, frame.laser_label_ids,
             PredictOptions(checkpoint=checkpoint, core_version=core_version,
                            predictor_version=HEADTAIL_PREDICTOR_VERSION),
             sink,
