@@ -467,6 +467,190 @@
         "title": "AutomaticFrameView",
         "type": "object"
       },
+      "AutomaticLengthPageView": {
+        "properties": {
+          "lengths": {
+            "items": {
+              "$ref": "#/components/schemas/AutomaticLengthView"
+            },
+            "title": "Lengths",
+            "type": "array"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next"
+          }
+        },
+        "required": [
+          "lengths",
+          "next"
+        ],
+        "title": "AutomaticLengthPageView",
+        "type": "object"
+      },
+      "AutomaticLengthView": {
+        "properties": {
+          "calibration_source": {
+            "title": "Calibration Source",
+            "type": "string"
+          },
+          "capture_id": {
+            "format": "uuid",
+            "title": "Capture Id",
+            "type": "string"
+          },
+          "capture_number": {
+            "title": "Capture Number",
+            "type": "integer"
+          },
+          "captured_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Captured At"
+          },
+          "depth_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depth M"
+          },
+          "human_length_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Human Length M"
+          },
+          "laser_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Laser Confidence"
+          },
+          "length_m": {
+            "title": "Length M",
+            "type": "number"
+          },
+          "mission_human_measured": {
+            "title": "Mission Human Measured",
+            "type": "boolean"
+          },
+          "mission_number": {
+            "title": "Mission Number",
+            "type": "integer"
+          },
+          "reviews": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/KindReviewView"
+            },
+            "title": "Reviews",
+            "type": "object"
+          },
+          "sam_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sam Score"
+          },
+          "scientific_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scientific Name"
+          },
+          "species": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Species"
+          },
+          "species_margin": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Species Margin"
+          },
+          "species_probability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Species Probability"
+          }
+        },
+        "required": [
+          "mission_number",
+          "capture_id",
+          "capture_number",
+          "captured_at",
+          "length_m",
+          "depth_m",
+          "calibration_source",
+          "laser_confidence",
+          "sam_score",
+          "species",
+          "scientific_name",
+          "species_probability",
+          "species_margin",
+          "human_length_m",
+          "mission_human_measured",
+          "reviews"
+        ],
+        "title": "AutomaticLengthView",
+        "type": "object"
+      },
       "CaptureCardPage": {
         "properties": {
           "captures": {
@@ -1420,6 +1604,43 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "KindReviewView": {
+        "properties": {
+          "action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action"
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "action",
+          "reason",
+          "pending"
+        ],
+        "title": "KindReviewView",
         "type": "object"
       },
       "LaserEvidenceView": {
@@ -4076,6 +4297,98 @@
         "summary": "Summary"
       }
     },
+    "/tenants/{slug}/automatic/lengths": {
+      "get": {
+        "description": "The tenant's current automatic lengths, by mission and capture\nnumber; ``species`` keeps one, by scientific name. Unvalidated.",
+        "operationId": "list_automatic_lengths",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "species",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Species"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomaticLengthPageView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Lengths"
+      }
+    },
     "/tenants/{slug}/captures/{capture_id}/automatic": {
       "get": {
         "operationId": "get_automatic_frame",
@@ -5019,6 +5332,90 @@
           }
         ],
         "summary": "Get Mission"
+      }
+    },
+    "/tenants/{slug}/missions/{number}/automatic/lengths": {
+      "get": {
+        "description": "One mission's current automatic lengths, by capture number.",
+        "operationId": "list_mission_automatic_lengths",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomaticLengthPageView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Mission Lengths"
       }
     },
     "/tenants/{slug}/missions/{number}/calibration-refusal": {
