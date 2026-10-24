@@ -9,10 +9,13 @@ run_e2e.py, score.py, tail/evaluate.py). Decided 2026-10-06:
   label, a human-path prediction or a `measurements` row; the human path is
   exactly as it was;
 * **the backlog cohort** (`AUTOMATIC_RESULTS_COHORT`): a dive of **any**
-  priority with no human measurement (no `measurements` row on any of its
-  captures), renderable (`camera_sql.RECTIFIABLE_MISSION`), with automatic work
-  outstanding; the oldest first, so the orchestrator can take the oldest
-  across the tenants it serves. Work is: a canonical frame with no automatic
+  priority, renderable (`camera_sql.RECTIFIABLE_MISSION`), with automatic work
+  outstanding; those with no human measurement (no `measurements` row on any
+  of their captures) first, then the oldest, so the orchestrator can take the
+  oldest across the tenants it serves. Human-measured dives were left out
+  until 2026-10-24, when the owner had them kept current: they are where the
+  automatic results are checked against people, and a cut-mask fix at
+  version 4 had never reached them. Work is: a canonical frame with no automatic
   head/tail at the current version; a kept mask with no automatic species at
   the current version; no automatic calibration at the current version, or one
   older than the dive's newest automatic head/tail (its candidates may have
@@ -384,7 +387,6 @@ def automatic_results_cohort(*, species: bool = True) -> str:
     if species:
         work.insert(1, _SPECIES_WORK)
     return f"""{RECTIFIABLE_MISSION}
-    AND NOT {_HUMAN_MEASURED}
     AND NOT {_EXCLUDED}
     AND NOT {_FAILED_OUT}
     AND ({" OR ".join(f"({w})" for w in work)})"""
@@ -478,15 +480,16 @@ async def next_mission_for_automatic_results(
     species: bool = True,
     exclude: Sequence[uuid.UUID] = (),
 ) -> AutomaticCandidate | None:
-    """The tenant's oldest dive in the backlog cohort, other than `exclude`
-    (the dives the run already took)."""
+    """The tenant's next dive in the backlog cohort, other than `exclude`
+    (the dives the run already took): one nobody has measured first, then the
+    oldest."""
     row = (
         await conn.execute(
             text(f"""
                 SELECT d.id, d.created_at FROM missions d
                 WHERE d.tenant_id = :t AND {automatic_results_cohort(species=species)}
                   AND NOT d.id = ANY(CAST(:exclude AS uuid[]))
-                ORDER BY d.created_at, d.id
+                ORDER BY {_HUMAN_MEASURED}, d.created_at, d.id
                 LIMIT 1
                 """),
             {"t": tenant_id, "hv": headtail_version, "sv": species_version,
