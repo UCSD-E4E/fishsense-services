@@ -34,6 +34,7 @@ from fishsense_services_contracts.laser_depth import (
     ComputeLaserDepthsResult,
     LaserDepth,
     LaserDepthOutcome,
+    LaserDepthRefusal,
 )
 from fishsense_services_contracts.measurement import FishLength, MeasureFishResult
 from fishsense_services_orchestrator.laser_depth.activities import (
@@ -180,3 +181,125 @@ async def test_a_length_that_crossed_temporal_answers_its_work(
             )
         ).scalar_one()
     assert written == 0.30000000000000004
+
+
+async def test_a_low_parallax_refusal_that_crossed_temporal_is_recorded(
+    owner_engine, app_engine, seed_memberships
+):
+    """Contract v21 to 0067, end to end but for the processor: a dot too near
+    the laser's vanishing point comes back refused with its positive depth,
+    and the orchestrator's persist records it under the widened CHECKs."""
+    lab = (await seed_memberships({ORCHESTRATOR: {"lab": "member"}}))["lab"]
+    mission_id, _ = await calibrated_dive(owner_engine, lab)
+    capture_id = await capture(owner_engine, lab, mission_id)
+    await laser_label(owner_engine, lab, capture_id, x=AWKWARD_X, y=AWKWARD_Y)
+    activities = LaserDepthActivities(
+        catalog=LaserDepthCatalog(app_engine, sub=ORCHESTRATOR)
+    )
+    env = ActivityEnvironment()
+
+    (target,) = _across([MissionTarget(lab, mission_id)], [MissionTarget])
+    (resolution,) = _across(
+        [await env.run(activities.resolve_laser_depth_inputs, target)],
+        [LaserDepthResolution],
+    )
+    payload = resolution.payload
+    (dot,) = payload.captures[0].laser_labels
+    result = ComputeLaserDepthsResult(
+        mission_id=payload.mission_id,
+        core_version="4.3.0",
+        captures=[
+            LaserDepthOutcome(
+                capture_id=payload.captures[0].capture_id,
+                depth=None,
+                refusals=[
+                    LaserDepthRefusal(
+                        laser_label_id=dot.laser_label_id,
+                        x=dot.x,
+                        y=dot.y,
+                        reason="low_parallax",
+                        depth_m=52.2,
+                    )
+                ],
+            )
+        ],
+    )
+    args = _across(
+        [target, payload.calibration.laser_calibration_id, result],
+        [MissionTarget, uuid.UUID, ComputeLaserDepthsResult],
+    )
+
+    persisted = await env.run(activities.persist_laser_depths, *args)
+
+    assert (persisted.refused, persisted.skipped_stale) == (1, 0)
+    async with owner_engine.connect() as conn:
+        written = (
+            await conn.execute(
+                text(
+                    "SELECT reason, depth_m FROM laser_depth_refusals "
+                    "WHERE capture_id = :c"
+                ),
+                {"c": capture_id},
+            )
+        ).one()
+    assert tuple(written) == ("low_parallax", 52.2)
+
+
+async def test_an_unmeasurable_dot_that_crossed_temporal_is_a_measurement_refusal(
+    owner_engine, app_engine, seed_memberships
+):
+    """Stage 14 since contract v21: a dot behind the camera is refused, not
+    measured as its positive twin, and the refusal reaches the database."""
+    lab = (await seed_memberships({ORCHESTRATOR: {"lab": "member"}}))["lab"]
+    mission_id, _ = await calibrated_dive(owner_engine, lab)
+    capture_id = await measurable_capture(
+        owner_engine, lab, mission_id, "Fish Model, Grouper"
+    )
+    activities = MeasurementActivities(
+        catalog=MeasurementCatalog(app_engine, sub=ORCHESTRATOR)
+    )
+    env = ActivityEnvironment()
+
+    (target,) = _across([MissionTarget(lab, mission_id)], [MissionTarget])
+    (resolution,) = _across(
+        [await env.run(activities.resolve_measurement_inputs, target)],
+        [MeasurementResolution],
+    )
+    payload = resolution.payload
+    (item,) = payload.captures
+    result = MeasureFishResult(
+        mission_id=payload.mission_id,
+        algorithm="laser_depth_fronto_parallel",
+        algorithm_version="2",
+        core_version="4.3.0",
+        captures=[
+            FishLength(
+                capture_id=item.capture_id,
+                species_label_id=item.species_label_id,
+                laser=item.laser,
+                head_tail=item.head_tail,
+                length_m=None,
+                depth_m=-0.4,
+                refusal="non_positive_depth",
+            )
+        ],
+    )
+    args = _across(
+        [target, payload.calibration.laser_calibration_id, result],
+        [MissionTarget, uuid.UUID, MeasureFishResult],
+    )
+
+    persisted = await env.run(activities.persist_measurements, *args)
+
+    assert (persisted.refused, persisted.skipped_stale) == (1, 0)
+    async with owner_engine.connect() as conn:
+        written = (
+            await conn.execute(
+                text(
+                    "SELECT reason, depth_m, algorithm_version "
+                    "FROM measurement_refusals WHERE capture_id = :c"
+                ),
+                {"c": capture_id},
+            )
+        ).one()
+    assert tuple(written) == ("non_positive_depth", -0.4, "2")

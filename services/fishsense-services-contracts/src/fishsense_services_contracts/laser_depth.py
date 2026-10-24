@@ -14,8 +14,9 @@ orchestrator resolves those inputs and persists the result:
   camera wins);
 * out: per capture, the depth (Z, used by stage 14), the range (the Euclidean
   norm; never conflate the two) and the triangulation's residual, naming the
-  label it came from -- or, when no label triangulates in front of the camera,
-  a **refusal** for each label tried.
+  label it came from -- or, when no label gives a measurable depth (finite,
+  in front of the camera, and since v21 with enough parallax: fishsense-core
+  `LaserPoint.is_measurable()`), a **refusal** for each label tried.
 
 v2 change: v1 counted that last case (`skipped_invalid_geometry`) and wrote
 nothing, so the image stayed "needing depth" and the dive was re-selected
@@ -35,6 +36,7 @@ from fishsense_services_contracts.renamed import renamed_from
 __all__ = [
     "CameraMatrix",
     "ComputeLaserDepthsInput",
+    "DotRefusal",
     "ComputeLaserDepthsResult",
     "FiniteFloat",
     "LaserCalibrationGeometry",
@@ -105,14 +107,24 @@ class LaserDepth(BaseModel):
     residual_m: Annotated[float, Field(ge=0, allow_inf_nan=False)] | None
 
 
+#: Why a laser dot gives no depth, as fishsense-core's
+#: `LaserPoint.is_measurable()` fails it, first failure first: the depth not
+#: finite; at or behind the camera; or (v21, core #96) the camera ray and the
+#: laser too near parallel -- a dot near the laser's vanishing point, whose
+#: finite, often positive depth is untrustworthy. Shared by `measurement`.
+#: The API's CHECKs repeat it (migration 0067).
+DotRefusal = Literal["non_finite_depth", "non_positive_depth", "low_parallax"]
+
+
 class LaserDepthRefusal(BaseModel):
-    """A label that gave no depth in front of the camera, and what was tried."""
+    """A label that gave no measurable depth, and what was tried."""
 
     laser_label_id: UUID
     x: FiniteFloat
     y: FiniteFloat
-    reason: Literal["non_finite_depth", "non_positive_depth"]
-    #: What the triangulation said; None when it was not finite.
+    reason: DotRefusal
+    #: What the triangulation said; None when it was not finite. At most 0
+    #: unless the reason is `low_parallax`.
     depth_m: FiniteFloat | None
 
 

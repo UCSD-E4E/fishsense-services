@@ -197,3 +197,23 @@ def test_the_result_names_the_core_that_made_it():
     assert ComputeLaserDepthsResult.model_validate_json(result.model_dump_json()) == (
         result
     )
+
+
+def test_a_low_parallax_refusal_carries_the_depth_the_solve_gave():
+    """v21 (core #96): a dot too near the laser's vanishing point is refused as
+    `low_parallax`, with the finite, often positive, depth the solve said."""
+    refusal = LaserDepthRefusal(
+        laser_label_id=uuid4(), x=2046.2, y=1470.0, reason="low_parallax", depth_m=52.2
+    )
+
+    assert LaserDepthRefusal.model_validate_json(refusal.model_dump_json()) == refusal
+
+
+def test_a_v20_refusal_still_parses():
+    """Replay: a payload recorded under v20 names only its two reasons."""
+    for reason, depth in (("non_positive_depth", -0.4), ("non_finite_depth", None)):
+        payload = (
+            f'{{"laser_label_id": "{uuid4()}", "x": 1.0, "y": 2.0,'
+            f' "reason": "{reason}", "depth_m": {"null" if depth is None else depth}}}'
+        )
+        assert LaserDepthRefusal.model_validate_json(payload).reason == reason
