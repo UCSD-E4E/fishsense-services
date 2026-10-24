@@ -47,7 +47,7 @@ on:
     branches: [main]
   # Manual re-converge without a pin bump — after a crash-loop, a kubeconfig
   # rotation, or to apply a config-only change under deploy/incus/ that
-  # promote.yml never touches (e.g. COMPOSE_PROFILES=superset).
+  # promote.yml never touches (e.g. COMPOSE_PROFILES).
   workflow_dispatch:
     inputs:
       target:

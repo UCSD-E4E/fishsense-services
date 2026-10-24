@@ -15,8 +15,7 @@ const EMPTY_ACTIVE: ProjectsByKind = {
   slate: [],
 };
 
-const NO_STATIC: { results: StaticLink[]; admin: StaticLink[] } = {
-  results: [],
+const NO_STATIC: { admin: StaticLink[] } = {
   admin: [],
 };
 
@@ -75,7 +74,7 @@ describe("buildSections", () => {
     ).toBe("https://ls.example.com/projects/42");
   });
 
-  it("emits sections in the canonical order: Laser, Head/Tail, Species, Slate, Results, Administration", () => {
+  it("emits sections in the canonical order: Laser, Head/Tail, Species, Slate, Administration", () => {
     const sections = buildSections(
       {
         laser: [{ id: 1, title: "L" }],
@@ -84,7 +83,6 @@ describe("buildSections", () => {
         slate: [{ id: 4, title: "D" }],
       },
       {
-        results: [{ title: "Lengths", description: "d", href: "https://r/" }],
         admin: [{ title: "Workflows", description: "w", href: "https://a/" }],
       },
     );
@@ -93,7 +91,6 @@ describe("buildSections", () => {
       "Head/Tail Labeling",
       "Species Labeling",
       "Slate Labeling",
-      "Results",
       "Administration",
     ]);
   });
@@ -125,16 +122,15 @@ describe("buildSections", () => {
     expect(sections[0].links.map((l) => l.title)).toEqual(["first", "second", "third"]);
   });
 
-  it("omits Results and Administration when their static link arrays are empty", () => {
-    const sections = buildSections(EMPTY_ACTIVE, { results: [], admin: [] });
+  it("omits Administration when its static link array is empty", () => {
+    const sections = buildSections(EMPTY_ACTIVE, { admin: [] });
     expect(sections).toEqual([]);
   });
 
-  it("keeps Results / Administration even when no labeling projects exist", () => {
+  it("keeps Administration even when no labeling projects exist", () => {
     const sections = buildSections(EMPTY_ACTIVE, {
-      results: [{ title: "Lengths", description: "d", href: "https://r/" }],
       admin: [{ title: "Workflows", description: "w", href: "https://a/" }],
     });
-    expect(sections.map((s) => s.title)).toEqual(["Results", "Administration"]);
+    expect(sections.map((s) => s.title)).toEqual(["Administration"]);
   });
 });
