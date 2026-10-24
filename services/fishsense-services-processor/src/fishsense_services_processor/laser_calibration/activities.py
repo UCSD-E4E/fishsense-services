@@ -5,7 +5,8 @@ workflow-worker/src/fishsense_data_processing_workflow_worker/activities/
 perform_laser_calibration_activity.py (itself a port of
 `scripts/stage13_perform_laser_calibration.ipynb`). The Atanasov fit is
 `fishsense_core.laser.calibrate_laser`; the pose and the ray-plane
-intersection are `calibration.geometry`; the fit and its gates are
+intersection are `fishsense_core.plane` (core #95; services carried its own
+`calibration/geometry.py` until v0.52); the fit and its gates are
 `calibration.fit`.
 
 What remains slate-specific here is only how the correspondences are
@@ -39,7 +40,7 @@ from fishsense_services_contracts.slate_calibration import (
     SlateObservation,
 )
 from fishsense_services_processor.calibration.fit import MIN_LASER_POINTS, fit_laser
-from fishsense_services_processor.calibration.geometry import (
+from fishsense_core.plane import (
     laser_point_on_plane,
     plane_from_correspondences,
 )
@@ -114,7 +115,7 @@ def _laser_point_in_camera_space(
         return None
     # The slate's whole contribution: template points in metres. Everything
     # after `plane_from_correspondences` is target-agnostic and shared with the
-    # checkerboard producer -- see `calibration.geometry`.
+    # checkerboard producer -- see `fishsense_core.plane`.
     body_points = (np.array(source_points) / float(dpi)) * INCH_TO_M
 
     matrix = np.asarray(camera_matrix, dtype=float)
