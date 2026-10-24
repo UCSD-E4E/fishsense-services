@@ -19,8 +19,9 @@ reference points; this finds them instead:
    correlation, homography), both ways up. SIFT failed on these sparse, bold,
    symmetric patterns (2026-10-23: 31% matched, all wrong); ECC put the
    reference points a median 2.0 px from the human clicks on 326 pool frames.
-3. **Pose** (`slate_plane`): production's `plane_from_correspondences` on the
-   template's reference points as the alignment places them.
+3. **Pose** (`slate_plane`): production's pose (`pose_from_correspondences`,
+   one solve) on the template's reference points as the alignment places
+   them.
 4. **Point** (`dot_point`: production's `laser_point_on_plane`): the
    automatic dot's ray meeting that plane.
 5. **Beam** (`fit_pose_points`): a line through the points, trimming one at a
@@ -41,17 +42,18 @@ from typing import Optional, Sequence
 
 import cv2
 import numpy as np
-
-from fishsense_services_processor.automatic_results import size_constancy as sc
-from fishsense_services_processor.calibration.geometry import (
-    Plane,
-    laser_point_on_plane,
-    plane_from_correspondences,
-)
-from fishsense_services_processor.calibration.consistency import (
+from fishsense_core.calibration_checks import (
     CalibrationUnderdeterminedError,
     check_observation_geometry,
 )
+from fishsense_core.plane import (
+    Plane,
+    laser_point_on_plane,
+    plane_from_pose,
+    pose_from_correspondences,
+)
+
+from fishsense_services_processor.automatic_results import size_constancy as sc
 
 #: As production's slate fit (`laser_calibration.activities`).
 INCH_TO_M = 0.0254
@@ -330,7 +332,7 @@ def align_template(image_grey: np.ndarray, corners, page_grey: np.ndarray, dpi: 
 def slate_plane(reference_points, dpi: int, h_template_to_image, camera_matrix):
     """``(plane, image points, rms px)``, or None: the template's reference
     points as the alignment places them, through production's
-    `plane_from_correspondences` (template px / dpi, in metres). The rms is
+    `pose_from_correspondences` (template px / dpi, in metres). The rms is
     how far a rigid board's pose misses those points: the alignment is a free
     homography, so this is how much of it no real pose explains."""
     tpl = np.asarray(reference_points, np.float32).reshape(-1, 1, 2)
@@ -339,13 +341,14 @@ def slate_plane(reference_points, dpi: int, h_template_to_image, camera_matrix):
     body = np.zeros((len(img), 3))
     body[:, :2] = np.asarray(reference_points, float) / float(dpi) * INCH_TO_M
     k = np.asarray(camera_matrix, float)
-    try:
-        plane = plane_from_correspondences(body, img, k)
-        ok, rv, tv = cv2.solvePnP(body, img.reshape(-1, 1, 2), k, np.zeros(5))
-    except cv2.error:
+    # One solve for the plane and its rms (review of #350): a second solvePnP
+    # here cost twice and, given float64 where core casts to float32, could
+    # describe a slightly different pose from the plane returned.
+    solved = pose_from_correspondences(body, img, k)
+    if solved is None:
         return None
-    if plane is None or not ok:
-        return None
+    rv, tv = solved
+    plane = plane_from_pose(cv2.Rodrigues(rv)[0], tv)
     rms = float(np.sqrt(((_project(body, rv, tv, k) - img) ** 2).sum(1).mean()))
     return plane, img, rms
 

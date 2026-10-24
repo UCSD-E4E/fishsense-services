@@ -25,7 +25,11 @@ def _activities(deps: Deps):
         slates=SlateCatalog(deps.engine, sub=deps.sub),
         layout=ObjectLayout(ObjectStoreConnection()),
     )
-    return [acts.plan_calibration_v3_replay, acts.resolve_mission_slate_template]
+    return [
+        acts.plan_calibration_v3_replay,
+        acts.resolve_mission_slate_template,
+        acts.resolve_slate_template_by_v1,
+    ]
 
 
 STAGE = Stage(

@@ -7,13 +7,17 @@ the laser calibration to record "each gate verdict"
 worth knowing about afterwards: dive 347's fit passed the self-consistency
 gate by abstaining on one dot. A refusal still raises, as in v1 (the other
 suites pin that); these pin the value returned when a gate does not refuse.
+
+Kept after the gates moved to `fishsense_core.calibration_checks`
+(fishsense-core 4.3.0): `fit_laser` stores these return values verbatim in
+`gate_verdicts`, so a change to core's strings would change stored rows.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-from fishsense_services_processor.calibration.consistency import (
+from fishsense_core.calibration_checks import (
     ABSTAINED,
     PASSED,
     check_baseline_plausible,
