@@ -42,6 +42,10 @@ from typing import Optional, Sequence
 
 import cv2
 import numpy as np
+from fishsense_core.calibration_checks import (
+    CalibrationUnderdeterminedError,
+    check_observation_geometry,
+)
 from fishsense_core.plane import (
     Plane,
     laser_point_on_plane,
@@ -50,10 +54,6 @@ from fishsense_core.plane import (
 )
 
 from fishsense_services_processor.automatic_results import size_constancy as sc
-from fishsense_services_processor.calibration.consistency import (
-    CalibrationUnderdeterminedError,
-    check_observation_geometry,
-)
 
 #: As production's slate fit (`laser_calibration.activities`).
 INCH_TO_M = 0.0254

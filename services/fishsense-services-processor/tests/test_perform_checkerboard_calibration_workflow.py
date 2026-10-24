@@ -295,7 +295,7 @@ async def test_fit_does_not_accept_when_the_gate_rejects(monkeypatch):
     A mixed dot population shipped a calibration whose length errors reached
     +137% downstream on prod dive 77. The gate refuses; nothing is accepted.
     """
-    from fishsense_services_processor.calibration.consistency import (
+    from fishsense_core.calibration_checks import (
         CalibrationInconsistentError,
     )
 
