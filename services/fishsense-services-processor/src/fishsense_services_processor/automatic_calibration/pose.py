@@ -43,7 +43,7 @@ import cv2
 import numpy as np
 
 from fishsense_services_processor.automatic_results import size_constancy as sc
-from fishsense_services_processor.calibration.geometry import (
+from fishsense_core.plane import (
     Plane,
     laser_point_on_plane,
     plane_from_correspondences,
