@@ -16,6 +16,7 @@ RESERVED_TENANT_SLUGS = frozenset(
         "fish",
         "missions",
         "portal",
+        "tokens",
         "favicon",
         "logo",
         "world",

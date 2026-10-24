@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.51.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.50.1...v0.51.0) (2026-10-24)
+
+
+### Features
+
+* filter the Fish page by species, offering only the tenant's own ([733dcf1](https://github.com/UCSD-E4E/fishsense-services/commit/733dcf1ca7012c75f311866d1d04cf2c4b394e66))
+* filter the Fish page by species, offering only the tenant's own ([9fbf572](https://github.com/UCSD-E4E/fishsense-services/commit/9fbf57297f683fe1c7ad3cc59794431062c3386d))
+
 ## [0.50.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.50.0...v0.50.1) (2026-10-24)
 
 

@@ -6,11 +6,14 @@ import { formatLength, millimetres } from "@/lib/captures";
 import { type TenantMembership } from "@/lib/fishsense-api";
 import { pageCount, pageLinks, pageRange, parsePage } from "@/lib/pages";
 import { paths } from "@/lib/tenant-paths";
+import { SpeciesSelect } from "./species-select";
 import {
   deviceFilter,
   fishName,
   formatError,
   getObservationPage,
+  getObservationSpecies,
+  speciesFilter,
   knownLengthError,
   methodLabel,
   observationHref,
@@ -18,13 +21,14 @@ import {
   type Device,
   type Observation,
   type ObservationPage,
+  type SpeciesCount,
 } from "@/lib/observations";
 
 export const dynamic = "force-dynamic";
 
 type Props = {
   params: Promise<{ tenant: string }>;
-  searchParams: Promise<{ device?: string; page?: string }>;
+  searchParams: Promise<{ device?: string; species?: string; page?: string }>;
 };
 
 const PER_PAGE = 50;
@@ -36,9 +40,13 @@ const FILTERS: { label: string; device?: Device }[] = [
   { label: "Other devices", device: "other" },
 ];
 
-function href(tenant: string, device?: Device, page = 1): string {
+/** The page's address: its device and species filters, and its page. */
+type Filters = { device?: Device; species?: string };
+
+function href(tenant: string, { device, species }: Filters, page = 1): string {
   const query = new URLSearchParams();
   if (device) query.set("device", device);
+  if (species) query.set("species", species);
   if (page > 1) query.set("page", String(page));
   return `${paths.fish(tenant)}${query.size ? `?${query}` : ""}`;
 }
@@ -50,18 +58,24 @@ function href(tenant: string, device?: Device, page = 1): string {
  */
 export default async function FishPage({ params, searchParams }: Props) {
   const { tenant: slug } = await params;
-  const { device: rawDevice, page: rawPage } = await searchParams;
+  const { device: rawDevice, species: rawSpecies, page: rawPage } = await searchParams;
   const device = deviceFilter(rawDevice);
+  const species = speciesFilter(rawSpecies);
+  const filters = { device, species };
   const current = parsePage(rawPage);
-  const session = await requireSignedIn(href(slug, device, current));
+  const session = await requireSignedIn(href(slug, filters, current));
   const token = session.accessToken ?? "";
 
   let tenant: TenantMembership | null = null;
   let page: ObservationPage | null = null;
+  let choices: SpeciesCount[] = [];
   let failure: string | null = null;
   try {
     tenant = await tenantFor(token, slug);
-    page = await getObservationPage(token, tenant.slug, { device, page: current, limit: PER_PAGE });
+    [page, choices] = await Promise.all([
+      getObservationPage(token, tenant.slug, { device, species, page: current, limit: PER_PAGE }),
+      getObservationSpecies(token, tenant.slug, device),
+    ]);
   } catch (error) {
     unstable_rethrow(error);
     failure = error instanceof Error ? error.message : "unavailable";
@@ -70,7 +84,7 @@ export default async function FishPage({ params, searchParams }: Props) {
   // Past the end (a bookmark from when there were more, or a typed number):
   // the last page there is.
   if (tenant && page && page.observations.length === 0 && current > last) {
-    redirect(href(tenant.slug, device, last));
+    redirect(href(tenant.slug, filters, last));
   }
   const range = page ? pageRange(current, PER_PAGE, page.total) : null;
 
@@ -85,18 +99,31 @@ export default async function FishPage({ params, searchParams }: Props) {
       </header>
 
       {tenant && (
-        <nav aria-label="Device" className="flex flex-wrap gap-2">
-          {FILTERS.map((f) => (
-            <Link
-              key={f.label}
-              href={href(tenant.slug, f.device)}
-              aria-current={f.device === device ? "page" : undefined}
-              className="inline-flex h-11 items-center rounded-chip border border-line bg-surface px-4 text-sm font-medium aria-[current=page]:border-teal aria-[current=page]:bg-teal-tint aria-[current=page]:font-semibold aria-[current=page]:text-teal-fg"
-            >
-              {f.label}
-            </Link>
-          ))}
-        </nav>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <nav aria-label="Device" className="flex flex-wrap gap-2">
+            {FILTERS.map((f) => (
+              <Link
+                key={f.label}
+                href={href(tenant.slug, { device: f.device, species })}
+                aria-current={f.device === device ? "page" : undefined}
+                className="inline-flex h-11 items-center rounded-chip border border-line bg-surface px-4 text-sm font-medium aria-[current=page]:border-teal aria-[current=page]:bg-teal-tint aria-[current=page]:font-semibold aria-[current=page]:text-teal-fg"
+              >
+                {f.label}
+              </Link>
+            ))}
+          </nav>
+          {/* Only the species this tenant has (the owner, 2026-10-23). */}
+          <SpeciesSelect
+            species={choices}
+            current={species}
+            hrefFor={Object.fromEntries(
+              ["", ...choices.map((c) => c.scientific_name), ...(species ? [species] : [])].map((name) => [
+                name,
+                href(tenant.slug, { device, species: name || undefined }),
+              ]),
+            )}
+          />
+        </div>
       )}
 
       {failure ? (
@@ -106,7 +133,9 @@ export default async function FishPage({ params, searchParams }: Props) {
       ) : !tenant ? (
         <p className="text-fg-2">This account isn&apos;t a member of any tenant yet.</p>
       ) : page && page.observations.length === 0 ? (
-        <p className="text-fg-2">No measured fish from {tenant.name} yet.</p>
+        <p className="text-fg-2">
+          {species || device ? "No measured fish match these filters." : `No measured fish from ${tenant.name} yet.`}
+        </p>
       ) : (
         <>
           {page && range && (
@@ -121,7 +150,7 @@ export default async function FishPage({ params, searchParams }: Props) {
               </li>
             ))}
           </ul>
-          {last > 1 && <Pager slug={tenant.slug} device={device} current={current} last={last} />}
+          {last > 1 && <Pager slug={tenant.slug} filters={filters} current={current} last={last} />}
         </>
       )}
     </main>
@@ -130,12 +159,12 @@ export default async function FishPage({ params, searchParams }: Props) {
 
 function Pager({
   slug,
-  device,
+  filters,
   current,
   last,
 }: {
   slug: string;
-  device?: Device;
+  filters: Filters;
   current: number;
   last: number;
 }) {
@@ -145,7 +174,7 @@ function Pager({
   return (
     <nav aria-label="Pages" className="flex flex-wrap items-center justify-center gap-2">
       {current > 1 ? (
-        <Link href={href(slug, device, current - 1)} rel="prev" className={link}>
+        <Link href={href(slug, filters, current - 1)} rel="prev" className={link}>
           ‹ Newer
         </Link>
       ) : (
@@ -167,13 +196,13 @@ function Pager({
             {n}
           </span>
         ) : (
-          <Link key={n} href={href(slug, device, n)} aria-label={`Page ${n}`} className={link}>
+          <Link key={n} href={href(slug, filters, n)} aria-label={`Page ${n}`} className={link}>
             {n}
           </Link>
         ),
       )}
       {current < last ? (
-        <Link href={href(slug, device, current + 1)} rel="next" className={link}>
+        <Link href={href(slug, filters, current + 1)} rel="next" className={link}>
           Older ›
         </Link>
       ) : (
