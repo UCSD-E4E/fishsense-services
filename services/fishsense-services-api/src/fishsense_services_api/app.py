@@ -3,7 +3,9 @@
 Each request goes through the same four steps before touching tenant data:
 
 1. authenticate the bearer token in-app (401; 503 if the IdP's keys can't be
-   fetched -- an outage is not a bad token);
+   fetched -- an outage is not a bad token). It is an Authentik session, or a
+   personal API token (0066) acting as its owner: a ``read`` token is refused
+   every write here, for every route at once;
 2. provision the caller's user row on first sight, and -- for a partner whose
    token carries an ``org`` claim -- their membership in the tenant that
    claims that org (as ``member``; migration 0037);
@@ -17,16 +19,28 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from fishsense_services_api.api_tokens import (
+    DEFAULT_DAYS,
+    EDIT,
+    MAX_DAYS,
+    TOKEN_PREFIX,
+    Scope,
+    create_token,
+    my_tokens,
+    revoke_token,
+    token_principal,
+)
 from fishsense_services_api.auth import (
     InvalidToken,
     KeysUnavailable,
@@ -35,6 +49,7 @@ from fishsense_services_api.auth import (
 )
 from fishsense_services_api.db import principal_transaction, tenant_transaction
 from fishsense_services_api.memberships import (
+    UNLOCKED_ACCESS,
     Membership,
     join_claimed_tenant,
     list_memberships,
@@ -42,6 +57,7 @@ from fishsense_services_api.memberships import (
 )
 from fishsense_services_api.automatic_api import add_automatic_routes
 from fishsense_services_api.review_api import add_review_routes
+from fishsense_services_api.mcp_server import mount_mcp
 from fishsense_services_api.mobile_api import add_mobile_routes
 from fishsense_services_api.place_names import Geocoder
 from fishsense_services_api.missions_api import add_mission_routes
@@ -74,6 +90,32 @@ class Unlocked(BaseModel):
 UNLOCK_MINUTES = 60
 #: Methods a read-only system admin may use.
 _READS = {"GET", "HEAD", "OPTIONS"}
+
+
+class TokenCreate(BaseModel):
+    name: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)
+    ]
+    #: ``read`` unless the caller opts into ``edit``; fixed once made.
+    scope: Scope = "read"
+    expires_in_days: int = Field(DEFAULT_DAYS, ge=1, le=MAX_DAYS)
+
+
+class TokenView(BaseModel):
+    id: uuid.UUID
+    name: str
+    scope: Scope
+    #: The token's first characters, to tell it apart; never the secret.
+    prefix: str
+    created_at: datetime
+    expires_at: datetime
+    last_used_at: datetime | None
+    revoked_at: datetime | None
+
+
+class NewToken(TokenView):
+    #: The secret: shown this once, and never kept.
+    token: str
 
 
 class MyTenant(BaseModel):
@@ -128,15 +170,27 @@ def create_app(
         )
     bearer = HTTPBearer(auto_error=False)
 
-    # Deliberately sync: FastAPI runs it in a threadpool, so a JWKS fetch
-    # never blocks the event loop.
-    def authenticate(
+    async def authenticate(
+        request: Request,
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
     ) -> Principal:
         if credentials is None:
             raise _unauthorized()
+        raw = credentials.credentials
+        if raw.startswith(TOKEN_PREFIX):
+            owner = await token_principal(engine, raw)
+            if owner is None:
+                raise _unauthorized()
+            # One place for every route: a read token writes nothing (0066).
+            if owner.scope != EDIT and request.method not in _READS:
+                raise HTTPException(
+                    status.HTTP_403_FORBIDDEN,
+                    "read-only token: make an edit token to change anything",
+                )
+            return Principal(sub=owner.sub, token_scope=owner.scope)
         try:
-            return validator.validate(credentials.credentials)
+            # In a threadpool, so a JWKS fetch never blocks the event loop.
+            return await run_in_threadpool(validator.validate, raw)
         except InvalidToken:
             raise _unauthorized() from None
         except KeysUnavailable:
@@ -161,7 +215,29 @@ def create_app(
                 status.HTTP_403_FORBIDDEN,
                 "read-only: a system admin must unlock this tenant to change it",
             )
+        # An unlock is for its system admin, in the web app: their tokens
+        # write only where they are a member.
+        if (
+            principal.token_scope is not None
+            and found.access == UNLOCKED_ACCESS
+            and request.method not in _READS
+        ):
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "a token writes only in tenants its owner is a member of",
+            )
         return found
+
+    def signed_in(principal: Caller) -> Principal:
+        """The caller, in an Authentik session: no token may unlock a tenant
+        or manage tokens (0066)."""
+        if principal.token_scope is not None:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN, "sign in to the web app to do this"
+            )
+        return principal
+
+    Session = Annotated[Principal, Depends(signed_in)]
 
     Member = Annotated[Membership, Depends(membership)]
 
@@ -203,7 +279,7 @@ def create_app(
         operation_id="unlock_tenant",
         response_model=Unlocked,
     )
-    async def unlock(slug: str, principal: Caller) -> Unlocked:
+    async def unlock(slug: str, principal: Session) -> Unlocked:
         """A system admin, deliberately, becomes the admin of a tenant they are
         not in, for `UNLOCK_MINUTES`; recorded. 404 for anyone else, and for a
         tenant they are already a member of."""
@@ -219,6 +295,49 @@ def create_app(
         if until is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND)
         return Unlocked(until=until)
+
+    @app.get(
+        "/me/tokens", operation_id="list_my_tokens", response_model=list[TokenView]
+    )
+    async def list_tokens(principal: Session) -> list[TokenView]:
+        """The caller's personal API tokens, newest first: never their secrets."""
+        async with principal_transaction(engine, principal.sub) as conn:
+            return [TokenView(**vars(t)) for t in await my_tokens(conn)]
+
+    @app.post(
+        "/me/tokens",
+        operation_id="create_my_token",
+        response_model=NewToken,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def make_token(body: TokenCreate, principal: Session) -> NewToken:
+        """A token that acts as the caller, for a script or an agent: ``read``
+        unless they ask for ``edit``. Its secret is in this response only."""
+        async with principal_transaction(
+            engine, principal.sub, org=principal.org
+        ) as conn:
+            await _first_sight(conn, principal)
+            made = await create_token(
+                conn, name=body.name, scope=body.scope, days=body.expires_in_days
+            )
+        if made is None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "too many live tokens: revoke one you no longer use",
+            )
+        raw, token = made
+        return NewToken(**vars(token), token=raw)
+
+    @app.delete(
+        "/me/tokens/{token_id}",
+        operation_id="revoke_my_token",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    async def revoke(token_id: uuid.UUID, principal: Session) -> Response:
+        async with principal_transaction(engine, principal.sub) as conn:
+            if not await revoke_token(conn, token_id):
+                raise HTTPException(status.HTTP_404_NOT_FOUND)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.get(
         "/me/memberships",
@@ -302,6 +421,8 @@ def create_app(
         geocoder=geocoder,
         namer=namer,
     )
+    # Agents' read-only door (0066): last, as it calls the routes above.
+    mount_mcp(app, engine)
     return app
 
 
