@@ -140,6 +140,27 @@ def test_the_plane_and_the_dot_point_are_recovered():
     assert np.allclose(pose.dot_point(plane, dot, K), target, atol=1e-6)
 
 
+def test_the_plane_and_its_rms_come_from_one_solve(monkeypatch):
+    """One `solvePnP` gives both the plane and the rms that describes it. Two
+    solves cost twice, and saw different inputs (core casts the body to
+    float32), so the rms could describe a slightly different pose from the
+    plane returned (review of #350)."""
+    rv, tv = _pose(25.0)
+    page, refs = _page()
+    h = _h_body_to_image(rv, tv) @ _template_to_body(page.shape)
+    calls = []
+    real = cv2.solvePnP
+
+    def solve(*args, **kwargs):
+        calls.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(cv2, "solvePnP", solve)
+
+    assert pose.slate_plane(refs, DPI, h, K) is not None
+    assert len(calls) == 1
+
+
 @pytest.mark.parametrize("h", [np.zeros((3, 3)), np.full((3, 3), np.nan)])
 def test_a_degenerate_alignment_gives_no_plane(h):
     """(OpenCV places points a NaN homography sends nowhere at 0, 0.)"""
