@@ -1,10 +1,13 @@
 """Personal API tokens (0066; the owner, 2026-10-23).
 
-Ported in shape from e4e-reference-manager's ``refman_`` tokens (``app/auth.py``):
+Ported in shape from e4e-reference-manager@1cfed39's ``refman_`` tokens
+(``api/app/auth.py``):
 a random secret shown once, only its SHA-256 kept, an expiry on every token.
 v2 adds a kind, fixed when the token is made: ``read`` (the default) or
-``edit`` (an opt-in), so a token handed to an agent reads and nothing more
-unless its owner chose otherwise.
+``edit`` (an opt-in), so a token handed to an agent is refused every write
+request unless its owner chose otherwise. Its reads keep their server-side
+effects, as anyone's do: a system admin's visit is recorded (0056), and the
+Fish list fills in the place names it can.
 
 The table is reached only through 0066's functions, which act for the caller
 named by ``app.user_sub``; :func:`token_principal` is the one that needs no
@@ -28,7 +31,10 @@ SHOWN_CHARACTERS = len(TOKEN_PREFIX) + 6
 READ, EDIT = "read", "edit"
 Scope = Literal["read", "edit"]
 DEFAULT_DAYS = 90
+#: As 0066 has them (a test pins the two equal): the longest a token lasts,
+#: and how many live tokens a user may hold.
 MAX_DAYS = 365
+MAX_LIVE = 25
 
 
 @dataclass(frozen=True)
@@ -60,8 +66,9 @@ def new_secret() -> str:
 async def create_token(
     conn: AsyncConnection, *, name: str, scope: Scope, days: int
 ) -> tuple[str, ApiToken] | None:
-    """The caller's new token and its secret, or None once they hold the most
-    live tokens allowed. Runs in the caller's principal transaction."""
+    """The caller's new token and its secret, or None once they hold
+    ``MAX_LIVE`` live tokens: the only quiet refusal. Runs in the caller's
+    principal transaction, after their user row is provisioned."""
     raw = new_secret()
     row = (
         await conn.execute(

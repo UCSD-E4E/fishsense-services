@@ -1,5 +1,5 @@
 import { requireSignedIn } from "@/app/_shell/guard";
-import { listTokens, mcpCommand } from "@/lib/api-tokens";
+import { listTokens, mcpUrl } from "@/lib/api-tokens";
 import { RevokeButton, TokenForm } from "./token-form";
 
 export const dynamic = "force-dynamic";
@@ -27,12 +27,12 @@ export default async function TokensPage() {
         <h1 className="text-3xl font-semibold tracking-tight">API tokens</h1>
         <p className="mt-1 max-w-3xl text-sm text-fg-2">
           A token lets a script or an AI agent use FishSense as you. A read-only token reads what you can read:
-          your tenants, or every tenant if you are a system admin, and nothing more. Agents connect to FishSense&apos;s
+          your tenants, or every tenant if you are a system admin, and can&apos;t change anything. Agents connect to FishSense&apos;s
           MCP endpoint with one. An edit token can also change data, through the API only.
         </p>
       </div>
 
-      <TokenForm mcpCommandFor={mcpCommand("TOKEN")} />
+      <TokenForm mcpUrl={mcpUrl()} />
 
       <div className="overflow-x-auto rounded-card border border-line bg-surface">
         <table className="w-full text-sm">

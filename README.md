@@ -151,8 +151,10 @@ Signed-in users make personal API tokens on the web app's **API tokens** page
 (`/tokens`). A token acts as the person who made it, and comes in two kinds,
 fixed when it is made:
 
-- **read-only**, the default: reads what its owner can read: their tenants,
-  or every tenant read-only for a system admin, with each visit recorded;
+- **read-only**, the default: reads what its owner can read (their tenants,
+  or every tenant read-only for a system admin, with each visit recorded) and
+  is refused every write request. Reads keep their server-side effects, such
+  as that visit record and the Fish list's place names;
 - **edit**, an opt-in: also writes what its owner's role allows, through the
   REST API only, and only in tenants its owner is a member of.
 
@@ -173,7 +175,7 @@ claude mcp add --transport http fishsense https://api.fishsense.e4e.ucsd.edu/mcp
 Each tool is a thin wrapper over a REST read: tenants, summaries, regions,
 missions and their captures, observations, deployments, devices, reviews, and
 automatic results. Automatic results come back marked `validated: false`. The
-design follows e4e-reference-manager's (`api/app/mcp_server.py`);
+design follows e4e-reference-manager@a12bcca's (`api/app/mcp_server.py`);
 [`mcp_server.py`](services/fishsense-services-api/src/fishsense_services_api/mcp_server.py)
 says what differs.
 

@@ -49,6 +49,12 @@ class Principal:
     token_scope: str | None = None
 
 
+#: The ASGI scope key under which the MCP endpoint hands its already
+#: authenticated caller to the routes it calls in-process (0066). Only the
+#: server builds a scope, so no request from outside can set it.
+IN_PROCESS_PRINCIPAL = "fishsense.in_process_principal"
+
+
 class KeySource(Protocol):
     def key_for(self, kid: str | None) -> Any:
         """Return the public key the issuer published under ``kid``."""

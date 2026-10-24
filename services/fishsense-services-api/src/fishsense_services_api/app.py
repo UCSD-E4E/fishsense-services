@@ -5,7 +5,8 @@ Each request goes through the same four steps before touching tenant data:
 1. authenticate the bearer token in-app (401; 503 if the IdP's keys can't be
    fetched -- an outage is not a bad token). It is an Authentik session, or a
    personal API token (0066) acting as its owner: a ``read`` token is refused
-   every write here, for every route at once;
+   every write request here, for every route at once (a GET keeps its own
+   server-side effects, such as recording a system admin's visit);
 2. provision the caller's user row on first sight, and -- for a partner whose
    token carries an ``org`` claim -- their membership in the tenant that
    claims that org (as ``member``; migration 0037);
@@ -42,6 +43,7 @@ from fishsense_services_api.api_tokens import (
     token_principal,
 )
 from fishsense_services_api.auth import (
+    IN_PROCESS_PRINCIPAL,
     InvalidToken,
     KeysUnavailable,
     Principal,
@@ -174,27 +176,33 @@ def create_app(
         request: Request,
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
     ) -> Principal:
-        if credentials is None:
-            raise _unauthorized()
-        raw = credentials.credentials
-        if raw.startswith(TOKEN_PREFIX):
+        # The MCP endpoint's in-process reads: it resolved the token already.
+        principal = request.scope.get(IN_PROCESS_PRINCIPAL)
+        if principal is None:
+            if credentials is None:
+                raise _unauthorized()
+            raw = credentials.credentials
+            if not raw.startswith(TOKEN_PREFIX):
+                try:
+                    # In a threadpool, so a JWKS fetch never blocks the loop.
+                    return await run_in_threadpool(validator.validate, raw)
+                except InvalidToken:
+                    raise _unauthorized() from None
+                except KeysUnavailable:
+                    raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE) from None
             owner = await token_principal(engine, raw)
             if owner is None:
                 raise _unauthorized()
-            # One place for every route: a read token writes nothing (0066).
-            if owner.scope != EDIT and request.method not in _READS:
-                raise HTTPException(
-                    status.HTTP_403_FORBIDDEN,
-                    "read-only token: make an edit token to change anything",
-                )
-            return Principal(sub=owner.sub, token_scope=owner.scope)
-        try:
-            # In a threadpool, so a JWKS fetch never blocks the event loop.
-            return await run_in_threadpool(validator.validate, raw)
-        except InvalidToken:
-            raise _unauthorized() from None
-        except KeysUnavailable:
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE) from None
+            principal = Principal(sub=owner.sub, token_scope=owner.scope)
+        # One place for every route: a read token is refused every write
+        # request (0066). A GET keeps its own server-side effects: a system
+        # admin's visit is recorded, and the Fish list names places it can.
+        if principal.token_scope != EDIT and request.method not in _READS:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "read-only token: make an edit token to change anything",
+            )
+        return principal
 
     Caller = Annotated[Principal, Depends(authenticate)]
 

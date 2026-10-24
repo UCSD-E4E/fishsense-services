@@ -2,9 +2,9 @@
 //  * tokens are listed, made and revoked as the signed-in user;
 //  * a token is read-only unless the form asks for edit;
 //  * a refusal comes back in the API's own words;
-//  * the MCP command names the public API and a read token only.
+//  * the MCP endpoint is on the public API.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createToken, listTokens, mcpCommand, mcpUrl, revokeToken } from "./api-tokens";
+import { createToken, listTokens, mcpUrl, revokeToken } from "./api-tokens";
 
 type FetchSig = (input: Request, init?: RequestInit) => Promise<Response>;
 const json = (body: unknown, status = 200) =>
@@ -76,12 +76,9 @@ describe("revokeToken", () => {
   });
 });
 
-describe("mcpCommand", () => {
-  it("connects Claude Code to the public API's MCP endpoint", () => {
+describe("mcpUrl", () => {
+  it("is the public API's MCP endpoint", () => {
     expect(mcpUrl()).toBe("https://api.fishsense.e4e.ucsd.edu/mcp");
-    expect(mcpCommand("fishsense_abc")).toBe(
-      'claude mcp add --transport http fishsense https://api.fishsense.e4e.ucsd.edu/mcp --header "Authorization: Bearer fishsense_abc"',
-    );
   });
 
   it("follows the public API's address when it is set", () => {

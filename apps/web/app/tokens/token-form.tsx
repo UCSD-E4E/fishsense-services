@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import type { NewToken, Scope } from "@/lib/api-tokens";
+import { mcpCommand } from "@/lib/mcp-command";
 import { createTokenAction, revokeTokenAction } from "./actions";
 
 const LIFETIMES = [
@@ -12,7 +13,7 @@ const LIFETIMES = [
 
 /** Make a token: read-only unless the person opts into edit. The secret is
  *  shown here once, with the command that connects an agent to it. */
-export function TokenForm({ mcpCommandFor }: { mcpCommandFor: string }) {
+export function TokenForm({ mcpUrl }: { mcpUrl: string }) {
   const [name, setName] = useState("");
   const [scope, setScope] = useState<Scope>("read");
   const [days, setDays] = useState(90);
@@ -104,7 +105,7 @@ export function TokenForm({ mcpCommandFor }: { mcpCommandFor: string }) {
             <>
               <p className="text-fg-2">To connect Claude Code:</p>
               <code className="block overflow-x-auto rounded-control bg-surface p-2 font-mono">
-                {mcpCommandFor.replace("TOKEN", made.token)}
+                {mcpCommand(mcpUrl, made.token)}
               </code>
             </>
           ) : (

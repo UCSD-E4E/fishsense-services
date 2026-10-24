@@ -1,7 +1,9 @@
 """Personal API tokens (the owner, 2026-10-23).
 
 A signed-in user makes a token for a script or an agent; it acts as them. Two
-kinds: **read** (the default) may only read, and **edit**, which they opt into,
+kinds: **read** (the default) is refused every write request (a GET keeps its
+own server-side effects, such as a system admin's visit record), and **edit**,
+which they opt into,
 may write what their role allows -- through the REST API only, as the MCP
 endpoint takes read tokens alone. A token's kind is fixed when it is made.
 
@@ -222,7 +224,7 @@ async def test_a_token_acts_as_its_owner(client, tenants):
     assert elsewhere.status_code == 404
 
 
-async def test_a_read_token_writes_nothing(client, tenants):
+async def test_a_read_token_is_refused_a_write(client, tenants):
     made = await _make(client)
 
     response = await client.post(
@@ -392,3 +394,51 @@ async def test_the_app_role_cannot_read_the_table(app_engine, tenants):
     with pytest.raises(ProgrammingError, match="permission denied"):
         async with app_engine.connect() as conn:
             await conn.execute(text("SELECT count(*) FROM api_tokens"))
+
+
+async def test_the_cap_holds_under_concurrent_makes(client, tenants):
+    """Each make counts the caller's live tokens and inserts; without a lock on
+    the caller, concurrent makes all see room and overshoot."""
+    import asyncio
+
+    for _ in range(20):
+        await _make(client)
+
+    responses = await asyncio.gather(
+        *(
+            client.post(
+                "/me/tokens", headers=_signed_in(OWNER), json={"name": f"burst {i}"}
+            )
+            for i in range(10)
+        )
+    )
+
+    assert sorted(r.status_code for r in responses) == [201] * 5 + [409] * 5
+    listed = (await client.get("/me/tokens", headers=_signed_in(OWNER))).json()
+    assert len(listed) == 25
+
+
+def test_the_lifetime_limit_is_one_number():
+    """The API and the database refuse the same lifetimes."""
+    import importlib
+
+    from fishsense_services_api import api_tokens
+
+    migration = importlib.import_module(
+        "fishsense_services_api.migrations.versions.0066_api_tokens"
+    )
+    assert migration.MAX_DAYS == api_tokens.MAX_DAYS
+    assert migration.MAX_LIVE == api_tokens.MAX_LIVE
+
+
+async def test_a_lifetime_the_database_refuses_is_an_error_not_the_cap(
+    app_engine, tenants
+):
+    """Only the cap is a quiet "no": anything else the API should have
+    stopped is loud, never reported as too many tokens."""
+    from fishsense_services_api.api_tokens import create_token
+    from fishsense_services_api.db import principal_transaction
+
+    with pytest.raises(DBAPIError, match="lifetime"):
+        async with principal_transaction(app_engine, OWNER) as conn:
+            await create_token(conn, name="a", scope="read", days=400)

@@ -4,7 +4,9 @@ A signed-in user makes a token that acts as them, the way e4e-reference-manager'
 ``refman_`` tokens do, so an agent can reach the API (and its MCP endpoint)
 without an Authentik session. Two kinds, chosen when it is made:
 
-* ``read``, the default: reads what its owner can read, and nothing else;
+* ``read``, the default: reads what its owner can read, and is refused every
+  write request (a GET keeps its own server-side effects, such as a system
+  admin's visit record);
 * ``edit``, an opt-in: writes what its owner's role allows, through the REST
   API only (the MCP endpoint takes read tokens alone).
 
@@ -17,7 +19,10 @@ opens nothing: four ``SECURITY DEFINER`` functions (0056's pattern) act for the
 caller named by ``app.user_sub``, and one resolves a token by its hash:
 
 * ``api_token_create(name, scope, hash, prefix, days)``: the caller's new token,
-  or no row once they hold ``MAX_LIVE`` live ones;
+  or no row once they hold ``MAX_LIVE`` live ones. It locks the caller's user
+  row first, so concurrent makes can't all see room and overshoot. A lifetime
+  outside 1..``MAX_DAYS`` days, or a caller with no user row, is an error: the
+  API stops both before they get here, so neither is reported as the cap;
 * ``api_tokens_mine()``: the caller's tokens, newest first;
 * ``api_token_revoke(id)``: revokes one of the caller's; false if not theirs;
 * ``api_token_principal(hash)``: the live token's owner and scope, recording
@@ -32,8 +37,10 @@ from alembic import context, op
 revision = "0066"
 down_revision = "0065"
 
-#: Live (unrevoked, unexpired) tokens a user may hold at once.
+#: Live (unrevoked, unexpired) tokens a user may hold at once, and the longest
+#: a token may last. ``api_tokens`` repeats both, and a test pins them equal.
 MAX_LIVE = 25
+MAX_DAYS = 365
 CALLER = "NULLIF(current_setting('app.user_sub', true), '')"
 _PINNED = "SECURITY DEFINER SET search_path = pg_catalog, public"
 _VIEW = """id uuid, name text, scope text, prefix text, created_at timestamptz,
@@ -95,8 +102,16 @@ def upgrade() -> None:
         DECLARE
             me uuid;
         BEGIN
-            SELECT u.id INTO me FROM public.users u WHERE u.sub = {CALLER};
-            IF me IS NULL OR p_days < 1 OR p_days > 365 THEN RETURN; END IF;
+            SELECT u.id INTO me FROM public.users u WHERE u.sub = {CALLER}
+            FOR UPDATE;
+            IF me IS NULL THEN
+                RAISE EXCEPTION 'api_token_create: the caller has no user row';
+            END IF;
+            IF p_days < 1 OR p_days > {MAX_DAYS} THEN
+                RAISE EXCEPTION
+                    'api_token_create: a lifetime of % days is outside 1..{MAX_DAYS}',
+                    p_days;
+            END IF;
             IF (SELECT count(*) FROM public.api_tokens t
                 WHERE t.user_id = me AND t.revoked_at IS NULL
                   AND t.expires_at > now()) >= {MAX_LIVE} THEN

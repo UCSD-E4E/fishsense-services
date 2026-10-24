@@ -28,7 +28,11 @@ from sqlalchemy import text
 
 from fishsense_services_api.app import create_app
 from fishsense_services_api.auth import StaticKeySource, TokenValidator
-from fishsense_services_api.mcp_server import ReadOnlyTransport
+from fishsense_services_api.mcp_server import (
+    InProcessTransport,
+    ReadOnlyTransport,
+    mount_mcp,
+)
 
 ISSUER, AUDIENCE, KID = "https://idp.test", "fishsense-api", "test-key"
 KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -304,3 +308,104 @@ async def test_the_tools_client_cannot_write(method):
         with pytest.raises(PermissionError):
             await client.request(method, "/tenants/lab/deployments")
         assert (await client.get("/tenants/lab/summary")).status_code == 200
+
+
+async def test_the_api_runs_in_process_without_waiting_for_background_work():
+    """A route's background work (the Fish list names places after it
+    answers) must not hold up the tool: httpx's own ASGITransport waits for it."""
+    import asyncio
+
+    from starlette.applications import Starlette
+    from starlette.background import BackgroundTask
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route as StarletteRoute
+
+    never = asyncio.Event()
+
+    async def page(_):
+        return JSONResponse({"ok": True}, background=BackgroundTask(never.wait))
+
+    app = Starlette(routes=[StarletteRoute("/", page)])
+    async with httpx.AsyncClient(
+        transport=InProcessTransport(app), base_url="http://x"
+    ) as client:
+        response = await asyncio.wait_for(client.get("/"), timeout=2)
+
+    assert response.json() == {"ok": True}
+    never.set()
+
+
+async def test_the_api_in_process_reports_a_crash_as_a_500():
+    from starlette.applications import Starlette
+    from starlette.routing import Route as StarletteRoute
+
+    async def broken(_):
+        raise RuntimeError("boom")
+
+    app = Starlette(routes=[StarletteRoute("/", broken)])
+    async with httpx.AsyncClient(
+        transport=InProcessTransport(app), base_url="http://x"
+    ) as client:
+        response = await client.get("/")
+
+    assert response.status_code == 500
+
+
+async def test_a_tool_call_looks_the_token_up_once(app, tenants, monkeypatch):
+    """The endpoint resolves the token; the tool's in-process reads (two, for
+    list_tenants) act as that owner rather than resolving it again each."""
+    import fishsense_services_api.api_tokens as api_tokens
+    import fishsense_services_api.app as app_module
+
+    token = await _token(app, OPERATOR)
+    calls = []
+    real = api_tokens.token_principal
+
+    async def counted(engine, raw):
+        calls.append(raw)
+        return await real(engine, raw)
+
+    monkeypatch.setattr(api_tokens, "token_principal", counted)
+    monkeypatch.setattr(app_module, "token_principal", counted)
+
+    async with (
+        app.router.lifespan_context(app),
+        httpx2.AsyncClient(
+            transport=httpx2.ASGITransport(app=app), base_url="http://api.test"
+        ) as http,
+    ):
+        response = await http.post(
+            "/mcp",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json, text/event-stream",
+            },
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "list_tenants", "arguments": {}},
+            },
+        )
+
+    assert not response.json()["result"].get("isError"), response.json()
+    assert len(calls) == 1
+
+
+async def test_mounting_keeps_the_apps_own_lifespan(app_engine):
+    from fastapi import FastAPI
+
+    ran = []
+
+    @asynccontextmanager
+    async def own(_):
+        ran.append("start")
+        yield
+        ran.append("stop")
+
+    app = FastAPI(lifespan=own)
+    endpoint = mount_mcp(app, app_engine)
+
+    async with app.router.lifespan_context(app):
+        assert endpoint.running
+    assert ran == ["start", "stop"]

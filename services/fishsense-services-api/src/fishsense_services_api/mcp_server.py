@@ -1,11 +1,11 @@
 """The MCP endpoint at /mcp: lets agents read FishSense (the owner, 2026-10-23).
 
-Ported in shape from e4e-reference-manager's ``app/mcp_server.py``: streamable
-HTTP, stateless, JSON responses, and each tool a thin wrapper over a REST
-endpoint, called in-process with the caller's own ``Authorization`` header. So
-a tool sees exactly what the API shows that user -- their tenants, or for a
-system admin every tenant read-only, each visit recorded (0056) -- and nothing
-here re-implements a permission or touches the database itself.
+Ported in shape from e4e-reference-manager@a12bcca ``api/app/mcp_server.py``:
+streamable HTTP, stateless, JSON responses, and each tool a thin wrapper over a
+REST endpoint, called in-process as the caller. So a tool sees exactly what the
+API shows that user -- their tenants, or for a system admin every tenant
+read-only, each visit recorded (0056) -- and nothing here re-implements a
+permission or touches the database itself.
 
 v2 changes from the reference manager:
 
@@ -20,8 +20,18 @@ v2 changes from the reference manager:
   by the API besides.
 * **Automatic results say so.** An automatic result comes back wrapped as
   ``validated: false``, so a model can't quote it as a measurement.
+* **The token is looked up once a call.** The endpoint resolves it, and hands
+  its owner to the routes it calls through the ASGI scope
+  (``IN_PROCESS_PRINCIPAL``); the reference manager forwards the header, and
+  every in-process GET looked the token up again (the PR #335 review).
+* **Background work doesn't hold a tool up.** httpx's ``ASGITransport`` waits
+  for the whole app call, background tasks included, so a tool reading the
+  Fish list waited on the geocoder. :class:`InProcessTransport` answers once
+  the response is sent, and leaves the background work running.
 """
 
+import asyncio
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -41,7 +51,11 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.types import Receive, Scope, Send
 
-from fishsense_services_api.api_tokens import READ, TOKEN_PREFIX, token_principal
+from fishsense_services_api import api_tokens
+from fishsense_services_api.api_tokens import READ, TOKEN_PREFIX
+from fishsense_services_api.auth import IN_PROCESS_PRINCIPAL, Principal
+
+log = logging.getLogger(__name__)
 
 INSTRUCTIONS = (
     "Read-only tools over FishSense: fish measured from underwater photos, "
@@ -52,8 +66,8 @@ INSTRUCTIONS = (
     "(get_mission_automatic, get_capture_automatic) come back with "
     "`validated: false`: they have not been reviewed by a person, so say so "
     "wherever you use one and never present it as a measurement. When you report "
-    "numbers, give how many fish or frames they rest on. Nothing here changes "
-    "data; changes are made in the web app."
+    "numbers, give how many fish or frames they rest on. These tools only "
+    "read; changes are made in the web app."
 )
 UNVALIDATED = (
     "An automatic result, not reviewed by a person: say so wherever it is used, "
@@ -83,6 +97,81 @@ class ReadOnlyTransport(httpx.AsyncBaseTransport):
         await self._inner.aclose()
 
 
+class InProcessTransport(httpx.AsyncBaseTransport):
+    """Calls an ASGI app in this process, answering as soon as the response is
+    sent. Its background work carries on, as it would behind a server; a crash
+    before any response is a 500, as a server would send. The caller a request
+    acts as rides in its ``IN_PROCESS_PRINCIPAL`` extension, into the scope."""
+
+    def __init__(self, app) -> None:
+        self._app = app
+        self._running: set[asyncio.Task] = set()
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        body = await request.aread()
+        url = request.url
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": request.method,
+            "scheme": url.scheme,
+            "path": url.path,
+            "raw_path": url.raw_path.split(b"?")[0],
+            "query_string": url.query,
+            "root_path": "",
+            "headers": [(k.lower(), v) for k, v in request.headers.raw],
+            "client": ("127.0.0.1", 0),
+            "server": (url.host, url.port or 80),
+            "extensions": {},
+        }
+        principal = request.extensions.get(IN_PROCESS_PRINCIPAL)
+        if principal is not None:
+            scope[IN_PROCESS_PRINCIPAL] = principal
+        answered = asyncio.Event()
+        started: dict = {}
+        chunks: list[bytes] = []
+        delivered = False
+
+        async def receive():
+            nonlocal delivered
+            if not delivered:
+                delivered = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            await answered.wait()
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            if message["type"] == "http.response.start":
+                started.update(message)
+            elif message["type"] == "http.response.body":
+                chunks.append(message.get("body", b""))
+                if not message.get("more_body", False):
+                    answered.set()
+
+        task = asyncio.create_task(self._app(scope, receive, send))
+        self._running.add(task)
+        task.add_done_callback(self._finished)
+        waiting = asyncio.ensure_future(answered.wait())
+        try:
+            await asyncio.wait({task, waiting}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            waiting.cancel()
+        if not answered.is_set():
+            return httpx.Response(500, request=request)
+        return httpx.Response(
+            started.get("status", 500),
+            headers=started.get("headers", []),
+            content=b"".join(chunks),
+            request=request,
+        )
+
+    def _finished(self, task: asyncio.Task) -> None:
+        self._running.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            log.error("in-process API call failed", exc_info=task.exception())
+
+
 def _path(*segments: object) -> str:
     return "/" + "/".join(quote(str(s), safe="") for s in segments)
 
@@ -106,9 +195,15 @@ class McpEndpoint:
     :meth:`lifespan` builds a fresh one each time the app starts."""
 
     def __init__(self, app: FastAPI, engine: AsyncEngine) -> None:
-        self._app, self._engine = app, engine
+        self._engine = engine
+        self._transport = ReadOnlyTransport(InProcessTransport(app))
+        self._api: httpx.AsyncClient | None = None
         self._manager: Any = None
         self.server = _server(self._get)
+
+    @property
+    def running(self) -> bool:
+        return self._manager is not None
 
     @asynccontextmanager
     async def lifespan(self, _: FastAPI) -> AsyncIterator[None]:
@@ -122,32 +217,41 @@ class McpEndpoint:
             ),
         )
         manager = self.server.session_manager
-        async with manager.run():
-            self._manager = manager
+        async with (
+            httpx.AsyncClient(
+                transport=self._transport, base_url="http://fishsense.internal"
+            ) as api,
+            manager.run(),
+        ):
+            self._api, self._manager = api, manager
             try:
                 yield
             finally:
-                self._manager = None
+                self._api, self._manager = None, None
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        refusal = await self._refusal(Headers(scope=scope).get("authorization", ""))
-        if refusal is not None:
-            await refusal(scope, receive, send)
+        caller = await self._caller(Headers(scope=scope).get("authorization", ""))
+        if isinstance(caller, JSONResponse):
+            await caller(scope, receive, send)
         elif self._manager is None:
             await JSONResponse({"detail": "MCP is not running"}, status_code=503)(
                 scope, receive, send
             )
         else:
-            await self._manager.handle_request(scope, receive, send)
+            # The tools act as this caller (see `_get`): never set from outside.
+            await self._manager.handle_request(
+                {**scope, IN_PROCESS_PRINCIPAL: caller}, receive, send
+            )
 
-    async def _refusal(self, authorization: str) -> JSONResponse | None:
+    async def _caller(self, authorization: str) -> Principal | JSONResponse:
+        """The read token's owner, looked up once a call; else the refusal."""
         scheme, _, raw = authorization.partition(" ")
         raw = raw.strip()
         if scheme.lower() != "bearer" or not raw.startswith(TOKEN_PREFIX):
             return _unauthorized(
                 "a personal API token is required (Bearer fishsense_…)"
             )
-        owner = await token_principal(self._engine, raw)
+        owner = await api_tokens.token_principal(self._engine, raw)
         if owner is None:
             return _unauthorized("invalid, expired or revoked token")
         if owner.scope != READ:
@@ -155,24 +259,20 @@ class McpEndpoint:
                 {"detail": "MCP takes a read-only token: make one in the web app"},
                 status_code=403,
             )
-        return None
+        return Principal(sub=owner.sub, token_scope=owner.scope)
 
     async def _get(
         self, ctx: Context, path: str, *, params: dict | None = None, missing=False
     ) -> Any:
         """GET ``path`` from the API as the caller. ``missing``: return None
         on a 404 rather than raising it."""
-        authorization = (ctx.headers or {}).get("authorization", "")
-        # raise_app_exceptions=False: a crash inside an endpoint comes back as
-        # its 500, reported to the agent as a tool error.
-        inner = httpx.ASGITransport(app=self._app, raise_app_exceptions=False)
-        async with httpx.AsyncClient(
-            transport=ReadOnlyTransport(inner),
-            base_url="http://fishsense.internal",
-            headers={"Authorization": authorization},
-        ) as api:
-            query = {k: v for k, v in (params or {}).items() if v is not None}
-            response = await api.get(path, params=query)
+        caller = ctx.request_context.request.scope.get(IN_PROCESS_PRINCIPAL)
+        if caller is None or self._api is None:
+            raise ToolError("no caller: MCP is not running")
+        query = {k: v for k, v in (params or {}).items() if v is not None}
+        response = await self._api.get(
+            path, params=query, extensions={IN_PROCESS_PRINCIPAL: caller}
+        )
         if missing and response.status_code == 404:
             return None
         if response.is_error:
@@ -336,12 +436,20 @@ def _server(get) -> MCPServer:
 
 
 def mount_mcp(app: FastAPI, engine: AsyncEngine) -> McpEndpoint:
-    """Serve /mcp on ``app``, its session manager running with the app."""
+    """Serve /mcp on ``app``, its session manager running inside whatever
+    lifespan the app already has."""
     endpoint = McpEndpoint(app, engine)
     app.router.routes.append(
         Route("/mcp", endpoint=endpoint, methods=["GET", "POST", "DELETE"])
     )
-    app.router.lifespan_context = endpoint.lifespan
+    own = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def lifespan(running: FastAPI):
+        async with own(running) as state, endpoint.lifespan(running):
+            yield state
+
+    app.router.lifespan_context = lifespan
     return endpoint
 
 

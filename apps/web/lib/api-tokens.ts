@@ -54,8 +54,3 @@ export function mcpUrl(): string {
   const base = process.env.FISHSENSE_API_PUBLIC_URL || PUBLIC_API_URL;
   return `${base.replace(/\/+$/, "")}/mcp`;
 }
-
-/** The command that connects Claude Code to FishSense with a read token. */
-export function mcpCommand(token: string): string {
-  return `claude mcp add --transport http fishsense ${mcpUrl()} --header "Authorization: Bearer ${token}"`;
-}
