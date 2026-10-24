@@ -54,16 +54,11 @@ _IF = re.compile(r"\{\{\s*if [^}]*\}\}")
 _FIELD = re.compile(r"\{\{\s*\.Data\.data\.([a-z_]+)(\s*\|\s*urlquery)?\s*\}\}")
 
 #: Generated when not given: they are the rehearsal's own, never production's.
-GENERATED = {"postgres", "generated/services_db", "superset", "web"}
+GENERATED = {"postgres", "generated/services_db", "web"}
 #: Placeholders shaped like the real thing, where a service validates a shape.
 PLACEHOLDERS = {
     ("oidc/web", "issuer_url"): "https://auth.example.invalid/application/o/fishsense/",
     ("oidc/web", "client_id"): "fishsense-web-rehearsal",
-    (
-        "oidc/analytics",
-        "issuer_url",
-    ): "https://auth.example.invalid/application/o/fishsense-analytics/",
-    ("oidc/analytics", "client_id"): "fishsense-analytics-rehearsal",
     (
         "oidc/mobile",
         "issuer_url",
@@ -248,9 +243,6 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--values", type=Path, help="TOML: [<openbao path>] field = ..."
     )
-    parser.add_argument(
-        "--superset", action="store_true", help="COMPOSE_PROFILES=superset"
-    )
     args = parser.parse_args(argv)
 
     values = tomllib.loads(args.values.read_text()) if args.values else {}
@@ -259,7 +251,6 @@ def main(argv: list[str]) -> int:
         values=values,
         version=args.version,
         local_images=args.local_images,
-        profiles="superset" if args.superset else "",
     )
     print(
         f"staged: {args.out}\n  {dc} config --quiet   # validate\n  {dc} up -d postgres"

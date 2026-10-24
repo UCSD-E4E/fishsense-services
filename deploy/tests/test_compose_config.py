@@ -73,22 +73,11 @@ def test_compose_accepts_the_production_file(tmp_path):
     assert result.returncode == 0, result.stderr
     model = yaml.safe_load(result.stdout)
     assert model["name"] == "project"  # the slot's is the working dir's: fishsense
-    # Off by default: superset and the smoke test are not in the converge.
-    assert "superset" not in model["services"]
+    # Off by default: the smoke test is not in the converge.
     assert "smoke" not in model["services"]
     assert {"postgres", "db-bootstrap", "migrate", "api", "web", "orchestrator"} <= set(
         model["services"]
     )
-
-
-def test_compose_accepts_it_with_superset_on(tmp_path):
-    project, compose = _stage(tmp_path, profiles="superset")
-
-    result = _config(project, compose)
-
-    assert result.returncode == 0, result.stderr
-    services = yaml.safe_load(result.stdout)["services"]
-    assert {"superset", "superset-init", "superset-worker", "valkey"} <= set(services)
 
 
 def test_the_project_name_on_the_slot_is_v1s(tmp_path):

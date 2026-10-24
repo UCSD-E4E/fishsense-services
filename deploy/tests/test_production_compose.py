@@ -116,7 +116,7 @@ def test_postgres_is_v1s_container_on_v1s_volume():
 
     assert postgres["image"] == "postgres:17.10"
     assert ("pgdata", "/var/lib/postgresql/data") in volumes(postgres)
-    assert set(compose()["volumes"]) >= {"pgdata", "superset_home", "valkey_data"}
+    assert "pgdata" in compose()["volumes"]
 
 
 def test_the_interior_network_keeps_v1s_name():
@@ -539,7 +539,7 @@ def _dynamic() -> dict:
     return yaml.safe_load((INCUS / "traefik-dynamic.yml").read_text())
 
 
-def test_the_three_hosts_route_to_the_three_services():
+def test_the_two_hosts_route_to_the_two_services():
     http = _dynamic()["http"]
     hosts = {
         re.search(r"Host\(`([^`]+)`\)", r["rule"]).group(1): r["service"]
@@ -548,7 +548,6 @@ def test_the_three_hosts_route_to_the_three_services():
     assert hosts == {
         "fishsense.e4e.ucsd.edu": "web",
         "api.fishsense.e4e.ucsd.edu": "api",
-        "analytics.fishsense.e4e.ucsd.edu": "superset",
     }
     for name, backend in http["services"].items():
         url = backend["loadBalancer"]["servers"][0]["url"]
@@ -577,24 +576,19 @@ def test_every_route_serves_the_vault_agent_cert():
 # --- superset ------------------------------------------------------------------------------
 
 
-SUPERSET = (
-    "superset",
-    "superset-init",
-    "superset-worker",
-    "superset-worker-beat",
-    "valkey",
-)
-
-
-def test_superset_is_off_unless_its_profile_is_named():
-    """Kept from v1, behind the `superset` profile: off until the analytics
-    login is bound to the lab (docs/cutover.md), then on by one line in
-    compose.env."""
-    for name in SUPERSET:
-        assert services()[name].get("profiles") == ["superset"], name
-    assert re.search(
-        r"^COMPOSE_PROFILES=\s*$", (INCUS / "compose.env").read_text(), re.M
-    )
+def test_superset_is_retired():
+    """Retired 2026-10-23: no sign-in since 2026-10-02, and per-tenant
+    analytics live in the portal (RLS gives Superset's one role one tenant).
+    Its `superset` database stays, dumped by the backup, as the archive."""
+    names = set(services())
+    assert not {n for n in names if "superset" in n or n == "valkey"}
+    assert not {"superset_home", "valkey_data"} & set(compose()["volumes"])
+    assert "superset" not in (INCUS / "compose.env").read_text().lower()
+    secrets = (INCUS / "secrets.nix").read_text()
+    assert "superset.env" not in secrets
+    assert ".Data.data.analytics_password" not in secrets  # no render reads it
+    assert not re.search(r"L\+ \S*superset", (INCUS / "workdir.nix").read_text())
+    assert not (INCUS / "superset_volumes").exists()
 
 
 def test_the_smoke_test_runs_only_when_asked():

@@ -4,6 +4,7 @@ Nothing inside the app is faked. Only Authentik is stood in for, by a static
 server publishing a JWKS whose private key the tests hold.
 """
 
+import json
 import uuid
 
 import httpx
@@ -97,3 +98,34 @@ def test_the_api_runs_unprivileged_and_without_owner_credentials(stack):
     assert uid != "0"
     assert "FISHSENSE_MIGRATION_DATABASE_URL" not in environment
     assert "owner-dev-only" not in environment
+
+
+def test_an_agent_reads_over_mcp_with_a_read_token(stack):
+    """The built image serves /mcp: its lifespan runs the session manager, and
+    a read token reaches the tools as its owner."""
+    sub = f"sub-{uuid.uuid4().hex[:8]}"
+    slug = stack.grant(sub)
+    made = httpx.post(
+        f"{stack.api_url}/me/tokens", json={"name": "e2e"}, headers=stack.bearer(sub)
+    )
+    assert made.status_code == 201
+
+    response = httpx.post(
+        f"{stack.api_url}/mcp",
+        headers={
+            "Authorization": f"Bearer {made.json()['token']}",
+            "Accept": "application/json, text/event-stream",
+        },
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "list_tenants", "arguments": {}},
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert not result.get("isError"), result
+    tenants = json.loads(result["content"][0]["text"])["tenants"]
+    assert [t["slug"] for t in tenants] == [slug]

@@ -35,7 +35,9 @@ def issuer(jwks) -> str:
 
 @pytest.fixture
 def client_factory(monkeypatch, app_url, owner_engine, issuer):
-    """Boots the app from the environment as it stands when called."""
+    """Boots the app from the environment as it stands when called. Open it
+    in the test, not in a fixture: its lifespan runs the MCP session manager,
+    an anyio task group, which must close in the task that opened it."""
     for name in (
         "FISHSENSE_OIDC_JWKS_URL",
         "FISHSENSE_OIDC_MOBILE_ISSUER",
@@ -62,12 +64,6 @@ def client_factory(monkeypatch, app_url, owner_engine, issuer):
     return _client
 
 
-@pytest.fixture
-async def client(client_factory) -> AsyncIterator:
-    async with client_factory() as c:
-        yield c
-
-
 def _bearer(issuer: str, key=SIGNING_KEY) -> dict[str, str]:
     now = int(time.time())
     claims = {"iss": issuer, "aud": AUDIENCE, "sub": "s", "iat": now, "exp": now + 60}
@@ -75,26 +71,51 @@ def _bearer(issuer: str, key=SIGNING_KEY) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-async def test_the_booted_app_authenticates_against_the_jwks(client, issuer):
+async def test_the_booted_app_authenticates_against_the_jwks(client_factory, issuer):
     """404, not 401 or 500: the token checked out and the DB answered."""
-    response = await client.get("/tenants/lab/devices", headers=_bearer(issuer))
+    async with client_factory() as client:
+        response = await client.get("/tenants/lab/devices", headers=_bearer(issuer))
 
     assert response.status_code == 404
 
 
-async def test_the_booted_app_rejects_a_token_it_did_not_publish(client, issuer):
-    response = await client.get(
-        "/tenants/lab/devices", headers=_bearer(issuer, key=rsa_key())
-    )
+async def test_the_booted_app_rejects_a_token_it_did_not_publish(
+    client_factory, issuer
+):
+    async with client_factory() as client:
+        response = await client.get(
+            "/tenants/lab/devices", headers=_bearer(issuer, key=rsa_key())
+        )
 
     assert response.status_code == 401
 
 
-async def test_health_needs_no_token(client):
-    response = await client.get("/healthz")
+async def test_health_needs_no_token(client_factory):
+    async with client_factory() as client:
+        response = await client.get("/healthz")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+async def test_the_booted_app_serves_mcp(client_factory, issuer):
+    """The MCP session manager runs with the app's lifespan, which this
+    factory wraps: a 503 here is a factory that dropped it."""
+    async with client_factory() as client:
+        made = await client.post(
+            "/me/tokens", headers=_bearer(issuer), json={"name": "agent"}
+        )
+        response = await client.post(
+            "/mcp",
+            headers={
+                "Authorization": f"Bearer {made.json()['token']}",
+                "Accept": "application/json, text/event-stream",
+            },
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["result"]["tools"]
 
 
 async def test_the_booted_app_accepts_the_mobile_issuers_tokens(
