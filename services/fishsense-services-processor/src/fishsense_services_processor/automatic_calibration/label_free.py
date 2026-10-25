@@ -18,7 +18,7 @@ from typing import Any, Optional
 
 from fishsense_core import size_constancy as sc
 
-__all__ = ["LabelFreeFit", "refused"]
+__all__ = ["LabelFreeFit", "accepted", "refused"]
 
 
 @dataclass(frozen=True)
@@ -50,15 +50,27 @@ def _empty(hint: Any) -> Any:
     raise TypeError(f"no empty value for a LabelFreeFit field of type {hint!r}")
 
 
-def refused(reason: str, *, o_mag_m: float = sc.O_DESIGN_M, **seen) -> LabelFreeFit:
-    """A refused fit, with what it saw: every field not in `seen` empty."""
+def _filled(**given) -> dict:
+    """`given`, with every other field of the fit at its empty value."""
     hints = typing.get_type_hints(LabelFreeFit)
     values = {
         f.name: (f.default if f.default is not MISSING else _empty(hints[f.name]))
         for f in fields(LabelFreeFit)
-        if f.name not in ("outcome", "refusal_reason", "o_mag_m")
+        if f.name not in ("outcome", "refusal_reason") and f.name not in given
     }
-    values.update(seen)
+    values.update(given)
+    return values
+
+
+def refused(reason: str, *, o_mag_m: float = sc.O_DESIGN_M, **seen) -> LabelFreeFit:
+    """A refused fit, with what it saw: every field not in `seen` empty."""
     return LabelFreeFit(
-        outcome="refused", refusal_reason=reason, o_mag_m=o_mag_m, **values
+        outcome="refused", refusal_reason=reason, **_filled(o_mag_m=o_mag_m, **seen)
     )
+
+
+def accepted(**values) -> LabelFreeFit:
+    """An accepted fit from `values`: a field core added that the caller does
+    not set (4.3.2's `implausible_pairs`, for fits that solve no pairs) is
+    empty rather than a TypeError."""
+    return LabelFreeFit(outcome="accepted", refusal_reason=None, **_filled(**values))

@@ -72,8 +72,10 @@ These change what the stage must reproduce, so they come first.
 ## 2. What already exists, and how this differs
 
 Production already runs a size-constancy calibration: the automatic track's
-label-free fit (`automatic_results/size_constancy.py`,
-`AUTOMATIC_CALIBRATION_VERSION = "2"`). The shadow stage is a **different
+label-free fit (`fishsense_core.size_constancy`, called from
+`automatic_calibration/activities.py`; services' own port,
+`automatic_results/size_constancy.py`, was deleted in #354,
+`AUTOMATIC_CALIBRATION_VERSION = "size-constancy-3"`). The shadow stage is a **different
 method under different rules**:
 
 | | Automatic track (existing) | Shadow stage (this design) |

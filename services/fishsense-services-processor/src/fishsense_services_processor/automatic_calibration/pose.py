@@ -55,6 +55,7 @@ from fishsense_core.plane import (
 
 from fishsense_services_processor.automatic_calibration.label_free import (
     LabelFreeFit,
+    accepted,
     refused,
 )
 
@@ -435,9 +436,7 @@ def fit_pose_points(points, *, min_frames: int = 3) -> LabelFreeFit:
         return refused("lever_arm_below_0.6m", **seen)
     c, d = _line_through(pts[keep])
     origin = c - (c[2] / d[2]) * d
-    return LabelFreeFit(
-        outcome="accepted", refusal_reason=None,
+    return accepted(
         laser_position=[float(v) for v in origin], laser_axis=[float(v) for v in d],
-        vanishing_px=None, line_direction=None, line_offset_px=None, size_ratio=None,
-        se_px=None, o_mag_m=float(np.linalg.norm(origin)), **seen,
+        o_mag_m=float(np.linalg.norm(origin)), **seen,
     )  # fmt: skip

@@ -49,6 +49,7 @@ from fishsense_core.line_fit import consensus_line
 
 from fishsense_services_processor.automatic_calibration.label_free import (
     LabelFreeFit,
+    accepted,
     refused,
 )
 
@@ -280,8 +281,7 @@ def fit_known_sizes(
     if sd > scale_sd_max:
         return refused("uncertain_fit", **seen)
     origin, axis = sc.beam_from_vanishing(tv, u, offset, camera_matrix)
-    return LabelFreeFit(
-        outcome="accepted", refusal_reason=None,
+    return accepted(
         laser_position=[float(c) for c in origin], laser_axis=[float(c) for c in axis],
         se_px=sc.bootstrap_se(tk, sk, rng=rng), o_mag_m=sc.O_DESIGN_M, **seen,
     )  # fmt: skip

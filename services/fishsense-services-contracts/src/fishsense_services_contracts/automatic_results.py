@@ -63,16 +63,21 @@ and a frame whose size disagrees with its place on the line is dropped
 (`size_constancy.trim_frames`). Version 1 fitted both: a reflection's run of
 off-line dots moved session 77's vanishing point by 1,600 px, and one
 wrong-range dot moved mission 80's by 360 px.
-3 (2026-10-23): the size-constancy fit is fishsense-core 4.3.0's
-(`fishsense_core.size_constancy`), which absorbed this repo's port of cscw's.
-Core sizes only the largest connected component of the pairs the robust pass
-kept, so a frame whose every pair fails it has no size (cscw session 114's
-frame 7, a pair at log scale -37: its error against the stored calibration
-moved from -0.0446 deg to -0.0485 deg; the other nine sessions fit as under 2,
-to 1e-11 px), and with no dive line the direction follows the trim. The bump
-re-fits every dive in the cohort (`automatic_results_store._CALIBRATION_WORK`
-selects on `algorithm_version`); each accepted fit is a new row, so the
-lengths that used the dive's label-free calibration are measured again.
+``size-constancy-3`` (2026-10-25): the size-constancy fit is fishsense-core
+4.3.2's (`fishsense_core.size_constancy`), which absorbed this repo's port of
+cscw's. Named, not numbered, so a row cannot be read as calibration v3 (the
+screen-consensus-check replay, `automatic_calibration.v3`), which no row
+records (review of #354). Core sizes only the largest connected component
+of the pairs the robust pass kept, drops a pair beyond 10x before solving,
+and measures no scale from a pair whose inliers collapse to one spot; with no
+dive line the direction follows the trim. On cscw's ten sessions: nine fit
+as under 2 (to 1e-11 px), and session 114 keeps all 29 frames with its
+collapsed pair (log scale -37) counted implausible, its error against the
+stored calibration -0.0446 -> -0.0439 deg. Production's cohort was re-fitted
+read-only before this shipped (#354). The bump re-fits every dive in the
+cohort (`automatic_results_store._CALIBRATION_WORK` selects on
+`algorithm_version`); each accepted fit is a new row, so the lengths that
+used the dive's label-free calibration are measured again.
 
 Not in ``MODELS``: integration publishes schemas once for every slice.
 """
@@ -115,7 +120,7 @@ __all__ = [
 AUTOMATIC_HEADTAIL_PREDICTOR_VERSION = 4
 #: The one render every step reads (`renders.RENDER_VERSION`).
 AUTOMATIC_JPEG_RENDER_VERSION = RENDER_VERSION
-AUTOMATIC_CALIBRATION_VERSION = "3"
+AUTOMATIC_CALIBRATION_VERSION = "size-constancy-3"
 AUTOMATIC_MEASUREMENT_VERSION = "1"
 
 #: Stage 14's single-depth fronto-parallel projection (processor
