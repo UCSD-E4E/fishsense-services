@@ -1064,3 +1064,34 @@ async def test_another_tenants_mission_has_no_template_here(owner_engine, app_en
     lab, other = await tenant(owner_engine), await tenant(owner_engine, "reef")
     theirs, _, _ = await _resolver_scene(owner_engine, other)
     assert await _mission_template(app_engine, lab, theirs) is None
+
+
+# ---------- calibration v4: a template by its v1 id (the replay's override) ----------
+
+
+async def _by_v1(app_engine, lab, v1_id):
+    from fishsense_services_api.slate_store import slate_template_by_v1
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        return await slate_template_by_v1(conn, v1_id)
+
+
+async def _set_v1(owner_engine, template_id, v1_id):
+    async with owner_engine.begin() as conn:
+        await conn.execute(text("UPDATE slate_templates SET v1_id = :v WHERE id = :i"),
+                           {"v": v1_id, "i": template_id})  # fmt: skip
+
+
+async def test_a_template_is_found_by_its_v1_id_when_it_can_pose_a_slate(
+    owner_engine, app_engine
+):
+    lab = await tenant(owner_engine)
+    good = await slate_template(owner_engine)
+    bare = await slate_template(owner_engine, dpi=None)
+    await _set_v1(owner_engine, good, 9002)
+    await _set_v1(owner_engine, bare, 9003)
+    found = await _by_v1(app_engine, lab, 9002)
+    assert found.id == good and found.dpi == 300
+    assert found.reference_points == [tuple(p) for p in TEMPLATE_POINTS]
+    assert await _by_v1(app_engine, lab, 9003) is None  # no DPI: cannot pose
+    assert await _by_v1(app_engine, lab, 9999) is None

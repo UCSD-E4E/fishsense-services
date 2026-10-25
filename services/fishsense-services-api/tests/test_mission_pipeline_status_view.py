@@ -435,11 +435,19 @@ async def test_v1s_columns_come_first_in_v1s_order(owner_engine):
     assert columns == v1 + list(PENDING)
 
 
+def _latest_versions_migration():
+    """The migration that last recreated the function for a predictor bump
+    (0067: the laser stage's v3)."""
+    return importlib.import_module(
+        "fishsense_services_api.migrations.versions.0067_laser_predictor_v3"
+    )
+
+
 def test_the_predictor_versions_frozen_in_the_view_are_the_stages():
     """A view is frozen when it is created, so the predictor versions its
     prediction columns compare against are spelled in the migration. A version
     bump must ship a migration that recreates the view; this is what says so."""
-    migration = _migration()
+    migration = _latest_versions_migration()
     assert migration.LASER_PREDICTOR_VERSION == laser_store.LASER_PREDICTOR_VERSION
     assert (
         migration.HEADTAIL_PREDICTOR_VERSION
@@ -494,6 +502,26 @@ def test_0063_adds_the_review_terms_todays_stores_use():
     )
     rendered = hashlib.sha256(migration.FUNCTION_SQL.encode()).hexdigest()
     assert rendered == migration.RENDERED_SHA256
+
+
+def test_0067_moves_only_the_laser_stale_term_to_v3():
+    """0067 recreates 0063's function with the laser stage's version bumped
+    (2 -> 3, the colour from fishsense-core 4.3.0) and nothing else: the
+    head/tail stale term keeps its own version."""
+    migration = _latest_versions_migration()
+    previous = importlib.import_module(
+        "fishsense_services_api.migrations.versions.0063_reviews_and_skills"
+    )
+    rendered = hashlib.sha256(migration.FUNCTION_SQL.encode()).hexdigest()
+    assert rendered == migration.RENDERED_SHA256
+    assert migration.PREVIOUS_FUNCTION_SQL == previous.FUNCTION_SQL
+    laser_term = "ORDER BY p.seq DESC LIMIT 1\n) IS DISTINCT FROM {}"
+    assert previous.FUNCTION_SQL.count(laser_term.format(2)) == 1
+    assert migration.FUNCTION_SQL.count(laser_term.format(3)) == 1
+    assert migration.FUNCTION_SQL.replace(
+        laser_term.format(3), laser_term.format(2)
+    ) == (previous.FUNCTION_SQL)
+    assert "p.predictor_version IS DISTINCT FROM 2" in migration.FUNCTION_SQL
 
 
 def test_0046_recreates_the_function_from_0029_with_the_renamed_schema():

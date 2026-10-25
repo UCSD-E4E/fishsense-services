@@ -37,7 +37,7 @@ These change what the stage must reproduce, so they come first.
      FishSense Lite (IMWUT) paper, §5.3, requires calibration photographs to
      span at least 0.6 m of range (`papers/fishsense-lite-imwut/Sections/results.tex:133`).
      Production enforces it as the lever-arm refusal:
-     `calibration.consistency.check_observation_geometry`,
+     `fishsense_core.calibration_checks.check_observation_geometry` (services' `calibration.consistency` until 2026-10-24),
      `MIN_OBSERVATION_LEVER_M = 0.60`, the spread along the optical axis
      (max z − min z) of the camera-space laser points fitted. The shadow stage
      calls that function on its own fitted laser points. It reuses the
@@ -72,8 +72,10 @@ These change what the stage must reproduce, so they come first.
 ## 2. What already exists, and how this differs
 
 Production already runs a size-constancy calibration: the automatic track's
-label-free fit (`automatic_results/size_constancy.py`,
-`AUTOMATIC_CALIBRATION_VERSION = "2"`). The shadow stage is a **different
+label-free fit (`fishsense_core.size_constancy`, called from
+`automatic_calibration/activities.py`; services' own port,
+`automatic_results/size_constancy.py`, was deleted in #354,
+`AUTOMATIC_CALIBRATION_VERSION = "size-constancy-3"`). The shadow stage is a **different
 method under different rules**:
 
 | | Automatic track (existing) | Shadow stage (this design) |
@@ -154,8 +156,9 @@ with no edits to shared files beyond registering it.
   a 1600-px long side, as the port's render cache did (`render.py`: rectify,
   then downscale, JPEG q95).
 - It runs SAM 3.1 through the existing pinned loader (`get_segmenter`, the
-  head/tail stage's checkpoint `sam3/3.1@<sha12>`), with
-  `ScoredSam3Adapter(..., prompt=…)`.
+  head/tail stage's checkpoint `sam3/3.1@<sha12>`), through
+  `ScoredSam3Adapter(processor)`: the image is encoded once (`encoded`), then
+  each prompt asked of that encoding (`prompted(state, prompt)`).
   - Prompts are tried in the port's order, `("slate", "white board")`, at the
     port's confidence threshold of **0.3**. On the pool, "white board" won 253
     of 258 frames.

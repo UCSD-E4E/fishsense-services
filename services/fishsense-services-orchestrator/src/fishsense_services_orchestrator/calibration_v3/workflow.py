@@ -17,7 +17,7 @@ import asyncio
 import uuid
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
@@ -52,6 +52,7 @@ with workflow.unsafe.imports_passed_through():
         AutomaticCalibrationPlan,
         AutomaticTarget,
     )
+    from fishsense_services_orchestrator.calibration_v3.activities import TemplateTarget
     from fishsense_services_orchestrator.nrp.workflow import (
         wake_gpu_processor,
         wake_per_image_processor,
@@ -80,6 +81,9 @@ class ReplayTarget:
     #: ``sift`` (pair ratios), ``sam`` (each slate's SAM mask: strategy 2) or
     #: ``pose`` (each slate posed automatically: calibration v4).
     size_source: str = "sift"
+    #: Pose with this template (by v1 id) instead of the mission's own: the
+    #: one identified on its frames, when it records none (2026-10-24).
+    slate_template_v1: Optional[int] = None
 
 
 @dataclass
@@ -92,6 +96,9 @@ class ReplayRequest:
     draw_sizes: List[int] = field(default_factory=list)
     draws_per_size: int = 0
     size_source: str = "sift"
+    #: Mission number (as text: JSON keys) -> the template, by v1 id, to pose
+    #: it with (`ReplayTarget.slate_template_v1`).
+    templates: Dict[str, int] = field(default_factory=dict)
 
 
 #: Slate frames per SAM child: each carries its render's presigned GET.
@@ -174,11 +181,18 @@ class ReplayCalibrationV3ForMissionWorkflow:
     async def _pose(self, target: ReplayTarget, plan: AutomaticCalibrationPlan):
         """Each slate frame posed on a real GPU (calibration v4), or the
         refusal: no template that can pose a slate, or no GPU."""
-        template: Optional[dict] = await workflow.execute_activity(
-            "resolve_mission_slate_template",
-            AutomaticTarget(target.tenant_id, target.mission_id),
-            result_type=Optional[dict], **_DB,
-        )  # fmt: skip
+        if target.slate_template_v1 is not None:
+            template: Optional[dict] = await workflow.execute_activity(
+                "resolve_slate_template_by_v1",
+                TemplateTarget(target.tenant_id, target.slate_template_v1),
+                result_type=Optional[dict], **_DB,
+            )  # fmt: skip
+        else:
+            template = await workflow.execute_activity(
+                "resolve_mission_slate_template",
+                AutomaticTarget(target.tenant_id, target.mission_id),
+                result_type=Optional[dict], **_DB,
+            )  # fmt: skip
         if template is None:
             return CalibrationV3Report(mission_id=target.mission_id, size_source="pose",
                                        outcome="refused",
@@ -233,14 +247,16 @@ class ReplayCalibrationV3Workflow:
         async def one(m: dict) -> dict:
             draw = m["number"] in set(request.draw_numbers)
             child = replay_child_id(run_id, m["mission_id"])
-            row = {"number": m["number"], "mission_id": m["mission_id"], "child": child}
+            named = request.templates.get(str(m["number"]))
+            row = {"number": m["number"], "mission_id": m["mission_id"], "child": child,
+                   "slate_template_v1": named}  # fmt: skip
             try:
                 await workflow.execute_child_workflow(
                     ReplayCalibrationV3ForMissionWorkflow.run,
                     ReplayTarget(uuid.UUID(plan["tenant_id"]), uuid.UUID(m["mission_id"]),
                                  request.draw_sizes if draw else [],
                                  request.draws_per_size if draw else 0,
-                                 request.size_source),
+                                 request.size_source, named),
                     id=child, id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
                     result_type=CalibrationV3Report,
                 )  # fmt: skip

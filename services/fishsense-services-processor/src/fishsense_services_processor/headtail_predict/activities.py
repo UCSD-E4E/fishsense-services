@@ -44,11 +44,10 @@ from fishsense_services_contracts.headtail import (
 from fishsense_services_contracts.masks import KEPT_MASK_STATUSES
 from fishsense_services_processor.masks import MaskSink, Put, store_mask_or_none
 from fishsense_services_processor.renders.activities import http_put
+from fishsense_core.fish.fish_at_dot import FishialSegmenter, Sam3Segmenter
 from fishsense_services_processor.headtail_predict.predict import (
     FALLBACK_CHECKPOINT,
     PredictOptions,
-    _FishialAdapter,
-    _Sam3Adapter,
     cuda_available,
     get_fallback_segmenter,
     get_segmenter,
@@ -144,7 +143,7 @@ class HeadtailPredictActivities:  # pylint: disable=too-few-public-methods
 
         if on_gpu:
             path, model_id = await self._verified_sam3_checkpoint()
-            segmenter: Any = _Sam3Adapter(
+            segmenter: Any = Sam3Segmenter(
                 await asyncio.to_thread(get_segmenter, str(path))
             )
             options = PredictOptions(
@@ -153,7 +152,9 @@ class HeadtailPredictActivities:  # pylint: disable=too-few-public-methods
                 predictor_version=HEADTAIL_PREDICTOR_VERSION,
             )
         else:
-            segmenter = _FishialAdapter(await asyncio.to_thread(get_fallback_segmenter))
+            segmenter = FishialSegmenter(
+                await asyncio.to_thread(get_fallback_segmenter)
+            )
             options = PredictOptions(
                 checkpoint=FALLBACK_CHECKPOINT,
                 core_version=_core_version(),

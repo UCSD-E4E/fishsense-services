@@ -19,10 +19,8 @@ from fishsense_services_processor.automatic_frames.activities import (
 from fishsense_services_processor.automatic_frames.workflow import (
     PredictAutomaticFramesWorkflow,
 )
-from fishsense_services_processor.automatic_results.frames import (
-    LaserDot,
-    ScoredSam3Adapter,
-)
+from fishsense_core.fish.fish_at_dot import Sam3Segmenter
+from fishsense_services_processor.automatic_results.frames import LaserDot
 from fishsense_services_processor.headtail_predict import stage as headtail_stage
 from fishsense_services_processor.headtail_predict.activities import (
     HeadtailPredictActivities,
@@ -72,7 +70,8 @@ _ACTIVITIES = AutomaticFramesActivities(
     cuda_available=cuda_available,
     predict_dot=_predict_dot,
     render_jpeg=rectify_and_encode_jpeg,
-    segmenter=lambda path: ScoredSam3Adapter(get_segmenter(path)),
+    # Core's SAM 3.1 seam, scored: the chain gates on its scores (core #93).
+    segmenter=lambda path: Sam3Segmenter(get_segmenter(path)),
 )
 
 STAGE = Stage(

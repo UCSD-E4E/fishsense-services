@@ -53,9 +53,13 @@ FOLDER = "2024.06.20.REEF/082929_FishModels_FSL07"
 EXISTING_AT = datetime(2024, 8, 21, 7, 0, 0, tzinfo=timezone.utc)
 
 
-def _orf(date_time="2024:08:21 08:56:51") -> bytes:
+def _orf(date_time="2024:08:21 08:56:51", focal_length=(450, 100)) -> bytes:
     """Padded past one hash chunk so the streaming read is exercised."""
-    return build_orf(date_time=date_time, serial_number="BJ6C67989") + b"\0" * 40_000
+    return (
+        build_orf(date_time=date_time, serial_number="BJ6C67989",
+                  focal_length=focal_length)
+        + b"\0" * 40_000
+    )  # fmt: skip
 
 
 class RecordingCatalog:
@@ -131,11 +135,29 @@ async def test_registers_a_frame_with_its_checksum_and_timestamp():
         "source_path": f"{FOLDER}/A.ORF",
         "captured_at": datetime(2024, 8, 21, 8, 56, 51, tzinfo=timezone.utc),
         "checksum": hashlib.md5(data).hexdigest(),
+        "focal_length_mm": 4.5,
     }
     # The store computes canonicality; there is no way to send it. v1 had to
     # remember not to -- sending it would mark every duplicate canonical and
     # destroy the distinction canonical-only pipeline gating depends on.
     assert "is_canonical" not in capture
+
+
+async def test_a_zoomed_frame_is_registered_with_its_focal_length():
+    """The zoom gate's input (2026-10-25): EXIF 0x920A, recorded at ingest.
+    Unknown stays None -- not the wide end."""
+    catalog = RecordingCatalog()
+
+    await _run(
+        ["Z.ORF", "U.ORF"],
+        {"Z.ORF": _orf(focal_length=(1462, 100)), "U.ORF": _orf(focal_length=None)},
+        catalog=catalog,
+    )
+
+    assert [c["focal_length_mm"] for c in catalog.registered] == [
+        pytest.approx(14.62),
+        None,
+    ]
 
 
 async def test_downloads_the_resolved_nas_path():

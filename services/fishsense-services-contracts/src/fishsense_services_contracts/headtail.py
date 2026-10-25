@@ -68,7 +68,11 @@ HEADTAIL_PREDICTOR_VERSION = 2
 
 #: Stamped by the Mask R-CNN fallback. Negative so it can never equal a real
 #: version: a fallback row is stale until a GPU can upgrade it.
-HEADTAIL_FALLBACK_PREDICTOR_VERSION = -1
+#: -1 until 2026-10-24; -2 since the fallback is fishsense-core's
+#: `FishialSegmenter`, which answers a portrait crop (core's native code
+#: rotates it) where services' adapter refused it as `no_detections`. Stale
+#: either way; the number tells the two apart (review of #349).
+HEADTAIL_FALLBACK_PREDICTOR_VERSION = -2
 
 #: The laser-centred crop, in rectified-frame pixels. Tuned on held-out frames
 #: (v1's sweep); 1400-2200 is a plateau. Moving it bumps the version.
