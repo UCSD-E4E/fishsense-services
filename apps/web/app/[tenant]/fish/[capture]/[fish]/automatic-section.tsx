@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { formatLength } from "@/lib/captures";
 import { automaticOverlay, statusLabel, type AutomaticFrame } from "@/lib/automatic";
+import { colourLabel } from "@/lib/laser-colour";
 
 /**
  * What the automatic run made of this frame (the owner, 2026-10-21: review the
@@ -107,6 +108,9 @@ export function AutomaticSection({
             </Row>
           )}
           <Row label="Laser depth">{frame.depth_m != null ? `${frame.depth_m.toFixed(2)} m` : "—"}</Row>
+          {frame.laser && (
+            <Row label="Laser colour">{colourLabel(frame.laser_color, frame.laser_color_margin)}</Row>
+          )}
           <Row label="Calibration">
             {frame.calibration_source === "label_free"
               ? "Label-free fit"

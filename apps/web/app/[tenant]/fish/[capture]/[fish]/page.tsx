@@ -15,6 +15,7 @@ import {
 } from "@/lib/observations";
 import { paths } from "@/lib/tenant-paths";
 import { AutomaticSection } from "./automatic-section";
+import { colourLabel } from "@/lib/laser-colour";
 
 export const dynamic = "force-dynamic";
 
@@ -153,6 +154,7 @@ export default async function FishDetailPage({ params }: Props) {
                 <Row label="Laser range">{metres(detail.laser.range_m)}</Row>
                 <Row label="Calibration">{detail.laser.calibration_producer ?? "—"}</Row>
                 <Row label="Laser dot">{pixels(detail.laser.dot)}</Row>
+                {detail.laser.dot && <Row label="Laser colour">{colourLabel(detail.laser.color)}</Row>}
                 <Row label="Head">{pixels(detail.laser.head)}</Row>
                 <Row label="Tail">{pixels(detail.laser.tail)}</Row>
               </>

@@ -32,6 +32,9 @@ from fishsense_services_contracts.task_queues import (
     PROCESSOR_TASK_QUEUE,
 )
 
+#: v21 (2026-10-24): an automatic frame's dot carries its colour
+#: (`AutomaticFrameResult.laser_color`/`laser_color_margin`), which the laser
+#: kernel always read and the frames stage dropped. Optional; v20 parses.
 #: v20 (2026-10-23): BioCLIP with fish-model classes, read-only (`species_models`:
 #: `SpeciesModelsInput`, `SpeciesModelsResult`). New models only; v19 parses.
 #: v19 (2026-10-23): the SimCC head/tail keypoint replay (`headtail_keypoints`:
@@ -81,7 +84,7 @@ from fishsense_services_contracts.task_queues import (
 #: JSON is unchanged -- each renamed field keeps its old name on the wire
 #: (`renamed.py`) -- so a v6 processor and a v7 orchestrator interoperate; only
 #: the published schema's model names differ.
-CONTRACT_VERSION = 20
+CONTRACT_VERSION = 21
 
 
 def _discover_models() -> tuple[type[BaseModel], ...]:

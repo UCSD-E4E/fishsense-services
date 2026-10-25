@@ -41,11 +41,16 @@ def _store() -> ProcessorObjectStore:
 
 
 def _predict_dot(raw_path: Path, camera, distortion) -> Optional[LaserDot]:
-    """The laser stage's kernel (wavelength unknown, as production's)."""
-    # pylint: disable-next=import-outside-toplevel,protected-access
-    from fishsense_services_processor.laser_predict.activities import _predict_from_raw
+    """The laser stage's kernel (wavelength unknown, as production's), and
+    the colour it read off the dot: kept since contract v21 (2026-10-24),
+    dropped before (`prediction, *_, checkpoint`)."""
+    # pylint: disable-next=import-outside-toplevel
+    from fishsense_services_processor.laser_predict import activities as laser
 
-    prediction, *_, checkpoint = _predict_from_raw(raw_path, camera, distortion, None)
+    # pylint: disable-next=protected-access
+    prediction, _, _, color, margin, checkpoint = laser._predict_from_raw(
+        raw_path, camera, distortion, None
+    )
     if prediction.x is None or prediction.y is None:
         return None
     return LaserDot(
@@ -54,6 +59,8 @@ def _predict_dot(raw_path: Path, camera, distortion) -> Optional[LaserDot]:
         float(prediction.confidence),
         LASER_PREDICTOR_VERSION,
         checkpoint,
+        color,
+        None if margin is None else float(margin),
     )
 
 

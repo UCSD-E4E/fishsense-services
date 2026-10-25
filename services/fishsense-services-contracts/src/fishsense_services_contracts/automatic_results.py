@@ -69,7 +69,7 @@ Not in ``MODELS``: integration publishes schemas once for every slice.
 
 from __future__ import annotations
 
-from typing import List, Optional, Annotated
+from typing import List, Literal, Optional, Annotated
 from uuid import UUID
 
 from pydantic import BaseModel, field_validator, ConfigDict, model_validator
@@ -200,6 +200,11 @@ class AutomaticFrameResult(BaseModel):
     laser_confidence: Optional[float] = None
     laser_predictor_version: Optional[int] = None
     laser_checkpoint: Optional[str] = None
+    #: The dot's colour, read off its pixels by the laser stage's kernel
+    #: (`laser.LaserPrediction.color`), and how clearly (v21, 2026-10-24).
+    #: None when the dot gave no reading, or from a v20 processor.
+    laser_color: Optional[Literal["red", "green"]] = None
+    laser_color_margin: Optional[float] = None
     head_x: Optional[float] = None
     head_y: Optional[float] = None
     tail_x: Optional[float] = None

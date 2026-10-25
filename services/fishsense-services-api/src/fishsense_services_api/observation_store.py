@@ -31,6 +31,7 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api.laser_colour_store import LABEL_COLOURS
 from fishsense_services_api.renders_store import newest_render
 from fishsense_services_api.thumbnails_store import THUMBNAIL_WIDTH
 
@@ -100,6 +101,9 @@ class LaserEvidence:
     dot: Point | None
     head: Point | None
     tail: Point | None
+    #: The colour the labeller chose for the dot, ``red`` or ``green``; None
+    #: when the label names none (2026-10-24).
+    color: str | None = None
 
 
 @dataclass(frozen=True)
@@ -338,7 +342,7 @@ async def observation(
                     m.algorithm, m.algorithm_version, m.core_version,
                     m.model_version,
                     depth.depth_m, depth.range_m, cal.producer,
-                    ll.x AS dot_x, ll.y AS dot_y,
+                    ll.x AS dot_x, ll.y AS dot_y, ll.label AS dot_label,
                     ht.head_x, ht.head_y, ht.tail_x, ht.tail_y,
                     dp.snout_x, dp.snout_y, dp.fork_x, dp.fork_y, dp.origin
                 FROM observations o
@@ -391,6 +395,7 @@ async def observation(
             dot=_point(row.dot_x, row.dot_y),
             head=_point(row.head_x, row.head_y),
             tail=_point(row.tail_x, row.tail_y),
+            color=LABEL_COLOURS.get(row.dot_label),
         )
     points = None
     if row.snout_x is not None:

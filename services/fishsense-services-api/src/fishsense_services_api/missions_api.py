@@ -18,9 +18,11 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Response, status
 from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from fishsense_services_api.db import tenant_transaction
+from fishsense_services_api.laser_colour_store import mission_laser_colours
 from fishsense_services_api.memberships import Membership
 from fishsense_services_api.mission_facts import Port, Purpose
 from fishsense_services_api.mission_store import (
@@ -45,6 +47,25 @@ __all__ = ["add_mission_routes"]
 DeploymentNumber = Annotated[int, Path(ge=1)]
 
 
+class ColourCountsView(BaseModel):
+    red: int
+    green: int
+    #: A dot with no colour: a label without one, or an abstaining reading.
+    unread: int
+
+
+class LaserColoursView(BaseModel):
+    """Frames by laser colour, per source; counts, never a verdict, so a
+    mission whose sources disagree shows it (`laser_colour_store`)."""
+
+    #: Labellers' choice, on live labels with a dot.
+    labels: ColourCountsView
+    #: The human path's laser stage, read off the dot.
+    predictions: ColourCountsView
+    #: The automatic chain's dot, read by the same kernel (0068).
+    automatic: ColourCountsView
+
+
 class MissionDetail(Mission):
     #: The Lite folder; a phone mission has none (0057).
     source_path: str | None
@@ -52,6 +73,7 @@ class MissionDetail(Mission):
     port_note: str | None
     country: str | None
     region: str | None
+    laser_colors: LaserColoursView
 
 
 class PortStatement(BaseModel):
@@ -104,6 +126,13 @@ def add_mission_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None
 
     async def _detail(conn, member, number) -> MissionDetail:
         found = await mission_detail(conn, member.tenant_id, number)
+        mission_id = (
+            await conn.execute(
+                text("SELECT id FROM missions WHERE tenant_id = :t AND number = :n"),
+                {"t": member.tenant_id, "n": number},
+            )
+        ).scalar_one()
+        colours = await mission_laser_colours(conn, member.tenant_id, mission_id)
         return MissionDetail(
             **Mission.model_validate(found.summary, from_attributes=True).model_dump(),
             source_path=found.source_path,
@@ -111,6 +140,11 @@ def add_mission_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None
             port_note=found.port_note,
             country=found.country,
             region=found.region,
+            laser_colors=LaserColoursView(
+                labels=ColourCountsView(**vars(colours.labels)),
+                predictions=ColourCountsView(**vars(colours.predictions)),
+                automatic=ColourCountsView(**vars(colours.automatic)),
+            ),
         )
 
     @app.get(

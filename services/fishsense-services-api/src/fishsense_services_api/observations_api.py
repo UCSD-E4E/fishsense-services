@@ -120,6 +120,8 @@ class LaserEvidenceView(BaseModel):
     dot: Point | None
     head: Point | None
     tail: Point | None
+    #: The labeller's colour for the dot, ``red`` or ``green``, or None.
+    color: str | None
 
 
 class DevicePointsView(BaseModel):
@@ -425,6 +427,7 @@ def add_observation_routes(
                     dot=_point(laser.dot),
                     head=_point(laser.head),
                     tail=_point(laser.tail),
+                    color=laser.color,
                 )
                 if laser is not None
                 else None

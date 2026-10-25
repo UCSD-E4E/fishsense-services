@@ -879,6 +879,10 @@ export interface components {
             depth_m: number | null;
             head: components["schemas"]["PixelPoint"] | null;
             laser: components["schemas"]["PixelPoint"] | null;
+            /** Laser Color */
+            laser_color: string | null;
+            /** Laser Color Margin */
+            laser_color_margin: number | null;
             /** Laser Confidence */
             laser_confidence: number | null;
             /** Length M */
@@ -959,6 +963,8 @@ export interface components {
             depth_m: number | null;
             /** Human Length M */
             human_length_m: number | null;
+            /** Laser Color */
+            laser_color: string | null;
             /** Laser Confidence */
             laser_confidence: number | null;
             /** Length M */
@@ -1104,6 +1110,15 @@ export interface components {
         Cleared: {
             /** Cleared */
             cleared: number;
+        };
+        /** ColourCountsView */
+        ColourCountsView: {
+            /** Green */
+            green: number;
+            /** Red */
+            red: number;
+            /** Unread */
+            unread: number;
         };
         /** ConfidenceGeometry */
         ConfidenceGeometry: {
@@ -1265,10 +1280,22 @@ export interface components {
             /** Reason */
             reason: string | null;
         };
+        /**
+         * LaserColoursView
+         * @description Frames by laser colour, per source; counts, never a verdict, so a
+         *     mission whose sources disagree shows it (`laser_colour_store`).
+         */
+        LaserColoursView: {
+            automatic: components["schemas"]["ColourCountsView"];
+            labels: components["schemas"]["ColourCountsView"];
+            predictions: components["schemas"]["ColourCountsView"];
+        };
         /** LaserEvidenceView */
         LaserEvidenceView: {
             /** Calibration Producer */
             calibration_producer: string | null;
+            /** Color */
+            color: string | null;
             /** Depth M */
             depth_m: number | null;
             dot: components["schemas"]["Point"] | null;
@@ -1486,6 +1513,7 @@ export interface components {
             deployment_number: number | null;
             /** Device Name */
             device_name: string | null;
+            laser_colors: components["schemas"]["LaserColoursView"];
             /** Name */
             name: string | null;
             /** Notes */

@@ -70,7 +70,10 @@ INSTRUCTIONS = (
     "laser or head_tail review whose action is accept or fix has become a human "
     "label, and `human_length_m` is the frame's human length when there is one; "
     "prefer it. Lengths come a page at a time: pass `next` as `after` until it "
-    "is null (a page may be short and still have a next). When you report "
+    "is null (a page may be short and still have a next). A mission's "
+    "`laser_colors` counts its frames by laser colour from three sources "
+    "(labellers, the human path's predictions, the automatic dot): say which "
+    "you use, and say so when they disagree. When you report "
     "numbers, give how many fish or frames they rest on. These tools only "
     "read; changes are made in the web app."
 )

@@ -104,7 +104,7 @@ _ROWS_SQL = f"""
     SELECT d.number AS mission_number, c.id AS capture_id,
            c.number AS capture_number, c.captured_at,
            m.length_m, m.depth_m, m.calibration_source,
-           h.laser_confidence, h.sam_score,
+           h.laser_confidence, h.laser_color, h.sam_score,
            s.predicted_choice AS species, {_SCIENTIFIC} AS scientific_name,
            s.top1_probability AS species_probability, s.margin AS species_margin,
            (SELECT CASE WHEN count(*) = 1 THEN max(o.length_m) END
@@ -166,6 +166,9 @@ class AutomaticLength:
     depth_m: float | None
     calibration_source: str
     laser_confidence: float | None
+    #: The dot's colour as the laser kernel read it (0068); None when it gave
+    #: no reading, and on rows from before.
+    laser_color: str | None
     sam_score: float | None
     species: str | None
     scientific_name: str | None

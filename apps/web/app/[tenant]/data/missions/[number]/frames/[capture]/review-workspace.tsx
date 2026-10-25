@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { ZoomFrame, type Marker } from "@/app/_review/zoom-frame";
 import type { AutomaticFrame } from "@/lib/automatic";
+import { colourLabel } from "@/lib/laser-colour";
 import { maskFromRgba, snapToMask, type Pixel } from "@/lib/mask-snap";
 import {
   KINDS,
@@ -373,6 +374,13 @@ export function ReviewWorkspace({
             );
           })}
         </div>
+
+        {kind === "laser" && frame.laser && (
+          <p className="mb-3 text-sm text-fg-2">
+            The model read this dot&apos;s colour as{" "}
+            <strong className="text-fg">{colourLabel(frame.laser_color, frame.laser_color_margin)}</strong>.
+          </p>
+        )}
 
         <p className="mb-3 text-sm text-fg-2">
           You&apos;re <strong className="text-fg">{LEVEL_LABEL[level]}</strong> at this.{" "}
