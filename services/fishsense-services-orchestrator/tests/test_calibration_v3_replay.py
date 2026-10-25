@@ -79,12 +79,19 @@ def _stubs(*, frames=2, broken=(), mode="gpu", template=True):
                 "reference_points": [[1.0, 2.0], [3.0, 4.0]],
                 "slate_pdf": {"bucket": "scratch", "key": f"slate_pdf/{IDS[5]}.pdf"}}  # fmt: skip
 
+    @activity.defn(name="resolve_slate_template_by_v1")
+    async def by_v1(t) -> Optional[dict]:
+        EVENTS.append(("template v1", t["v1_id"]))
+        return {"slate_template_id": str(IDS[4]), "dpi": 100,
+                "reference_points": [[5.0, 6.0]],
+                "slate_pdf": {"bucket": "scratch", "key": f"slate_pdf/{IDS[4]}.pdf"}}  # fmt: skip
+
     @activity.defn(name="stage_slate_pdf")
     async def stage_pdf(target) -> bool:
         EVENTS.append(("stage pdf", str(target["slate_template_id"])))
         return True
 
-    return [plan, resolve, wake, wake_gpu, slate, stage_pdf]
+    return [plan, resolve, wake, wake_gpu, slate, stage_pdf, by_v1]
 
 
 @workflow.defn(name="ReplayAutomaticCalibrationV3Workflow")
@@ -273,3 +280,24 @@ async def test_the_template_resolves_with_where_its_pdf_is_staged():
     assert got["slate_pdf"] == layout.slate_pdf(TENANT, IDS[5]).model_dump(mode="json")
     assert await env.run(acts.resolve_mission_slate_template,
                          AutomaticTarget(TENANT, IDS[2])) is None  # fmt: skip
+
+
+async def test_a_named_template_is_posed_with_and_the_missions_own_never_read():
+    """Calibration v4's coverage (2026-10-24): most missions record no slate
+    template, so the replay can be told which one their frames show."""
+    target = ReplayTarget(TENANT, IDS[1], size_source="pose", slate_template_v1=7)
+    await _run(
+        ReplayCalibrationV3ForMissionWorkflow.run, target, frames=2, template=False
+    )
+    assert ("template v1", 7) in EVENTS and ("template",) not in EVENTS
+    assert ("stage pdf", str(IDS[4])) in EVENTS
+    assert ("pose", "2", f"slate_pdf/{IDS[4]}.pdf", "100") in EVENTS
+
+
+async def test_the_run_gives_each_mission_its_named_template_and_records_it():
+    request = ReplayRequest(tenant="lab", numbers=[1, 2], size_source="pose",
+                            templates={"1": 7})  # fmt: skip
+    result, _ = await _run(ReplayCalibrationV3Workflow.run, request, template=True)
+    rows = {r["number"]: r for r in result["missions"]}
+    assert rows[1]["slate_template_v1"] == 7 and rows[2]["slate_template_v1"] is None
+    assert EVENTS.count(("template v1", 7)) == 1 and EVENTS.count(("template",)) == 1

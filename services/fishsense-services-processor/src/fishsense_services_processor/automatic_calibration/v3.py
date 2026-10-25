@@ -40,12 +40,17 @@ human dots 1.7 px.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field
 from typing import Callable, Optional, Sequence
 
 import numpy as np
 from fishsense_core import size_constancy as sc
 from fishsense_core.line_fit import consensus_line
+
+from fishsense_services_processor.automatic_calibration.label_free import (
+    LabelFreeFit,
+    refused,
+)
 
 __all__ = [
     "CHECK_MEDIAN_PX",
@@ -142,35 +147,6 @@ def beam_line(camera_matrix, position, axis) -> np.ndarray:
     pts = [k @ (o + ((z - o[2]) / a[2]) * a) for z in (0.5, 20.0)]
     line = np.cross(pts[0], pts[1])
     return line / np.hypot(line[0], line[1])
-
-
-@dataclass(frozen=True)
-class LabelFreeFit(sc.LabelFreeFit):
-    """fishsense-core's `size_constancy.LabelFreeFit`, plus `scale_sd`, which
-    v3 sets and core does not carry (core #97 left services-only fields to
-    services): the length scale's predicted SD from dot and size noise
-    (calibration v3 on SAM sizes, 2026-10-23); None where not predicted."""
-
-    scale_sd: Optional[float] = None
-
-    @classmethod
-    def of(cls, fit: sc.LabelFreeFit) -> "LabelFreeFit":
-        """`fit` as this type (unchanged if it already is one)."""
-        if isinstance(fit, cls):
-            return fit
-        return cls(**{f.name: getattr(fit, f.name) for f in fields(sc.LabelFreeFit)})
-
-
-def refused(reason: str, *, o_mag_m: float = sc.O_DESIGN_M, **seen) -> LabelFreeFit:
-    """A refused fit, with what it saw: every field not in `seen` empty."""
-    values = {
-        "laser_position": None, "laser_axis": None, "vanishing_px": None,
-        "line_direction": None, "line_offset_px": None, "used": [],
-        "frames_used": 0, "pairs": 0, "size_ratio": None, "se_px": None,
-        "pair_residual_sd": None, "o_mag_m": o_mag_m,
-    }  # fmt: skip
-    values.update(seen)
-    return LabelFreeFit(outcome="refused", refusal_reason=reason, **values)
 
 
 @dataclass(frozen=True)

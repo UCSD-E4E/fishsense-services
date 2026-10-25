@@ -26,6 +26,18 @@ non-retryable error); the version constants come from the contract package;
 and a corrected dot never made the row stale; **a kept mask's box rides on the
 result** (`mask_bbox`, frame pixels), which the species pre-annotation stage
 crops by.
+
+2026-10-24: the kernel is fishsense-core's (`fishsense_core.fish.fish_at_dot`,
+core #89, ported from this module): the crop, the laser gate, the keypointer,
+the whole-frame retry of a cut mask and SAM's score gate, with core's
+`Sam3Segmenter` and `FishialSegmenter` in place of this module's adapters.
+What stays here is the service's: decoding the JPEG (`decode_failed`), the
+models' loading and GPU refusal, naming a laser *label* from the dot core
+names, and the result row. Core's `FishialSegmenter` has no portrait refusal
+(core's native code has rotated portrait input since 4.0.0), which this
+module's adapter kept and turned into `no_detections`; the stage's crops are
+1800x1350 windows of landscape frames, so its outputs do not change and
+`HEADTAIL_PREDICTOR_VERSION` stands.
 """
 
 from __future__ import annotations
@@ -34,9 +46,10 @@ import logging
 import threading
 import uuid
 from dataclasses import dataclass
-from typing import Any, List, Optional, Sequence
+from typing import Any, Optional, Sequence
 
 import numpy as np
+from fishsense_core.fish.fish_at_dot import FishAtDot, find_fish_at_dot
 from temporalio.exceptions import ApplicationError
 
 from fishsense_services_contracts.headtail import (
@@ -45,19 +58,12 @@ from fishsense_services_contracts.headtail import (
     HEADTAIL_PREDICTOR_VERSION,
     HeadtailPredictionResult,
 )
-from fishsense_services_processor.headtail_predict.geometry import (
-    crop_origin,
-    cut_by_window,
-    lift_point,
-    mask_at_point,
-    mask_box,
-    silhouette_ratio,
-)
 
 __all__ = [
     "FALLBACK_CHECKPOINT",
     "PredictOptions",
     "cuda_available",
+    "find_fish_in_jpeg",
     "get_fallback_segmenter",
     "get_segmenter",
     "predict_from_jpeg",
@@ -167,19 +173,44 @@ class PredictOptions:
     grow_cut_masks: bool = False
 
 
-def _laser_label_for_mask(
-    local_points: Sequence[Sequence[float]],
-    laser_label_ids: Optional[Sequence[uuid.UUID]],
-    binary,
-) -> Optional[uuid.UUID]:
-    """Which laser label landed on the chosen mask, if any were supplied."""
-    if not laser_label_ids:
+def _decode(jpeg_bytes: bytes) -> Optional[np.ndarray]:
+    # pylint: disable-next=import-outside-toplevel
+    import cv2
+
+    return cv2.imdecode(np.frombuffer(jpeg_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+
+
+def find_fish_in_jpeg(
+    jpeg_bytes: bytes,
+    laser_points: Sequence[Sequence[float]],
+    segmenter: Any,
+    options: Optional[PredictOptions] = None,
+    mask_sink: Any = None,
+    score_gate: Optional[float] = None,
+) -> Optional[FishAtDot]:
+    """Core's `find_fish_at_dot` on the decoded JPEG; None when it will not
+    decode. `mask_sink` (`masks.MaskSink`), when given, is handed the mask
+    kept, to be stored (contract 12, 2026-10-21). `score_gate` is the
+    automatic chain's (`automatic_results.frames`), and needs a scored
+    segmenter."""
+    options = options or PredictOptions()
+    frame = _decode(jpeg_bytes)
+    if frame is None:
         return None
-    for (px, py), label_id in zip(local_points, laser_label_ids):
-        xi, yi = int(round(px)), int(round(py))
-        if 0 <= yi < binary.shape[0] and 0 <= xi < binary.shape[1] and binary[yi, xi]:
-            return label_id
-    return None
+    found = find_fish_at_dot(
+        frame,
+        laser_points,
+        segmenter,
+        crop_w=options.crop_w,
+        crop_h=options.crop_h,
+        grow_cut_masks=options.grow_cut_masks,
+        score_gate=score_gate,
+    )
+    if mask_sink is not None and found.mask is not None:
+        mask_sink.keep(
+            found.mask, found.crop_x, found.crop_y, found.width, found.height
+        )
+    return found
 
 
 def predict_from_jpeg(
@@ -191,212 +222,59 @@ def predict_from_jpeg(
     options: Optional[PredictOptions] = None,
     mask_sink: Any = None,
 ) -> HeadtailPredictionResult:
-    """Decode, crop, segment, gate, keypoint, and lift back to frame pixels.
-
-    `segmenter` is anything with `segment(image) -> list[np.ndarray]` of
-    crop-local binary masks: production passes an adapter, tests a stub.
-    `mask_sink` (`masks.MaskSink`), when given, is handed the mask kept, to
-    be stored (contract 12, 2026-10-21).
-    """
-    # pylint: disable=import-outside-toplevel
-    import cv2
-
-    options = options or PredictOptions()
-
-    def _abstain(status: str, **extra) -> HeadtailPredictionResult:
-        return HeadtailPredictionResult(
-            capture_id=capture_id,
-            status=status,
-            predictor_version=options.predictor_version,
-            checkpoint=options.checkpoint,
-            core_version=options.core_version,
-            **extra,
+    """Decode, then core's crop, segment, gate, keypoint and lift, as the
+    stage's result row. `segmenter` is anything with
+    `segment(image) -> list[np.ndarray]`: core's `Sam3Segmenter` or
+    `FishialSegmenter` in production, a stub in tests. `laser_label_ids`, when
+    given, names one label per laser point: the result names the label of the
+    dot core reports (`FishAtDot.dot`)."""
+    if laser_label_ids and len(laser_label_ids) != len(laser_points):
+        # A caller's bug: every retry gets the same payload (review of #349).
+        raise ApplicationError(
+            f"{len(laser_label_ids)} laser label ids for {len(laser_points)} "
+            "laser points: one per dot, or none",
+            type="LaserLabelsMismatch",
+            non_retryable=True,
         )
-
-    frame = cv2.imdecode(np.frombuffer(jpeg_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
-    if frame is None:
-        return _abstain("decode_failed")
-    height, width = frame.shape[:2]
-
-    if not laser_points:
-        return _abstain("laser_off_all_fish", width=width, height=height)
-
-    origin_x, origin_y = crop_origin(
-        laser_points[0][0],
-        laser_points[0][1],
-        width,
-        height,
-        options.crop_w,
-        options.crop_h,
-    )
-    crop = np.ascontiguousarray(
-        frame[
-            origin_y : origin_y + options.crop_h,
-            origin_x : origin_x + options.crop_w,
-        ]
-    )
-
-    masks = segmenter.segment(crop)
-    # v2: with no mask kept, the answer came from the crop, centred on the
-    # first dot, so the abstention names it: a correction to that dot then
-    # makes the row stale (v1 left it NULL, and "no fish" stood forever).
-    placed = {
-        "width": width,
-        "height": height,
-        "crop_x": origin_x,
-        "crop_y": origin_y,
-        "laser_label_id": laser_label_ids[0] if laser_label_ids else None,
-    }
-    if not masks:
-        return _abstain("no_detections", **placed)
-
-    local_points = [(px - origin_x, py - origin_y) for px, py in laser_points]
-    mask = mask_at_point(masks, local_points)
-    if mask is None:
-        return _abstain("laser_off_all_fish", **placed)
-
-    binary = (np.asarray(mask) > 0).astype(np.uint8)
-    if options.grow_cut_masks and cut_by_window(
-        binary, origin_x, origin_y, width, height
-    ):
-        # The fish runs on past the window (lab mission 383, 2026-10-22: a
-        # 686 mm grouper cut at both ends measured 554 mm). The cut mask's
-        # length is known to be wrong, so it is never kept: the whole frame
-        # answers, or the frame abstains.
-        origin_x = origin_y = 0
-        placed.update(crop_x=0, crop_y=0)
-        local_points = [(float(px), float(py)) for px, py in laser_points]
-        masks = segmenter.segment(np.ascontiguousarray(frame))
-        if not masks:
-            return _abstain("no_detections", **placed)
-        mask = mask_at_point(masks, local_points)
-        if mask is None:
-            return _abstain("laser_off_all_fish", **placed)
-        binary = (np.asarray(mask) > 0).astype(np.uint8)
-    if mask_sink is not None:
-        mask_sink.keep(binary, origin_x, origin_y, width, height)
-    return _keypoint(
-        binary,
-        capture_id=capture_id,
-        origin=(origin_x, origin_y),
-        frame_size=(width, height),
-        local_points=local_points,
-        laser_label_ids=laser_label_ids,
-        options=options,
-    )
+    options = options or PredictOptions()
+    found = find_fish_in_jpeg(jpeg_bytes, laser_points, segmenter, options, mask_sink)
+    return _result(found, capture_id, laser_label_ids, options)
 
 
-def _keypoint(
-    binary,
-    *,
+def _result(
+    found: Optional[FishAtDot],
     capture_id: uuid.UUID,
-    origin: tuple,
-    frame_size: tuple,
-    local_points: Sequence[Sequence[float]],
     laser_label_ids: Optional[Sequence[uuid.UUID]],
     options: PredictOptions,
 ) -> HeadtailPredictionResult:
-    """Keypoint one chosen mask and lift the result into frame coordinates."""
-    # pylint: disable=import-outside-toplevel
-    from fishsense_core.fish import FishHeadTailDetector
-
-    origin_x, origin_y = origin
-    area = int(np.count_nonzero(binary))
-    common = {
+    """Core's answer as the stage's row. With no dots there is no crop to
+    place (core says (0, 0)), so the row leaves it NULL, as before."""
+    provenance = {
         "capture_id": capture_id,
-        "width": frame_size[0],
-        "height": frame_size[1],
-        "crop_x": origin_x,
-        "crop_y": origin_y,
         "predictor_version": options.predictor_version,
         "checkpoint": options.checkpoint,
         "core_version": options.core_version,
-        # The dot that chose the mask, on a failure too (v2; v1: NULL).
-        "laser_label_id": _laser_label_for_mask(local_points, laser_label_ids, binary),
-        # v2: the kept mask's box, on a failure too -- the fish is known even
-        # when its keypoints are not (the species stage crops by it).
-        "mask_bbox": mask_box(binary, origin_x, origin_y),
     }
-
-    try:
-        head, tail = FishHeadTailDetector().find_head_tail_img(binary * 255)
-    # A native call with no documented exception hierarchy; one unfittable
-    # mask must not fail the whole per-image activity.
-    # pylint: disable-next=broad-exception-caught
-    except Exception as exc:
-        _log.warning("capture=%s find_head_tail_img failed: %s", capture_id, exc)
-        return HeadtailPredictionResult(
-            status="headtail_failed", mask_area_px=area, **common
-        )
-
-    head_x, head_y = lift_point(head, origin_x, origin_y)
-    tail_x, tail_y = lift_point(tail, origin_x, origin_y)
-    length = float(np.hypot(head_x - tail_x, head_y - tail_y))
-
+    if found is None:
+        return HeadtailPredictionResult(status="decode_failed", **provenance)
+    placed = found.dot is not None
+    head = found.head or (None, None)
+    tail = found.tail or (None, None)
     return HeadtailPredictionResult(
-        status="predicted",
-        head_x=head_x,
-        head_y=head_y,
-        tail_x=tail_x,
-        tail_y=tail_y,
-        mask_area_px=area,
-        silhouette_ratio=silhouette_ratio(area, length),
-        **common,
+        status=found.status,
+        width=found.width,
+        height=found.height,
+        crop_x=found.crop_x if placed else None,
+        crop_y=found.crop_y if placed else None,
+        laser_label_id=(
+            laser_label_ids[found.dot] if placed and laser_label_ids else None
+        ),
+        mask_bbox=list(found.mask_bbox) if found.mask_bbox is not None else None,
+        mask_area_px=found.mask_area_px,
+        silhouette_ratio=found.silhouette_ratio,
+        head_x=head[0],
+        head_y=head[1],
+        tail_x=tail[0],
+        tail_y=tail[1],
+        **provenance,
     )
-
-
-def _to_numpy(mask) -> np.ndarray:
-    """A mask as an ndarray, whatever the backend handed back: a device
-    tensor is detached and moved to the CPU first."""
-    if getattr(mask, "detach", None) is not None:
-        mask = mask.detach().cpu()
-    return np.asarray(mask)
-
-
-class _FishialAdapter:  # pylint: disable=too-few-public-methods
-    """`FishSegmentation` behind the `segment` seam: BGR in, landscape only,
-    its instance label map split into binary masks."""
-
-    def __init__(self, segmentation: Any):
-        self._segmentation = segmentation
-
-    def segment(self, image_bgr: np.ndarray) -> List[np.ndarray]:
-        height, width = image_bgr.shape[:2]
-        if width <= height:
-            _log.warning(
-                "fallback segmenter given a %dx%d (non-landscape) crop; "
-                "FishSegmentation returns an empty mask for these",
-                width,
-                height,
-            )
-            return []
-        labels = np.asarray(self._segmentation.inference(image_bgr))
-        ids = [int(i) for i in np.unique(labels) if int(i) != 0]
-        return [(labels == i) for i in ids]
-
-
-class _Sam3Adapter:  # pylint: disable=too-few-public-methods
-    """The SAM 3.1 processor behind the `segment` seam."""
-
-    def __init__(self, processor: Any, prompt: str = "fish"):
-        self._processor = processor
-        self._prompt = prompt
-
-    def segment(self, image_bgr: np.ndarray) -> List[np.ndarray]:
-        """One concept-prompted segmentation, under bfloat16 autocast entered
-        as a context manager (the thread is reused), on a PIL image (an HWC
-        array yields three-pixel-wide masks)."""
-        # pylint: disable=import-outside-toplevel,import-error
-        import cv2
-        import PIL.Image
-        import torch
-
-        rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-        device_type = "cuda" if torch.cuda.is_available() else "cpu"
-        with torch.autocast(device_type, dtype=torch.bfloat16):
-            state = self._processor.set_image(PIL.Image.fromarray(rgb))
-            state = self._processor.set_text_prompt(self._prompt, state)
-        masks = state.get("masks") if hasattr(state, "get") else None
-        if masks is None:
-            return []
-        return [_to_numpy(m).squeeze() for m in masks]

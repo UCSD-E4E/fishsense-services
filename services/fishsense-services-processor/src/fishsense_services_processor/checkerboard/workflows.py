@@ -27,7 +27,11 @@ execution timeout.
 
 v2 changes: the calibration child returns the fit's `LaserCalibrationResult`
 for the orchestrator to persist (v1: the persisted row id), and frames and
-renders are `ObjectRef`s the orchestrator issued.
+renders are `ObjectRef`s the orchestrator issued. The per-frame activities
+never retry a `TypeError` (review of #353): fishsense-core's detector raises
+it on a frame that is not uint8, a decode-path bug that every attempt
+repeats, and under Temporal's default policy each retry re-downloads and
+re-decodes a 1-3 GB raw without end. Anything else still retries.
 """
 
 import asyncio
@@ -35,6 +39,7 @@ from datetime import timedelta
 from typing import List
 
 from temporalio import workflow
+from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     import annotated_types  # noqa: F401  pylint: disable=unused-import
@@ -57,6 +62,9 @@ __all__ = [
     "PerformCheckerboardCalibrationWorkflow",
     "VerifyCheckerboardLatticeWorkflow",
 ]
+
+#: A frame the detector cannot take at all fails once (see the docstring).
+_FRAME_RETRY = RetryPolicy(non_retryable_error_types=["TypeError"])
 
 
 @workflow.defn
@@ -93,6 +101,7 @@ class PerformCheckerboardCalibrationWorkflow:
                         target=payload.target,
                     ),
                     start_to_close_timeout=timedelta(minutes=10),
+                    retry_policy=_FRAME_RETRY,
                     result_type=CheckerboardObservation,
                 )
                 for image in payload.images
@@ -149,6 +158,7 @@ class VerifyCheckerboardLatticeWorkflow:
                         target=payload.target,
                     ),
                     start_to_close_timeout=timedelta(minutes=10),
+                    retry_policy=_FRAME_RETRY,
                     result_type=CheckerboardLatticeRender,
                 )
                 for image in images

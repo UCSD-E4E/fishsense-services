@@ -51,7 +51,7 @@ def test_the_region_the_stage_gates_on_is_pinned_to_this_version():
         [1920, 1905],
         [1625, 1365],
     ], "the laser region changed -- bump LASER_PREDICTOR_VERSION and this fixture"
-    assert sut.LASER_PREDICTOR_VERSION == 2
+    assert sut.LASER_PREDICTOR_VERSION == 3
 
 
 def test_the_ls_tag_carries_the_version():

@@ -176,7 +176,7 @@ def test_the_fit_gates_before_it_accepts():
     for gate in (
         "check_observation_geometry(",
         "check_fit_self_consistency(",
-        "check_baseline_plausible(laser_position)",
+        "check_baseline_plausible(",
         "check_calibration_describes_mission(",
     ):
         assert source.index(gate) < accepted_at, gate

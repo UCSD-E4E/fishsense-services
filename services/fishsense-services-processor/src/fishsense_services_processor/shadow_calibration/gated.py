@@ -14,8 +14,9 @@ variant is cscw's script exactly (`fit.port_fit`); this adds, around it:
   time. Dive 279's red specks lie on the laser line at the wrong range, so no
   line gate can see them; this can (imwut IN_PLANE_DRIFT.md:346-358);
 - **the refusals** (§6), recorded in the committed order. The 0.6 m rule is
-  production's own lever-arm gate, `calibration.consistency.
-  check_observation_geometry`, on the fitted laser points, not a new rule.
+  production's own lever-arm gate, `fishsense_core.calibration_checks.
+  check_observation_geometry` (services' `calibration.consistency` until
+  fishsense-core 4.3.0), on the fitted laser points, not a new rule.
 
 Also recorded, deciding nothing: the lever arm with the mission's own
 production offset (author's sensitivity check), and slate length constancy --
@@ -28,14 +29,13 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Optional, Sequence
 
 import numpy as np
-
 from fishsense_core import size_constancy as sc
-from fishsense_core.line_fit import fit_line_pca, ransac_line
-
-from fishsense_services_processor.calibration.consistency import (
+from fishsense_core.calibration_checks import (
     CalibrationUnderdeterminedError,
     check_observation_geometry,
 )
+from fishsense_core.line_fit import fit_line_pca, ransac_line
+
 from fishsense_services_processor.shadow_calibration.fit import (
     O_DESIGN_M,
     PortFit,

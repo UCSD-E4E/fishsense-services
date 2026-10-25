@@ -118,7 +118,7 @@ Plus four SQL views that Superset reads directly (§2.6).
 
 ### 2.3 Models (no MLflow anywhere in v1)
 - **Laser detector** (ResNet-34 checkpoint) — **baked into the image** from Hugging Face
-  `ucsde4e/fishsense-laser-detector`. `LASER_PREDICTOR_VERSION=2`.
+  `ucsde4e/fishsense-laser-detector`. `LASER_PREDICTOR_VERSION=3` (2026-10-24: core 4.3.0's colour rule).
 - **SAM 3.1** (head/tail, laser-centred crop) — pulled from Garage bucket **`model-weights`**
   at `{name}/{version}/{filename}`, version pinned in config, volume-cached.
   `HEADTAIL_PREDICTOR_VERSION=2`.

@@ -2,8 +2,10 @@
 
 Ported from fishsense-lite@77e8f8e5 services/fishsense-data-processing-
 workflow-worker/tests/test_perform_checkerboard_calibration_workflow.py. The
-detection kernel is covered by `test_checkerboard_detection.py` and the
-geometry by `test_calibration_geometry.py`. What is left, and what these pin
+detection kernel is fishsense-core's (`fishsense_core.checkerboard`) and the
+geometry fishsense-core's (`fishsense_core.plane`), each tested in core's own
+suite and together at the call site in `test_checkerboard_call_site.py`. What
+is left, and what these pin
 down, is the wiring: that the fan-out hands every frame the board geometry it
 was dispatched with, that unusable frames are dropped rather than failing the
 dive, and that the fit refuses the same cases stage 13 refuses.
@@ -295,7 +297,7 @@ async def test_fit_does_not_accept_when_the_gate_rejects(monkeypatch):
     A mixed dot population shipped a calibration whose length errors reached
     +137% downstream on prod dive 77. The gate refuses; nothing is accepted.
     """
-    from fishsense_services_processor.calibration.consistency import (
+    from fishsense_core.calibration_checks import (
         CalibrationInconsistentError,
     )
 
@@ -404,3 +406,35 @@ async def test_the_refusal_says_why_the_frames_went():
     assert result.outcome == "refused"
     assert "dot_off_board" in result.refusal_reason
     assert "from 2 frames" in result.refusal_reason
+
+
+async def test_a_frame_that_is_not_uint8_fails_once_not_forever():
+    """Core's detector raises `TypeError` on a non-uint8 frame: a decode-path
+    bug, the same on every attempt. Under Temporal's default policy each
+    retry re-downloads and re-decodes a 1-3 GB raw, without end (review of
+    #353). A retry would succeed here, so only the policy can fail it."""
+    from temporalio.client import (  # pylint: disable=import-outside-toplevel
+        WorkflowFailureError,
+    )
+
+    attempts: dict = {}
+
+    @activity.defn(name="detect_checkerboard_laser_point")
+    async def _detect(payload: DetectCheckerboardLaserPointInput):
+        attempts[payload.capture_id] = attempts.get(payload.capture_id, 0) + 1
+        if attempts[payload.capture_id] == 1:
+            raise TypeError("detect_checkerboard needs a uint8 image")
+        return CheckerboardObservation(
+            capture_id=payload.capture_id,
+            point=[0.01, 0.02, 1.4],
+            laser_x=payload.laser_x,
+            laser_y=payload.laser_y,
+        )
+
+    @activity.defn(name="fit_checkerboard_laser_extrinsics")
+    async def _fit(_payload: FitCheckerboardExtrinsicsInput):
+        return _accepted()
+
+    with pytest.raises(WorkflowFailureError):
+        await _execute([_detect, _fit], _input(images=2), "checkerboard-not-uint8")
+    assert set(attempts.values()) == {1}

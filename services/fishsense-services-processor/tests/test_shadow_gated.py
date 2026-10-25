@@ -74,7 +74,7 @@ def test_the_committed_values_are_section_13s():
 
 
 def test_the_lever_arm_is_productions_own_gate():
-    from fishsense_services_processor.calibration.consistency import (
+    from fishsense_core.calibration_checks import (
         MIN_OBSERVATION_LEVER_M,
     )
 
