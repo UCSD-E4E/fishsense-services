@@ -40,16 +40,14 @@ class MaskBackfillActivities:  # pylint: disable=too-few-public-methods
         store_factory: Callable[[], Any],
         sam3_checkpoint: Callable[[], Awaitable[tuple[Path, str]]],
         cuda_available: Callable[[], bool],
-        scored_segmenter: Callable[[str], Any],
-        plain_segmenter: Callable[[str], Any],
+        segmenter: Callable[[str], Any],
         put: Put = http_put,
     ) -> None:
         self._store_factory = store_factory
         self._store: Any = None
         self._sam3_checkpoint = sam3_checkpoint
         self._cuda_available = cuda_available
-        self._scored = scored_segmenter
-        self._plain = plain_segmenter
+        self._segmenter = segmenter
         self._put = put
 
     def _object_store(self) -> Any:
@@ -85,10 +83,9 @@ class MaskBackfillActivities:  # pylint: disable=too-few-public-methods
                                   capture_id=frame.capture_id,
                                   outcome="image_unavailable")  # fmt: skip
         path, model_id = await self._sam3_checkpoint()
-        scored = await asyncio.to_thread(self._scored, str(path))
-        plain = await asyncio.to_thread(self._plain, str(path))
+        segmenter = await asyncio.to_thread(self._segmenter, str(path))
         outcome, got, mask = await asyncio.to_thread(
-            lambda: regenerate(source, frame, image, scored=scored, plain=plain,
+            lambda: regenerate(source, frame, image, segmenter=segmenter,
                                checkpoint=model_id,
                                core_version=version("fishsense-core"))  # fmt: skip
         )

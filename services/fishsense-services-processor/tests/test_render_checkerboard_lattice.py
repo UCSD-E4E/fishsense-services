@@ -272,6 +272,25 @@ def test_detect_drops_a_frame_with_no_board(rectified_is):
     assert (observation.laser_x, observation.laser_y) == (500.0, 400.0)
 
 
+@pytest.mark.parametrize(
+    "point", [[np.nan, 0.0, 1.0], [0.0, 0.0, np.inf]], ids=["nan", "inf"]
+)
+def test_detect_drops_a_point_that_is_not_finite(rectified_is, monkeypatch, point):
+    """`fishsense_core.plane.laser_point_on_plane` checks the ray for NaN but
+    not its answer; v0.48.0's own copy dropped a NaN point. A non-finite
+    point never reaches the observation or the fit (review of #350)."""
+    board = _board()
+    rectified_is(board)
+    monkeypatch.setattr(sut, "laser_point_on_plane", lambda *_: np.array(point))
+
+    observation = sut._observe(  # pylint: disable=protected-access
+        b"raw", _detect_payload(board)
+    )
+
+    assert observation.point is None
+    assert observation.skip_reason == "no_ray_plane_intersection"
+
+
 class _FakeStore:
     def __init__(self) -> None:
         self.uploaded: list[tuple[ObjectRef, bytes]] = []

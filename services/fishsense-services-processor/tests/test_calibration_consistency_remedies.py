@@ -20,9 +20,12 @@ v2 change, pinned in the last test: the remedies name v2's levers. v1's said
 priority is the text `'none'`, the refusal is a `refused` row in
 `laser_calibrations` rather than dive columns, and an operator can also clear
 it (`laser_calibration_store.clear_calibration_refusal`).
+
+The text lives in `calibration.fit` since the gates moved to fishsense-core
+4.3.0, which appends whatever `remedies=` its caller passes.
 """
 
-from fishsense_services_processor.calibration.consistency import (
+from fishsense_services_processor.calibration.fit import (
     REFUSAL_REMEDIES,
 )
 

@@ -68,6 +68,10 @@ from fishsense_core.checkerboard import (
 )
 from fishsense_core.image.raw_image import RawImage
 from fishsense_core.image.rectified_image import RectifiedImage
+from fishsense_core.plane import (
+    laser_point_on_plane,
+    plane_from_correspondences,
+)
 from pydantic import BaseModel, ConfigDict
 from temporalio import activity
 
@@ -81,10 +85,6 @@ from fishsense_services_contracts.slate_calibration import (
     Point,
 )
 from fishsense_services_processor.calibration.fit import fit_laser
-from fishsense_services_processor.calibration.geometry import (
-    laser_point_on_plane,
-    plane_from_correspondences,
-)
 from fishsense_services_processor.checkerboard.lattice_overlay import (
     draw_lattice_overlay,
 )
@@ -231,7 +231,9 @@ def _observe(
     point = laser_point_on_plane(
         plane, np.array([payload.laser_x, payload.laser_y], dtype=float), matrix
     )
-    if point is None:
+    # Core checks the ray but not its answer; v0.48.0's own copy dropped a
+    # NaN point, and a near-parallel plane gives an infinite one.
+    if point is None or not np.all(np.isfinite(point)):
         return unusable("no_ray_plane_intersection")
 
     return CheckerboardObservation(
