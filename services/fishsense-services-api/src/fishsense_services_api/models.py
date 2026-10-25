@@ -434,6 +434,9 @@ class Capture(Base):
     #: Where an imported phone capture came from (0058); a synced one has
     #: its uploader instead.
     imported_from: Mapped[str | None] = mapped_column(Text)
+    #: EXIF FocalLength (0x920A), mm (0069): the zoom gate's input. NULL is
+    #: unknown (not read yet, or a phone capture).
+    focal_length_mm: Mapped[float | None] = mapped_column(Double)
 
 
 class CameraCalibration(Base):

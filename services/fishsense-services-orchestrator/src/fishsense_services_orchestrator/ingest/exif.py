@@ -48,6 +48,7 @@ _TAG_ARTIST = 0x013B
 _TAG_EXIF_IFD = 0x8769
 _TAG_DATE_TIME_ORIGINAL = 0x9003
 _TAG_OFFSET_TIME_ORIGINAL = 0x9011
+_TAG_FOCAL_LENGTH = 0x920A
 _TAG_MAKER_NOTE = 0x927C
 
 _TAG_OLYMPUS_EQUIPMENT = 0x2010
@@ -90,6 +91,11 @@ class ExifData:
     model: str | None = None
     artist: str | None = None
     serial_number: str | None = None
+    #: FocalLength (0x920A), mm. The TG-6 zooms 4.5-18 mm and its intrinsics
+    #: are calibrated at 4.5; a zoomed frame's laser dots sit on another line
+    #: (2026-10-25: missions 374, 384, 386 mix 4.5 with up to 18 mm). None
+    #: when absent -- an unknown focal length is not the wide end.
+    focal_length_mm: float | None = None
 
 
 def _entries(buf: bytes, ifd_offset: int, endian: str, base: int):
@@ -128,6 +134,14 @@ def _ascii(raw: bytes) -> str | None:
     `Artist` would never match a `Camera.name`."""
     text = raw.split(b"\x00")[0].decode("ascii", "replace").strip()
     return text or None
+
+
+def _rational(raw: bytes, endian: str) -> float | None:
+    """An unsigned TIFF RATIONAL; None when short or over zero."""
+    if len(raw) < 8:
+        return None
+    num, den = struct.unpack_from(endian + "II", raw, 0)
+    return num / den if den else None
 
 
 def _long(raw: bytes, endian: str) -> int | None:
@@ -214,13 +228,15 @@ def read_exif(data: bytes) -> ExifData:
             elif tag == _TAG_EXIF_IFD:
                 exif_offset = _long(raw, endian)
 
-        date_time_original = offset_time = serial_number = None
+        date_time_original = offset_time = serial_number = focal_length = None
         if exif_offset is not None:
             for tag, _typ, _n, raw in _entries(data, exif_offset, endian, 0):
                 if tag == _TAG_DATE_TIME_ORIGINAL:
                     date_time_original = _ascii(raw)
                 elif tag == _TAG_OFFSET_TIME_ORIGINAL:
                     offset_time = _ascii(raw)
+                elif tag == _TAG_FOCAL_LENGTH:
+                    focal_length = _rational(raw, endian)
 
             # The MakerNote is resolved separately, NOT from the loop above.
             # Its declared length is the whole raw block (~1.5 MB on a real
@@ -244,6 +260,7 @@ def read_exif(data: bytes) -> ExifData:
         model=model,
         artist=artist,
         serial_number=serial_number,
+        focal_length_mm=focal_length,
     )
 
 

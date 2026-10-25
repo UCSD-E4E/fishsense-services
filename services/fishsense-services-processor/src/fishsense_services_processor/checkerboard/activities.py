@@ -38,7 +38,20 @@ v2 changes:
   nothing to keep retryable);
 * the board carries its pitch per axis (`CheckerboardTarget`);
 * the JPEG encoder is the shared `jpeg.encode_jpeg` (v1's
-  `encode_rectified_jpeg`), and the region test is the contracts' one.
+  `encode_rectified_jpeg`), and the region test is the contracts' one;
+* the detector is `fishsense_core.checkerboard` (fishsense-core 4.3.1: #98
+  and #114; services kept its own copy, `checkerboard/detection.py`, through
+  v0.56.0). Core's copy adds a checker-parity gate, and that fixes a live 2x
+  scale error: on a warped board a saturated laser dot of >=16 px radius made
+  OpenCV return every other row (~66 px steps on ~33 px squares), a perfect
+  homography that services' copy accepted. Those frames are now
+  `no_usable_board`, and production has one (mission 522, capture 134474,
+  every other column). Detection is also deterministic (a fixed sequence of
+  seeds, the largest passing grid kept), the residual is the worst corner's,
+  with up to two corners a laser dot dragged repaired onto the grid (4.3.1),
+  pitches within 0.1 % count as equal, and a non-uint8 frame raises
+  `TypeError`. 4.3.0 alone dropped 29 good production boards (#353's survey);
+  4.3.1 was adopted instead.
 """
 
 from __future__ import annotations
@@ -52,8 +65,17 @@ from uuid import UUID
 
 import numpy as np
 from fishsense_core.camera_intrinsics import CameraIntrinsics
+from fishsense_core.checkerboard import (
+    board_hull,
+    detect_checkerboard,
+    median_corner_spacing,
+)
 from fishsense_core.image.raw_image import RawImage
 from fishsense_core.image.rectified_image import RectifiedImage
+from fishsense_core.plane import (
+    laser_point_on_plane,
+    plane_from_correspondences,
+)
 from pydantic import BaseModel, ConfigDict
 from temporalio import activity
 
@@ -67,15 +89,6 @@ from fishsense_services_contracts.slate_calibration import (
     Point,
 )
 from fishsense_services_processor.calibration.fit import fit_laser
-from fishsense_services_processor.calibration.geometry import (
-    laser_point_on_plane,
-    plane_from_correspondences,
-)
-from fishsense_services_processor.checkerboard.detection import (
-    board_hull,
-    detect_checkerboard,
-    median_corner_spacing,
-)
 from fishsense_services_processor.checkerboard.lattice_overlay import (
     draw_lattice_overlay,
 )
@@ -105,7 +118,7 @@ class DetectCheckerboardLaserPointInput(BaseModel):
     camera_matrix: List[List[float]]
     distortion_coefficients: List[float]
     #: The declared board: its INTERIOR corners are an upper bound on what may
-    #: be detected, not the grid asked for. See `checkerboard.detection`.
+    #: be detected, not the grid asked for. See `fishsense_core.checkerboard`.
     target: CheckerboardTarget
 
 
@@ -222,7 +235,9 @@ def _observe(
     point = laser_point_on_plane(
         plane, np.array([payload.laser_x, payload.laser_y], dtype=float), matrix
     )
-    if point is None:
+    # Core checks the ray but not its answer; v0.48.0's own copy dropped a
+    # NaN point, and a near-parallel plane gives an infinite one.
+    if point is None or not np.all(np.isfinite(point)):
         return unusable("no_ray_plane_intersection")
 
     return CheckerboardObservation(

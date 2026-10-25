@@ -12,10 +12,11 @@ Behaviour is v1's:
   cold pod the first batch of activities enters the lazy init together, and
   unguarded each would load its own copy of the checkpoint onto the GPU;
 * `LinearRawImage` (linear + Bayer excess, what the 6-channel model was
-  trained on), `rectify_output=True` with the dive's intrinsics;
+  trained on), the dot returned in rectified pixels with the dive's
+  intrinsics;
 * the colour is read off the dot while the decoded frame is in hand -- at the
-  *sensor* point, because the prediction is rectified and the frame is not
-  (up to ~48 px apart near the laser region);
+  *sensor* point, because the frame is not rectified (the two are up to
+  ~48 px apart near the laser region);
 * a dot outside the expected-laser region is dropped (`rejected_out_of_region`),
   its confidence kept for audit; no region disables the gate;
 * every result carries `LASER_PREDICTOR_VERSION`, the checkpoint and core's
@@ -32,6 +33,32 @@ v2 changes:
 * the raw frame is an `ObjectRef`, streamed to a temporary file;
 * the checkpoint recorded is core's canonical name for it (resolved by
   content), not a path's basename;
+* **the colour rule is fishsense-core's** (`fishsense_core.laser_color`,
+  core #94, from 4.3.0): `classify_laser_color`. Services carried its own
+  copy, ported verbatim from fishsense-lite@77e8f8e5, through v0.55.0. Core's copy departs from it on purpose in two places: a
+  saturated dot's margin is scaled by its brightest *usable* pixel, not the
+  blown-out core (on this uint16 frame a 65535 core shrank the halo's margin
+  by 65535 over the halo's own brightest level), and a float image is not
+  tested for saturation against its own maximum (no effect here:
+  `LinearRawImage` is uint16). Core measured it on 1,600 synthetic dots:
+  unsaturated dots are identical, and 6 saturated abstentions became votes
+  (5 right, 1 wrong). `LASER_PREDICTOR_VERSION` was at first left at 2 for
+  it (2026-10-23: the version gates re-prediction and the auto-accept gate's
+  staleness check for the whole stage, the dot itself is unchanged, and
+  colour is taken as a dive-level majority). The colour rule is one of the
+  version's inputs, though, and the owner approved the bump: it is 3 from
+  2026-10-24, so the open frames of missions still being labelled are
+  re-predicted and re-judged under core's rule;
+* **the dot is predicted in sensor pixels and rectified once** (review of
+  #352). v1 asked the detector for rectified output and mapped the point back
+  to the sensor to read the colour; the inverse runs in float64 where the
+  forward map runs in float32, so the colour was read a fraction of a pixel
+  off the dot. Now the colour is read at the detector's own point and the
+  stored point is `fishsense_core.laser.rectify_prediction` of it, the call
+  `predict(rectify_output=True)` makes itself, so stored points are unchanged;
+* **a non-finite dot is a non-detection.** A NaN passes `is not None`; v1's
+  colour code raised on it, and it would otherwise be rectified, gated and
+  stored.
 * **weights that cannot load are final** (2026-10-24): settings missing,
   bytes that aren't the pinned file, an object not in the bucket, or no
   manifest entry fail non-retryably as ``LaserDetector{kind}``
@@ -40,8 +67,10 @@ v2 changes:
   workflow sets no retry policy -- and in the automatic frames (whose dot
   comes from this detector) every frame of the mission was left out for it.
 
-torch and the checkpoint are only needed at run time, so `fishsense_core.laser`
-and `LinearRawImage` are imported lazily, as in v1.
+torch, cv2 and the checkpoint are only needed at run time, so
+`fishsense_core.laser`, `fishsense_core.laser_color` (which imports the
+detector module) and `LinearRawImage` are imported lazily, as in v1: the
+stages are registered for every role at import.
 """
 
 from __future__ import annotations
@@ -63,10 +92,6 @@ from fishsense_services_contracts.laser import (
 from fishsense_services_contracts.laser_region import point_in_laser_region
 from fishsense_services_contracts.refusals import LASER_DETECTOR
 from fishsense_services_contracts.object_store import ObjectStoreConnection
-from fishsense_services_processor.laser_predict.laser_color import (
-    classify_laser_color,
-    rectified_to_sensor_point,
-)
 from fishsense_services_processor.laser_predict.workflow import (
     PredictLaserImageInput,
 )
@@ -126,33 +151,40 @@ def _predict_from_raw(
     wavelength: str | None,
 ) -> Any:
     """Off-loop CPU/GPU work: decode to a `LinearRawImage`, run the detector
-    with rectified output, and read the colour at the dot's sensor point.
+    in sensor pixels, read the colour there, and rectify the dot.
 
     Returns `(prediction, width, height, color, color_margin, checkpoint)`.
     `cv2.undistort` preserves the image size, so the rectified dims equal the
     decoded raw dims.
     """
     # pylint: disable=import-outside-toplevel
+    import math
+
     import numpy as np
     from fishsense_core.image.linear_raw_image import LinearRawImage
+    from fishsense_core.laser import rectify_prediction
+    from fishsense_core.laser_color import classify_laser_color
 
     image = LinearRawImage(raw_path)
     height, width = image.data.shape[:2]
     detector = _get_detector()
-    prediction = detector.predict(
-        image,
-        wavelength=wavelength,
-        rectify_output=True,
-        camera_matrix=np.array(camera_matrix, dtype=float),
-        distortion=np.array(distortion_coefficients, dtype=float),
-    )
+    prediction = detector.predict(image, wavelength=wavelength)
 
+    x, y = prediction.x, prediction.y
     color = margin = None
-    if prediction.x is not None and prediction.y is not None:
-        sensor_x, sensor_y = rectified_to_sensor_point(
-            prediction.x, prediction.y, camera_matrix, distortion_coefficients
-        )
-        color, margin = classify_laser_color(image.data, sensor_x, sensor_y)
+    if x is not None and y is not None:
+        if math.isfinite(x) and math.isfinite(y):
+            color, margin = classify_laser_color(image.data, x, y)
+            x, y = rectify_prediction(
+                x,
+                y,
+                np.array(camera_matrix, dtype=float),
+                np.array(distortion_coefficients, dtype=float),
+            )
+        else:
+            _log.warning("the detector returned a non-finite dot (%s, %s)", x, y)
+            x = y = None
+    prediction = type(prediction)(x=x, y=y, confidence=prediction.confidence)
 
     checkpoint = getattr(detector, "checkpoint_name", None)
     return prediction, int(width), int(height), color, margin, checkpoint

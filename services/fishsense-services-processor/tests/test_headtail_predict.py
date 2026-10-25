@@ -39,7 +39,13 @@ import boto3
 import cv2
 import numpy as np
 import pytest
-from fishsense_core.models import ModelIntegrityError, ModelUnavailable
+from fishsense_core.models import (
+    Manifest,
+    ModelIntegrityError,
+    ModelRef,
+    ModelUnavailable,
+    builtin_manifest,
+)
 from moto import mock_aws
 from temporalio import activity, workflow
 from temporalio.client import WorkflowFailureError
@@ -60,7 +66,8 @@ from fishsense_services_contracts.object_store import ObjectRef
 from fishsense_services_processor.headtail_predict import activities as act
 from fishsense_services_processor.headtail_predict import predict as sut
 from fishsense_services_processor.headtail_predict import weights as sam3_weights
-from fishsense_services_processor.headtail_predict.geometry import crop_origin
+from fishsense_core.fish import fish_at_dot as core_fish_at_dot
+from fishsense_core.fish.fish_at_dot import FishialSegmenter, crop_origin
 from fishsense_services_processor.headtail_predict.workflow import (
     PredictHeadtailImagesWorkflow,
 )
@@ -190,6 +197,33 @@ def test_records_which_laser_label_chose_the_fish():
     assert result.laser_label_id == b
 
 
+def test_a_label_for_every_dot_or_none_at_all():
+    """The label is looked up by the dot core names (`FishAtDot.dot`), so a
+    list of labels that does not match the dots is a caller's bug, refused.
+    The old `zip` truncated it silently and named no label."""
+    from temporalio.exceptions import ApplicationError
+
+    with pytest.raises(ApplicationError, match="laser") as raised:
+        _predict(_jpeg(), [(1800.0, 1500.0), (2300.0, 1500.0)], _Stub([]),
+                 laser_label_ids=[uuid.uuid4()])  # fmt: skip
+    # Deterministic: a retry gets the same payload (review of #349).
+    assert raised.value.non_retryable
+    assert raised.value.type == "LaserLabelsMismatch"
+
+
+def test_the_kernel_is_cores():
+    """Crop, gate and keypoint are fishsense-core's `find_fish_at_dot`
+    (core #89): none of services' own copies remain."""
+    for gone in (
+        "crop_origin",
+        "_keypoint",
+        "_FishialAdapter",
+        "_Sam3Adapter",
+        "_to_numpy",
+    ):
+        assert not hasattr(sut, gone), gone
+
+
 def test_crop_is_centred_on_the_first_laser_point_only():
     """A second dot outside that window cannot be gated on; in the corpus that
     never happens, which is why cropping on the first point is safe."""
@@ -233,11 +267,7 @@ def test_an_unfittable_mask_is_a_headtail_failure_not_an_error(monkeypatch):
         def find_head_tail_img(self, _mask):
             raise RuntimeError("native detector failed")
 
-    monkeypatch.setitem(
-        sys.modules,
-        "fishsense_core.fish",
-        types.SimpleNamespace(FishHeadTailDetector=_Exploding),
-    )
+    monkeypatch.setattr(core_fish_at_dot, "FishHeadTailDetector", _Exploding)
     laser = (2000.0, 1500.0)
     ox, oy = crop_origin(*laser, FRAME_W, FRAME_H, CROP_W, CROP_H)
 
@@ -287,11 +317,7 @@ class TestAnAbstentionNamesItsDot:
             def find_head_tail_img(self, _mask):
                 raise RuntimeError("native detector failed")
 
-        monkeypatch.setitem(
-            sys.modules,
-            "fishsense_core.fish",
-            types.SimpleNamespace(FishHeadTailDetector=_Exploding),
-        )
+        monkeypatch.setattr(core_fish_at_dot, "FishHeadTailDetector", _Exploding)
         miss, hit = (1800.0, 1500.0), (2300.0, 1500.0)
         ox, oy = crop_origin(*miss, FRAME_W, FRAME_H, CROP_W, CROP_H)
         mask = _fish_mask(int(hit[0] - ox), int(hit[1] - oy), 120, 50)
@@ -355,11 +381,7 @@ class TestTheKeptMasksBox:
             def find_head_tail_img(self, _mask):
                 raise RuntimeError("native detector failed")
 
-        monkeypatch.setitem(
-            sys.modules,
-            "fishsense_core.fish",
-            types.SimpleNamespace(FishHeadTailDetector=_Exploding),
-        )
+        monkeypatch.setattr(core_fish_at_dot, "FishHeadTailDetector", _Exploding)
         mask, box = self._mask()
 
         result = _predict(_jpeg(), [self.LASER], _Stub([mask]))
@@ -372,103 +394,6 @@ class TestTheKeptMasksBox:
             masks = [_fish_mask(100, 100, 40, 20)]
         result = _predict(_jpeg(), [self.LASER], _Stub(masks))
         assert result.mask_bbox is None
-
-
-# -- mask conversion ---------------------------------------------------------------
-
-
-class TestMaskConversion:
-    """SAM3 returns device tensors; `np.asarray` on a CUDA tensor raises."""
-
-    def test_detaches_and_moves_a_device_tensor(self):
-        class _DeviceTensor:
-            def __init__(self, data):
-                self._data = data
-                self.detached = False
-
-            def __array__(self, *args, **kwargs):
-                raise TypeError("can't convert cuda:0 device type tensor to numpy")
-
-            def detach(self):
-                self.detached = True
-                return self
-
-            def cpu(self):
-                return np.asarray(self._data)
-
-        tensor = _DeviceTensor([[1, 0], [0, 1]])
-        out = sut._to_numpy(tensor)  # pylint: disable=protected-access
-        assert tensor.detached
-        assert out.tolist() == [[1, 0], [0, 1]]
-
-    def test_passes_a_plain_array_through(self):
-        assert sut._to_numpy(np.zeros((2, 2))).shape == (
-            2,
-            2,
-        )  # pylint: disable=protected-access
-
-
-# -- the fallback backend (v1's TestFishialFallbackAdapter) --------------------------
-
-
-class TestFishialFallbackAdapter:
-    class _Recording:
-        def __init__(self, labels):
-            self._labels = labels
-            self.seen = None
-
-        def inference(self, image):
-            self.seen = image
-            return self._labels
-
-    def _adapter(self, segmentation):
-        return sut._FishialAdapter(segmentation)  # pylint: disable=protected-access
-
-    def test_splits_the_instance_label_map_into_binary_masks(self):
-        labels = np.zeros((40, 60), dtype=np.int32)
-        labels[5:10, 5:15] = 1
-        labels[20:25, 30:50] = 7  # ids are arbitrary, not contiguous
-
-        masks = self._adapter(self._Recording(labels)).segment(
-            np.zeros((40, 60, 3), dtype=np.uint8)
-        )
-
-        assert len(masks) == 2
-        assert sorted(int(np.asarray(m).sum()) for m in masks) == [50, 100]
-        assert all(np.asarray(m).dtype == bool for m in masks)
-
-    def test_background_is_not_returned_as_a_mask(self):
-        labels = np.zeros((20, 40), dtype=np.int32)
-        assert (
-            self._adapter(self._Recording(labels)).segment(
-                np.zeros((20, 40, 3), dtype=np.uint8)
-            )
-            == []
-        )
-
-    def test_the_frame_is_passed_through_as_bgr(self):
-        frame = np.zeros((20, 40, 3), dtype=np.uint8)
-        frame[:, :, 0] = 255  # blue channel only, in BGR
-        recorder = self._Recording(np.zeros((20, 40), dtype=np.int32))
-
-        self._adapter(recorder).segment(frame)
-
-        assert np.array_equal(recorder.seen, frame), "frame was converted"
-
-    def test_a_non_landscape_crop_is_refused_rather_than_silently_empty(self):
-        recorder = self._Recording(np.ones((40, 20), dtype=np.int32))
-
-        masks = self._adapter(recorder).segment(np.zeros((40, 20, 3), dtype=np.uint8))
-
-        assert masks == []
-        assert recorder.seen is None, "the model should not have been called"
-
-    def test_a_square_crop_is_refused_too(self):
-        """`width <= height`: a square is not landscape either."""
-        recorder = self._Recording(np.ones((30, 30), dtype=np.int32))
-
-        assert self._adapter(recorder).segment(np.zeros((30, 30, 3), np.uint8)) == []
-        assert recorder.seen is None
 
 
 class TestSam3RequiresAGpu:
@@ -527,7 +452,7 @@ class TestFallbackSegmenterIsLoaded:
         assert got is built
         assert built.loaded is True, "load_model() was never called"
         assert (
-            sut._FishialAdapter(got).segment(
+            FishialSegmenter(got).segment(
                 np.zeros((4, 8, 3), dtype=np.uint8)
             )  # pylint: disable=protected-access
             == []
@@ -536,18 +461,14 @@ class TestFallbackSegmenterIsLoaded:
 
 # -- SAM 3.1's weights through core's manifest ---------------------------------------
 
-#: fishsense-core's pin for SAM 3.1 (4.2.0+), the `model-weights` copy v1
-#: uploaded: the owner matched the processor Secret's recorded
-#: FISHSENSE_SAM3_* against it before the shim went (2026-10-23).
-CORE_SAM3_SHA256 = "0567debeec80ba4ac6369540c6c248025283cb3ff2b92827509e57e2b3541cb6"
-CORE_SAM3_SIZE = 3502755717
-#: What every SAM 3.1 row has recorded as its checkpoint since the cutover.
-CORE_SAM3_ID = "sam3/3.1@0567debeec80"
 WEIGHTS_ENV = {
     "FISHSENSE_MODEL_WEIGHTS_ENDPOINT_URL": "https://s3.test",
     "FISHSENSE_MODEL_WEIGHTS_ACCESS_KEY_ID": "k",
     "FISHSENSE_MODEL_WEIGHTS_SECRET_ACCESS_KEY": "s",
 }
+#: Stands in for SAM 3.1's 3.5 GB: core's pin itself (sha256, size, the id
+#: every SAM 3.1 row records) is pinned once, in test_weights.py.
+_STAND_IN = b"SAM 3.1, standing in"
 
 
 class _NoStore:
@@ -557,15 +478,31 @@ class _NoStore:
         raise AssertionError(f"{ref.id} was a cache hit; nothing to download")
 
 
-def _cached_core_sam3(cache_dir: Path) -> Path:
-    """A cache entry as core's `fetch` leaves one: the file, at the pinned
-    size (sparse, not 3.5 GB of disk), and its verification stamp."""
-    path = cache_dir / "sam3" / "3.1" / "sam3.1_multiplex.pt"
-    path.parent.mkdir(parents=True)
-    with path.open("wb") as handle:
-        handle.truncate(CORE_SAM3_SIZE)
-    path.with_name(path.name + ".sha256").write_text(CORE_SAM3_SHA256 + "\n")
-    return path
+class _BytesStore:
+    """Core's `WeightStore`, holding `_STAND_IN`."""
+
+    def __init__(self):
+        self.downloads = []
+
+    def download_to(self, ref, dest):
+        self.downloads.append(ref.id)
+        Path(dest).write_bytes(_STAND_IN)
+
+
+def _stand_in_manifest(monkeypatch):
+    """Core's own `sam3`/`3.1` entry (its filename), at the stand-in's sha256
+    and size, as the manifest `fetch_sam3` resolves (review of #358: the
+    tests no longer write core's private cache layout; core's `fetch` fills
+    its cache)."""
+    real = builtin_manifest().resolve("sam3", "3.1")
+    ref = ModelRef(
+        name=real.name, version=real.version, target=real.target,
+        filename=real.filename, sha256=hashlib.sha256(_STAND_IN).hexdigest(),
+        size=len(_STAND_IN),
+    )  # fmt: skip
+    manifest = Manifest([ref], {"sam3": "3.1"})
+    monkeypatch.setattr(sam3_weights, "builtin_manifest", lambda: manifest)
+    return ref
 
 
 class TestSam3Weights:
@@ -573,37 +510,56 @@ class TestSam3Weights:
     through core's manifest: no settings of its own, and nothing that isn't
     core's pinned file loads."""
 
-    async def test_the_checkpoint_is_cores_pinned_file(self, tmp_path):
-        """`sam3.1_multiplex.pt`, version 3.1, at v1's `model-weights/sam3/3.1/`
-        key (not `sam3.pt`, which loads just as quietly and degrades every
-        mask), recorded as the id every SAM 3.1 row has carried."""
-        cached = _cached_core_sam3(tmp_path)
+    async def test_the_checkpoint_is_cores_sam3_entry(self, monkeypatch, tmp_path):
+        """`sam3.1_multiplex.pt`, version 3.1 (not `sam3.pt`, which loads just
+        as quietly and degrades every mask), fetched once and then a cache
+        hit, and recorded as its manifest entry's id."""
+        ref = _stand_in_manifest(monkeypatch)
+        store = _BytesStore()
 
-        path, model_id = await sam3_weights.fetch_sam3(
-            store=_NoStore(), cache_dir=tmp_path
+        first = await sam3_weights.fetch_sam3(store=store, cache_dir=tmp_path)
+        again = await sam3_weights.fetch_sam3(store=_NoStore(), cache_dir=tmp_path)
+
+        assert first == again
+        path, model_id = first
+        assert Path(path) == tmp_path / "sam3" / "3.1" / "sam3.1_multiplex.pt"
+        assert Path(path).read_bytes() == _STAND_IN
+        assert model_id == ref.id
+        assert store.downloads == [ref.id]
+
+    async def test_the_id_recorded_is_the_entry_that_loaded(
+        self, monkeypatch, tmp_path
+    ):
+        """One manifest resolves both (review of #358): were the fetch to
+        resolve core's built-in pin itself, it would ask the store for the
+        3.5 GB file, get the stand-in, and refuse it."""
+        ref = _stand_in_manifest(monkeypatch)
+
+        _, model_id = await sam3_weights.fetch_sam3(
+            store=_BytesStore(), cache_dir=tmp_path
         )
 
-        assert Path(path) == cached
-        assert model_id == CORE_SAM3_ID
+        assert model_id == ref.id
 
     async def test_the_stage_needs_no_sam3_settings(self, monkeypatch, tmp_path):
         """The wiring every SAM stage shares reads only `FISHSENSE_MODEL_WEIGHTS_*`:
-        a pod without FISHSENSE_SAM3_* (the sync no longer writes them) loads."""
+        a pod without FISHSENSE_SAM3_* loads."""
         from fishsense_services_processor.headtail_predict import stage
 
+        ref = _stand_in_manifest(monkeypatch)
+        await sam3_weights.fetch_sam3(store=_BytesStore(), cache_dir=tmp_path)
         for name in ("FISHSENSE_SAM3_SHA256", "FISHSENSE_SAM3_SIZE"):
             monkeypatch.delenv(name, raising=False)
         for name, value in WEIGHTS_ENV.items():
             monkeypatch.setenv(name, value)
         monkeypatch.setenv("FISHSENSE_MODEL_WEIGHTS_CACHE_DIR", str(tmp_path))
-        _cached_core_sam3(tmp_path)
         stage._weights.cache_clear()
         try:
             _, model_id = await stage._sam3_checkpoint()
         finally:
             stage._weights.cache_clear()
 
-        assert model_id == CORE_SAM3_ID
+        assert model_id == ref.id
 
     @pytest.fixture
     def models_bucket(self, monkeypatch):
@@ -749,7 +705,7 @@ async def test_on_a_gpu_sam3_runs_with_the_verified_checkpoint(monkeypatch):
             return []
 
     monkeypatch.setattr(act, "get_segmenter", fake_get_segmenter)
-    monkeypatch.setattr(act, "_Sam3Adapter", _Adapter)
+    monkeypatch.setattr(act, "Sam3Segmenter", _Adapter)
     fetches = []
 
     result = await ActivityEnvironment().run(

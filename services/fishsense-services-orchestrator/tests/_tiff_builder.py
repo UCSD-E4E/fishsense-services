@@ -29,6 +29,7 @@ import struct
 # TIFF field types used here.
 ASCII = 2
 LONG = 4
+RATIONAL = 5
 UNDEFINED = 7
 IFD = 13  # non-standard; Olympus uses it for the Equipment sub-IFD pointer
 
@@ -40,6 +41,7 @@ TAG_ARTIST = 0x013B
 TAG_EXIF_IFD = 0x8769
 TAG_DATE_TIME_ORIGINAL = 0x9003
 TAG_OFFSET_TIME_ORIGINAL = 0x9011
+TAG_FOCAL_LENGTH = 0x920A
 TAG_MAKER_NOTE = 0x927C
 TAG_OLYMPUS_EQUIPMENT = 0x2010
 TAG_OLYMPUS_SERIAL = 0x0101
@@ -137,6 +139,10 @@ def _body(value_base: int, endian: str, fields: dict) -> tuple[bytes, bytes]:
         )
         if e is not None
     ]
+    if fields["focal_length"] is not None:
+        num, den = fields["focal_length"]
+        rational = place(struct.pack(endian + "II", num, den))
+        exif_entries.append(_entry(endian, TAG_FOCAL_LENGTH, RATIONAL, 1, rational))
     if maker_note_offset is not None:
         exif_entries.append(
             _entry(endian, TAG_MAKER_NOTE, UNDEFINED, 1024, maker_note_offset)
@@ -170,8 +176,12 @@ def build_orf(  # pylint: disable=too-many-arguments
     serial_number: str | None = "BJ6C67989",
     offset_time: str | None = "-08:00",
     maker_note_signature: bytes = OLYMPUS_SIGNATURE,
+    focal_length: tuple[int, int] | None = (450, 100),
 ) -> bytes:
     """A minimal but structurally faithful ORF.
+
+    `focal_length` is the FocalLength rational ``(numerator, denominator)``;
+    a TG-6 writes ``(450, 100)`` at the wide end.
 
     Any argument set to None omits that tag — how the tests express "this
     camera didn't write a DateTime".
@@ -185,6 +195,7 @@ def build_orf(  # pylint: disable=too-many-arguments
         "serial_number": serial_number,
         "offset_time": offset_time,
         "maker_note_signature": maker_note_signature,
+        "focal_length": focal_length,
     }
     header = struct.pack(endian + "2sHI", b"II" if endian == "<" else b"MM", magic, 8)
     # Pass 1: learn IFD0's length. Pass 2: place values after it.
