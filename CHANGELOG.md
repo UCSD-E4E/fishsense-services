@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.58.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.57.0...v0.58.0) (2026-10-25)
+
+
+### Features
+
+* **processor:** size constancy and line fitters from fishsense-core 4.3.2, calibration version size-constancy-3 (items 10-11) ([010bb8d](https://github.com/UCSD-E4E/fishsense-services/commit/010bb8d30ecb5e6568e2c03423f60fab13fe43ac))
+
+
+### Bug Fixes
+
+* **orchestrator:** the focal-length backfill reads a TG-7 frame further in ([16d015d](https://github.com/UCSD-E4E/fishsense-services/commit/16d015dafc77938efb094cecc47c65f80e921882))
+* **orchestrator:** the focal-length backfill reads a TG-7 frame further in ([845fa43](https://github.com/UCSD-E4E/fishsense-services/commit/845fa43edff147efecfc5c78d9a0323d4c5c7234))
+* the sync checks SAM 3.1 in Garage and keeps its pin for old images; one manifest resolves SAM's id and file (review of [#358](https://github.com/UCSD-E4E/fishsense-services/issues/358)) ([ea5dfb0](https://github.com/UCSD-E4E/fishsense-services/commit/ea5dfb0b51a84c01faa85af01486c6aba9e02bd8))
+
 ## [0.57.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.56.0...v0.57.0) (2026-10-25)
 
 
