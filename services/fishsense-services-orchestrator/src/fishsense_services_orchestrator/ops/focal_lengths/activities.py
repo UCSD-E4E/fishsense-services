@@ -10,7 +10,10 @@ The rules:
 * **a dry run unless told otherwise**: `apply=False` reads and reports, and
   writes nothing -- the dry run is the corpus count the gate is proven on;
 * **4 KB a frame** (`FOCAL_HEADER_BYTES`): the tag sits at byte ~2,870 of a
-  TG-6 raw, and the NAS moves ~1 MB/s; never the whole file;
+  TG-6 raw, and the NAS moves ~1 MB/s; never the whole file. A TG-7 puts its
+  Exif IFD further in (missions 480-487, all 484 frames unreadable at 4 KB on
+  the 2026-10-25 apply; found at 64 KB), so a frame with no FocalLength in
+  4 KB is read again to `FOCAL_RETRY_BYTES` before it is unreadable;
 * the write fills an unknown focal length only (`record_focal_length`), so a
   re-run skips what was read and a value written meanwhile is counted, not
   overwritten;
@@ -50,6 +53,7 @@ from fishsense_services_orchestrator.ops.focal_lengths.contracts import (
 
 __all__ = [
     "FOCAL_HEADER_BYTES",
+    "FOCAL_RETRY_BYTES",
     "FocalLengthActivities",
     "FocalLengthCatalog",
     "WIDE_END_MM",
@@ -57,6 +61,8 @@ __all__ = [
 
 #: Enough of a TG-6 raw for its FocalLength (at byte 2,868 on the fixture).
 FOCAL_HEADER_BYTES = 4096
+#: Enough of a TG-7 raw: read only when the first 4 KB has no FocalLength.
+FOCAL_RETRY_BYTES = 65536
 #: The TG-6's wide end, where its intrinsics are calibrated.
 WIDE_END_MM = 4.5
 
@@ -158,21 +164,23 @@ class FocalLengthActivities:
     async def _read(
         self, nas: NasClient, frame: FocalLengthFrame, report: FocalLengthMissionReport
     ) -> float | None:
-        try:
-            header = await asyncio.to_thread(
-                nas.download_range,
-                file_path=resolve_nas_path(frame.source_path, self._nas_settings),
-                offset=0,
-                length=FOCAL_HEADER_BYTES,
-            )
-        except FileStationError as exc:
-            if not is_nas_not_found(exc):
-                raise
-            report.not_found_count += 1
-            if len(report.not_found) < LISTED:
-                report.not_found.append(frame.source_path)
-            return None
-        focal = read_exif(header).focal_length_mm
+        path = resolve_nas_path(frame.source_path, self._nas_settings)
+        focal = None
+        for length in (FOCAL_HEADER_BYTES, FOCAL_RETRY_BYTES):
+            try:
+                header = await asyncio.to_thread(
+                    nas.download_range, file_path=path, offset=0, length=length
+                )
+            except FileStationError as exc:
+                if not is_nas_not_found(exc):
+                    raise
+                report.not_found_count += 1
+                if len(report.not_found) < LISTED:
+                    report.not_found.append(frame.source_path)
+                return None
+            focal = read_exif(header).focal_length_mm
+            if focal is not None:
+                break
         if focal is None:
             report.unreadable_count += 1
             if len(report.unreadable) < LISTED:
