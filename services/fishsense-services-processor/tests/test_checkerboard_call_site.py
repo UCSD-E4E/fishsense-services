@@ -1,9 +1,9 @@
 """Core's checkerboard detector at services' call site.
 
-The detector is fishsense-core's (`fishsense_core.checkerboard`, 4.3.0, #98)
+The detector is fishsense-core's (`fishsense_core.checkerboard`, 4.3.1: #98, #114)
 and core's suite tests it alone. These are services' own tests of it, kept
 from services' `tests/test_checkerboard_detection.py` (which tested services'
-copy, `checkerboard/detection.py`, through v0.55.0) because they pin the
+copy, `checkerboard/detection.py`, through v0.56.0) because they pin the
 combination the checkerboard activities actually run, which core's suite does
 not (review of #353):
 

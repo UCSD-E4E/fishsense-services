@@ -16,7 +16,7 @@ through a declared-board size bound (a coarse lattice is smaller), and through
 does not move). It then scales every depth, the fitted baseline, and every
 length downstream. Since fishsense-core 4.3.0 the detector's `checker_parity`
 gate refuses the uniform case from the image (services' own detector,
-through v0.55.0, did not); this overlay remains the person's check.
+through v0.56.0, did not); this overlay remains the person's check.
 
 Measured 2026-09-11: five of fourteen checkerboard calibrations carry a
 baseline that is a simple multiple of the consensus 10.4 cm -- 4.00x, 2.16x,

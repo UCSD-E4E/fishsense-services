@@ -349,7 +349,7 @@ async def test_a_skipped_render_writes_nothing(rectified_is, monkeypatch):
 # that is EVERY OTHER ROW -- adjacent detected rows ~66 px apart against
 # ~33 px squares. Labelled one pitch apart, that halves the board's distance
 # along that axis, and so every depth the frame contributes. Its homography
-# is perfect, so services' own copy of the detector (through v0.55.0)
+# is perfect, so services' own copy of the detector (through v0.56.0)
 # accepted it, and its test asserted the frame was kept. These pin the
 # refusal at the call sites, on core's synthetic frame (40 px squares, an
 # 80 px border, the warp below).
@@ -378,30 +378,34 @@ def _warped_core_board(radius: int) -> np.ndarray:
 def test_the_frame_really_is_latticed_every_other_row(radius):
     """The precondition, so the refusals below are refusals of THIS fault.
 
-    Raw OpenCV, called as core calls it (its requested pattern, flags and
-    default seed, read from core so they cannot drift apart): the grid comes
-    back short, and its row step is twice its column step.
+    Raw OpenCV, called as core calls it (its requested pattern and flags,
+    read from core so they cannot drift apart), on every seed core tries:
+    since 4.3.1 a frame is refused only if no seed gives a passing grid, so
+    on each one the grid must come back short, its row step twice its
+    column step, or not at all.
     """
-    import inspect  # pylint: disable=import-outside-toplevel
-
     from fishsense_core import (  # pylint: disable=import-outside-toplevel
         checkerboard as core,
     )
 
     gray = cv2.cvtColor(_warped_core_board(radius), cv2.COLOR_BGR2GRAY)
-    seed = inspect.signature(core.detect_checkerboard).parameters["seed"].default
-    cv2.setRNGSeed(int(seed))
-    found, corners, meta = cv2.findChessboardCornersSBWithMeta(
-        gray,
-        core._REQUESTED_PATTERN,  # pylint: disable=protected-access
-        core._DETECTION_FLAGS,  # pylint: disable=protected-access
-    )
-    assert found
-    rows, cols = int(meta.shape[0]), int(meta.shape[1])
-    grid = np.asarray(corners, np.float64).reshape(rows, cols, 2)
-    step_rows = np.median(np.linalg.norm(np.diff(grid, axis=0), axis=2))
-    step_cols = np.median(np.linalg.norm(np.diff(grid, axis=1), axis=2))
-    assert step_rows / step_cols == pytest.approx(2.0, rel=0.1)
+    latticed = 0
+    for seed in core.DEFAULT_SEEDS:
+        cv2.setRNGSeed(int(seed))
+        found, corners, meta = cv2.findChessboardCornersSBWithMeta(
+            gray,
+            core._REQUESTED_PATTERN,  # pylint: disable=protected-access
+            core._DETECTION_FLAGS,  # pylint: disable=protected-access
+        )
+        if not found:
+            continue
+        rows, cols = int(meta.shape[0]), int(meta.shape[1])
+        grid = np.asarray(corners, np.float64).reshape(rows, cols, 2)
+        step_rows = np.median(np.linalg.norm(np.diff(grid, axis=0), axis=2))
+        step_cols = np.median(np.linalg.norm(np.diff(grid, axis=1), axis=2))
+        assert step_rows / step_cols == pytest.approx(2.0, rel=0.1), seed
+        latticed += 1
+    assert latticed, "no seed found the every-other-row grid at all"
 
 
 @pytest.mark.parametrize("radius", [16, 20])
@@ -447,8 +451,8 @@ def test_a_smaller_dot_still_yields_a_point(rectified_is, radius):
 
 
 def test_detect_gives_the_same_observation_for_the_same_frame(rectified_is):
-    """Detection is seeded: an occluded board used to come back as a different
-    sub-grid per call (fishsense-core#98: 4 x 10, 5 x 3 or 3 x 3 over 20 calls),
+    """Detection is seeded (since 4.3.1, a fixed sequence of seeds): an
+    occluded board used to come back as a different sub-grid per call (fishsense-core#98: 4 x 10, 5 x 3 or 3 x 3 over 20 calls),
     and with it a different outcome for the same frame (unseeded, this one
     flips between a point and `no_usable_board`)."""
     board = _board()

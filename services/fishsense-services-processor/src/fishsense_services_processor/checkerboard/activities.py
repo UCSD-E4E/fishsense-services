@@ -39,15 +39,19 @@ v2 changes:
 * the board carries its pitch per axis (`CheckerboardTarget`);
 * the JPEG encoder is the shared `jpeg.encode_jpeg` (v1's
   `encode_rectified_jpeg`), and the region test is the contracts' one;
-* the detector is `fishsense_core.checkerboard` (fishsense-core 4.3.0, #98;
-  services kept its own copy, `checkerboard/detection.py`, through v0.55.0).
-  Core's copy adds a checker-parity gate, and that fixes a live 2x scale
-  error: on a warped board a saturated laser dot of >=16 px radius made
+* the detector is `fishsense_core.checkerboard` (fishsense-core 4.3.1: #98
+  and #114; services kept its own copy, `checkerboard/detection.py`, through
+  v0.56.0). Core's copy adds a checker-parity gate, and that fixes a live 2x
+  scale error: on a warped board a saturated laser dot of >=16 px radius made
   OpenCV return every other row (~66 px steps on ~33 px squares), a perfect
   homography that services' copy accepted. Those frames are now
-  `no_usable_board`. Detection is also seeded (the same frame gives the same
-  grid), the residual is the worst corner's not the median's, pitches within
-  0.1 % count as equal, and a non-uint8 frame raises `TypeError`.
+  `no_usable_board`, and production has one (mission 522, capture 134474,
+  every other column). Detection is also deterministic (a fixed sequence of
+  seeds, the largest passing grid kept), the residual is the worst corner's,
+  with up to two corners a laser dot dragged repaired onto the grid (4.3.1),
+  pitches within 0.1 % count as equal, and a non-uint8 frame raises
+  `TypeError`. 4.3.0 alone dropped 29 good production boards (#353's survey);
+  4.3.1 was adopted instead.
 """
 
 from __future__ import annotations

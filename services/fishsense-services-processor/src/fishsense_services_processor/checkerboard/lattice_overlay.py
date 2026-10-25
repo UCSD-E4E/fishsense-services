@@ -16,7 +16,7 @@ which a pure scale error does not move. The pose then places the board at a
 fraction of its true distance and every depth, the fitted baseline, and every
 length downstream scales with it. Services' own detector
 (`checkerboard/detection.py`, with its `_fits_declared_board` bound and
-residual gate) had only those checks, through v0.55.0.
+residual gate) had only those checks, through v0.56.0.
 
 That is not hypothetical. Measured 2026-09-11 against the known-length targets:
 five of fourteen checkerboard calibrations carry a baseline that is a simple
@@ -30,12 +30,14 @@ level at each detected cell's centre, which alternates dark and light only
 when the cells are single squares, and refuses a lattice that does not. That
 gate is what fixed the every-other-row detection a 16 px laser dot provoked on
 a warped board. Core measured it on synthetic boards. On production's real
-frames (2026-10-24, read-only: all 745 checkerboard-labelled renders of the 17
-missions with a calibration target, against services' detector on OpenCV 5)
-it refused one lattice services' detector accepted that is every other column
-(mission 522, capture 134474, parity 0.13), and no lattice of single squares
-that services' detector found (all >= 0.987). The overlay stays the
-independent check, by a person.
+frames (2026-10-24/25, read-only: all 745 checkerboard-labelled renders of the
+17 missions with a calibration target, against services' detector on OpenCV
+5) it refused one lattice services' detector accepted that is every other
+column (mission 522, capture 134474, parity 0.13), and no lattice of single
+squares that services' detector found (all >= 0.987). Under 4.3.1 the
+detector found a board in 640 of those frames against services' 615, keeping
+every grid both had found (#353). The overlay stays the independent check, by
+a person.
 
 **The connecting lines are the instrument, not decoration.** Corner dots alone
 turn "every corner, or every other one?" into a counting exercise at high zoom.

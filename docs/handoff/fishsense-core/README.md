@@ -1,5 +1,7 @@
 # fishsense-core: checkerboard detection drops real frames
 
+**Resolved 2026-10-25:** fishsense-core 4.3.1 (#114) repairs a corner a laser dot dragged and tries a fixed sequence of seeds. On the same 745 frames it found a board in 640 (services' detector: 615; 4.3.0: 593), kept every grid both had found, recovered all 11 dot-dragged boards and 17 of the 18 seed-lost ones (496/132309 gives no passing grid on any seed), and still refuses the every-other-column lattice. #353 pins it.
+
 **For:** whoever works on fishsense-core's `fishsense_core.checkerboard` (#98, released in 4.3.0).
 **From:** fishsense-services, 2026-10-24. services PR #353, which adopts core's detector, is on hold until a core release fixes the two problems below.
 
