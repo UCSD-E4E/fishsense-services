@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.56.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.55.0...v0.56.0) (2026-10-25)
+
+
+### Features
+
+* laser predictor v3 (fishsense-core 4.3.0's colour rule) ([8aadbe1](https://github.com/UCSD-E4E/fishsense-services/commit/8aadbe1fcea7ee7c383d514daf076c735310f0cb))
+* **processor:** laser colour and reflection split from fishsense-core, laser predictor v3 (items 7-8; migration 0067) ([e766c45](https://github.com/UCSD-E4E/fishsense-services/commit/e766c45003c49d664665dde60344ef1cbfda81ea))
+
+
+### Bug Fixes
+
+* **processor:** calibration guards from fishsense-core (item 6) ([4caf9d1](https://github.com/UCSD-E4E/fishsense-services/commit/4caf9d15035f298b2ffa0e978e5075542bf6ec88))
+* **processor:** read the laser colour where the detector found the dot (review of [#352](https://github.com/UCSD-E4E/fishsense-services/issues/352)) ([dc73f77](https://github.com/UCSD-E4E/fishsense-services/commit/dc73f77c9757d007b6a2052ab62a3a64596c98fc))
+* **processor:** v4 finds the template page on the board before ECC, not centred ([b19d086](https://github.com/UCSD-E4E/fishsense-services/commit/b19d086fb751fe7fbd159e5c85b7d310e41cd05f))
+
 ## [0.55.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.54.1...v0.55.0) (2026-10-24)
 
 
