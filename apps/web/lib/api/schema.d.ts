@@ -61,6 +61,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/me/tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Tokens
+         * @description The caller's personal API tokens, newest first: never their secrets.
+         */
+        get: operations["list_my_tokens"];
+        put?: never;
+        /**
+         * Make Token
+         * @description A token that acts as the caller, for a script or an agent: ``read``
+         *     unless they ask for ``edit``. Its secret is in this response only.
+         */
+        post: operations["create_my_token"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/tokens/{token_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke */
+        delete: operations["revoke_my_token"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/public/summary": {
         parameters: {
             query?: never;
@@ -70,6 +112,27 @@ export interface paths {
         };
         /** Summary */
         get: operations["get_public_summary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/automatic/lengths": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Lengths
+         * @description The tenant's current automatic lengths, by mission and capture
+         *     number; ``species`` keeps one, by scientific name. Unvalidated.
+         */
+        get: operations["list_automatic_lengths"];
         put?: never;
         post?: never;
         delete?: never;
@@ -327,6 +390,26 @@ export interface paths {
         };
         /** Get Mission */
         get: operations["get_mission_automatic"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/missions/{number}/automatic/lengths": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Mission Lengths
+         * @description One mission's current automatic lengths, by capture number.
+         */
+        get: operations["list_mission_automatic_lengths"];
         put?: never;
         post?: never;
         delete?: never;
@@ -637,6 +720,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{slug}/observations/species": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Species
+         * @description The species the tenant's measured fish are, most first, with how
+         *     many of each: what the Fish page offers to filter by. Only the
+         *     tenant's own (the owner, 2026-10-23).
+         */
+        get: operations["list_observation_species"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{slug}/observations/{capture_id}/{fish_id}": {
         parameters: {
             query?: never;
@@ -829,6 +934,53 @@ export interface components {
             /** Status */
             status: string;
             tail: components["schemas"]["PixelPoint"] | null;
+        };
+        /** AutomaticLengthPageView */
+        AutomaticLengthPageView: {
+            /** Lengths */
+            lengths: components["schemas"]["AutomaticLengthView"][];
+            /** Next */
+            next: string | null;
+        };
+        /** AutomaticLengthView */
+        AutomaticLengthView: {
+            /** Calibration Source */
+            calibration_source: string;
+            /**
+             * Capture Id
+             * Format: uuid
+             */
+            capture_id: string;
+            /** Capture Number */
+            capture_number: number;
+            /** Captured At */
+            captured_at: string | null;
+            /** Depth M */
+            depth_m: number | null;
+            /** Human Length M */
+            human_length_m: number | null;
+            /** Laser Confidence */
+            laser_confidence: number | null;
+            /** Length M */
+            length_m: number;
+            /** Mission Human Measured */
+            mission_human_measured: boolean;
+            /** Mission Number */
+            mission_number: number;
+            /** Reviews */
+            reviews: {
+                [key: string]: components["schemas"]["KindReviewView"];
+            };
+            /** Sam Score */
+            sam_score: number | null;
+            /** Scientific Name */
+            scientific_name: string | null;
+            /** Species */
+            species: string | null;
+            /** Species Margin */
+            species_margin: number | null;
+            /** Species Probability */
+            species_probability: number | null;
         };
         /** CaptureCardPage */
         CaptureCardPage: {
@@ -1103,6 +1255,15 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** KindReviewView */
+        KindReviewView: {
+            /** Action */
+            action: string | null;
+            /** Pending */
+            pending: boolean;
+            /** Reason */
+            reason: string | null;
         };
         /** LaserEvidenceView */
         LaserEvidenceView: {
@@ -1411,6 +1572,39 @@ export interface components {
             /** Started On */
             started_on?: string | null;
         };
+        /** NewToken */
+        NewToken: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Name */
+            name: string;
+            /** Prefix */
+            prefix: string;
+            /** Revoked At */
+            revoked_at: string | null;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "read" | "edit";
+            /** Token */
+            token: string;
+        };
         /** ObservationDetailView */
         ObservationDetailView: {
             /** Algorithm */
@@ -1648,6 +1842,15 @@ export interface components {
             /** Note */
             note?: string | null;
         };
+        /** SpeciesCountView */
+        SpeciesCountView: {
+            /** Common Name */
+            common_name: string | null;
+            /** Count */
+            count: number;
+            /** Scientific Name */
+            scientific_name: string;
+        };
         /** SpeciesView */
         SpeciesView: {
             /** Common Name */
@@ -1700,6 +1903,53 @@ export interface components {
             unknown_ports: number;
             /** Wild Fish */
             wild_fish: number;
+        };
+        /** TokenCreate */
+        TokenCreate: {
+            /**
+             * Expires In Days
+             * @default 90
+             */
+            expires_in_days: number;
+            /** Name */
+            name: string;
+            /**
+             * Scope
+             * @default read
+             * @enum {string}
+             */
+            scope: "read" | "edit";
+        };
+        /** TokenView */
+        TokenView: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Name */
+            name: string;
+            /** Prefix */
+            prefix: string;
+            /** Revoked At */
+            revoked_at: string | null;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "read" | "edit";
         };
         /** Unlocked */
         Unlocked: {
@@ -1823,6 +2073,88 @@ export interface operations {
             };
         };
     };
+    list_my_tokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenView"][];
+                };
+            };
+        };
+    };
+    create_my_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TokenCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewToken"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_my_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_public_summary: {
         parameters: {
             query?: never;
@@ -1839,6 +2171,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PublicSummaryView"];
+                };
+            };
+        };
+    };
+    list_automatic_lengths: {
+        parameters: {
+            query?: {
+                species?: string | null;
+                after?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutomaticLengthPageView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -2387,6 +2754,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MissionAutomaticView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_mission_automatic_lengths: {
+        parameters: {
+            query?: {
+                after?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                number: number;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutomaticLengthPageView"];
                 };
             };
             /** @description Validation Error */
@@ -2960,6 +3362,7 @@ export interface operations {
             query?: {
                 device?: ("lite" | "mobile" | "other") | null;
                 mission?: number | null;
+                species?: string | null;
                 limit?: number;
                 before?: string | null;
                 page?: number | null;
@@ -2979,6 +3382,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ObservationPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_observation_species: {
+        parameters: {
+            query?: {
+                device?: ("lite" | "mobile" | "other") | null;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeciesCountView"][];
                 };
             };
             /** @description Validation Error */

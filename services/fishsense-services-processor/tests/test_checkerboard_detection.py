@@ -3,7 +3,7 @@
 Ported from fishsense-lite@77e8f8e5 services/fishsense-data-processing-workflow-worker/tests/test_checkerboard_detection.py.
 
 The detector's whole job is to produce the `(body_points, image_points)` that
-`calibration_geometry.plane_from_correspondences` turns into a plane — the
+`fishsense_core.plane.plane_from_correspondences` turns into a plane — the
 same pair a `MissionSlate`'s template points and hand-clicked corners produce
 today. Everything downstream is already shared and already tested.
 
@@ -35,7 +35,7 @@ import pytest
 from fishsense_services_contracts.laser_region import point_in_laser_region
 
 from fishsense_services_processor.checkerboard import detection as sut
-from fishsense_services_processor.calibration.geometry import (
+from fishsense_core.plane import (
     laser_point_on_plane,
     plane_from_correspondences,
 )

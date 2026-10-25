@@ -3,7 +3,8 @@
 Ported from fishsense-lite@77e8f8e5 services/fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/checkerboard_detection.py.
 
 This is the checkerboard half of what a `MissionSlate` supplies to stage 13:
-`(body_points, image_points)` for `calibration_geometry`. Everything after
+`(body_points, image_points)` for `fishsense_core.plane` (services'
+own `calibration/geometry.py` through v0.54.1). Everything after
 that — the pose, the plane, the ray-plane intersection, the Atanasov fit, the
 self-consistency gate, `LaserExtrinsics` — is already shared and already knows
 nothing about what the target was. See

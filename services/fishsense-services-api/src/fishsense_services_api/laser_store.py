@@ -90,7 +90,7 @@ __all__ = [
 #: package owns it (`fishsense_services_contracts.laser`); the API does not
 #: depend on the contract, so the number is repeated here and the
 #: orchestrator's tests pin the two together.
-LASER_PREDICTOR_VERSION = 2
+LASER_PREDICTOR_VERSION = 3
 
 #: v1's gate compares recorded margins loosely: a float round trip must not
 #: manufacture a write.

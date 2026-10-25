@@ -228,10 +228,11 @@ def test_the_builtin_manifest_gates_what_loads(s3, tmp_path):
         )
 
 
-def test_core_4_2_0_pins_sam3():
+def test_core_pins_sam3():
     """fishsense-core 4.1.0 did not pin SAM 3.1's hash, so the head/tail stage
-    builds its own pin from settings (`headtail_predict.weights`). 4.2.0 pins
-    it (2026-10-23, taken for the SimCC keypoint replay). The stage keeps its
+    builds its own pin from settings (`headtail_predict.weights`). Core pins it
+    from 4.2.0 (2026-10-23, taken for the SimCC keypoint replay), and 4.3.0
+    pins the same file. The stage keeps its
     own pin until the `model-weights` copy is checked against this one: a
     different file there would stop every head/tail prediction. This fails if
     core's pin moves, which is when to look again."""

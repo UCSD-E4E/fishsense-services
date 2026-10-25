@@ -22,7 +22,7 @@ from fishsense_services_contracts.mask_backfill import (
 )
 from fishsense_services_contracts.masks import MaskUpload, mask_key
 from fishsense_services_contracts.object_store import ObjectRef
-from fishsense_services_processor.headtail_predict.geometry import crop_origin
+from fishsense_core.fish.fish_at_dot import crop_origin
 from fishsense_services_processor.mask_backfill.activities import (
     MaskBackfillActivities,
 )
@@ -48,7 +48,15 @@ def _mask(dx=0, half_len=200, half_h=60):
     return m
 
 
-class _Scored:
+class _ScoredSeam:
+    """core's `ScoredSegmenter` needs both seams: `segment` is `segment_scored`'s
+    masks, written once."""
+
+    def segment(self, image):
+        return [mask for mask, _ in self.segment_scored(image)]
+
+
+class _Scored(_ScoredSeam):
     def __init__(self, pairs):
         self.pairs = pairs
 
@@ -70,7 +78,7 @@ def _first(source, jpeg, seg) -> MaskExpectation:
         prediction_id=uuid.uuid4(), capture_id=CAPTURE, dots=[list(DOT)],
         render_url="u", expect=MaskExpectation(mask_area_px=1, crop_x=0, crop_y=0),
     )  # fmt: skip
-    _, got, _ = regenerate(source, frame, jpeg, scored=seg, plain=seg,
+    _, got, _ = regenerate(source, frame, jpeg, segmenter=seg,
                            checkpoint="sam3/3.1@abc", core_version="4.1.0")  # fmt: skip
     return got
 
@@ -91,7 +99,7 @@ class _Both(_Scored, _Plain):
 def test_the_same_mask_reproduces_its_prediction_and_is_kept(source):
     jpeg, seg = _jpeg(), _Both(_mask())
     expect = _first(source, jpeg, seg)
-    outcome, got, mask = regenerate(source, _frame(expect), jpeg, scored=seg, plain=seg,
+    outcome, got, mask = regenerate(source, _frame(expect), jpeg, segmenter=seg,
                                     checkpoint="sam3/3.1@abc", core_version="4.1.0")  # fmt: skip
     assert outcome == "reproduced" and got == expect
     assert (
@@ -105,8 +113,7 @@ def test_a_different_mask_is_not_the_predictions(source):
     jpeg = _jpeg()
     expect = _first(source, jpeg, _Both(_mask()))
     other = _Both(_mask(half_len=260))
-    outcome, got, mask = regenerate(source, _frame(expect), jpeg, scored=other,
-                                    plain=other, checkpoint="c", core_version="v")  # fmt: skip
+    outcome, got, mask = regenerate(source, _frame(expect), jpeg, segmenter=other, checkpoint="c", core_version="v")  # fmt: skip
     assert outcome == "mismatch" and got != expect and mask is None
 
 
@@ -114,16 +121,14 @@ def test_no_mask_under_the_dot_now_is_said():
     jpeg = _jpeg()
     expect = _first("automatic", jpeg, _Both(_mask()))
     off = _Both(_mask(dx=700))
-    outcome, got, mask = regenerate("automatic", _frame(expect), jpeg, scored=off,
-                                    plain=off, checkpoint="c", core_version="v")  # fmt: skip
+    outcome, got, mask = regenerate("automatic", _frame(expect), jpeg, segmenter=off, checkpoint="c", core_version="v")  # fmt: skip
     assert (outcome, got, mask) == ("no_mask", None, None)
 
 
 def test_an_image_that_does_not_decode_is_said():
     expect = MaskExpectation(mask_area_px=10, crop_x=0, crop_y=0)
     seg = _Both(_mask())
-    outcome, _, _ = regenerate("headtail", _frame(expect), b"not a jpeg", scored=seg,
-                               plain=seg, checkpoint="c", core_version="v")  # fmt: skip
+    outcome, _, _ = regenerate("headtail", _frame(expect), b"not a jpeg", segmenter=seg, checkpoint="c", core_version="v")  # fmt: skip
     assert outcome == "decode_failed"
 
 
@@ -157,8 +162,7 @@ def _activities(store, *, gpu=True, seg=None, puts=None):
 
     return MaskBackfillActivities(
         store_factory=lambda: store, sam3_checkpoint=checkpoint,
-        cuda_available=lambda: gpu, scored_segmenter=lambda path: seg,
-        plain_segmenter=lambda path: seg, put=put,
+        cuda_available=lambda: gpu, segmenter=lambda path: seg, put=put,
     )  # fmt: skip
 
 

@@ -23,6 +23,7 @@ from fishsense_services_api.observation_store import (
     list_observations,
     observation,
     observation_page,
+    observation_species,
 )
 from observation_seed import (
     ALICE,
@@ -445,3 +446,64 @@ class TestEvidence:
             found = await observation(conn, tenants["lab"], capture_id, fish_id)
 
         assert found.laser.depth_m == 3.5
+
+
+class TestBySpecies:
+    """The Fish page filters by species (the owner, 2026-10-23): one species'
+    fish, and the species there are to choose from, with how many of each."""
+
+    async def _three(self, owner_engine, app_engine, lab):
+        hog = ("Lachnolaimus maximus", "Hogfish")
+        a, _ = await _lite(owner_engine, lab, species=hog, device_name="FSL-01")
+        b, _ = await _lite(
+            owner_engine,
+            lab,
+            species=hog,
+            device_name="FSL-02",
+            at=T0 + timedelta(days=1),
+        )
+        c, _ = await _lite(
+            owner_engine,
+            lab,
+            species=("Scarus coeruleus", "Blue Parrotfish"),
+            at=T0 + timedelta(days=2),
+            device_name="FSL-03",
+        )
+        await _lite(owner_engine, lab, model=("Ginny", 0.3127), device_name="FSL-04")  # fmt: skip
+        await _mobile(app_engine, owner_engine, lab, at=T0 + timedelta(days=3))
+        return a, b, c
+
+    async def test_a_species_keeps_only_its_fish(
+        self, owner_engine, app_engine, tenants
+    ):
+        a, b, _ = await self._three(owner_engine, app_engine, tenants["lab"])
+
+        found = await _page(app_engine, tenants["lab"], species="Lachnolaimus maximus")
+
+        assert [o.capture_id for o in found.observations] == [b, a]
+        assert found.total == 2
+
+    async def test_it_combines_with_the_device(self, owner_engine, app_engine, tenants):
+        await self._three(owner_engine, app_engine, tenants["lab"])
+
+        phones = await _page(
+            app_engine, tenants["lab"], species="Lachnolaimus maximus", device="mobile"
+        )
+
+        assert phones.total == 0
+
+    async def test_the_species_to_choose_from_most_first(
+        self, owner_engine, app_engine, tenants
+    ):
+        await self._three(owner_engine, app_engine, tenants["lab"])
+        await _lite(owner_engine, tenants["partner"], species=("Other partner", "x"))
+
+        async with tenant_transaction(app_engine, tenants["lab"]) as conn:
+            found = await observation_species(conn, tenants["lab"])
+            phones = await observation_species(conn, tenants["lab"], device="mobile")
+
+        assert [(s.scientific_name, s.common_name, s.count) for s in found] == [
+            ("Lachnolaimus maximus", "Hogfish", 2),
+            ("Scarus coeruleus", "Blue Parrotfish", 1),
+        ]
+        assert phones == []

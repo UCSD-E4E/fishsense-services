@@ -1,6 +1,6 @@
 [project]
 name = "fishsense-services-processor"
-version = "0.50.0"
+version = "0.55.0"
 description = "FishSense v2 processor: the compute side of the pipeline, ported from v1's data-worker."
 requires-python = ">=3.13,<3.14"
 dependencies = [
@@ -10,10 +10,18 @@ dependencies = [
     # Pinned to v1's lock (fishsense-lite@a8b2c3bc): stage 1's clusters must
     # match v1's for the same timestamps, and HDBSCAN is where they come from.
     "scikit-learn==1.9.0",
-    # The same wheel v1 runs at the freeze (PLAN.md §6.3): the line fit (#82,
-    # #85), CameraIntrinsics without the API SDK (#83), and the model loader
-    # (#84). Base install only -- torch is behind the `torch` extra below.
-    "fishsense-core==4.2.0",
+    # Was the wheel v1 ran at the freeze (PLAN.md §6.3; 4.1.0): the line fit
+    # (#82, #85), CameraIntrinsics without the API SDK (#83), and the model
+    # loader (#84). 4.3.0 (2026-10-23) carries the measurement code services
+    # adopts in place of its own copies: find_fish_at_dot with SAM's score
+    # gate, plane geometry, laser point and length, the calibration guards,
+    # laser colour, the reflection split, checkerboard detection, size
+    # constancy and the line fitters. It needs OpenCV 5 (the root override),
+    # so a row's recorded core_version also names its OpenCV: 4.3.0 rows are
+    # OpenCV 5, earlier rows OpenCV 4 (test_dependency_pins checks core's
+    # requirement).
+    # Base install only -- torch is behind the `torch` extra below.
+    "fishsense-core==4.3.0",
     "boto3>=1.35.0",
     "pymupdf>=1.26.6",
     "pandas>=2.3.3",
@@ -25,7 +33,7 @@ dependencies = [
 # Kept out of the base install so CI and the per-image and light images don't
 # pull torch and its CUDA runtime. The GPU image installs `--extra torch`.
 torch = [
-    "fishsense-core[laser-detector,slate,headtail-keypoints]==4.2.0",
+    "fishsense-core[laser-detector,slate,headtail-keypoints]==4.3.0",
     # SAM3: Meta publishes no wheel. Pinned to v1's commit so the stage can't
     # change under HEADTAIL_PREDICTOR_VERSION without a visible diff.
     "sam3 @ git+https://github.com/facebookresearch/sam3.git@8e451d5eb43c817b64ae7577fb7b9ae223db88a9",
@@ -58,7 +66,7 @@ fishsense-services-processor = "fishsense_services_processor.worker:run"
 [tool.uv.sources]
 fishsense-services-contracts = { workspace = true }
 fishsense-core = [
-    { url = "https://github.com/UCSD-E4E/fishsense-core/releases/download/fishsense-core-v4.2.0/fishsense_core-4.2.0-cp313-cp313-manylinux_2_34_x86_64.whl", marker = "python_version == '3.13'" },
+    { url = "https://github.com/UCSD-E4E/fishsense-core/releases/download/fishsense-core-v4.3.0/fishsense_core-4.3.0-cp313-cp313-manylinux_2_34_x86_64.whl", marker = "python_version == '3.13'" },
 ]
 
 [build-system]

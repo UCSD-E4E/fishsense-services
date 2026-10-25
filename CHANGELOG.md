@@ -1,5 +1,68 @@
 # Changelog
 
+## [0.55.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.54.1...v0.55.0) (2026-10-24)
+
+
+### Features
+
+* the v4 replay can pose a mission with a named slate template ([c5b68c4](https://github.com/UCSD-E4E/fishsense-services/commit/c5b68c4340a9855464519688caa5bc94fed846d7))
+* the v4 replay can pose a mission with a named slate template ([82ee3b5](https://github.com/UCSD-E4E/fishsense-services/commit/82ee3b5fc1f26565e1f31d0c1d04acdcce23f2b6))
+
+
+### Bug Fixes
+
+* **processor:** a slate label with no points left is skipped, not fatal (review of [#350](https://github.com/UCSD-E4E/fishsense-services/issues/350)) ([ce95d31](https://github.com/UCSD-E4E/fishsense-services/commit/ce95d314e88e3d7fd74a35dfa3574aa8cb0a6009))
+* **processor:** a slate label with no points left is skipped, not fatal (review of [#350](https://github.com/UCSD-E4E/fishsense-services/issues/350)) ([77d1045](https://github.com/UCSD-E4E/fishsense-services/commit/77d10450dbd4f13fb113400ef45c8a3f04b53832))
+* **processor:** unusable SAM scores are an abstention, mismatched labels never retry (review of [#349](https://github.com/UCSD-E4E/fishsense-services/issues/349)) ([d5e7487](https://github.com/UCSD-E4E/fishsense-services/commit/d5e748774d95141bd231c399971f1be004a0e1c4))
+
+## [0.54.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.54.0...v0.54.1) (2026-10-24)
+
+
+### Bug Fixes
+
+* **api:** the automatic drain keeps human-measured missions current too ([7c19a51](https://github.com/UCSD-E4E/fishsense-services/commit/7c19a51a56636460c633f07549c46e5752a9e0f0))
+* **api:** the automatic drain keeps human-measured missions current too ([1da8318](https://github.com/UCSD-E4E/fishsense-services/commit/1da831887f6ca6421f4733dc30d2e8803116bfe8))
+
+## [0.54.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.53.0...v0.54.0) (2026-10-24)
+
+
+### Features
+
+* **api:** list automatic lengths, per tenant and per mission, with their reviews ([88670de](https://github.com/UCSD-E4E/fishsense-services/commit/88670de63b817c1677d05d1c18bd2331a1a3bf6c))
+* **api:** list automatic lengths, per tenant and per mission, with their reviews ([e70a368](https://github.com/UCSD-E4E/fishsense-services/commit/e70a36880e83cab43c414506913dd34601ba7f1a))
+
+## [0.53.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.52.0...v0.53.0) (2026-10-24)
+
+
+### Features
+
+* BioCLIP with fish-model classes, read-only replay (contract v20) ([a0c7a4b](https://github.com/UCSD-E4E/fishsense-services/commit/a0c7a4b1b944ad3f7212994d0eac35704fc18e18))
+* BioCLIP with fish-model classes, read-only replay (contract v20) ([9036186](https://github.com/UCSD-E4E/fishsense-services/commit/9036186dd9c15a3a34aa72eb2c7eb969f5e7d94b))
+* **deploy:** retire Superset ([88c9615](https://github.com/UCSD-E4E/fishsense-services/commit/88c96157bdb8c4df149f9699069b3ff4640b36cb))
+
+## [0.52.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.51.0...v0.52.0) (2026-10-24)
+
+
+### Features
+
+* **api:** personal API tokens and a read-only MCP endpoint ([da0aa57](https://github.com/UCSD-E4E/fishsense-services/commit/da0aa57d34d77c44c9dd1df16d104b573b525731))
+
+## [0.51.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.50.1...v0.51.0) (2026-10-24)
+
+
+### Features
+
+* filter the Fish page by species, offering only the tenant's own ([733dcf1](https://github.com/UCSD-E4E/fishsense-services/commit/733dcf1ca7012c75f311866d1d04cf2c4b394e66))
+* filter the Fish page by species, offering only the tenant's own ([9fbf572](https://github.com/UCSD-E4E/fishsense-services/commit/9fbf57297f683fe1c7ad3cc59794431062c3386d))
+
+## [0.50.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.50.0...v0.50.1) (2026-10-24)
+
+
+### Bug Fixes
+
+* **web:** the tenant switcher closes on a click elsewhere, Escape, or a pick ([11aefb5](https://github.com/UCSD-E4E/fishsense-services/commit/11aefb5bfe070dff214bc07f76f9b1c324466b8b))
+* **web:** the tenant switcher closes on a click elsewhere, Escape, or a pick ([74bd5cd](https://github.com/UCSD-E4E/fishsense-services/commit/74bd5cd45f4c462c1f8b290659293328b937e31d))
+
 ## [0.50.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.49.0...v0.50.0) (2026-10-23)
 
 

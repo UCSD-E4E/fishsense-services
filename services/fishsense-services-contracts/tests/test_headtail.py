@@ -102,6 +102,16 @@ def test_the_version_and_crop_are_v1s():
     """A different value would make every migrated prediction stale (or fresh)
     at cutover; these are bumped by hand, in a diff, never by accident."""
     assert HEADTAIL_PREDICTOR_VERSION == 2
+
+
+def test_the_fallback_tier_is_minus_two_since_core_rotates_portraits():
+    """core's FishialSegmenter answers a portrait crop the old adapter
+    refused (review of #349): its rows are told apart from -1's."""
+    from fishsense_services_contracts.headtail import (
+        HEADTAIL_FALLBACK_PREDICTOR_VERSION,
+    )
+
+    assert HEADTAIL_FALLBACK_PREDICTOR_VERSION == -2
     assert (HEADTAIL_CROP_WIDTH, HEADTAIL_CROP_HEIGHT) == (1800, 1350)
 
 

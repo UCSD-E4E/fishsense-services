@@ -83,6 +83,9 @@ export async function AppHeader() {
           {state.signedIn ? (
             <>
               <span className="text-sm text-fg-2">{state.name}</span>
+              <Link href="/tokens" className="text-sm text-teal-fg hover:underline">
+                API tokens
+              </Link>
               <form
                 action={async () => {
                   "use server";

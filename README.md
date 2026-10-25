@@ -145,6 +145,43 @@ are never in this repo. [`docs/cutover.md`](docs/cutover.md) is the operations
 runbook: the cutover as it was run, rehearsals, the krg-infra handoff, and the
 post-cutover steps.
 
+## API tokens and the MCP endpoint (AI agents)
+
+Signed-in users make personal API tokens on the web app's **API tokens** page
+(`/tokens`). A token acts as the person who made it, and comes in two kinds,
+fixed when it is made:
+
+- **read-only**, the default: reads what its owner can read (their tenants,
+  or every tenant read-only for a system admin, with each visit recorded) and
+  is refused every write request. Reads keep their server-side effects, such
+  as that visit record and the Fish list's place names;
+- **edit**, an opt-in: also writes what its owner's role allows, through the
+  REST API only, and only in tenants its owner is a member of.
+
+No token can unlock a tenant or make, list or revoke tokens. Only a SHA-256 of
+each token is stored, and every token expires (90 days by default, a year at
+most).
+
+The API serves a read-only [MCP](https://modelcontextprotocol.io) endpoint at
+`https://api.fishsense.e4e.ucsd.edu/mcp`. It accepts read-only tokens only:
+edit tokens and sign-in sessions are refused. To connect Claude Code (the
+tokens page shows this command with your new token filled in):
+
+```sh
+claude mcp add --transport http fishsense https://api.fishsense.e4e.ucsd.edu/mcp \
+  --header "Authorization: Bearer fishsense_..."
+```
+
+Each tool is a thin wrapper over a REST read: tenants, summaries, regions,
+missions and their captures, observations, deployments, devices, reviews, and
+automatic results. Automatic lengths are listed a page at a time, for a tenant
+(optionally one species) or a mission. Each length comes with its reviews and
+with the human length on the same frame. Automatic results come back marked
+`validated: false`. The
+design follows e4e-reference-manager@a12bcca's (`api/app/mcp_server.py`);
+[`mcp_server.py`](services/fishsense-services-api/src/fishsense_services_api/mcp_server.py)
+says what differs.
+
 ## Operating notes
 
 - **Schedules are created if missing and never updated in place.** To change
