@@ -38,7 +38,13 @@ import boto3
 import cv2
 import numpy as np
 import pytest
-from fishsense_core.models import ModelIntegrityError, ModelUnavailable
+from fishsense_core.models import (
+    Manifest,
+    ModelIntegrityError,
+    ModelRef,
+    ModelUnavailable,
+    builtin_manifest,
+)
 from moto import mock_aws
 from temporalio import activity
 from fishsense_services_contracts.temporal import DATA_CONVERTER
@@ -453,18 +459,14 @@ class TestFallbackSegmenterIsLoaded:
 
 # -- SAM 3.1's weights through core's manifest ---------------------------------------
 
-#: fishsense-core's pin for SAM 3.1 (4.2.0+), the `model-weights` copy v1
-#: uploaded: the owner matched the processor Secret's recorded
-#: FISHSENSE_SAM3_* against it before the shim went (2026-10-23).
-CORE_SAM3_SHA256 = "0567debeec80ba4ac6369540c6c248025283cb3ff2b92827509e57e2b3541cb6"
-CORE_SAM3_SIZE = 3502755717
-#: What every SAM 3.1 row has recorded as its checkpoint since the cutover.
-CORE_SAM3_ID = "sam3/3.1@0567debeec80"
 WEIGHTS_ENV = {
     "FISHSENSE_MODEL_WEIGHTS_ENDPOINT_URL": "https://s3.test",
     "FISHSENSE_MODEL_WEIGHTS_ACCESS_KEY_ID": "k",
     "FISHSENSE_MODEL_WEIGHTS_SECRET_ACCESS_KEY": "s",
 }
+#: Stands in for SAM 3.1's 3.5 GB: core's pin itself (sha256, size, the id
+#: every SAM 3.1 row records) is pinned once, in test_weights.py.
+_STAND_IN = b"SAM 3.1, standing in"
 
 
 class _NoStore:
@@ -474,15 +476,31 @@ class _NoStore:
         raise AssertionError(f"{ref.id} was a cache hit; nothing to download")
 
 
-def _cached_core_sam3(cache_dir: Path) -> Path:
-    """A cache entry as core's `fetch` leaves one: the file, at the pinned
-    size (sparse, not 3.5 GB of disk), and its verification stamp."""
-    path = cache_dir / "sam3" / "3.1" / "sam3.1_multiplex.pt"
-    path.parent.mkdir(parents=True)
-    with path.open("wb") as handle:
-        handle.truncate(CORE_SAM3_SIZE)
-    path.with_name(path.name + ".sha256").write_text(CORE_SAM3_SHA256 + "\n")
-    return path
+class _BytesStore:
+    """Core's `WeightStore`, holding `_STAND_IN`."""
+
+    def __init__(self):
+        self.downloads = []
+
+    def download_to(self, ref, dest):
+        self.downloads.append(ref.id)
+        Path(dest).write_bytes(_STAND_IN)
+
+
+def _stand_in_manifest(monkeypatch):
+    """Core's own `sam3`/`3.1` entry (its filename), at the stand-in's sha256
+    and size, as the manifest `fetch_sam3` resolves (review of #358: the
+    tests no longer write core's private cache layout; core's `fetch` fills
+    its cache)."""
+    real = builtin_manifest().resolve("sam3", "3.1")
+    ref = ModelRef(
+        name=real.name, version=real.version, target=real.target,
+        filename=real.filename, sha256=hashlib.sha256(_STAND_IN).hexdigest(),
+        size=len(_STAND_IN),
+    )  # fmt: skip
+    manifest = Manifest([ref], {"sam3": "3.1"})
+    monkeypatch.setattr(sam3_weights, "builtin_manifest", lambda: manifest)
+    return ref
 
 
 class TestSam3Weights:
@@ -490,37 +508,56 @@ class TestSam3Weights:
     through core's manifest: no settings of its own, and nothing that isn't
     core's pinned file loads."""
 
-    async def test_the_checkpoint_is_cores_pinned_file(self, tmp_path):
-        """`sam3.1_multiplex.pt`, version 3.1, at v1's `model-weights/sam3/3.1/`
-        key (not `sam3.pt`, which loads just as quietly and degrades every
-        mask), recorded as the id every SAM 3.1 row has carried."""
-        cached = _cached_core_sam3(tmp_path)
+    async def test_the_checkpoint_is_cores_sam3_entry(self, monkeypatch, tmp_path):
+        """`sam3.1_multiplex.pt`, version 3.1 (not `sam3.pt`, which loads just
+        as quietly and degrades every mask), fetched once and then a cache
+        hit, and recorded as its manifest entry's id."""
+        ref = _stand_in_manifest(monkeypatch)
+        store = _BytesStore()
 
-        path, model_id = await sam3_weights.fetch_sam3(
-            store=_NoStore(), cache_dir=tmp_path
+        first = await sam3_weights.fetch_sam3(store=store, cache_dir=tmp_path)
+        again = await sam3_weights.fetch_sam3(store=_NoStore(), cache_dir=tmp_path)
+
+        assert first == again
+        path, model_id = first
+        assert Path(path) == tmp_path / "sam3" / "3.1" / "sam3.1_multiplex.pt"
+        assert Path(path).read_bytes() == _STAND_IN
+        assert model_id == ref.id
+        assert store.downloads == [ref.id]
+
+    async def test_the_id_recorded_is_the_entry_that_loaded(
+        self, monkeypatch, tmp_path
+    ):
+        """One manifest resolves both (review of #358): were the fetch to
+        resolve core's built-in pin itself, it would ask the store for the
+        3.5 GB file, get the stand-in, and refuse it."""
+        ref = _stand_in_manifest(monkeypatch)
+
+        _, model_id = await sam3_weights.fetch_sam3(
+            store=_BytesStore(), cache_dir=tmp_path
         )
 
-        assert Path(path) == cached
-        assert model_id == CORE_SAM3_ID
+        assert model_id == ref.id
 
     async def test_the_stage_needs_no_sam3_settings(self, monkeypatch, tmp_path):
         """The wiring every SAM stage shares reads only `FISHSENSE_MODEL_WEIGHTS_*`:
-        a pod without FISHSENSE_SAM3_* (the sync no longer writes them) loads."""
+        a pod without FISHSENSE_SAM3_* loads."""
         from fishsense_services_processor.headtail_predict import stage
 
+        ref = _stand_in_manifest(monkeypatch)
+        await sam3_weights.fetch_sam3(store=_BytesStore(), cache_dir=tmp_path)
         for name in ("FISHSENSE_SAM3_SHA256", "FISHSENSE_SAM3_SIZE"):
             monkeypatch.delenv(name, raising=False)
         for name, value in WEIGHTS_ENV.items():
             monkeypatch.setenv(name, value)
         monkeypatch.setenv("FISHSENSE_MODEL_WEIGHTS_CACHE_DIR", str(tmp_path))
-        _cached_core_sam3(tmp_path)
         stage._weights.cache_clear()
         try:
             _, model_id = await stage._sam3_checkpoint()
         finally:
             stage._weights.cache_clear()
 
-        assert model_id == CORE_SAM3_ID
+        assert model_id == ref.id
 
     @pytest.fixture
     def models_bucket(self, monkeypatch):

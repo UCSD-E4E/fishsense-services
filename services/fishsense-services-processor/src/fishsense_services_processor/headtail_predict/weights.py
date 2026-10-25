@@ -44,9 +44,13 @@ async def fetch_sam3(*, store: GarageWeightStore, cache_dir: Path) -> tuple[Path
 
     Raises what core's `fetch` raises: `KeyError` (no such manifest entry),
     `ModelIntegrityError`, `ModelUnavailable`; the activity maps each to its
-    own non-retryable failure."""
-    ref = builtin_manifest().resolve(SAM3_MODEL, SAM3_VERSION)
+    own non-retryable failure.
+
+    One manifest resolves both the id and the file (review of #358): the id
+    recorded is always the entry that loaded."""
+    manifest = builtin_manifest()
+    ref = manifest.resolve(SAM3_MODEL, SAM3_VERSION)
     path = await afetch_weights(
-        SAM3_MODEL, SAM3_VERSION, store=store, cache_dir=cache_dir
+        SAM3_MODEL, SAM3_VERSION, store=store, cache_dir=cache_dir, manifest=manifest
     )
     return path, ref.id
