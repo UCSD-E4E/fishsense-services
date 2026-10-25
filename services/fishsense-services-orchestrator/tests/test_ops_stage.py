@@ -27,6 +27,9 @@ from fishsense_services_orchestrator.ops.checksums.workflows import (
 from fishsense_services_orchestrator.ops.labeling_configs.workflow import (
     ReconcileLabelingConfigsWorkflow,
 )
+from fishsense_services_orchestrator.ops.focal_lengths.workflow import (
+    BackfillFocalLengthsWorkflow,
+)
 from fishsense_services_orchestrator.ops.paths.workflow import (
     RepairMovedCapturePathsWorkflow,
 )
@@ -51,6 +54,7 @@ def test_the_ops_stage_serves_its_workflows():
         VerifyAllMissionsChecksumsWorkflow,
         ReconcileLabelingConfigsWorkflow,
         RepairMovedCapturePathsWorkflow,
+        BackfillFocalLengthsWorkflow,
         RegroupMissionWorkflow,
         ImportFsmExportWorkflow,
     }
@@ -67,6 +71,8 @@ def test_its_activities_build_from_the_nas_and_label_studio_settings(monkeypatch
         "select_canonical_dive_numbers",
         "reconcile_labeling_configs",
         "repair_moved_capture_paths",
+        "focal_length_missions",
+        "read_mission_focal_lengths",
         "regroup_dive",
         "plan_fsm_import",
         "import_fsm_captures",

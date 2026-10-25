@@ -50,6 +50,7 @@ __all__ = [
     "build_nas_client",
     "file_checksum",
     "parse_taken_datetime",
+    "read_focal_length",
     "read_taken_datetime",
     "resolve_nas_path",
 ]
@@ -114,6 +115,14 @@ def read_taken_datetime(path: Path) -> datetime | None:
     with open(path, "rb") as handle:
         header = handle.read(EXIF_HEADER_BYTES)
     return parse_taken_datetime(read_exif(header).date_time)
+
+
+def read_focal_length(path: Path) -> float | None:
+    """EXIF FocalLength (0x920A), mm, or None if absent or unreadable: the zoom
+    gate's input (2026-10-25). None is unknown, never the wide end."""
+    with open(path, "rb") as handle:
+        header = handle.read(EXIF_HEADER_BYTES)
+    return read_exif(header).focal_length_mm
 
 
 def parse_taken_datetime(raw: str | None) -> datetime | None:

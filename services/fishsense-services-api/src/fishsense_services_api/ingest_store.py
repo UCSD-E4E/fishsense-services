@@ -219,9 +219,11 @@ async def register_capture(
     source_path: str,
     captured_at: datetime,
     checksum: str,
+    focal_length_mm: float | None = None,
 ) -> RegisteredCapture:
     """Upsert one frame on its path; canonical unless another canonical copy of
-    the same content exists in the tenant."""
+    the same content exists in the tenant. `focal_length_mm` is EXIF 0x920A
+    (0069, the zoom gate's input); None leaves what was recorded."""
     existing = (
         await conn.execute(
             text(
@@ -251,15 +253,17 @@ async def register_capture(
         "captured_at": captured_at,
         "checksum": checksum,
         "canonical": not canonical_elsewhere,
+        "focal": focal_length_mm,
     }
     if existing is None:
         capture_id = (
             await conn.execute(
                 text("""
                     INSERT INTO captures (tenant_id, mission_id, device_id, source_path,
-                                          captured_at, checksum, is_canonical)
+                                          captured_at, checksum, is_canonical,
+                                          focal_length_mm)
                     VALUES (:tenant, :mission, :device, :path, :captured_at, :checksum,
-                            :canonical)
+                            :canonical, :focal)
                     RETURNING id
                     """),
                 params,
@@ -271,7 +275,8 @@ async def register_capture(
             text("""
                 UPDATE captures SET mission_id = :mission, device_id = :device,
                     captured_at = :captured_at, checksum = :checksum,
-                    is_canonical = :canonical
+                    is_canonical = :canonical,
+                    focal_length_mm = coalesce(:focal, focal_length_mm)
                 WHERE tenant_id = :tenant AND id = :id
                 """),
             {**params, "id": existing},
