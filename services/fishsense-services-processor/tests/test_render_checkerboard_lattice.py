@@ -26,7 +26,10 @@ import numpy as np
 import pytest
 
 from fishsense_services_contracts.object_store import ObjectRef
-from fishsense_services_contracts.slate_calibration import CheckerboardTarget
+from fishsense_services_contracts.slate_calibration import (
+    CheckerboardObservation,
+    CheckerboardTarget,
+)
 from fishsense_services_processor.checkerboard import activities as sut
 from fishsense_services_processor.checkerboard.activities import (
     DetectCheckerboardLaserPointInput,
@@ -49,16 +52,20 @@ _RENDER = ObjectRef(
 _TARGET = CheckerboardTarget(rows=_ROWS, cols=_COLS, pitch_x_m=0.042, pitch_y_m=0.042)
 
 
-def _board() -> np.ndarray:
-    height = _ROWS_SQ * _SQUARE_PX + 2 * _BORDER
-    width = _COLS_SQ * _SQUARE_PX + 2 * _BORDER
+def _board_gray(square: int = _SQUARE_PX, border: int = _BORDER) -> np.ndarray:
+    height = _ROWS_SQ * square + 2 * border
+    width = _COLS_SQ * square + 2 * border
     img = np.full((height, width), 255, np.uint8)
     for row in range(_ROWS_SQ):
         for col in range(_COLS_SQ):
             if (row + col) % 2 == 0:
-                y_0, x_0 = _BORDER + row * _SQUARE_PX, _BORDER + col * _SQUARE_PX
-                img[y_0 : y_0 + _SQUARE_PX, x_0 : x_0 + _SQUARE_PX] = 0
-    return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+                y_0, x_0 = border + row * square, border + col * square
+                img[y_0 : y_0 + square, x_0 : x_0 + square] = 0
+    return img
+
+
+def _board() -> np.ndarray:
+    return cv2.cvtColor(_board_gray(), cv2.COLOR_GRAY2BGR)
 
 
 def _blank() -> np.ndarray:
@@ -323,7 +330,7 @@ async def test_a_skipped_render_writes_nothing(rectified_is, monkeypatch):
 # that is EVERY OTHER ROW -- adjacent detected rows ~66 px apart against
 # ~33 px squares. Labelled one pitch apart, that halves the board's distance
 # along that axis, and so every depth the frame contributes. Its homography
-# is perfect, so services' own copy of the detector (v0.51.0 and earlier)
+# is perfect, so services' own copy of the detector (through v0.55.0)
 # accepted it, and its test asserted the frame was kept. These pin the
 # refusal at the call sites, on core's synthetic frame (40 px squares, an
 # 80 px border, the warp below).
@@ -331,15 +338,8 @@ async def test_a_skipped_render_writes_nothing(rectified_is, monkeypatch):
 
 def _warped_core_board(radius: int) -> np.ndarray:
     """Core's `test_checkerboard.py` frame: the E4E board, warped, dotted."""
-    square, border = 40, 80
-    height = _ROWS_SQ * square + 2 * border
-    width = _COLS_SQ * square + 2 * border
-    img = np.full((height, width), 255, np.uint8)
-    for row in range(_ROWS_SQ):
-        for col in range(_COLS_SQ):
-            if (row + col) % 2 == 0:
-                y_0, x_0 = border + row * square, border + col * square
-                img[y_0 : y_0 + square, x_0 : x_0 + square] = 0
+    img = _board_gray(square=40, border=80)
+    height, width = img.shape
     source = np.float32([[0, 0], [width, 0], [width, height], [0, height]])
     destination = np.float32(
         [
@@ -359,15 +359,23 @@ def _warped_core_board(radius: int) -> np.ndarray:
 def test_the_frame_really_is_latticed_every_other_row(radius):
     """The precondition, so the refusals below are refusals of THIS fault.
 
-    Raw OpenCV, seeded as core seeds it: the grid comes back short, and its
-    row step is twice its column step.
+    Raw OpenCV, called as core calls it (its requested pattern, flags and
+    default seed, read from core so they cannot drift apart): the grid comes
+    back short, and its row step is twice its column step.
     """
+    import inspect  # pylint: disable=import-outside-toplevel
+
+    from fishsense_core import (  # pylint: disable=import-outside-toplevel
+        checkerboard as core,
+    )
+
     gray = cv2.cvtColor(_warped_core_board(radius), cv2.COLOR_BGR2GRAY)
-    cv2.setRNGSeed(0)
+    seed = inspect.signature(core.detect_checkerboard).parameters["seed"].default
+    cv2.setRNGSeed(int(seed))
     found, corners, meta = cv2.findChessboardCornersSBWithMeta(
         gray,
-        (3, 3),
-        cv2.CALIB_CB_EXHAUSTIVE | cv2.CALIB_CB_ACCURACY | cv2.CALIB_CB_LARGER,
+        core._REQUESTED_PATTERN,  # pylint: disable=protected-access
+        core._DETECTION_FLAGS,  # pylint: disable=protected-access
     )
     assert found
     rows, cols = int(meta.shape[0]), int(meta.shape[1])
@@ -442,6 +450,12 @@ def test_detect_gives_the_same_observation_for_the_same_frame(rectified_is):
     }
 
     assert len(observations) == 1
+    # And the outcome itself, so a detector that always fails cannot pass by
+    # failing the same way ten times (review of #353): seeded, the occluded
+    # board is found as a sub-grid beside the occluder, and the dot is off it.
+    (only,) = observations
+    observation = CheckerboardObservation.model_validate_json(only)
+    assert observation.skip_reason == "dot_off_board"
 
 
 def test_a_frame_that_is_not_8_bit_is_an_error_not_a_skip(rectified_is):

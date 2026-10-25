@@ -40,7 +40,7 @@ v2 changes:
 * the JPEG encoder is the shared `jpeg.encode_jpeg` (v1's
   `encode_rectified_jpeg`), and the region test is the contracts' one;
 * the detector is `fishsense_core.checkerboard` (fishsense-core 4.3.0, #98;
-  services kept its own copy, `checkerboard/detection.py`, until v0.51.0).
+  services kept its own copy, `checkerboard/detection.py`, through v0.55.0).
   Core's copy adds a checker-parity gate, and that fixes a live 2x scale
   error: on a warped board a saturated laser dot of >=16 px radius made
   OpenCV return every other row (~66 px steps on ~33 px squares), a perfect

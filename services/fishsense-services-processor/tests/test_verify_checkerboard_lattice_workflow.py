@@ -224,3 +224,30 @@ async def test_renders_carry_the_frame_dimensions_back():
     result, _ = await _run(_input(images=1), workflow_id="wf-lattice-dims")
 
     assert (result[0].width, result[0].height) == (4000, 3000)
+
+
+async def test_a_frame_that_is_not_uint8_fails_once_not_forever():
+    """Core's detector raises `TypeError` on a non-uint8 frame: a decode-path
+    bug, the same on every attempt. Under Temporal's default policy each
+    retry re-downloads and re-decodes a 1-3 GB raw, without end (review of
+    #353). A retry would succeed here, so only the policy can fail it."""
+    import pytest  # pylint: disable=import-outside-toplevel
+    from temporalio.client import (  # pylint: disable=import-outside-toplevel
+        WorkflowFailureError,
+    )
+
+    attempts: dict = {}
+
+    def _render_or_raise(inner):
+        attempts[inner.capture_id] = attempts.get(inner.capture_id, 0) + 1
+        if attempts[inner.capture_id] == 1:
+            raise TypeError("detect_checkerboard needs a uint8 image")
+        return _rendered(inner)
+
+    with pytest.raises(WorkflowFailureError):
+        await _run(
+            _input(images=2),
+            workflow_id="lattice-not-uint8",
+            on_render=_render_or_raise,
+        )
+    assert set(attempts.values()) == {1}
