@@ -95,6 +95,22 @@ def test_each_cause_is_its_own_non_retryable_type(no_weights_env, failure, kind)
     assert e.value.message.startswith("the laser detector's weights cannot load")
 
 
+def test_a_validation_error_from_anything_but_settings_is_not_blamed_on_them():
+    """Only a settings class's ValidationError means the pod's settings are
+    missing or invalid (review of #358). One from a model -- a core manifest
+    entry that no longer validates after an upgrade, say -- propagates as
+    itself, rather than sending an operator to check the Secret."""
+    from pydantic import BaseModel, ValidationError
+
+    class Entry(BaseModel):
+        size: int
+
+    with pytest.raises(ValidationError) as e:
+        with weights.refuse_unloadable_weights(LASER_DETECTOR, "the laser detector"):
+            Entry(size="not a size")
+    assert e.value.title == "Entry"
+
+
 @pytest.mark.parametrize(
     "failure",
     [

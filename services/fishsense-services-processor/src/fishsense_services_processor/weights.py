@@ -256,6 +256,26 @@ _CAUSES: tuple[tuple[type[BaseException], str], ...] = tuple(
 )
 
 
+def _settings_classes() -> set[str]:
+    """The names of every settings class loaded (a `BaseSettings` subclass,
+    at any depth)."""
+    names, pending = set(), [BaseSettings]
+    while pending:
+        cls = pending.pop()
+        for sub in cls.__subclasses__():
+            names.add(sub.__name__)
+            pending.append(sub)
+    return names
+
+
+def _is_settings(exc: ValidationError) -> bool:
+    """Whether a ValidationError is a settings class's (its `title` names the
+    class). Only that one means the pod's settings are missing or invalid
+    (review of #358): a model's -- a core manifest entry that no longer
+    validates, say -- propagates as itself."""
+    return exc.title in _settings_classes()
+
+
 @contextmanager
 def refuse_unloadable_weights(
     model: str,
@@ -271,6 +291,8 @@ def refuse_unloadable_weights(
     try:
         yield
     except tuple(cause for cause, _ in _CAUSES) as exc:
+        if isinstance(exc, ValidationError) and not _is_settings(exc):
+            raise
         kind, why = next(
             (kind, why)
             for (cause, why), kind in zip(_CAUSES, WEIGHTS_FAILURE_KINDS)
