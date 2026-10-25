@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.57.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.56.0...v0.57.0) (2026-10-25)
+
+
+### Features
+
+* record each frame's focal length, and a dry-run backfill for the zoom gate ([dca2928](https://github.com/UCSD-E4E/fishsense-services/commit/dca2928c10455f3a1c92d56f1a156b461e6cae47))
+* record each frame's focal length, and a dry-run backfill for the zoom gate ([5205dc7](https://github.com/UCSD-E4E/fishsense-services/commit/5205dc77505860900f6b8e25dda38c929bc35681))
+
+
+### Bug Fixes
+
+* **processor:** adopt fishsense-core 4.3.1's checkerboard detector ([693e95b](https://github.com/UCSD-E4E/fishsense-services/commit/693e95ba614f14d4349bc049507e72e303e99a8e))
+* **processor:** checkerboard detection from fishsense-core 4.3.1, refusing 2x lattices (item 9) ([f9d2503](https://github.com/UCSD-E4E/fishsense-services/commit/f9d2503f6b77c06719119b61f85f33d7a42a3046))
+* **processor:** checkerboard frames fail once on a bad decode; restore call-site tests (review of [#353](https://github.com/UCSD-E4E/fishsense-services/issues/353)) ([9bed4ab](https://github.com/UCSD-E4E/fishsense-services/commit/9bed4ab9ccd3e3c412430fc7dff5927e81ff1ee8))
+
+
+### Documentation
+
+* **handoff:** fishsense-core checkerboard detection drops real frames ([#353](https://github.com/UCSD-E4E/fishsense-services/issues/353) waits on it) ([e15cbc3](https://github.com/UCSD-E4E/fishsense-services/commit/e15cbc3f063cdb1ae8d905720c024aeb2c359fec))
+
 ## [0.56.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.55.0...v0.56.0) (2026-10-25)
 
 
