@@ -156,9 +156,9 @@ integration changed a foundation, what's written here is what's true.
   with `fetch_weights(name, version)`. Every fetch is verified against
   fishsense-core's manifest.
 - Build it when a role that loads models starts, so bad settings fail the pod.
-- SAM 3.1 has no manifest entry in fishsense-core 4.1.0. The head/tail slice
-  needs a core release that pins its sha256 and size, or a local manifest with
-  them measured once.
+- SAM 3.1 resolves through core's manifest like the rest (pinned since
+  fishsense-core 4.2.0). Before that the head/tail slice used a local manifest
+  measured once from settings; it was removed on 2026-10-23.
 - Weights are not in the object store's settings.
 
 **Taxonomy**

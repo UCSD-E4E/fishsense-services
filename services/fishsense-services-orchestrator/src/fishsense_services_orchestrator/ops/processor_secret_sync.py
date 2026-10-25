@@ -5,8 +5,9 @@
 New in v2 (2026-10-15). `fishsense-processor-secrets` is what the processor
 reads from its environment on NRP: Garage's endpoint and keys for the labels
 bucket (``FISHSENSE_OBJECT_STORE_*``) and for ``model-weights``
-(``FISHSENSE_MODEL_WEIGHTS_*``), and the pins of the weights it loads
-(``FISHSENSE_{SAM3,SLATE_DETECTOR,BIOCLIP,BIOCLIP_FALLBACK}_{SHA256,SIZE}``).
+(``FISHSENSE_MODEL_WEIGHTS_*``), and the pins of the weights it loads that
+fishsense-core does not pin itself
+(``FISHSENSE_{SLATE_DETECTOR,BIOCLIP,BIOCLIP_FALLBACK}_{SHA256,SIZE}``).
 It was written by hand (deploy/nrp/processor-secret.sh, now gone), so a new weight --
 BioCLIP, for the automatic chain's species -- or a rotated key waited on
 someone with OpenBao. The slot already has both keys (vault-agent renders
@@ -19,9 +20,17 @@ them for this one-shot), so the slot keeps the Secret, on every converge, as
    one without (run3, the slate detector: uploaded by hand) must be there
    already. A weight of the wrong size, a download that isn't the pinned
    file, a weight that can't be had: nothing is written;
-2. **SAM 3.1's pin is the one the Secret records** -- its checkpoint was
-   uploaded by hand and nothing else pins it -- measured from Garage (the
-   copy the processor fetches) only when there is none;
+2. **SAM 3.1 is pinned as core pins it.** Until 2026-10-23 the sync kept
+   ``FISHSENSE_SAM3_{SHA256,SIZE}`` -- the recorded pin, or one measured from
+   Garage's copy when there was none -- because fishsense-core 4.1.0 did not
+   pin it. Core does since 4.2.0, the owner matched the recorded pin against
+   core's, and the processor now fetches it through core's manifest. The
+   sync still checks Garage's copy is there at core's size, so a missing
+   checkpoint fails the converge rather than every SAM child on the next GPU
+   wake, and still writes ``FISHSENSE_SAM3_*`` (core's values, on the create
+   path as on the patch): a processor on an image from before #358 requires
+   them, and a recreated Secret must not break it (review of #358). It never
+   downloads the 3.5 GB to measure it;
 3. the keys and the pins are written in one patch, with a fingerprint, so a
    converge that changed nothing writes nothing, and a rotated key reaches
    NRP on the next converge. Running pods keep their environment; processors
@@ -64,7 +73,6 @@ __all__ = [
     "PINNED",
     "Pinned",
     "ProcessorSecretSettings",
-    "SAM_KEY",
     "SECRET_NAME",
     "WeightsMismatch",
     "main",
@@ -76,7 +84,6 @@ log = logging.getLogger("nrp-processor-secret-sync")
 SECRET_NAME: Final = "fishsense-processor-secrets"
 ENDPOINT: Final = "https://s3.e4e.ucsd.edu"
 WEIGHTS_BUCKET: Final = "model-weights"
-SAM_KEY: Final = "sam3/3.1/sam3.1_multiplex.pt"
 FINGERPRINT_ANNOTATION: Final = "fishsense.e4e.ucsd.edu/processor-secret-sha256"
 LAST_APPLIED: Final = "kubectl.kubernetes.io/last-applied-configuration"
 #: The processor's object-store settings that aren't credentials.
@@ -117,8 +124,19 @@ class Pinned:
     source: Optional[HubFile] = None
 
 
-#: Every weight but SAM 3.1 (see `_sam_pin`).
+#: The weights the sync makes sure of.
 PINNED: tuple[Pinned, ...] = (
+    # SAM 3.1, as fishsense-core's manifest pins it (4.2.0+): uploaded by hand
+    # (gated upstream, no public source), so it must already be in Garage.
+    # `env` keeps FISHSENSE_SAM3_* in the Secret for processor images before
+    # #358, which still require them; drop it once none can run.
+    # test_sam_3_1_is_pinned_as_core_pins_it checks the values.
+    Pinned(
+        "sam3/3.1/sam3.1_multiplex.pt",
+        "0567debeec80ba4ac6369540c6c248025283cb3ff2b92827509e57e2b3541cb6",
+        3502755717,
+        env="FISHSENSE_SAM3",
+    ),
     # fishsense-core 4.1.0's laser detector; core pins it in its manifest.
     Pinned(
         "laser-detector/run3/run3_epoch_021.pt",
@@ -255,9 +273,6 @@ class _Garage:
     def upload(self, path, key: str) -> None:
         self._s3.upload_file(str(path), WEIGHTS_BUCKET, key)
 
-    def download(self, key: str, path) -> None:
-        self._s3.download_file(WEIGHTS_BUCKET, key, str(path))
-
 
 def _fetch(url: str, path) -> None:
     """Stream ``url`` to ``path``."""
@@ -311,29 +326,6 @@ def _read(core: Any, namespace: str) -> Any:
         raise
 
 
-def _decoded(secret: Any) -> dict[str, str]:
-    data = (getattr(secret, "data", None) or {}) if secret is not None else {}
-    return {k: base64.b64decode(v).decode() for k, v in data.items()}
-
-
-def _sam_pin(recorded: dict[str, str], s3: Any) -> dict[str, str]:
-    """SAM 3.1's pin: the recorded one, or measured from Garage."""
-    if recorded.get("FISHSENSE_SAM3_SHA256") and recorded.get("FISHSENSE_SAM3_SIZE"):
-        return {
-            "FISHSENSE_SAM3_SHA256": recorded["FISHSENSE_SAM3_SHA256"],
-            "FISHSENSE_SAM3_SIZE": recorded["FISHSENSE_SAM3_SIZE"],
-        }
-    if s3.size(SAM_KEY) is None:
-        raise MissingWeights(f"{WEIGHTS_BUCKET}/{SAM_KEY} is missing")
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "sam3.pt"
-        s3.download(SAM_KEY, path)
-        return {
-            "FISHSENSE_SAM3_SHA256": _sha256(path),
-            "FISHSENSE_SAM3_SIZE": str(path.stat().st_size),
-        }
-
-
 def _has_kubeconfig(path: Optional[str]) -> bool:
     if not path or not Path(path).is_file():
         return False
@@ -376,7 +368,6 @@ def sync(
         **OBJECT_STORE,
         "FISHSENSE_MODEL_WEIGHTS_ENDPOINT_URL": ENDPOINT,
         **keys,
-        **_sam_pin(_decoded(current), garage),
     }
     for pin in PINNED:
         if pin.env:
