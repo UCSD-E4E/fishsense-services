@@ -220,6 +220,20 @@ async def test_selector_ignores_non_canonical_images(owner_engine, app_engine):
     assert await _next(app_engine, lab) is None
 
 
+async def test_selector_ignores_zoomed_images(owner_engine, app_engine):
+    """The zoom gate (2026-10-25): a dot's depth assumes the camera
+    calibration's intrinsics, which a zoomed frame does not have."""
+    from _slate_calibration_seed import zoom
+
+    lab = await tenant(owner_engine)
+    mission_id, _ = await calibrated_dive(owner_engine, lab)
+    capture_id = await capture(owner_engine, lab, mission_id)
+    await laser_label(owner_engine, lab, capture_id)
+    await zoom(owner_engine, capture_id, 12.73)
+
+    assert await _next(app_engine, lab) is None
+
+
 async def test_selector_skips_low_priority_missions(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     mission_id, _ = await calibrated_dive(owner_engine, lab, priority="low")
