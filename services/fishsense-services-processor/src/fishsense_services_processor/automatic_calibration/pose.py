@@ -299,10 +299,37 @@ def _page_at(board_blur: np.ndarray, page_blur: np.ndarray, reach: int):
     return x - reach, y - reach, float(best)
 
 
+@dataclass(frozen=True)
+class Alignment:
+    """The page aligned to the board: `h` maps template pixels (the page at
+    its dpi) to image pixels, `ecc` its correlation; `ecc_other` the other
+    way up's (None if it did not converge), `page_up_deg` the direction of the
+    page's top in the image (0 = up, clockwise positive)."""
+
+    h: np.ndarray
+    ecc: float
+    ecc_other: Optional[float]
+    page_up_deg: float
+
+
 def align_template(image_grey: np.ndarray, corners, page_grey: np.ndarray, dpi: int):
-    """``(H, correlation)``: H maps template pixels (the page at `dpi`) to
-    image pixels, or ``(None, None)``. `corners` are the board's TL, TR, BR,
-    BL in the image.
+    """``(H, correlation)`` of `align_template_both`, or ``(None, None)``."""
+    a = align_template_both(image_grey, corners, page_grey, dpi)
+    return (None, None) if a is None else (a.h, a.ecc)
+
+
+def align_template_both(
+    image_grey: np.ndarray, corners, page_grey: np.ndarray, dpi: int
+) -> Optional[Alignment]:
+    """The page aligned to the board both ways up, the better kept: an
+    `Alignment`, or None. `corners` are the board's TL, TR, BR, BL in the
+    image.
+
+    Both orientations' correlations are kept (2026-10-25): on a
+    near-symmetric pattern v4 chose the wrong way up on 17 of 445
+    human-labelled frames (436's 11 of 12), and nothing else it recorded
+    told them apart; the losing one's correlation is the margin a check
+    needs.
 
     The board is rectified front-on at its known size (12 in long), so the
     page's scale on it is known from `dpi`; where the page sits is not. The
@@ -332,7 +359,7 @@ def align_template(image_grey: np.ndarray, corners, page_grey: np.ndarray, dpi: 
     over = max(sw - w, sh - h, 0)
     reach = int(over + SEARCH_IN * px_per_in)
     a = cv2.GaussianBlur(cv2.equalizeHist(board), (0, 0), 3).astype(np.float32)
-    best = None
+    scored = []
     for flip in (False, True):
         fl = (np.array([[-1, 0, sw], [0, -1, sh], [0, 0, 1]], np.float64) if flip
               else np.eye(3))  # fmt: skip
@@ -352,14 +379,23 @@ def align_template(image_grey: np.ndarray, corners, page_grey: np.ndarray, dpi: 
                 (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 200, 1e-6), None, 5)  # fmt: skip
         except cv2.error:
             continue
-        if best is None or cc > best[0]:
-            best = (float(cc), warp @ hinit)
-    if best is None:
-        return None, None
-    cc, ht = best
+        scored.append((float(cc), warp @ hinit))
+    if not scored:
+        return None
+    scored.sort(key=lambda t: -t[0])
+    cc, ht = scored[0]
     if rotate:  # unrotated page px -> rotated: (x, y) -> (ph - 1 - y, x)
         ht = ht @ np.array([[0, -1, ph - 1], [1, 0, 0], [0, 0, 1]], np.float32)
-    return np.linalg.inv(hb) @ ht, cc
+    h = np.linalg.inv(hb) @ ht
+    gh, gw = page_grey.shape
+    top, bottom = cv2.perspectiveTransform(
+        np.float32([[[gw / 2, 0]], [[gw / 2, gh]]]), h.astype(np.float32)
+    ).reshape(2, 2)
+    dx, dy = top - bottom
+    return Alignment(
+        h=h, ecc=cc, ecc_other=scored[1][0] if len(scored) > 1 else None,
+        page_up_deg=float(np.degrees(np.arctan2(dx, -dy))),
+    )  # fmt: skip
 
 
 # -- 3. the slate's plane ---------------------------------------------------------------

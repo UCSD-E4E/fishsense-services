@@ -7,7 +7,9 @@
 2. the board fitted to that mask (`automatic_calibration.pose.fit_board`), in
    the camera scaled to the render;
 3. the template's page aligned to the board on the **full-resolution** render
-   (`align_template`) -- the 1600-px cache's reef alignments were weak;
+   (`align_template_both`) -- the 1600-px cache's reef alignments were weak;
+   both ways up are scored and the loser's correlation is kept with the
+   page's up (2026-10-25: the wrong-way-up margin, 436);
 4. the plane and the dot's point on it (`slate_plane`, `dot_point`).
 
 Each step that finds nothing ends the frame with its status; a weak alignment
@@ -90,10 +92,13 @@ def pose_frame(
         return {**out, "status": "no_board"}
     out.update(board_covered=board.covered, board_extra=board.extra,
                tilt_deg=pose.tilt_deg(board.rvec))  # fmt: skip
-    h, ecc = pose.align_template(full, board.corners * scale, page_grey, dpi)
-    if h is None:
+    aligned = pose.align_template_both(full, board.corners * scale, page_grey, dpi)
+    if aligned is None:
         return {**out, "status": "not_aligned"}
-    out["ecc"] = ecc
+    h, ecc = aligned.h, aligned.ecc
+    # Both ways up scored, and the page's up recorded (2026-10-25): the
+    # margin a wrong-way-up check needs (436).
+    out.update(ecc=ecc, ecc_other=aligned.ecc_other, page_up_deg=aligned.page_up_deg)
     plane = pose.slate_plane(reference_points, dpi, h, camera_matrix)
     if plane is None:
         return {**out, "status": "no_plane"}
