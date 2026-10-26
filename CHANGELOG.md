@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.67.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.66.0...v0.67.0) (2026-10-26)
+
+
+### Features
+
+* **api:** retire mission 436's mirrored slate labels and withdraw their calibration ([b4823d0](https://github.com/UCSD-E4E/fishsense-services/commit/b4823d09cadad34d0633f5a5f462ac47de747bb5))
+* **api:** retire mission 436's mirrored slate labels and withdraw their calibration ([52d9609](https://github.com/UCSD-E4E/fishsense-services/commit/52d9609d53a90d4bd8f1e8534b93554d3c800e93))
+
 ## [0.66.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.65.0...v0.66.0) (2026-10-26)
 
 
