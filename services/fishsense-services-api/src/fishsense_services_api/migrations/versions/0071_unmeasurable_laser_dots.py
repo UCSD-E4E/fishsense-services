@@ -17,23 +17,53 @@ old reasons and widen here:
 - ``measurement_refusals`` (0025): stage 14 now gates the dot before it
   measures (v1 measured at the dot's depth whatever its sign; the owner gave
   that parity up), so it takes the depth stage's three reasons too;
-- ``automatic_measurements`` (0036): `low_parallax` joins its reasons.
+- ``automatic_measurements`` (0036; 0070 added `zoomed`): `low_parallax`
+  and `non_finite_depth` join its reasons. The automatic stage used to
+  store a non-finite depth as `non_positive_depth`, which named a finite,
+  positive depth with a non-finite range wrongly (review of #361).
 
 Values added only, so every existing row still satisfies them. The downgrade
-restores 0025's and 0036's definitions exactly, and fails -- rather than
-deletes anything -- once a row holds a reason they do not name: these tables
-are append-only history.
+restores the definitions before it exactly (0025's; 0070's for the automatic
+one), and fails -- rather than deletes anything -- once a row holds a reason
+they do not name: these tables are append-only history.
 
-Revision ID: 0068
-Revises: 0067
+Numbered 0068 until main's 0069 (focal length) and 0070 (zoom gate) landed
+first (review of #361): 0068 then revised 0067 alongside 0069, two heads,
+and 0070 rewrites the automatic CHECK, so this takes 0070's list rather than
+0036's.
+
+Revision ID: 0071
+Revises: 0070
 """
+
+import importlib.util
+from pathlib import Path
 
 from alembic import op
 
-revision = "0068"
-down_revision = "0067"
+revision = "0071"
+down_revision = "0070"
 
-#: (table, constraint, 0025/0036's definition, 0068's).
+
+def _migration(filename: str):
+    spec = importlib.util.spec_from_file_location(
+        f"_fishsense_migration_{Path(filename).stem}",
+        Path(__file__).with_name(filename),
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+#: 0070's automatic reasons: 0036's, and `zoomed`.
+_AUTOMATIC_BEFORE = (*_migration("0070_zoom_gate.py")._REFUSALS, "zoomed")
+
+
+def _in(column: str, reasons) -> str:
+    return f"{column} IN ({', '.join(repr(r) for r in reasons)})"
+
+
+#: (table, constraint, the definition before, 0071's).
 _CHECKS = (
     (
         "laser_depth_refusals",
@@ -57,9 +87,8 @@ _CHECKS = (
     (
         "automatic_measurements",
         "automatic_measurements_refusal_check",
-        "refusal IN ('non_positive_depth', 'non_finite_length', 'zero_length')",
-        "refusal IN ('non_positive_depth', 'non_finite_length', 'zero_length',"
-        " 'low_parallax')",
+        _in("refusal", _AUTOMATIC_BEFORE),
+        _in("refusal", (*_AUTOMATIC_BEFORE, "low_parallax", "non_finite_depth")),
     ),
 )
 

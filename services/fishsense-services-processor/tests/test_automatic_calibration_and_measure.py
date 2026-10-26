@@ -1,6 +1,6 @@
 """The automatic-results CPU stages: the label-free fit per dive, and lengths.
 
-New in v2. The fit is `automatic_results.size_constancy` (golden-tested in
+New in v2. The fit is fishsense-core's `size_constancy` (golden-tested in
 test_size_constancy.py) run on the dive's slate frames: their rectified JPEGs
 are read from Garage, SIFT is taken around each automatic dot, every pair is
 registered, and the beam is fitted. Pinned here end to end on synthetic frames
@@ -212,7 +212,7 @@ async def test_with_no_mission_line_the_fit_takes_cscws_fallback(
     no mission line, takes its direction through the dots it uses
     (`fit_label_free(line=None)`, cscw's fallback) -- as before the gate
     (review of #136)."""
-    from fishsense_services_processor.automatic_results import size_constancy
+    from fishsense_core import size_constancy
 
     seen = []
     real = size_constancy.fit_label_free

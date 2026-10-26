@@ -1,5 +1,5 @@
-"""Operations, as a stage: checksum verification, path repair and regroup (on demand),
-and the hourly labeling-config reconcile.
+"""Operations, as a stage: checksum verification, path repair, the focal-length
+backfill and regroup (on demand), and the hourly labeling-config reconcile.
 
 The nightly backup and the NRP cert sync are also ops, but not stages: each is
 its own process, with credentials the orchestrator must never hold (see
@@ -12,6 +12,7 @@ from temporalio.client import ScheduleOverlapPolicy
 
 from fishsense_services_api.capture_path_store import CapturePathCatalog
 from fishsense_services_api.checksum_store import ChecksumCatalog
+from fishsense_services_api.focal_length_store import FocalLengthCatalog
 from fishsense_services_api.mobile_import_store import MobileImportCatalog
 from fishsense_services_api.regroup_store import RegroupCatalog
 from fishsense_services_contracts.object_store import ObjectStoreConnection
@@ -35,6 +36,12 @@ from fishsense_services_orchestrator.ops.labeling_configs.registry import (
 )
 from fishsense_services_orchestrator.ops.labeling_configs.workflow import (
     ReconcileLabelingConfigsWorkflow,
+)
+from fishsense_services_orchestrator.ops.focal_lengths.activities import (
+    FocalLengthActivities,
+)
+from fishsense_services_orchestrator.ops.focal_lengths.workflow import (
+    BackfillFocalLengthsWorkflow,
 )
 from fishsense_services_orchestrator.ops.paths.activities import (
     PathRepairActivities,
@@ -63,6 +70,9 @@ def _activities(deps: Deps):
     paths = PathRepairActivities(
         catalog=CapturePathCatalog(deps.engine, sub=deps.sub), nas_settings=nas
     )
+    focal_lengths = FocalLengthActivities(
+        catalog=FocalLengthCatalog(deps.engine, sub=deps.sub), nas_settings=nas
+    )
     regroup = RegroupActivities(catalog=RegroupCatalog(deps.engine, sub=deps.sub))
     fsm_import = FsmImportActivities(
         catalog=MobileImportCatalog(deps.engine, sub=deps.sub),
@@ -82,6 +92,8 @@ def _activities(deps: Deps):
         checksums.select_canonical_mission_numbers,
         reconcile.reconcile_labeling_configs,
         paths.repair_moved_capture_paths,
+        focal_lengths.focal_length_missions,
+        focal_lengths.read_mission_focal_lengths,
         regroup.regroup_mission,
         fsm_import.plan_fsm_import,
         fsm_import.import_fsm_captures,
@@ -95,6 +107,7 @@ STAGE = Stage(
         VerifyAllMissionsChecksumsWorkflow,
         ReconcileLabelingConfigsWorkflow,
         RepairMovedCapturePathsWorkflow,
+        BackfillFocalLengthsWorkflow,
         RegroupMissionWorkflow,
         ImportFsmExportWorkflow,
     ],

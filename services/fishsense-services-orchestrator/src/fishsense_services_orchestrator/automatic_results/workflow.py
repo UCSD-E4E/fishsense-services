@@ -39,7 +39,14 @@ processor, or running under another firing): its calibration and lengths
 would be fit on part of it and go stale, and each hour without a GPU added a
 refusal to its history (review of #85). A frame left out is recorded against
 the frame, never as a dive strike; three runs make it a terminal
-``frame_failed`` (0044), and the dive goes on.
+``frame_failed`` (0044), and the dive goes on. **A processor's refusal is
+the worker's, not the dive's** (2026-10-24): a pod with no GPU for SAM 3.1,
+or whose weights cannot load (`fishsense_services_contracts.refusals`), fails
+the frames child with that cause. Recorded as the dive's failure, each dive
+the drain went on to took a strike for the pod's fault (at three the cohort
+leaves it for an operator); now nothing is recorded against the dive or its
+frames, the scratch is cleaned up, the refusal is logged as an error and
+named in the report (`refused`), and the run stops there.
 
 **Replay.** The reports (2026-10-16/17) changed these workflows' commands
 and results without `workflow.patched` guards: on 2026-10-17 production had
@@ -70,6 +77,7 @@ from temporalio.exceptions import (
 
 with workflow.unsafe.imports_passed_through():
     from fishsense_services_contracts.renamed import renamed_from
+    from fishsense_services_contracts.refusals import WORKER_REFUSALS
     import annotated_types  # noqa: F401  pylint: disable=unused-import
     import pydantic  # noqa: F401  pylint: disable=unused-import
 
@@ -147,6 +155,13 @@ class AutomaticMissionReport:
     #: The GPU's mode when a GPU step was skipped for want of one: then
     #: every dive behind this one would skip too, and the run stops.
     no_gpu: Optional[str] = None
+    #: A processor's refusal of a step (``<step>: <type>: <message>``): the
+    #: worker's fault, recorded against nothing; every dive behind this one
+    #: would be refused too, and the run stops.
+    refused: Optional[str] = None
+    #: That refusal's type (e.g. ``Sam3WeightsCorrupt``), as data: the drain
+    #: and a by-hand run name it without parsing `refused` (review of #364).
+    refusal_type: Optional[str] = None
 
 
 @dataclass
@@ -404,6 +419,18 @@ async def _species(
     try:
         await _species_step(target, gpu, report)
     except (ActivityError, ChildWorkflowError) as exc:
+        refusal = _refusal(exc)
+        if refusal is not None and workflow.patched(SPECIES_REFUSAL_PATCH):
+            # The worker's, as any step's refusal: every dive behind this one
+            # would wake the GPU to be refused alike (review of #364). The
+            # dive keeps its lengths; nothing is recorded against it.
+            workflow.logger.error(
+                "automatic species for dive=%s refused by the processor: %s: %s",
+                target.mission_id, refusal.type, refusal.message,
+            )  # fmt: skip
+            report.refused = f"species: {refusal.type}: {refusal.message}"
+            report.refusal_type = refusal.type
+            return
         report.species_failed = True
         workflow.logger.warning(
             "automatic species failed for dive=%s; lengths are kept: %s",
@@ -495,12 +522,48 @@ class StepFailed(Exception):
     """A dive's step failed; it is recorded against the dive."""
 
 
+class StepRefused(Exception):
+    """A processor refused a dive's step; recorded against nothing."""
+
+    def __init__(self, step: str, refusal: ApplicationError) -> None:
+        super().__init__(f"{step}: {refusal.type}: {refusal.message}")
+        self.refusal_type = refusal.type
+
+
+#: The change that stopped a processor's refusal costing a dive a strike
+#: (2026-10-24): a run started before it replays recording the failure.
+REFUSAL_PATCH = "automatic-worker-refusal-not-a-strike"
+#: The change that made a species refusal stop the run like any step's
+#: (review of #364): a run started before it replays logging it as a species
+#: failure and going on.
+SPECIES_REFUSAL_PATCH = "automatic-species-refusal-stops"
+
+
+def _refusal(exc: BaseException) -> Optional[ApplicationError]:
+    """The processor's refusal behind a failed step, if that is what it was:
+    a child's failure wraps its activity's, so the whole chain is read."""
+    cause: Optional[BaseException] = exc
+    while cause is not None:
+        if isinstance(cause, ApplicationError) and cause.type in WORKER_REFUSALS:
+            return cause
+        cause = getattr(cause, "cause", None)
+    return None
+
+
 async def _step(
     target: AutomaticTarget, name: str, run: Callable[[], Awaitable[T]]
 ) -> T:
     try:
         return await run()
     except (ActivityError, ChildWorkflowError) as exc:
+        refusal = _refusal(exc)
+        if refusal is not None and workflow.patched(REFUSAL_PATCH):
+            workflow.logger.error(
+                "automatic %s for dive=%s refused by the processor, not "
+                "recorded against it: %s: %s",
+                name, target.mission_id, refusal.type, refusal.message,
+            )  # fmt: skip
+            raise StepRefused(name, refusal) from exc
         error = str(exc.cause or exc)
         workflow.logger.warning(
             "automatic %s failed for dive=%s: %s", name, target.mission_id, error
@@ -522,6 +585,10 @@ async def _run_for_mission(
         await _step(target, "lengths", lambda: _lengths(target))
     except StepFailed as exc:
         report.failed = str(exc)
+        return report, gpu
+    except StepRefused as exc:
+        report.refused = str(exc)
+        report.refusal_type = exc.refusal_type
         return report, gpu
     # Isolated: a species failure is logged, and the dive keeps its lengths.
     await _species(target, gpu, report)
@@ -548,6 +615,14 @@ class AutomaticResultsForMissionWorkflow:
     @workflow.run
     async def run(self, target: AutomaticTarget) -> AutomaticMissionReport:
         report, _ = await _run_for_mission(target)
+        if report.refused:
+            raise ApplicationError(
+                f"automatic {report.refused} (dive {target.mission_id}; the "
+                "processor's refusal, recorded against nothing)",
+                report.refusal_type,  # details: the type, for `run_missions`
+                type="AutomaticWorkerRefused",
+                non_retryable=True,
+            )
         if report.failed:
             raise ApplicationError(
                 f"automatic {report.failed} failed for dive {target.mission_id} "
@@ -588,5 +663,9 @@ class AutomaticResultsParentWorkflow:
             missions.append(report)
             if report.no_gpu:
                 stopped = f"no GPU ({report.no_gpu})"
+                break
+            if report.refused:
+                # Every dive behind it would be refused alike.
+                stopped = f"worker refused ({report.refusal_type})"
                 break
         return AutomaticRunReport(missions=missions, stopped=stopped)

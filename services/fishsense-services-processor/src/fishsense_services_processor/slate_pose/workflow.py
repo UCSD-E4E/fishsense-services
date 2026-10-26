@@ -1,7 +1,8 @@
 """Calibration v4's pose workflow (GPU queue): `SlatePoseFramesWorkflow`, one
 `slate_pose_frame` per frame, in parallel. A frame failing every try is
-recorded as ``failed``; a worker that can't run SAM fails the child, as the
-shadow calibration's segmentation does."""
+recorded as ``failed``; a worker that can't run SAM -- no GPU, or its
+weights cannot load (2026-10-24) -- fails the child, as the shadow
+calibration's segmentation does."""
 
 from __future__ import annotations
 
@@ -14,8 +15,11 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError, ApplicationError
 
 with workflow.unsafe.imports_passed_through():
+    from fishsense_services_processor.worker_refusals import refusals
     import annotated_types  # noqa: F401  pylint: disable=unused-import
     import pydantic  # noqa: F401  pylint: disable=unused-import
+
+    from fishsense_services_contracts.refusals import SAM3_REFUSALS
 
     from fishsense_services_contracts.calibration_v4 import (
         SlatePose,
@@ -25,7 +29,9 @@ with workflow.unsafe.imports_passed_through():
 __all__ = ["SlatePoseFramesWorkflow"]
 
 FRAME_ATTEMPTS = 3
-_WORKER_REFUSALS = ("NoGpuForSam3",)
+_WORKER_REFUSALS = SAM3_REFUSALS
+#: Before #364 (`worker_refusals`): what a run started then replays with.
+_LEGACY_REFUSALS = ("NoGpuForSam3",)
 _FRAME_RETRY = RetryPolicy(
     initial_interval=timedelta(seconds=10),
     maximum_attempts=FRAME_ATTEMPTS,
@@ -56,9 +62,8 @@ class SlatePoseFramesWorkflow:
         for frame, outcome in zip(request.frames, outcomes):
             if isinstance(outcome, ActivityError):
                 cause = outcome.cause
-                if (
-                    isinstance(cause, ApplicationError)
-                    and cause.type in _WORKER_REFUSALS
+                if isinstance(cause, ApplicationError) and cause.type in refusals(
+                    _WORKER_REFUSALS, _LEGACY_REFUSALS
                 ):
                     raise outcome
                 workflow.logger.warning("slate pose capture=%s failed: %s",

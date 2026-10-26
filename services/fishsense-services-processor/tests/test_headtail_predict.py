@@ -11,10 +11,10 @@ tag tests moved with the version to the contract package.
 What is new here pins the activity itself, which v1 never unit-tested, and
 the v2 changes:
 
-* **the weights come through fishsense-core's manifest**: SAM 3.1 has no entry
-  in fishsense-core 4.1.0, so the stage builds one from required settings
-  (`FISHSENSE_SAM3_SHA256`, `FISHSENSE_SAM3_SIZE`) and fetches through
-  `weights.GarageWeightStore`; bytes that aren't the pinned file never load
+* **the weights come through fishsense-core's manifest**, which pins SAM 3.1
+  since 4.2.0 (until then the stage pinned it from `FISHSENSE_SAM3_*`
+  settings), fetched through `weights.GarageWeightStore`; bytes that aren't
+  the pinned file never load
   (v1's checkpoint cache trusted whatever the key held); **a weights failure
   is final**, one non-retryable type per cause, not a retry per image;
 * the JPEG is read from the ref the orchestrator hands over;
@@ -25,6 +25,7 @@ the v2 changes:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import sys
 import types
@@ -38,14 +39,21 @@ import boto3
 import cv2
 import numpy as np
 import pytest
-from fishsense_core.models import ModelIntegrityError, ModelUnavailable
+from fishsense_core.models import (
+    Manifest,
+    ModelIntegrityError,
+    ModelRef,
+    ModelUnavailable,
+    builtin_manifest,
+)
 from moto import mock_aws
-from pydantic import ValidationError
-from temporalio import activity
+from temporalio import activity, workflow
+from temporalio.client import WorkflowFailureError
+from temporalio.common import RetryPolicy
 from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
-from temporalio.worker import Worker
+from temporalio.worker import Replayer, UnsandboxedWorkflowRunner, Worker
 
 from fishsense_services_contracts.headtail import (
     HEADTAIL_FALLBACK_PREDICTOR_VERSION,
@@ -64,7 +72,10 @@ from fishsense_core.fish.fish_at_dot import FishialSegmenter, crop_origin
 from fishsense_services_processor.headtail_predict.workflow import (
     PredictHeadtailImagesWorkflow,
 )
-from fishsense_services_processor.weights import GarageWeightStore
+from fishsense_services_processor.weights import (
+    GarageWeightStore,
+    ModelWeightsSettings,
+)
 
 FRAME_W, FRAME_H = 4014, 3016
 CROP_W, CROP_H = 1800, 1350
@@ -449,51 +460,107 @@ class TestFallbackSegmenterIsLoaded:
         )
 
 
-# -- SAM 3.1's weights through the manifest -----------------------------------------
+# -- SAM 3.1's weights through core's manifest ---------------------------------------
 
-WEIGHTS = b"pretend these are gigabytes of SAM 3.1"
-SAM3_ENV = {
-    "FISHSENSE_SAM3_SHA256": hashlib.sha256(WEIGHTS).hexdigest(),
-    "FISHSENSE_SAM3_SIZE": str(len(WEIGHTS)),
+WEIGHTS_ENV = {
+    "FISHSENSE_MODEL_WEIGHTS_ENDPOINT_URL": "https://s3.test",
+    "FISHSENSE_MODEL_WEIGHTS_ACCESS_KEY_ID": "k",
+    "FISHSENSE_MODEL_WEIGHTS_SECRET_ACCESS_KEY": "s",
 }
+#: Stands in for SAM 3.1's 3.5 GB: core's pin itself (sha256, size, the id
+#: every SAM 3.1 row records) is pinned once, in test_weights.py.
+_STAND_IN = b"SAM 3.1, standing in"
+
+
+class _NoStore:
+    """A store a cache hit must never reach."""
+
+    def download_to(self, ref, dest):
+        raise AssertionError(f"{ref.id} was a cache hit; nothing to download")
+
+
+class _BytesStore:
+    """Core's `WeightStore`, holding `_STAND_IN`."""
+
+    def __init__(self):
+        self.downloads = []
+
+    def download_to(self, ref, dest):
+        self.downloads.append(ref.id)
+        Path(dest).write_bytes(_STAND_IN)
+
+
+def _stand_in_manifest(monkeypatch):
+    """Core's own `sam3`/`3.1` entry (its filename), at the stand-in's sha256
+    and size, as the manifest `fetch_sam3` resolves (review of #358: the
+    tests no longer write core's private cache layout; core's `fetch` fills
+    its cache)."""
+    real = builtin_manifest().resolve("sam3", "3.1")
+    ref = ModelRef(
+        name=real.name, version=real.version, target=real.target,
+        filename=real.filename, sha256=hashlib.sha256(_STAND_IN).hexdigest(),
+        size=len(_STAND_IN),
+    )  # fmt: skip
+    manifest = Manifest([ref], {"sam3": "3.1"})
+    monkeypatch.setattr(sam3_weights, "builtin_manifest", lambda: manifest)
+    return ref
 
 
 class TestSam3Weights:
-    """fishsense-core 4.1.0's manifest has no SAM 3.1 entry, so the stage pins
-    one from settings until core does. Nothing unverified loads."""
+    """fishsense-core pins SAM 3.1 itself since 4.2.0, so the stage fetches
+    through core's manifest: no settings of its own, and nothing that isn't
+    core's pinned file loads."""
 
-    @pytest.mark.parametrize("missing", sorted(SAM3_ENV))
-    def test_the_hash_and_size_are_required(self, monkeypatch, missing):
-        for name, value in SAM3_ENV.items():
-            if name != missing:
-                monkeypatch.setenv(name, value)
-        monkeypatch.delenv(missing, raising=False)
+    async def test_the_checkpoint_is_cores_sam3_entry(self, monkeypatch, tmp_path):
+        """`sam3.1_multiplex.pt`, version 3.1 (not `sam3.pt`, which loads just
+        as quietly and degrades every mask), fetched once and then a cache
+        hit, and recorded as its manifest entry's id."""
+        ref = _stand_in_manifest(monkeypatch)
+        store = _BytesStore()
 
-        with pytest.raises(ValidationError):
-            sam3_weights.Sam3Settings()
+        first = await sam3_weights.fetch_sam3(store=store, cache_dir=tmp_path)
+        again = await sam3_weights.fetch_sam3(store=_NoStore(), cache_dir=tmp_path)
 
-    def test_a_hash_must_look_like_one(self, monkeypatch):
-        monkeypatch.setenv("FISHSENSE_SAM3_SHA256", "not-a-hash")
-        monkeypatch.setenv("FISHSENSE_SAM3_SIZE", "10")
+        assert first == again
+        path, model_id = first
+        assert Path(path) == tmp_path / "sam3" / "3.1" / "sam3.1_multiplex.pt"
+        assert Path(path).read_bytes() == _STAND_IN
+        assert model_id == ref.id
+        assert store.downloads == [ref.id]
 
-        with pytest.raises(ValidationError):
-            sam3_weights.Sam3Settings()
+    async def test_the_id_recorded_is_the_entry_that_loaded(
+        self, monkeypatch, tmp_path
+    ):
+        """One manifest resolves both (review of #358): were the fetch to
+        resolve core's built-in pin itself, it would ask the store for the
+        3.5 GB file, get the stand-in, and refuse it."""
+        ref = _stand_in_manifest(monkeypatch)
 
-    def test_the_manifest_pins_v1s_checkpoint(self, monkeypatch):
-        """`sam3.1_multiplex.pt`, version 3.1, at v1's
-        `model-weights/sam3/3.1/` key -- not `sam3.pt`, which loads just as
-        quietly and degrades every mask."""
-        for name, value in SAM3_ENV.items():
-            monkeypatch.setenv(name, value)
-
-        ref = sam3_weights.sam3_manifest(sam3_weights.Sam3Settings()).resolve("sam3")
-
-        assert (ref.name, ref.version, ref.filename) == (
-            "sam3",
-            "3.1",
-            "sam3.1_multiplex.pt",
+        _, model_id = await sam3_weights.fetch_sam3(
+            store=_BytesStore(), cache_dir=tmp_path
         )
-        assert (ref.sha256, ref.size) == (hashlib.sha256(WEIGHTS).hexdigest(), 38)
+
+        assert model_id == ref.id
+
+    async def test_the_stage_needs_no_sam3_settings(self, monkeypatch, tmp_path):
+        """The wiring every SAM stage shares reads only `FISHSENSE_MODEL_WEIGHTS_*`:
+        a pod without FISHSENSE_SAM3_* loads."""
+        from fishsense_services_processor.headtail_predict import stage
+
+        ref = _stand_in_manifest(monkeypatch)
+        await sam3_weights.fetch_sam3(store=_BytesStore(), cache_dir=tmp_path)
+        for name in ("FISHSENSE_SAM3_SHA256", "FISHSENSE_SAM3_SIZE"):
+            monkeypatch.delenv(name, raising=False)
+        for name, value in WEIGHTS_ENV.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.setenv("FISHSENSE_MODEL_WEIGHTS_CACHE_DIR", str(tmp_path))
+        stage._weights.cache_clear()
+        try:
+            _, model_id = await stage._sam3_checkpoint()
+        finally:
+            stage._weights.cache_clear()
+
+        assert model_id == ref.id
 
     @pytest.fixture
     def models_bucket(self, monkeypatch):
@@ -504,39 +571,20 @@ class TestSam3Weights:
             s3.create_bucket(Bucket="model-weights")
             yield s3
 
-    async def test_the_pinned_bytes_are_fetched_and_verified(
-        self, monkeypatch, models_bucket, tmp_path
-    ):
-        for name, value in SAM3_ENV.items():
-            monkeypatch.setenv(name, value)
-        models_bucket.put_object(
-            Bucket="model-weights", Key="sam3/3.1/sam3.1_multiplex.pt", Body=WEIGHTS
-        )
-
-        path, model_id = await sam3_weights.fetch_sam3(
-            store=GarageWeightStore(models_bucket, "model-weights"),
-            cache_dir=tmp_path,
-            settings=sam3_weights.Sam3Settings(),
-        )
-
-        assert Path(path).read_bytes() == WEIGHTS
-        assert model_id.startswith("sam3/3.1@")
-
-    async def test_other_bytes_never_load(self, monkeypatch, models_bucket, tmp_path):
-        for name, value in SAM3_ENV.items():
-            monkeypatch.setenv(name, value)
+    async def test_other_bytes_never_load(self, models_bucket, tmp_path):
         models_bucket.put_object(
             Bucket="model-weights",
             Key="sam3/3.1/sam3.1_multiplex.pt",
-            Body=b"tampered " + WEIGHTS[9:],
+            Body=b"not SAM 3.1",
         )
 
         with pytest.raises(ModelIntegrityError):
             await sam3_weights.fetch_sam3(
                 store=GarageWeightStore(models_bucket, "model-weights"),
                 cache_dir=tmp_path,
-                settings=sam3_weights.Sam3Settings(),
             )
+
+        assert [p for p in tmp_path.rglob("*") if p.is_file()] == []
 
 
 # -- the activity ---------------------------------------------------------------------
@@ -672,9 +720,9 @@ async def test_on_a_gpu_sam3_runs_with_the_verified_checkpoint(monkeypatch):
     assert result.checkpoint == "sam3/3.1@0123456789ab", "the model, not a path"
 
 
-def _unset_sam3_settings():
-    # Raises the ValidationError a pod without FISHSENSE_SAM3_* raises.
-    return sam3_weights.Sam3Settings()
+def _unset_weights_settings():
+    # Raises the ValidationError a pod without FISHSENSE_MODEL_WEIGHTS_* raises.
+    return ModelWeightsSettings()
 
 
 class TestAWeightsFailureIsFinal:
@@ -688,16 +736,16 @@ class TestAWeightsFailureIsFinal:
     @pytest.mark.parametrize(
         ("failure", "error_type"),
         [
-            (_unset_sam3_settings, "Sam3SettingsInvalid"),
+            (_unset_weights_settings, "Sam3SettingsInvalid"),
             (ModelIntegrityError("sam3/3.1: expected sha256 ..."), "Sam3WeightsCorrupt"),
             (ModelUnavailable("sam3/3.1: not in s3://model-weights"), "Sam3WeightsUnavailable"),
-            (KeyError("sam3"), "Sam3NotInManifest"),
+            (KeyError("unknown model sam3/x for target server; known: ..."), "Sam3NotInManifest"),
         ],
         ids=["settings", "integrity", "unavailable", "manifest"],
     )  # fmt: skip
     async def test_is_non_retryable_and_named(self, monkeypatch, failure, error_type):
         monkeypatch.setattr(act, "cuda_available", lambda: True)
-        for name in SAM3_ENV:
+        for name in (*WEIGHTS_ENV, "FISHSENSE_MODEL_WEIGHTS_CACHE_DIR"):
             monkeypatch.delenv(name, raising=False)
 
         async def fetch():
@@ -764,6 +812,219 @@ async def test_workflow_fans_out_one_prediction_per_image_and_returns_them():
 
     assert [r.capture_id for r in results] == captures
     assert sorted(seen) == sorted((c, timedelta(minutes=15)) for c in captures)
+
+
+async def _run_predict_workflow(
+    stub, workflow_cls=PredictHeadtailImagesWorkflow, runner=None, images=None
+):
+    """Images (one by default) through the workflow; the client's error, or
+    its history."""
+    payload = PredictHeadtailImagesInput(
+        tenant_id=uuid.uuid4(), mission_id=uuid.uuid4(), images=images or [_payload()]
+    )
+    async with await WorkflowEnvironment.start_time_skipping(
+        data_converter=DATA_CONVERTER
+    ) as env:
+        async with Worker(env.client, task_queue="t-ht", workflows=[workflow_cls],
+                          activities=[stub],
+                          **({"workflow_runner": runner} if runner else {})):  # fmt: skip
+            handle = await env.client.start_workflow(
+                "PredictHeadtailImagesWorkflow", payload, id=f"t-ht-{uuid.uuid4()}",
+                task_queue="t-ht", execution_timeout=timedelta(hours=2),
+            )  # fmt: skip
+            try:
+                await handle.result()
+            except WorkflowFailureError as exc:
+                return exc, await handle.fetch_history()
+            return None, await handle.fetch_history()
+
+
+async def test_a_failing_image_is_tried_a_bounded_number_of_times():
+    """2026-10-24: the workflow set no retry policy, so an image no worker
+    could finish (a crash, an OOM) retried without limit -- every 100 s at
+    Temporal's default ceiling -- until the parent's child timeout, holding
+    the GPU queue. It gets `IMAGE_ATTEMPTS` tries, as the processor's other
+    per-frame workflows give theirs."""
+    from fishsense_services_processor.headtail_predict.workflow import IMAGE_ATTEMPTS
+
+    attempts = []
+
+    @activity.defn(name="predict_headtail_image")
+    async def stub(image: PredictHeadtailImage) -> HeadtailPredictionResult:
+        attempts.append(activity.info().attempt)
+        raise RuntimeError("CUDA out of memory")
+
+    error, _ = await _run_predict_workflow(stub)
+    assert error is None, "a failing image is left out, not the child failed"
+    assert attempts == list(range(1, IMAGE_ATTEMPTS + 1))
+
+
+async def test_an_image_that_fails_its_tries_costs_only_itself():
+    """Review of #364: failing the child threw away every other image's
+    prediction, and one image that always fails failed its dive every hour.
+    Left out, it has no current prediction, so the parent selects it again
+    next run; the others are returned to be persisted."""
+    good, bad = _payload(capture_id=uuid.uuid4()), _payload(capture_id=uuid.uuid4())
+
+    @activity.defn(name="predict_headtail_image")
+    async def stub(image: PredictHeadtailImage) -> HeadtailPredictionResult:
+        if image.capture_id == bad.capture_id:
+            raise RuntimeError("CUDA out of memory")
+        return HeadtailPredictionResult(capture_id=image.capture_id, status="predicted")
+
+    payload = PredictHeadtailImagesInput(
+        tenant_id=uuid.uuid4(), mission_id=uuid.uuid4(), images=[good, bad]
+    )
+    async with await WorkflowEnvironment.start_time_skipping(
+        data_converter=DATA_CONVERTER
+    ) as env:
+        async with Worker(env.client, task_queue="t-ht2",
+                          workflows=[PredictHeadtailImagesWorkflow], activities=[stub]):  # fmt: skip
+            results = await env.client.execute_workflow(
+                PredictHeadtailImagesWorkflow.run, payload, id=f"t-ht2-{uuid.uuid4()}",
+                task_queue="t-ht2", result_type=List[HeadtailPredictionResult],
+            )  # fmt: skip
+
+    assert [r.capture_id for r in results] == [good.capture_id]
+
+
+@pytest.mark.parametrize(
+    "error_type", ["NoGpuForSam3", "Sam3WeightsCorrupt", "Sam3SettingsInvalid"]
+)
+async def test_a_worker_refusal_is_never_retried(error_type):
+    """Even raised retryable (an older worker, a slip), a refusal is the
+    worker's: the policy names every one non-retryable."""
+    attempts = []
+
+    @activity.defn(name="predict_headtail_image")
+    async def stub(image: PredictHeadtailImage) -> HeadtailPredictionResult:
+        attempts.append(1)
+        raise ApplicationError("refused", type=error_type)
+
+    error, _ = await _run_predict_workflow(stub)
+    assert error.cause.cause.type == error_type
+    assert len(attempts) == 1
+
+
+@workflow.defn(name="PredictHeadtailImagesWorkflow")
+class _BeforeTheRetryPolicy:  # pylint: disable=too-few-public-methods
+    """The workflow as it was before 2026-10-24 (no retry policy), under its
+    registered name: what a child in flight across the deploy ran."""
+
+    @workflow.run
+    async def run(self, payload: PredictHeadtailImagesInput) -> list:
+        return list(
+            await asyncio.gather(
+                *[
+                    workflow.execute_activity(
+                        "predict_headtail_image",
+                        image,
+                        start_to_close_timeout=timedelta(minutes=15),
+                        result_type=HeadtailPredictionResult,
+                    )
+                    for image in payload.images
+                ]
+            )
+        )
+
+
+@workflow.defn(name="PredictHeadtailImagesWorkflow")
+class _FailFast:  # pylint: disable=too-few-public-methods
+    """#364 before its review: a bounded retry, and an image that fails its
+    tries fails the child."""
+
+    @workflow.run
+    async def run(self, payload: PredictHeadtailImagesInput) -> list:
+        return list(
+            await asyncio.gather(
+                *[
+                    workflow.execute_activity(
+                        "predict_headtail_image",
+                        image,
+                        start_to_close_timeout=timedelta(minutes=15),
+                        retry_policy=RetryPolicy(
+                            initial_interval=timedelta(seconds=10),
+                            maximum_attempts=3,
+                        ),
+                        result_type=HeadtailPredictionResult,
+                    )
+                    for image in payload.images
+                ]
+            )
+        )
+
+
+async def test_a_child_that_failed_fast_replays_as_it_ran():
+    """The leave-out is behind `workflow.patched`: a history in which an
+    image failed its tries and failed the child -- under the code before --
+    replays under the new code without a determinism error, rather than
+    being completed as if the image had been left out."""
+
+    @activity.defn(name="predict_headtail_image")
+    async def stub(image: PredictHeadtailImage) -> HeadtailPredictionResult:
+        raise RuntimeError("CUDA out of memory")
+
+    error, history = await _run_predict_workflow(
+        stub, _FailFast, runner=UnsandboxedWorkflowRunner()
+    )
+    assert error is not None
+
+    replayed = await Replayer(
+        workflows=[PredictHeadtailImagesWorkflow], data_converter=DATA_CONVERTER
+    ).replay_workflow(history, raise_on_replay_failure=False)
+    assert replayed.replay_failure is None
+
+
+@workflow.defn(name="PredictHeadtailImagesWorkflow")
+class _AnotherActivity:  # pylint: disable=too-few-public-methods
+    """The replay control: a real change (another activity type)."""
+
+    @workflow.run
+    async def run(self, payload: PredictHeadtailImagesInput) -> list:
+        return [
+            await workflow.execute_activity(
+                "another_activity",
+                image,
+                start_to_close_timeout=timedelta(minutes=15),
+                result_type=HeadtailPredictionResult,
+            )
+            for image in payload.images
+        ]
+
+
+async def test_a_child_started_before_the_retry_policy_replays():
+    """Replay safety, measured rather than assumed: a history written by the
+    workflow without a retry policy -- its image failing once, then passing
+    -- replays under the new one. Temporal's determinism check matches a
+    scheduled activity by its id and type, not its options, so the policy
+    is not part of it. The control: the same history under a workflow that
+    schedules another activity type is caught as non-deterministic, so the
+    replayer would see a real change."""
+    tries = []
+
+    @activity.defn(name="predict_headtail_image")
+    async def stub(image: PredictHeadtailImage) -> HeadtailPredictionResult:
+        tries.append(1)
+        if len(tries) == 1:
+            raise RuntimeError("transient")
+        return HeadtailPredictionResult(capture_id=image.capture_id, status="predicted")
+
+    error, history = await _run_predict_workflow(
+        stub, _BeforeTheRetryPolicy, runner=UnsandboxedWorkflowRunner()
+    )
+    assert error is None and len(tries) == 2
+
+    replayed = await Replayer(
+        workflows=[PredictHeadtailImagesWorkflow], data_converter=DATA_CONVERTER
+    ).replay_workflow(history, raise_on_replay_failure=False)
+    assert replayed.replay_failure is None
+
+    control = await Replayer(
+        workflows=[_AnotherActivity],
+        data_converter=DATA_CONVERTER,
+        workflow_runner=UnsandboxedWorkflowRunner(),
+    ).replay_workflow(history, raise_on_replay_failure=False)
+    assert control.replay_failure is not None
 
 
 # -- the stored mask (contract 12, 2026-10-21) ------------------------------------

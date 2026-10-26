@@ -406,7 +406,7 @@ async def test_the_model_loads_once_per_process():
     [
         (ModelIntegrityError("sha256 mismatch"), "SlateDetectorWeightsCorrupt"),
         (ModelUnavailable("not in s3://model-weights"), "SlateDetectorWeightsUnavailable"),
-        (KeyError("slate-detector"), "SlateDetectorNotInManifest"),
+        (KeyError("unknown model slate-detector/x for target server; known: ..."), "SlateDetectorNotInManifest"),
     ],
 )  # fmt: skip
 async def test_a_weights_failure_is_final(cause, error_type):

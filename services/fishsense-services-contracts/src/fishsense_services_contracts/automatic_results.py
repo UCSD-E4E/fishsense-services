@@ -73,6 +73,21 @@ and a frame whose size disagrees with its place on the line is dropped
 (`size_constancy.trim_frames`). Version 1 fitted both: a reflection's run of
 off-line dots moved session 77's vanishing point by 1,600 px, and one
 wrong-range dot moved mission 80's by 360 px.
+``size-constancy-3`` (2026-10-25): the size-constancy fit is fishsense-core
+4.3.2's (`fishsense_core.size_constancy`), which absorbed this repo's port of
+cscw's. Named, not numbered, so a row cannot be read as calibration v3 (the
+screen-consensus-check replay, `automatic_calibration.v3`), which no row
+records (review of #354). Core sizes only the largest connected component
+of the pairs the robust pass kept, drops a pair beyond 10x before solving,
+and measures no scale from a pair whose inliers collapse to one spot; with no
+dive line the direction follows the trim. On cscw's ten sessions: nine fit
+as under 2 (to 1e-11 px), and session 114 keeps all 29 frames with its
+collapsed pair (log scale -37) counted implausible, its error against the
+stored calibration -0.0446 -> -0.0439 deg. Production's cohort was re-fitted
+read-only before this shipped (#354). The bump re-fits every dive in the
+cohort (`automatic_results_store._CALIBRATION_WORK` selects on
+`algorithm_version`); each accepted fit is a new row, so the lengths that
+used the dive's label-free calibration are measured again.
 
 Not in ``MODELS``: integration publishes schemas once for every slice.
 """
@@ -115,7 +130,7 @@ __all__ = [
 AUTOMATIC_HEADTAIL_PREDICTOR_VERSION = 4
 #: The one render every step reads (`renders.RENDER_VERSION`).
 AUTOMATIC_JPEG_RENDER_VERSION = RENDER_VERSION
-AUTOMATIC_CALIBRATION_VERSION = "2"
+AUTOMATIC_CALIBRATION_VERSION = "size-constancy-3"
 AUTOMATIC_MEASUREMENT_VERSION = "2"
 
 #: Stage 14's single-depth fronto-parallel projection (processor
@@ -325,10 +340,11 @@ class AutomaticLength(BaseModel):
     automatic_head_tail_prediction_id: UUID
     length_m: Optional[float] = None
     depth_m: Optional[float] = None
-    #: Why no length: `non_positive_depth` (the depth not finite, or at or
-    #: behind the camera), `low_parallax` (version 2: a dot too near the
-    #: laser's vanishing point), `non_finite_length`, `zero_length`. The API's
-    #: CHECK repeats them (migration 0068).
+    #: Why no length: the dot's reason (`laser_depth.DotRefusal`:
+    #: `non_finite_depth`, `non_positive_depth`, `low_parallax`; version 2,
+    #: and before it a non-finite depth was stored as `non_positive_depth`),
+    #: `non_finite_length`, `zero_length`, or `zoomed` (the CLI's withdrawal,
+    #: 0070). The API's CHECK repeats them (migration 0071).
     refusal: Optional[str] = None
 
 

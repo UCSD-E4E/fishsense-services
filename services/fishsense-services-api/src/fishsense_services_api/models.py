@@ -434,6 +434,9 @@ class Capture(Base):
     #: Where an imported phone capture came from (0058); a synced one has
     #: its uploader instead.
     imported_from: Mapped[str | None] = mapped_column(Text)
+    #: EXIF FocalLength (0x920A), mm (0069): the zoom gate's input. NULL is
+    #: unknown (not read yet, or a phone capture).
+    focal_length_mm: Mapped[float | None] = mapped_column(Double)
 
 
 class CameraCalibration(Base):
@@ -1174,7 +1177,7 @@ class Measurement(Base):
 
 class LaserDepthRefusal(Base):
     """A laser label tried under a calibration that gave no measurable depth
-    (migration 0025; `low_parallax` since 0068): "tried, made no progress"."""
+    (migration 0025; `low_parallax` since 0071): "tried, made no progress"."""
 
     __tablename__ = "laser_depth_refusals"
     __table_args__ = (
@@ -1219,7 +1222,7 @@ class LaserDepthRefusal(Base):
 
 
 class MeasurementRefusal(Base):
-    """A capture's measurement inputs that gave no usable length -- since 0068
+    """A capture's measurement inputs that gave no usable length -- since 0071
     including a laser dot that is not measurable -- or a real fish no name
     could be read from (migration 0025)."""
 

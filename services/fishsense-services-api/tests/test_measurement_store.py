@@ -402,6 +402,26 @@ async def test_non_canonical_and_low_priority_are_not_selected(
     assert await _next(app_engine, lab) is None
 
 
+async def test_a_zoomed_frame_is_not_measured(owner_engine, app_engine):
+    """The zoom gate (2026-10-25): the measurement view leaves out a frame shot
+    zoomed in -- its depth and length assume intrinsics it was not shot at --
+    so it is neither work nor a reason to pick the mission. None of the 3,314
+    human lengths was on one when the focal lengths were recorded."""
+    from _slate_calibration_seed import zoom
+
+    lab = await tenant(owner_engine)
+    mission_id, _ = await calibrated_dive(owner_engine, lab)
+    wide = await measurable_capture(owner_engine, lab, mission_id)
+    zoomed = await measurable_capture(owner_engine, lab, mission_id)
+    await zoom(owner_engine, zoomed, 18.0)
+
+    work = await _work(app_engine, lab, mission_id)
+    assert [w.capture_id for w in work.captures] == [wide]
+
+    await zoom(owner_engine, wide, 5.4)
+    assert await _next(app_engine, lab) is None
+
+
 # ── calibration provenance (v1's test_measurement_calibration_provenance) ──
 
 
@@ -1021,7 +1041,7 @@ async def test_a_migrated_measurement_under_the_effective_calibration_is_current
 
 @pytest.mark.parametrize(
     "reason",
-    # The last three since contract v21 (0068): the dot failed fishsense-core's
+    # The last three since contract v21 (0071): the dot failed fishsense-core's
     # `LaserPoint.is_measurable()`, so no length was taken.
     [
         "zero_length",

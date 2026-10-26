@@ -20,8 +20,8 @@ from __future__ import annotations
 import math
 from importlib.metadata import version
 
+from fishsense_core.world_point import measure_length_at_depth
 from temporalio import activity
-from temporalio.exceptions import ApplicationError
 
 from fishsense_services_contracts.automatic_results import (
     AUTOMATIC_MEASUREMENT_ALGORITHM,
@@ -30,8 +30,7 @@ from fishsense_services_contracts.automatic_results import (
     MeasureAutomaticInput,
     MeasureAutomaticResult,
 )
-from fishsense_core.world_point import compute_laser_point, measure_length_at_depth
-from fishsense_services_processor.laser_depth.activities import dot_refusal
+from fishsense_services_processor.laser_dots import dot_refusal, laser_point
 
 __all__ = ["measure_automatic"]
 
@@ -41,23 +40,18 @@ async def measure_automatic(payload: MeasureAutomaticInput) -> MeasureAutomaticR
     """Each automatic fish's length at its automatic dot's depth."""
     lengths = []
     for c in payload.captures:
-        try:
-            point = compute_laser_point(
-                (c.laser_x, c.laser_y),
-                payload.laser_position,
-                payload.laser_axis,
-                payload.camera_matrix,
-            )
-        except ValueError as exc:
-            raise ApplicationError(
-                f"dive {payload.mission_id}'s calibration is unusable: {exc}",
-                type="UnusableLaserCalibration",
-                non_retryable=True,
-            ) from exc
+        point = laser_point(
+            (c.laser_x, c.laser_y),
+            payload.laser_position,
+            payload.laser_axis,
+            payload.camera_matrix,
+            of=f"dive {payload.mission_id}'s automatic calibration",
+        )
         depth = point.depth_m if math.isfinite(point.depth_m) else None
+        # The dot's own reason, `non_finite_depth` included (review of #361:
+        # it was stored as `non_positive_depth`, misnaming a finite, positive
+        # depth with a non-finite range; 0071's CHECK names it).
         length, refusal = None, dot_refusal(point)
-        if refusal == "non_finite_depth":
-            refusal = "non_positive_depth"
         if refusal is None:
             length = measure_length_at_depth(
                 (c.head_x, c.head_y),

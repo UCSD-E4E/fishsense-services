@@ -537,3 +537,25 @@ def test_a_saturated_dot_votes_from_its_halo(monkeypatch):
     # The magnitude is what `laser_predictions.color_margin` stores, under
     # LASER_PREDICTOR_VERSION 3: a change in core's scaling must show here.
     assert margin == pytest.approx(MARGIN_V3, rel=1e-6)
+
+
+def test_malformed_intrinsics_fail_before_the_detector_runs(monkeypatch):
+    """The dot is rectified after inference, so a camera calibration whose
+    distortion cannot rectify failed only after the GPU had run the frame,
+    on every retry (review of #361). The same rectification runs on a dummy
+    point first."""
+    _install_fake_linear_raw_image(monkeypatch, {})
+    calls = []
+
+    class _Detector:  # pylint: disable=too-few-public-methods
+        checkpoint_name = "run3_epoch_021.pt"
+
+        def predict(self, image, **kwargs):
+            calls.append(1)
+            return SimpleNamespace(x=10.0, y=10.0, confidence=0.9)
+
+    monkeypatch.setattr(sut, "_get_detector", _Detector)
+
+    with pytest.raises(Exception):
+        sut._predict_from_raw(Path("/scratch/abc123.ORF"), _K, [0.1, 0.2, 0.3], None)
+    assert calls == []

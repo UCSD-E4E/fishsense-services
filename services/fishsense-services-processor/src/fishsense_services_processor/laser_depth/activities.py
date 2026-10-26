@@ -41,11 +41,9 @@ v2 changes:
 
 from __future__ import annotations
 
-import importlib.metadata
 import math
 
 from temporalio import activity
-from temporalio.exceptions import ApplicationError
 
 from fishsense_services_contracts.laser_depth import (
     ComputeLaserDepthsInput,
@@ -54,40 +52,17 @@ from fishsense_services_contracts.laser_depth import (
     LaserDepthOutcome,
     LaserDepthRefusal,
 )
-from fishsense_core.world_point import LaserPoint, compute_laser_point
+from fishsense_services_processor.laser_dots import (
+    core_version,
+    dot_refusal,
+    laser_point,
+)
 
-__all__ = ["compute_laser_depths", "core_version", "dot_refusal"]
-
-
-def core_version() -> str:
-    """The fishsense-core wheel doing the geometry, as results record it."""
-    return importlib.metadata.version("fishsense-core")
+__all__ = ["compute_laser_depths"]
 
 
 def _finite(value: float) -> float | None:
     return value if math.isfinite(value) else None
-
-
-def dot_refusal(point: LaserPoint) -> str | None:
-    """Why `point` cannot carry a depth (`laser_depth.DotRefusal`), or None.
-
-    The gate is `point.is_measurable()`, whole; the name is its first failure:
-    a depth that is not finite, then one at or behind the camera (so a dot
-    v20 refused keeps its reason), then too little parallax. A dot with a
-    finite, positive depth and enough parallax fails only if its range or
-    residual is not finite -- the solve broke down, so it is `non_finite_depth`.
-    """
-    if point.is_measurable():
-        return None
-    if not math.isfinite(point.depth_m):
-        return "non_finite_depth"
-    if point.depth_m <= 0.0:
-        return "non_positive_depth"
-    if not all(
-        map(math.isfinite, (point.range_m, point.residual_m, point.parallax_rad))
-    ):
-        return "non_finite_depth"
-    return "low_parallax"
 
 
 @activity.defn(name="compute_laser_depths")
@@ -101,22 +76,14 @@ async def compute_laser_depths(
         depth: LaserDepth | None = None
         refusals: list[LaserDepthRefusal] = []
         for dot in capture.laser_labels:
-            try:
-                point = compute_laser_point(
-                    (dot.x, dot.y),
-                    payload.calibration.laser_position,
-                    payload.calibration.laser_axis,
-                    payload.camera_matrix,
-                )
-            except ValueError as exc:
-                # The kernel refuses a zero-length (or non-finite) axis. It is
-                # the dive's calibration, not this image, that is broken.
-                raise ApplicationError(
-                    f"laser calibration {payload.calibration.laser_calibration_id}"
-                    f" of dive {payload.mission_id} is unusable: {exc}",
-                    type="UnusableLaserCalibration",
-                    non_retryable=True,
-                ) from exc
+            point = laser_point(
+                (dot.x, dot.y),
+                payload.calibration.laser_position,
+                payload.calibration.laser_axis,
+                payload.camera_matrix,
+                of=f"laser calibration {payload.calibration.laser_calibration_id}"
+                f" of dive {payload.mission_id}",
+            )
             reason = dot_refusal(point)
             if reason is None:
                 depth = LaserDepth(

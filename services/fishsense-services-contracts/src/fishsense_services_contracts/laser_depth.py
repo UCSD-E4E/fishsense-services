@@ -30,7 +30,7 @@ same inputs there.
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = [
@@ -112,7 +112,7 @@ class LaserDepth(BaseModel):
 #: finite; at or behind the camera; or (v21, core #96) the camera ray and the
 #: laser too near parallel -- a dot near the laser's vanishing point, whose
 #: finite, often positive depth is untrustworthy. Shared by `measurement`.
-#: The API's CHECKs repeat it (migration 0068).
+#: The API's CHECKs repeat it (migration 0071).
 DotRefusal = Literal["non_finite_depth", "non_positive_depth", "low_parallax"]
 
 
@@ -126,6 +126,22 @@ class LaserDepthRefusal(BaseModel):
     #: What the triangulation said; None when it was not finite. At most 0
     #: unless the reason is `low_parallax`.
     depth_m: FiniteFloat | None
+
+    @model_validator(mode="after")
+    def _never_a_usable_depth(self) -> "LaserDepthRefusal":
+        """A refusal's depth is never one `laser_depths` would take, as the
+        API's CHECK holds (0071): rejected here, at the boundary, rather than
+        at the insert (review of #361)."""
+        if (
+            self.depth_m is not None
+            and self.depth_m > 0
+            and self.reason != "low_parallax"
+        ):
+            raise ValueError(
+                f"a {self.reason} refusal records a depth at most 0, not "
+                f"{self.depth_m}"
+            )
+        return self
 
 
 class LaserDepthOutcome(BaseModel):

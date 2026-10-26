@@ -115,7 +115,7 @@ async def test_a_refusal_never_holds_a_usable_depth(owner_engine):
 
 
 async def test_only_a_low_parallax_refusal_may_hold_a_positive_depth(owner_engine):
-    """0068: near the laser's vanishing point the solve's depth is finite and
+    """0071: near the laser's vanishing point the solve's depth is finite and
     positive but untrustworthy; that refusal records it. Every other reason
     still may not, and an unknown reason is still refused."""
     lab = await tenant(owner_engine)

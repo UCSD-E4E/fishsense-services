@@ -24,7 +24,7 @@ v2 changes:
   twin, and a dot near the laser's vanishing point at a finite, positive,
   wrong depth. The owner chose fishsense-core's gate over that parity: the
   dot must pass `LaserPoint.is_measurable()`, or the capture is refused with
-  the depth stage's reasons (`laser_depth.activities.dot_refusal`:
+  the depth stage's reasons (`laser_dots.dot_refusal`:
   `non_finite_depth`, `non_positive_depth`, `low_parallax`), and core's
   `measure_length_at_depth` now raises on a depth that is not positive. A
   non-finite depth was `non_finite_length` under version 1. Where both
@@ -38,18 +38,18 @@ from __future__ import annotations
 
 import math
 
+from fishsense_core.world_point import measure_length_at_depth
 from temporalio import activity
-from temporalio.exceptions import ApplicationError
 
 from fishsense_services_contracts.measurement import (
     FishLength,
     MeasureFishInput,
     MeasureFishResult,
 )
-from fishsense_core.world_point import compute_laser_point, measure_length_at_depth
-from fishsense_services_processor.laser_depth.activities import (
+from fishsense_services_processor.laser_dots import (
     core_version,
     dot_refusal,
+    laser_point,
 )
 
 __all__ = ["ALGORITHM", "ALGORITHM_VERSION", "measure_fish"]
@@ -59,6 +59,12 @@ __all__ = ["ALGORITHM", "ALGORITHM_VERSION", "measure_fish"]
 ALGORITHM = "laser_depth_fronto_parallel"
 #: Bump when the length a given set of inputs yields changes. 2 (2026-10-23):
 #: behind `LaserPoint.is_measurable()` (see the module docstring).
+#: `measurement_work` does not select on it, so a capture measured under 1
+#: is not measured again. That leaves no wrong length behind: production's
+#: 22,398 measured laser dots were checked (2026-10-24, read-only) and none
+#: is under 0.005 rad of parallax -- the least is 0.0133 rad, 2.7x the
+#: threshold -- so every v1 length stands as the gate would have let it
+#: (review of #361).
 ALGORITHM_VERSION = "2"
 
 
@@ -71,20 +77,14 @@ async def measure_fish(payload: MeasureFishInput) -> MeasureFishResult:
     """Each capture's head-to-tail length at its laser dot's depth."""
     lengths: list[FishLength] = []
     for capture in payload.captures:
-        try:
-            point = compute_laser_point(
-                (capture.laser.x, capture.laser.y),
-                payload.calibration.laser_position,
-                payload.calibration.laser_axis,
-                payload.camera_matrix,
-            )
-        except ValueError as exc:
-            raise ApplicationError(
-                f"laser calibration {payload.calibration.laser_calibration_id}"
-                f" of dive {payload.mission_id} is unusable: {exc}",
-                type="UnusableLaserCalibration",
-                non_retryable=True,
-            ) from exc
+        point = laser_point(
+            (capture.laser.x, capture.laser.y),
+            payload.calibration.laser_position,
+            payload.calibration.laser_axis,
+            payload.camera_matrix,
+            of=f"laser calibration {payload.calibration.laser_calibration_id}"
+            f" of dive {payload.mission_id}",
+        )
         refusal = dot_refusal(point)
         length_m = math.nan
         if refusal is None:
