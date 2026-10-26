@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.62.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.61.0...v0.62.0) (2026-10-26)
+
+
+### Features
+
+* calibration v4 scores the template both ways up and records the margin ([659c4d8](https://github.com/UCSD-E4E/fishsense-services/commit/659c4d82a3db273bfc0a3495743850dbb3b6d942))
+
 ## [0.61.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.60.0...v0.61.0) (2026-10-26)
 
 
