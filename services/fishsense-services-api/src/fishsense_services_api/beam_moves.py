@@ -123,6 +123,11 @@ def _best_line(xy: np.ndarray, rng: np.random.Generator):
 def detect_beam_move(dots: Sequence[Dot]) -> Optional[BeamMove]:
     """The mission's move, or None (no move, or too few dots to say)."""
     ordered = sorted(dots, key=lambda d: (d.at, d.x, d.y))
+    # Not only redundant with the split's sides: the whole mission's line fit
+    # below needs two dots (2026-10-25: removed as redundant, the first
+    # production dry run crashed on a one-dot mission).
+    if len(ordered) < MIN_DOTS:
+        return None
     xy = np.array([[d.x, d.y] for d in ordered])
     rng = np.random.default_rng(0)
     whole, _ = _best_line(xy, rng)
