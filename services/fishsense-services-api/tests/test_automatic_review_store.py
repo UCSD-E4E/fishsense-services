@@ -22,6 +22,7 @@ from depth_measure_seed import (  # noqa: F401  (forget_identities: a fixture)
 )
 from test_automatic_results_store import (
     VERSIONS,  # noqa: F401
+    _backlog_mission,
     _in,
     _label_free,
     _measured,
@@ -277,3 +278,103 @@ async def test_a_length_whose_calibration_is_no_longer_current_is_not_shown(
     await _in(app_engine, lab, persist_automatic_calibration, mission_id, _label_free())
 
     assert (await _frame(app_engine, lab, c)).length_m is None
+
+
+# -- head/tail v5: the SimCC points are the frame's head and tail ---------------------
+
+
+async def _simcc(owner_engine, app_engine, lab, *, head, tail, status="predicted"):
+    """A frame whose SAM rule is `_predicted`'s (1800,1500)-(2300,1480) and
+    whose SimCC keypoints are `head` and `tail` (or refused): its mission
+    and capture."""
+    from fishsense_services_api.automatic_results_store import (
+        AutomaticKeypointRow,
+        automatic_keypoint_inputs,
+        persist_automatic_keypoints,
+    )
+
+    mission_id = await _backlog_mission(owner_engine, lab)
+    c = await capture(owner_engine, lab, mission_id)
+    await _predict(app_engine, lab, mission_id, _predicted(c), keypoints=False)
+    (owed,) = await _in(app_engine, lab, automatic_keypoint_inputs, mission_id)
+    await _in(app_engine, lab, persist_automatic_keypoints, mission_id, [
+        AutomaticKeypointRow(prediction_id=owed.prediction_id, capture_id=c,
+                             status=status, head=head, tail=tail, confidence=0.7,
+                             checkpoint="simcc@test")])  # fmt: skip
+    return mission_id, c
+
+
+async def test_a_frame_with_simcc_keypoints_shows_them_as_its_head_and_tail(
+    owner_engine, app_engine
+):
+    """The owner, 2026-10-26: v5 is what lengths are measured from, so it is
+    what a reviewer sees and accepts. The SAM rule's points come too, named."""
+    lab = await tenant(owner_engine)
+    _, c = await _simcc(owner_engine, app_engine, lab, head=[1790.0, 1505.0],
+                        tail=[2250.0, 1490.0])  # fmt: skip
+
+    found = await _frame(app_engine, lab, c)
+
+    assert (found.head, found.tail) == ((1790.0, 1505.0), (2250.0, 1490.0))
+    assert found.head_tail_source == "simcc"
+    assert found.keypoint_status == "predicted"
+    assert found.keypoint_checkpoint == "simcc@test"
+    assert (found.sam_head, found.sam_tail) == ((1800.0, 1500.0), (2300.0, 1480.0))
+
+
+async def test_a_frame_sent_to_review_still_shows_simccs_points_and_says_why(
+    owner_engine, app_engine
+):
+    lab = await tenant(owner_engine)
+    _, c = await _simcc(owner_engine, app_engine, lab, head=[1800.0, 1500.0],
+                        tail=[2000.0, 1490.0])  # fmt: skip
+
+    found = await _frame(app_engine, lab, c)
+
+    assert found.head_tail_source == "simcc"
+    assert found.keypoint_status == "keypoints_disagree"
+    assert found.tail == (2000.0, 1490.0)
+    assert found.keypoint_disagreement == pytest.approx(0.6, abs=0.01)
+
+
+async def test_a_refused_box_or_no_keypoints_falls_back_to_the_sam_rule(
+    owner_engine, app_engine
+):
+    """A fish model's frame never gets keypoints (0074); a refused box has
+    none. Both show the SAM rule's points, named as such."""
+    lab = await tenant(owner_engine)
+    _, refused = await _simcc(
+        owner_engine, app_engine, lab, head=None, tail=None, status="refused"
+    )
+    mission_id = await _backlog_mission(owner_engine, lab)
+    model = await capture(owner_engine, lab, mission_id)
+    await _predict(app_engine, lab, mission_id, _predicted(model), keypoints=False)
+
+    for c, status in ((refused, "keypoints_refused"), (model, None)):
+        found = await _frame(app_engine, lab, c)
+        assert (found.head, found.tail) == ((1800.0, 1500.0), (2300.0, 1480.0))
+        assert found.head_tail_source == "sam_rule"
+        assert found.keypoint_status == status
+
+
+async def test_a_rerun_of_the_keypoints_shows_the_newest(owner_engine, app_engine):
+    """Keypoints are append-only: a rerun on the same prediction is the one shown."""
+    from fishsense_services_api.automatic_results_store import (
+        AutomaticKeypointRow,
+        persist_automatic_keypoints,
+    )
+
+    lab = await tenant(owner_engine)
+    mission_id, c = await _simcc(owner_engine, app_engine, lab, head=[1790.0, 1505.0],
+                                 tail=[2250.0, 1490.0])  # fmt: skip
+    first = await _frame(app_engine, lab, c)
+    await _in(app_engine, lab, persist_automatic_keypoints, mission_id, [
+        AutomaticKeypointRow(prediction_id=first.prediction_id, capture_id=c,
+                             status="predicted", head=[1795.0, 1502.0],
+                             tail=[2280.0, 1485.0], confidence=0.8,
+                             checkpoint="simcc@rerun")])  # fmt: skip
+
+    found = await _frame(app_engine, lab, c)
+
+    assert (found.head, found.tail) == ((1795.0, 1502.0), (2280.0, 1485.0))
+    assert found.keypoint_checkpoint == "simcc@rerun"

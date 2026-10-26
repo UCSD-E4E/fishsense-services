@@ -7,6 +7,14 @@ them, never writes them or turns them into anything else.
 * A frame is its current prediction (``current_automatic_head_tail_predictions``)
   with its dot, head and tail, the render those pixels are on, its mask
   (0059), its current length and its species guess.
+  - Its head and tail are SimCC's keypoints when it has them (head/tail v5,
+    0074; the owner, 2026-10-26: "switch to this as the primary version"), so
+    a reviewer sees and accepts the points its length is measured from. That
+    holds for a frame sent to review (``keypoints_disagree``) too: on the
+    held-out reef missions SimCC was the nearer of the two to the human
+    clicks even there. A fish model's frame (no keypoints) and a refused box
+    keep the SAM rule's. ``head_tail_source`` names which; the SAM rule's
+    points come as ``sam_head``/``sam_tail`` either way.
   - The pixels are full-frame pixels of the render the frames stage segmented,
     named by ``jpeg_render_version`` and ``jpeg_camera_calibration_id``. That
     is not always the newest render: after a camera is recalibrated, the
@@ -64,8 +72,20 @@ class AutomaticFrame:
     #: None when it gave no reading, and on every row from before.
     laser_color: str | None
     laser_color_margin: float | None
+    #: SimCC's points when the frame has them, else the SAM rule's.
     head: Point | None
     tail: Point | None
+    #: ``simcc`` or ``sam_rule``; None when there are no points.
+    head_tail_source: str | None
+    #: The SAM rule's points (the mask's extremes), whichever is shown.
+    sam_head: Point | None
+    sam_tail: Point | None
+    #: The frame's current keypoints: ``predicted``, ``keypoints_disagree``
+    #: (sent to review), ``keypoints_refused``; None when it has none.
+    keypoint_status: str | None
+    #: |SimCC length / SAM-rule length - 1|.
+    keypoint_disagreement: float | None
+    keypoint_checkpoint: str | None
     mask_bbox: list[int] | None
     sam_score: float | None
     slate_probability: float | None
@@ -112,8 +132,18 @@ async def automatic_frame(
                        m.length_m, m.depth_m, m.refusal, m.calibration_source,
                        m.algorithm AS m_algorithm,
                        m.algorithm_version AS m_algorithm_version,
-                       s.predicted_choice, s.top1_probability, s.margin, s.top5
+                       s.predicted_choice, s.top1_probability, s.margin, s.top5,
+                       k.status AS k_status, k.head_x AS k_head_x,
+                       k.head_y AS k_head_y, k.tail_x AS k_tail_x,
+                       k.tail_y AS k_tail_y, k.disagreement AS k_disagreement,
+                       k.checkpoint AS k_checkpoint
                 FROM current_automatic_head_tail_predictions h
+                LEFT JOIN LATERAL (
+                    SELECT * FROM automatic_keypoint_predictions k
+                    WHERE k.tenant_id = h.tenant_id
+                      AND k.automatic_head_tail_prediction_id = h.id
+                    ORDER BY k.seq DESC LIMIT 1
+                ) k ON true
                 LEFT JOIN LATERAL (
                     SELECT r.id, r.bucket, r.key, r.width, r.height FROM capture_renders r
                     WHERE r.tenant_id = h.tenant_id AND r.capture_id = h.capture_id
@@ -139,6 +169,10 @@ async def automatic_frame(
     ).first()
     if row is None:
         return None
+    sam_head, sam_tail = _point(row.head_x, row.head_y), _point(row.tail_x, row.tail_y)
+    simcc = row.k_head_x is not None
+    head = _point(row.k_head_x, row.k_head_y) if simcc else sam_head
+    tail = _point(row.k_tail_x, row.k_tail_y) if simcc else sam_tail
     return AutomaticFrame(
         prediction_id=row.id,
         status=row.status,
@@ -147,8 +181,14 @@ async def automatic_frame(
         laser_confidence=row.laser_confidence,
         laser_color=row.laser_color,
         laser_color_margin=row.laser_color_margin,
-        head=_point(row.head_x, row.head_y),
-        tail=_point(row.tail_x, row.tail_y),
+        head=head,
+        tail=tail,
+        head_tail_source=(None if head is None else "simcc" if simcc else "sam_rule"),
+        sam_head=sam_head,
+        sam_tail=sam_tail,
+        keypoint_status=row.k_status,
+        keypoint_disagreement=row.k_disagreement,
+        keypoint_checkpoint=row.k_checkpoint,
         mask_bbox=None if row.mask_bbox is None else list(row.mask_bbox),
         sam_score=row.sam_score,
         slate_probability=row.slate_probability,
