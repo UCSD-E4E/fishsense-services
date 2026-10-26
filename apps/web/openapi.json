@@ -2833,6 +2833,31 @@
         "title": "MissionDetail",
         "type": "object"
       },
+      "MissionLaserColoursView": {
+        "properties": {
+          "automatic": {
+            "$ref": "#/components/schemas/ColourCountsView"
+          },
+          "labels": {
+            "$ref": "#/components/schemas/ColourCountsView"
+          },
+          "mission_number": {
+            "title": "Mission Number",
+            "type": "integer"
+          },
+          "predictions": {
+            "$ref": "#/components/schemas/ColourCountsView"
+          }
+        },
+        "required": [
+          "labels",
+          "predictions",
+          "automatic",
+          "mission_number"
+        ],
+        "title": "MissionLaserColoursView",
+        "type": "object"
+      },
       "MissionView": {
         "properties": {
           "name": {
@@ -5160,6 +5185,55 @@
           }
         ],
         "summary": "List Label Studio Project Ids"
+      }
+    },
+    "/tenants/{slug}/laser-colors": {
+      "get": {
+        "description": "Every mission's frames by laser colour, per source, in one read: the\nmissions with a dot from any source, by number (the owner, 2026-10-26).",
+        "operationId": "list_mission_laser_colors",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MissionLaserColoursView"
+                  },
+                  "title": "Response List Mission Laser Colors",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Laser Colours"
       }
     },
     "/tenants/{slug}/me/skills": {
