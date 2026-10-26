@@ -98,6 +98,13 @@ def test_too_few_dots_decide_nothing():
     assert detect_beam_move(dots) is None
 
 
+def test_a_mission_with_one_dot_or_none_decides_nothing():
+    """2026-10-25: the first production dry run crashed on a mission with one
+    dot -- the whole-mission line fit needs two."""
+    assert detect_beam_move(_line(1, 0)) is None
+    assert detect_beam_move([]) is None
+
+
 def test_the_answer_does_not_depend_on_the_order_given():
     before, after = _line(20, 0), _line(25, 27, offset=45.0, seed=1)
     shuffled = list(np.random.default_rng(5).permutation(np.array(before + after)))
