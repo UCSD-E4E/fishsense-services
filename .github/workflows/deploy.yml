@@ -120,7 +120,7 @@ jobs:
           done
 
           deployed_compose=$("$SYSTEMCTL" show fishsense.service -p ExecStart --value \
-            | grep -oE '/nix/store/[a-z0-9]{32}-source/deploy/incus/compose.yml' \
+            | grep -oE '/nix/store/[a-z0-9]{32}-[^/ ]+(/deploy/incus)?/compose\.yml' \
             | head -1)
           if [ -z "$deployed_compose" ] || [ ! -r "$deployed_compose" ]; then
             echo "::error title=Deploy verify::could not read the deployed compose spec from fishsense.service ExecStart"
