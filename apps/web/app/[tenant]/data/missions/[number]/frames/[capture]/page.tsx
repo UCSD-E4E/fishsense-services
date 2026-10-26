@@ -21,7 +21,7 @@ type Props = {
 /**
  * One frame of a mission, measured or not (2026-10-21): what the automatic
  * run made of it, drawn on the render it was predicted on, and its review
- * (2026-10-22): the frame page is review's home, not the Labelling tab. `at`
+ * (2026-10-22): the frame page is review's home, not the Labeling tab. `at`
  * is the frame's place in the mission's order (the API's page cursor), which
  * the mission's frame cards carry, so the page can offer the next frame.
  */

@@ -11,7 +11,7 @@
  * byte-for-byte copy is correct by construction and a rebuilt one is a new
  * thing to get wrong.
  *
- * **Skip writes nothing.** Do not implement it as a Label Studio cancelled
+ * **Skip writes nothing.** Do not implement it as a Label Studio canceled
  * annotation. Those carry `result: []`, so the `from_name` filter finds no
  * region and x/y stay NULL — while `laser_label.completed = task.is_labeled`
  * flips true regardless, and the populate step's `_select_unlabeled_images`

@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { formatLength } from "@/lib/captures";
 import { automaticOverlay, statusLabel, type AutomaticFrame } from "@/lib/automatic";
-import { colourLabel } from "@/lib/laser-colour";
+import { colorLabel } from "@/lib/laser-color";
 
 /**
  * What the automatic run made of this frame (the owner, 2026-10-21: review the
  * automatic process here). Always marked automatic and unvalidated, and kept
  * apart from the measurement above. The points and mask are drawn on the
  * render they were predicted on: SAM's mask in teal, the laser dot, and the
- * head (snout colour) and tail (fork colour).
+ * head (snout color) and tail (fork color).
  */
 export function AutomaticSection({
   frame,
@@ -64,7 +64,7 @@ export function AutomaticSection({
                 aria-label="The automatic result: the fish mask, the laser dot, and the head and tail"
               >
                 <defs>
-                  {/* The mask is greyscale, 255 on the fish: its brightness becomes teal's opacity. */}
+                  {/* The mask is grayscale, 255 on the fish: its brightness becomes teal's opacity. */}
                   <filter id="automatic-mask" colorInterpolationFilters="sRGB">
                     <feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1 0 0 0 0" result="alpha" />
                     <feFlood floodColor="#00AAA5" />
@@ -109,7 +109,7 @@ export function AutomaticSection({
           )}
           <Row label="Laser depth">{frame.depth_m != null ? `${frame.depth_m.toFixed(2)} m` : "—"}</Row>
           {frame.laser && (
-            <Row label="Laser colour">{colourLabel(frame.laser_color, frame.laser_color_margin)}</Row>
+            <Row label="Laser color">{colorLabel(frame.laser_color, frame.laser_color_margin)}</Row>
           )}
           <Row label="Calibration">
             {frame.calibration_source === "label_free"

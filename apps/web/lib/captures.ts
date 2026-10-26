@@ -57,16 +57,16 @@ export async function getCapture(
 }
 
 /**
- * A fish's length in whole millimetres, the unit every length is shown in
- * (the owner, 2026-10-21; docs/design/README.md). Stored and served in metres;
- * distances (laser range, GPS accuracy) stay in metres.
+ * A fish's length in whole millimeters, the unit every length is shown in
+ * (the owner, 2026-10-21; docs/design/README.md). Stored and served in meters;
+ * distances (laser range, GPS accuracy) stay in meters.
  */
-export function millimetres(lengthM: number | null | undefined): string {
+export function millimeters(lengthM: number | null | undefined): string {
   return lengthM == null ? "—" : Math.round(lengthM * 1000).toLocaleString("en-US");
 }
 
 export function formatLength(lengthM: number | null | undefined): string {
-  return lengthM == null ? "not measured" : `${millimetres(lengthM)} mm`;
+  return lengthM == null ? "not measured" : `${millimeters(lengthM)} mm`;
 }
 
 export function osmLink(latitude: number, longitude: number): string {

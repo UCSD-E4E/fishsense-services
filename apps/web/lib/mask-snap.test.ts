@@ -60,7 +60,7 @@ describe("snapToMask", () => {
 });
 
 describe("maskFromRgba", () => {
-  it("reads the grey PNG's brightness: nonzero is fish", () => {
+  it("reads the gray PNG's brightness: nonzero is fish", () => {
     const rgba = new Uint8ClampedArray([0, 0, 0, 255, 255, 255, 255, 255, 1, 1, 1, 255]);
     expect(Array.from(maskFromRgba(rgba))).toEqual([0, 255, 1]);
   });

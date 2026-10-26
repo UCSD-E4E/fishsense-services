@@ -16,7 +16,7 @@
  * saved label is never moved afterwards.
  *
  * The mask is row-major, one byte per pixel, nonzero is fish: the app's
- * layout, and what the automatic track stores as a frame-sized grey PNG
+ * layout, and what the automatic track stores as a frame-sized gray PNG
  * (0059). That PNG is the render's size (every one in prod on 2026-10-22,
  * 35,149 of them), so its pixels are the render's.
  */
@@ -82,7 +82,7 @@ export function snapToMask({
   return null;
 }
 
-/** A decoded mask's RGBA pixels as the snap's one byte per pixel: the grey
+/** A decoded mask's RGBA pixels as the snap's one byte per pixel: the gray
  *  PNG's brightness, read from its red channel. */
 export function maskFromRgba(rgba: Uint8ClampedArray): Uint8Array {
   const out = new Uint8Array(rgba.length / 4);
