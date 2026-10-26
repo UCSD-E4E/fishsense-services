@@ -33,6 +33,15 @@ def _ints(text: str) -> list[int]:
     return [int(n) for n in text.split(",") if n.strip()]
 
 
+def _templates(text: str) -> dict[str, int]:
+    """``"51:2,116:7"`` -> ``{"51": 2, "116": 7}``."""
+    out = {}
+    for pair in (p for p in text.split(",") if p.strip()):
+        number, v1 = pair.split(":")
+        out[str(int(number))] = int(v1)
+    return out
+
+
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="fishsense_services_orchestrator.calibration_v3.replay"
@@ -45,6 +54,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     start.add_argument("--sizes", default="3,4,5,6,8")
     start.add_argument("--draws", type=int, default=20)
     start.add_argument("--size-source", choices=["sift", "sam", "pose"], default="sift")
+    start.add_argument("--templates", default="",
+                       help="mission:template_v1 pairs, e.g. 51:2,116:7 (pose)")  # fmt: skip
     collect = sub.add_parser("collect", help="gather the reports")
     collect.add_argument("--workflow-id", required=True)
     collect.add_argument("--out", required=True)
@@ -66,7 +77,8 @@ async def _run(args: argparse.Namespace) -> None:
         request = ReplayRequest(tenant=args.tenant, numbers=_ints(args.missions),
                                 draw_numbers=_ints(args.draw_missions),
                                 draw_sizes=_ints(args.sizes), draws_per_size=args.draws,
-                                size_source=args.size_source)  # fmt: skip
+                                size_source=args.size_source,
+                                templates=_templates(args.templates))  # fmt: skip
         await client.start_workflow(ReplayCalibrationV3Workflow.run, request,
                                     id=workflow_id, task_queue=temporal.task_queue)  # fmt: skip
         print(f"replay started: {workflow_id}")

@@ -2,8 +2,8 @@
 
 `SegmentSlateFramesWorkflow`: one `segment_slate_frame` per frame, in
 parallel; a frame that fails every try is left out (its fit counts it as no
-mask), but a worker that can't run SAM fails the child, as the automatic
-frames stage does. The fit's workflow is in `fit_workflow` (its own module,
+mask), but a worker that can't run SAM -- no GPU, or its weights cannot
+load (2026-10-24) -- fails the child, as the automatic frames stage does. The fit's workflow is in `fit_workflow` (its own module,
 so each role's workflows name only that role's activities).
 """
 
@@ -18,8 +18,11 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError, ApplicationError
 
 with workflow.unsafe.imports_passed_through():
+    from fishsense_services_processor.worker_refusals import refusals
     import annotated_types  # noqa: F401  pylint: disable=unused-import
     import pydantic  # noqa: F401  pylint: disable=unused-import
+
+    from fishsense_services_contracts.refusals import SAM3_REFUSALS
 
     from fishsense_services_contracts.shadow_calibration import (
         SegmentSlateFramesInput,
@@ -29,7 +32,9 @@ with workflow.unsafe.imports_passed_through():
 __all__ = ["SegmentSlateFramesWorkflow"]
 
 FRAME_ATTEMPTS = 3
-_WORKER_REFUSALS = ("NoGpuForSam3",)
+_WORKER_REFUSALS = SAM3_REFUSALS
+#: Before #364 (`worker_refusals`): what a run started then replays with.
+_LEGACY_REFUSALS = ("NoGpuForSam3",)
 _FRAME_RETRY = RetryPolicy(
     initial_interval=timedelta(seconds=10),
     maximum_attempts=FRAME_ATTEMPTS,
@@ -59,9 +64,8 @@ class SegmentSlateFramesWorkflow:
         for frame, outcome in zip(payload.frames, outcomes):
             if isinstance(outcome, ActivityError):
                 cause = outcome.cause
-                if (
-                    isinstance(cause, ApplicationError)
-                    and cause.type in _WORKER_REFUSALS
+                if isinstance(cause, ApplicationError) and cause.type in refusals(
+                    _WORKER_REFUSALS, _LEGACY_REFUSALS
                 ):
                     raise outcome
                 workflow.logger.warning("shadow segment capture=%s left out: %s",

@@ -228,18 +228,22 @@ def test_the_builtin_manifest_gates_what_loads(s3, tmp_path):
         )
 
 
-def test_core_4_2_0_pins_sam3():
-    """fishsense-core 4.1.0 did not pin SAM 3.1's hash, so the head/tail stage
-    builds its own pin from settings (`headtail_predict.weights`). 4.2.0 pins
-    it (2026-10-23, taken for the SimCC keypoint replay). The stage keeps its
-    own pin until the `model-weights` copy is checked against this one: a
-    different file there would stop every head/tail prediction. This fails if
-    core's pin moves, which is when to look again."""
-    from fishsense_core.models import builtin_manifest
-
+def test_sam3_resolves_to_the_pinned_sha_and_size():
+    """SAM 3.1 comes from core's manifest (pinned since 4.2.0). Until then the
+    head/tail stage built its own pin from `FISHSENSE_SAM3_*`; it dropped that
+    shim once the owner matched the Secret's recorded pin against core's
+    (2026-10-23). The file is v1's `model-weights/sam3/3.1/sam3.1_multiplex.pt`:
+    if core's pin moves, every SAM 3.1 load stops on an integrity error until
+    that copy is replaced, and the recorded checkpoint id changes with it."""
     ref = builtin_manifest().resolve("sam3", "3.1")
-    assert ref.filename == "sam3.1_multiplex.pt" and ref.size == 3502755717
-    assert ref.sha256.startswith("0567debeec80")
+
+    assert (ref.filename, ref.sha256, ref.size) == (
+        "sam3.1_multiplex.pt",
+        "0567debeec80ba4ac6369540c6c248025283cb3ff2b92827509e57e2b3541cb6",
+        3502755717,
+    )
+    assert ref.id == "sam3/3.1@0567debeec80"
+    assert builtin_manifest().resolve("sam3") == ref, "3.1 is core's default"
 
 
 def test_a_missing_object_is_unavailable(s3, tmp_path):

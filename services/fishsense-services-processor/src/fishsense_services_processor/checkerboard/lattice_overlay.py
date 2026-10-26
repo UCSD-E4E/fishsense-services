@@ -2,20 +2,21 @@
 
 Ported from fishsense-lite@77e8f8e5 services/fishsense-data-processing-workflow-worker/src/fishsense_data_processing_workflow_worker/lattice_overlay.py.
 
-`checkerboard_detection` decides *that* a grid is present; this module shows a
-person **which** grid, so they can answer the one question no automated check
-here can: are the detected corners one board square apart, or two?
+`fishsense_core.checkerboard` decides *that* a grid is present; this module shows a
+person **which** grid, so they can confirm the one thing the geometry cannot:
+are the detected corners one board square apart, or two?
 
-**Why that question cannot be answered in code.** A uniformly mis-latticed
-detection — every corner two squares apart while `body_points` labels them one
-apart — is still a perfect grid. It is therefore an exact homography of the
-modelled grid, so `grid_residual_px` reads ~0 and passes it. The residual gate
-catches grids whose spacing is *mixed*, which breaks regularity; the uniform
-case also clears `_fits_declared_board` (a coarse lattice is *smaller* than the
-declared board, so an upper bound never fires) and `check_fit_self_consistency`
-(which compares 2-D dots, and a pure scale error does not move them). The pose
-then places the board at a fraction of its true distance and every depth, the
-fitted baseline, and every length downstream scales with it.
+**Why geometry alone cannot answer it.** A uniformly mis-latticed detection --
+every corner two squares apart while `body_points` labels them one apart -- is
+still a perfect grid. It is an exact homography of the modelled grid, so a
+grid-residual gate reads ~0 and passes it (the residual catches grids whose
+spacing is *mixed*); a coarse lattice is *smaller* than the declared board, so
+a size bound never fires; and `check_fit_self_consistency` compares 2-D dots,
+which a pure scale error does not move. The pose then places the board at a
+fraction of its true distance and every depth, the fitted baseline, and every
+length downstream scales with it. Services' own detector
+(`checkerboard/detection.py`, with its `_fits_declared_board` bound and
+residual gate) had only those checks, through v0.56.0.
 
 That is not hypothetical. Measured 2026-09-11 against the known-length targets:
 five of fourteen checkerboard calibrations carry a baseline that is a simple
@@ -23,12 +24,27 @@ multiple of the consensus 10.4 cm — 4.00x, 2.16x, 2.12x, 1.51x and 0.47x — a
 their dives read -75% to +45% on length. A scale error of exactly 2x or 4x is
 what a coarse lattice produces and what noise does not.
 
+Since fishsense-core 4.3.0 (#98) the detector does see the uniform case, by
+looking at the image rather than the geometry: `checker_parity` reads the grey
+level at each detected cell's centre, which alternates dark and light only
+when the cells are single squares, and refuses a lattice that does not. That
+gate is what fixed the every-other-row detection a 16 px laser dot provoked on
+a warped board. Core measured it on synthetic boards. On production's real
+frames (2026-10-24/25, read-only: all 745 checkerboard-labelled renders of the
+17 missions with a calibration target, against services' detector on OpenCV
+5) it refused one lattice services' detector accepted that is every other
+column (mission 522, capture 134474, parity 0.13), and no lattice of single
+squares that services' detector found (all >= 0.987). Under 4.3.1 the
+detector found a board in 640 of those frames against services' 615, keeping
+every grid both had found (#353). The overlay stays the independent check, by
+a person.
+
 **The connecting lines are the instrument, not decoration.** Corner dots alone
 turn "every corner, or every other one?" into a counting exercise at high zoom.
 Lines make it self-evident: a wrong lattice draws cells that visibly span two
 board squares.
 
-Kept out of `checkerboard_detection` deliberately. That module is on the
+Kept out of the detector deliberately. That module is on the
 calibration path and must stay free of drawing concerns; this one is only ever
 called by the verification stage.
 """

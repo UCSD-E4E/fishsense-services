@@ -41,12 +41,17 @@ human dots 1.7 px.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from itertools import combinations
 from typing import Callable, Optional, Sequence
 
 import numpy as np
+from fishsense_core import size_constancy as sc
+from fishsense_core.line_fit import consensus_line
 
-from fishsense_services_processor.automatic_results import size_constancy as sc
+from fishsense_services_processor.automatic_calibration.label_free import (
+    LabelFreeFit,
+    accepted,
+    refused,
+)
 
 __all__ = [
     "CHECK_MEDIAN_PX",
@@ -60,12 +65,14 @@ __all__ = [
     "OFF_LINE_PX",
     "RIVAL_SHARE",
     "Check",
+    "LabelFreeFit",
     "V3Fit",
     "beam_line",
     "calibrate_v3",
     "check",
     "fit_known_sizes",
     "gross_screen",
+    "refused",
     "slate_consensus",
 ]
 
@@ -102,14 +109,6 @@ def _xy(dots) -> np.ndarray:
     return np.asarray(dots, float).reshape(-1, 2)
 
 
-def _line_through(xy: np.ndarray) -> np.ndarray:
-    """``(a, b, c)``, unit normal, of the total-least-squares line."""
-    m = xy.mean(axis=0)
-    u = np.linalg.svd(xy - m)[2][0]
-    n = np.array([-u[1], u[0]])
-    return np.array([n[0], n[1], -n @ m])
-
-
 def _distances(xy: np.ndarray, line) -> np.ndarray:
     a, b, c = line
     return np.abs(xy @ np.array([a, b]) + c) / np.hypot(a, b)
@@ -127,27 +126,18 @@ def gross_screen(slate_xy, dive_line, gross_px: float = GROSS_PX) -> list[int]:
 def slate_consensus(slate_xy, tol: float = OFF_LINE_PX):
     """``(kept indices, line)``: the line the most dots agree on within `tol`
     -- every pair's line tried, ties to the smaller summed distance -- refitted
-    through its inliers. Fewer than two dots: all kept, no line."""
+    through its inliers. Fewer than two dots: all kept, no line.
+
+    The search is fishsense-core's `line_fit.consensus_line` (core #100),
+    which was ported from this function and reproduces it bit for bit; its
+    re-scored ``inliers`` are the dots kept."""
     xy = _xy(slate_xy)
-    if len(xy) < 2:
+    fit = consensus_line(xy, tol_px=tol) if len(xy) >= 2 else None
+    if fit is None:  # under two dots, or every dot at one pixel: no direction
         return list(range(len(xy))), None
-    best = None
-    for i, j in combinations(range(len(xy)), 2):
-        d = xy[j] - xy[i]
-        if np.hypot(*d) < 1.0:
-            continue
-        line = _line_through(xy[[i, j]])
-        dist = _distances(xy, line)
-        inl = dist <= tol
-        key = (int(inl.sum()), -float(dist[inl].sum()))
-        if best is None or key > best[0]:
-            best = (key, inl)
-    if best is None:  # every dot at one pixel: they agree, on no direction
-        return list(range(len(xy))), None
-    inl = best[1]
-    line = _line_through(xy[inl])
-    inl = _distances(xy, line) <= tol
-    return [int(i) for i in np.flatnonzero(inl)], line
+    return [int(i) for i in np.flatnonzero(fit.inliers)], np.array(
+        [fit.a, fit.b, fit.c]
+    )
 
 
 def beam_line(camera_matrix, position, axis) -> np.ndarray:
@@ -189,7 +179,7 @@ class V3Fit:
     outcome: str
     refusal_reason: Optional[str]
     #: The size-constancy fit, when one ran (its indices are into `kept`).
-    fit: Optional[sc.LabelFreeFit]
+    fit: Optional[LabelFreeFit]
     #: Indices (into the slate dots given) the fit was given.
     kept: list[int] = field(default_factory=list)
     gross_dropped: int = 0
@@ -204,7 +194,7 @@ def calibrate_v3(
     dive_line,
     other_xy,
     camera_matrix,
-    fit: Callable[[Sequence[int]], sc.LabelFreeFit],
+    fit: Callable[[Sequence[int]], LabelFreeFit],
 ) -> V3Fit:
     """Steps 1-3 for one dive. `fit(indices)` runs the size-constancy fit on
     those slate frames (direction through their own dots, at least
@@ -242,7 +232,7 @@ def fit_known_sizes(
     min_size_ratio: float = sc.MIN_SIZE_RATIO,
     rng: np.random.Generator | None = None,
     scale_sd_max: float = SCALE_SD_MAX,
-) -> sc.LabelFreeFit:
+) -> LabelFreeFit:
     """The size-constancy fit on sizes measured per frame -- the slate's SAM
     mask, sqrt(area) (strategy 2, owner 2026-10-22) -- instead of solved from
     SIFT pair ratios: no pair registration, so no ``too_few_matched_pairs``.
@@ -262,43 +252,36 @@ def fit_known_sizes(
     seen = dict(used=[int(i) for i in used], frames_used=len(used), pairs=0,
                 pair_residual_sd=None)  # fmt: skip
     if len(used) < min_frames:
-        return sc._refused("too_few_frames", **seen)  # pylint: disable=protected-access
+        return refused("too_few_frames", **seen)
     u = sc.line_direction(None, xy[used])
     t = xy @ u
     s = s_all
     seen["size_ratio"] = float(s[used].max() / s[used].min())
     if seen["size_ratio"] < min_size_ratio:
-        return sc._refused(
-            "too_little_range_spread", **seen
-        )  # pylint: disable=protected-access
+        return refused("too_little_range_spread", **seen)
     pinned = sc._pinned(
         t[used], sc.fit_vanishing_position(t[used], s[used])
     )  # pylint: disable=protected-access
     keep = _noise_trim(t, s, used)
     seen.update(used=[int(i) for i in keep], frames_used=len(keep))
     if len(keep) < min_frames:
-        return sc._refused(
-            "unconstrained" if pinned else "too_few_frames", **seen
-        )  # pylint: disable=protected-access
+        return refused("unconstrained" if pinned else "too_few_frames", **seen)
     seen["size_ratio"] = float(s[keep].max() / s[keep].min())
     if seen["size_ratio"] < min_size_ratio:
-        return sc._refused(
-            "too_little_range_spread", **seen
-        )  # pylint: disable=protected-access
+        return refused("too_little_range_spread", **seen)
     tk, sk = t[keep], s[keep]
     tv = sc.fit_vanishing_position(tk, sk)
     offset = float(np.median(xy[keep] @ np.array([-u[1], u[0]])))
     seen.update(vanishing_px=tv, line_direction=[float(c) for c in u],
                 line_offset_px=offset)  # fmt: skip
     if sc._pinned(tk, tv):  # pylint: disable=protected-access
-        return sc._refused("unconstrained", **seen)  # pylint: disable=protected-access
+        return refused("unconstrained", **seen)
     sd = scale_sd(tk, sk, u, offset, camera_matrix)
     seen["scale_sd"] = sd
     if sd > scale_sd_max:
-        return sc._refused("uncertain_fit", **seen)  # pylint: disable=protected-access
+        return refused("uncertain_fit", **seen)
     origin, axis = sc.beam_from_vanishing(tv, u, offset, camera_matrix)
-    return sc.LabelFreeFit(
-        outcome="accepted", refusal_reason=None,
+    return accepted(
         laser_position=[float(c) for c in origin], laser_axis=[float(c) for c in axis],
         se_px=sc.bootstrap_se(tk, sk, rng=rng), o_mag_m=sc.O_DESIGN_M, **seen,
     )  # fmt: skip

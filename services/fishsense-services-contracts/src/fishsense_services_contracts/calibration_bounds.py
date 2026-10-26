@@ -6,7 +6,10 @@ it lives in the contracts package, next to `taxonomy`, for v1's reason --
 two services need the identical number and neither owns it:
 
 * the **processor** refuses to return a fit outside these bounds as accepted
-  (`calibration.consistency.check_baseline_plausible`);
+  (`calibration.fit` passes them to fishsense-core's
+  `calibration_checks.check_baseline_plausible` as ``min_baseline_m`` /
+  ``max_baseline_m``; services' own `calibration.consistency` until
+  2026-10-24);
 * the **API** excludes an already-stored calibration outside them from
   counting as a calibration at all (migration 0018's SQL function
   ``plausible_laser_baseline``, whose two numbers the API's tests pin to

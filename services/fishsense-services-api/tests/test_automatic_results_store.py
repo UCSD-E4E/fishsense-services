@@ -260,15 +260,36 @@ async def test_a_mission_with_no_capture_has_no_work(owner_engine, app_engine):
     assert await _next(app_engine, lab) is None
 
 
-async def test_a_mission_with_a_human_measurement_is_never_selected(
+async def test_a_mission_with_a_human_measurement_is_selected_too(
     owner_engine, app_engine
 ):
+    """The owner, 2026-10-24: human-measured missions are where automatic
+    results are checked against people, so they are kept current like any
+    other (until then they were skipped, and a cut-mask fix at version 4
+    never reached them)."""
     lab = await tenant(owner_engine)
     measured, cal = await calibrated_dive(owner_engine, lab, priority="low")
     c = await measurable_capture(owner_engine, lab, measured)
     await measurement(owner_engine, lab, c, await fish(owner_engine, lab), cal)
 
-    assert await _next(app_engine, lab) is None
+    assert await _next(app_engine, lab) == measured
+
+
+async def test_a_mission_without_a_human_measurement_goes_first(
+    owner_engine, app_engine
+):
+    """The backlog -- missions nobody has measured -- still comes first, even
+    behind a human-measured mission that is older."""
+    lab = await tenant(owner_engine)
+    measured, cal = await calibrated_dive(owner_engine, lab, priority="low")
+    c = await measurable_capture(owner_engine, lab, measured)
+    await measurement(owner_engine, lab, c, await fish(owner_engine, lab), cal)
+    backlog = await _backlog_mission(owner_engine, lab)
+    await capture(owner_engine, lab, backlog)
+    await exec_(owner_engine, "UPDATE missions SET created_at = created_at + "
+                "interval '1 day' WHERE id = :d", d=backlog)  # fmt: skip
+
+    assert await _next(app_engine, lab) == backlog
 
 
 async def test_oldest_first(owner_engine, app_engine):
@@ -840,6 +861,100 @@ async def test_a_frame_the_detector_now_calls_a_slate_is_not_measured(
     assert inputs.captures == []
 
 
+async def test_a_zoomed_frame_is_not_measured(owner_engine, app_engine):
+    """The zoom gate (2026-10-25): a zoomed frame's depth and length assume
+    intrinsics it was not shot at. 152 automatic lengths were on zoomed
+    frames when the focal lengths were recorded."""
+    from _slate_calibration_seed import zoom
+
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    await _in(app_engine, lab, persist_automatic_calibration, mission_id, _label_free())
+    wide, zoomed = [await capture(owner_engine, lab, mission_id) for _ in range(2)]
+    await _predict(app_engine, lab, mission_id, _predicted(wide), _predicted(zoomed))
+    await zoom(owner_engine, zoomed, 18.0)
+
+    inputs = await _measure_inputs(app_engine, lab, mission_id)
+
+    assert [m.capture_id for m in inputs.captures] == [wide]
+
+
+async def test_a_zoomed_frame_does_not_hold_its_mission_in_the_cohort(
+    owner_engine, app_engine
+):
+    """Never measured, so never a length outstanding -- else its mission is
+    picked every hour (as a detector slate would be). Unrendered, so it owes
+    no species either: species does not depend on the zoom, and stays owed."""
+    from _slate_calibration_seed import zoom
+
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    c = await capture(owner_engine, lab, mission_id)
+    await _predict(app_engine, lab, mission_id, _predicted(c), rendered=False)
+    # After the prediction, so the calibration is current.
+    await _in(app_engine, lab, persist_automatic_calibration, mission_id, _label_free())
+    assert await _next(app_engine, lab) == mission_id  # its length is owed
+
+    await zoom(owner_engine, c, 14.62)
+
+    assert await _next(app_engine, lab) is None
+
+
+async def test_a_zoomed_frame_is_no_calibration_dot(owner_engine, app_engine):
+    """Neither a slate candidate nor a dot on the dive line: its dot sits on
+    another line (missions 374, 384, 386). Covers the live label-free fit and
+    the v3/v4 replays, which read the same inputs."""
+    from _slate_calibration_seed import zoom
+
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    await _camera(app_engine, lab, mission_id)
+    frames = [await capture(owner_engine, lab, mission_id) for _ in range(3)]
+    await _predict(app_engine, lab, mission_id, *[
+        AutomaticHeadTailRow(capture_id=f, status="slate_frame", laser_x=10.0 + i,
+                             laser_y=20.0, slate_probability=0.9, predictor_version=1)
+        for i, f in enumerate(frames)
+    ])  # fmt: skip
+    await zoom(owner_engine, frames[1], 18.0)
+    await zoom(owner_engine, frames[2], 4.5)
+
+    async def detector(conn, tenant_id, d):
+        return [(f, 0.9) for f in frames]
+
+    inputs = await _in(app_engine, lab, automatic_calibration_inputs, mission_id,
+                       slate_frames=detector)  # fmt: skip
+
+    assert [c.capture_id for c in inputs.candidates] == [frames[0], frames[2]]
+    assert sorted(x for x, _ in inputs.line_dots) == [10.0, 12.0]
+
+
+async def test_a_calibration_fitted_through_a_zoomed_frame_is_owed_again(
+    owner_engine, app_engine
+):
+    """The zoom gate came after some fits (2026-10-25: mission 237's used 2
+    zoomed frames of 18). Such a fit is stale: refitting it leaves the zoomed
+    frames out. A zoomed frame the fit did not use leaves it current."""
+    from _slate_calibration_seed import zoom
+
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    used, unused = [await capture(owner_engine, lab, mission_id) for _ in range(2)]
+    await _predict(app_engine, lab, mission_id, *[
+        AutomaticHeadTailRow(capture_id=c, status="slate_frame", laser_x=10.0,
+                             laser_y=20.0, slate_probability=0.9, predictor_version=1)
+        for c in (used, unused)
+    ])  # fmt: skip
+    await _in(app_engine, lab, persist_automatic_calibration, mission_id,
+              _label_free(capture_ids=[used]))  # fmt: skip
+    assert await _next(app_engine, lab) is None
+
+    await zoom(owner_engine, unused, 18.0)
+    assert await _next(app_engine, lab) is None
+
+    await zoom(owner_engine, used, 5.05)
+    assert await _next(app_engine, lab) == mission_id
+
+
 # -- measurements: current, stale, never the human path's -------------------------
 
 
@@ -876,6 +991,40 @@ async def test_a_length_is_current_and_drains_the_work(owner_engine, app_engine)
     assert current == [{"capture_id": c, "length_m": 0.42, "producer": "automatic",
                         "calibration_source": "label_free"}]  # fmt: skip
     assert (await _measure_inputs(app_engine, lab, mission_id)).captures == []
+
+
+async def test_a_low_parallax_refusal_is_recorded_and_drains_the_work(
+    owner_engine, app_engine
+):
+    """Measurement version 2 (contract v21, 0071): a dot too near the laser's
+    vanishing point is refused, and the refusal answers the frame's work."""
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    await _in(app_engine, lab, persist_automatic_calibration, mission_id, _label_free())
+    c = await capture(owner_engine, lab, mission_id)
+    await _predict(app_engine, lab, mission_id, _predicted(c))
+    inputs = await _in(app_engine, lab, automatic_measure_inputs, mission_id,
+                       algorithm_version="2")  # fmt: skip
+    (job,) = inputs.captures
+    await _in(app_engine, lab, persist_automatic_measurements, mission_id, [
+        AutomaticMeasurementRow(
+            capture_id=c,
+            automatic_head_tail_prediction_id=job.automatic_head_tail_prediction_id,
+            calibration_source=inputs.calibration.source,
+            automatic_laser_calibration_id=inputs.calibration.automatic_laser_calibration_id,
+            laser_calibration_id=inputs.calibration.laser_calibration_id,
+            camera_calibration_id=inputs.camera_calibration_id,
+            length_m=None, depth_m=52.2, refusal="low_parallax",
+            algorithm="laser_depth_fronto_parallel", algorithm_version="2",
+            core_version="4.3.0",
+        )
+    ])  # fmt: skip
+
+    assert await _rows(
+        owner_engine, "SELECT refusal FROM current_automatic_measurements"
+    ) == [{"refusal": "low_parallax"}]
+    assert (await _in(app_engine, lab, automatic_measure_inputs, mission_id,
+                      algorithm_version="2")).captures == []  # fmt: skip
 
 
 async def test_a_new_head_tail_makes_the_length_stale(owner_engine, app_engine):

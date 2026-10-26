@@ -396,13 +396,15 @@ def _require_camera(row, mission_id) -> None:
 
 
 async def _mission_dots(conn, tenant_id, mission_id) -> list[tuple[float, float]]:
-    """Every live dot in the dive (incomplete and non-canonical included)."""
+    """Every live dot in the dive (incomplete and non-canonical included),
+    except on a frame shot zoomed in (the zoom gate, 0070)."""
     rows = await conn.execute(
         text("""
             SELECT l.x, l.y FROM laser_labels l
             JOIN captures c ON c.tenant_id = l.tenant_id AND c.id = l.capture_id
             WHERE l.tenant_id = :tenant AND c.mission_id = :mission
               AND NOT l.superseded AND l.x IS NOT NULL AND l.y IS NOT NULL
+              AND focal_length_calibrated(c.focal_length_mm)
             ORDER BY c.number, l.number
             """),
         {"tenant": tenant_id, "mission": mission_id},
@@ -465,6 +467,8 @@ async def slate_calibration_inputs(
                 LEFT JOIN ({_LOWEST_LIVE_DOT}) dot ON dot.capture_id = s.capture_id
                 WHERE s.tenant_id = :tenant AND c.mission_id = :mission
                   AND NOT s.superseded
+                  -- the zoom gate (0070): another focal length, other intrinsics
+                  AND focal_length_calibrated(c.focal_length_mm)
                 ORDER BY c.number, s.number
                 """),
             {"tenant": tenant_id, "mission": mission_id},
@@ -532,6 +536,7 @@ async def checkerboard_calibration_inputs(
             FROM captures c
             JOIN ({_LOWEST_LIVE_DOT}) dot ON dot.capture_id = c.id
             WHERE c.tenant_id = :tenant AND c.mission_id = :mission AND c.is_canonical
+              AND focal_length_calibrated(c.focal_length_mm)
             ORDER BY c.number
             """),
         {"tenant": tenant_id, "mission": mission_id},

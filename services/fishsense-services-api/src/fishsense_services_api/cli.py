@@ -28,6 +28,10 @@ fishsense-services-api serve-tenants [--apply]
                                     # dry run: make the orchestrator a member
                                     # of every tenant it isn't yet (add-tenant
                                     # does it for a new one)
+fishsense-services-api withdraw-zoomed-lengths [--apply]
+                                    # dry run: the automatic lengths on frames
+                                    # shot zoomed in (0070); --apply appends a
+                                    # `zoomed` refusal after each, as the owner
 fishsense-services-api system-admin --user <sub> --grant [--apply]
                                     # dry run: may open any tenant, read-only
                                     # until they unlock it (0056)
@@ -56,6 +60,10 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from fishsense_services_api import dev_seed
+from fishsense_services_api.zoom_gate import (
+    withdraw_zoomed_automatic_lengths,
+    zoomed_automatic_lengths,
+)
 from fishsense_services_api.automatic_validation import (
     PAPER_CALIBRATION_SESSIONS,
     PAPER_POOL_MISSIONS,
@@ -226,6 +234,12 @@ def build_parser() -> argparse.ArgumentParser:
         "add-tenant does for a new one; a dry run by default",
     )
     serve_tenants.add_argument("--apply", action="store_true", help="write it")
+    withdraw = commands.add_parser(
+        "withdraw-zoomed-lengths",
+        help="withdraw the automatic lengths on frames shot zoomed in (0070), "
+        "appending a refusal after each; a dry run by default",
+    )
+    withdraw.add_argument("--apply", action="store_true", help="write it")
     backfill = commands.add_parser(
         "backfill-mission-facts",
         help="plan (and with --apply, write) the port, deployment and purpose of "
@@ -320,6 +334,8 @@ async def main(argv: Sequence[str]) -> int:
         return await _add_tenant(args)
     if args.command == "serve-tenants":
         return await _serve_tenants(args)
+    if args.command == "withdraw-zoomed-lengths":
+        return await _withdraw_zoomed_lengths(args)
     if args.command == "public-totals":
         return await _public_totals(args)
     if args.command == "system-admin":
@@ -670,6 +686,46 @@ async def _serve_tenants(args: argparse.Namespace) -> int:
                     "nothing written"
                 )
         print(f"{sub} now serves: {', '.join(slugs)}")
+        return 0
+    finally:
+        await engine.dispose()
+
+
+async def _withdraw_zoomed_lengths(args: argparse.Namespace) -> int:
+    """Dry run unless --apply; the apply writes exactly the lengths listed."""
+    settings = _settings(MigrationSettings)
+    if settings is None:
+        return 2
+    engine = create_async_engine(settings.migration_database_url.get_secret_value())
+    try:
+        async with engine.begin() as conn:
+            listed = await zoomed_automatic_lengths(conn)
+            if not listed:
+                print("no automatic length is on a zoomed frame: nothing to withdraw")
+                return 0
+            missions = Counter(z.mission_id for z in listed)
+            focal = Counter(round(z.focal_length_mm, 2) for z in listed)
+            verb = (
+                "Withdrawing"
+                if args.apply
+                else "DRY RUN: nothing written. Would withdraw"
+            )
+            print(f"{verb} {len(listed)} automatic length(s) on zoomed frames "
+                  f"in {len(missions)} mission(s):")  # fmt: skip
+            print("  by focal length (mm): " + ", ".join(
+                f"{f:g}: {n}" for f, n in sorted(focal.items())))  # fmt: skip
+            if not args.apply:
+                print("\nto write it: withdraw-zoomed-lengths --apply")
+                return 0
+            written = await withdraw_zoomed_automatic_lengths(
+                conn, [z.measurement_id for z in listed]
+            )
+            if written != len(listed):
+                raise RuntimeError(
+                    f"wrote {written} of {len(listed)}: lengths changed meanwhile, "
+                    "nothing written"
+                )
+        print(f"withdrew {written}")
         return 0
     finally:
         await engine.dispose()

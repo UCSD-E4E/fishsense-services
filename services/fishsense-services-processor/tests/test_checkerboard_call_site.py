@@ -1,29 +1,17 @@
-"""Unit tests for the checkerboard corner detector.
+"""Core's checkerboard detector at services' call site.
 
-Ported from fishsense-lite@77e8f8e5 services/fishsense-data-processing-workflow-worker/tests/test_checkerboard_detection.py.
+The detector is fishsense-core's (`fishsense_core.checkerboard`, 4.3.1: #98, #114)
+and core's suite tests it alone. These are services' own tests of it, kept
+from services' `tests/test_checkerboard_detection.py` (which tested services'
+copy, `checkerboard/detection.py`, through v0.56.0) because they pin the
+combination the checkerboard activities actually run, which core's suite does
+not (review of #353):
 
-The detector's whole job is to produce the `(body_points, image_points)` that
-`calibration_geometry.plane_from_correspondences` turns into a plane — the
-same pair a `MissionSlate`'s template points and hand-clicked corners produce
-today. Everything downstream is already shared and already tested.
-
-What is pinned here is the part that can go wrong *silently*, because
-`solvePnP` does not refuse a bad correspondence set — it returns success and a
-confident, meaningless pose:
-
-  * correspondences are index-aligned and built from the **detected** grid,
-    never the nominal board;
-  * a grid bigger than the declared board is refused (wrong target linked);
-  * a degenerate near-collinear detection is refused;
-  * a sub-grid recovers the *same plane* as the full board, which is what
-    makes partial detections usable at all — and how much less sharply it
-    does so once real corner noise is in play.
-
-v2 change: the detector takes the target's pitch per axis (`pitch_x_m`,
-`pitch_y_m`; `calibration_targets` is versioned with one per axis, PLAN.md
-§4.3). These are v1's tests, run with the two equal -- which is every migrated
-target, since v1 kept one `square_size_m`. What changes when they differ is
-pinned in `test_checkerboard_pitch.py`.
+  * the detector's correspondences through `fishsense_core.plane`: a sub-grid,
+    a partial view and a transposed or mirrored grid recover the same plane;
+  * its `board_hull` through the contracts' `point_in_laser_region`, the
+    region test both activities admit a dot by: the hull is the grid's
+    outline in order, inset one square, and an occluder refuses a dot on it.
 """
 
 from __future__ import annotations
@@ -31,14 +19,13 @@ from __future__ import annotations
 import cv2
 import numpy as np
 import pytest
-
-from fishsense_services_contracts.laser_region import point_in_laser_region
-
-from fishsense_services_processor.checkerboard import detection as sut
-from fishsense_services_processor.calibration.geometry import (
+from fishsense_core import checkerboard as sut
+from fishsense_core.plane import (
     laser_point_on_plane,
     plane_from_correspondences,
 )
+
+from fishsense_services_contracts.laser_region import point_in_laser_region
 
 SQUARE_PX = 40
 SQUARE_SIZE_M = 0.0254
@@ -95,33 +82,6 @@ def _detect(img, **overrides):
 
 
 # ---------- the happy path ----------
-
-
-def test_detects_the_full_board():
-    detected = _detect(_render())
-
-    assert detected is not None
-    assert sorted((detected.rows, detected.cols)) == sorted((BOARD_ROWS, BOARD_COLS))
-    assert len(detected.body_points) == BOARD_ROWS * BOARD_COLS
-    assert len(detected.image_points) == len(detected.body_points)
-
-
-def test_body_points_carry_the_measured_pitch():
-    """The one number that sets the scale of every downstream length."""
-    detected = _detect(_render())
-
-    grid = detected.body_points.reshape(detected.rows, detected.cols, 2)
-    along_cols = np.diff(grid[0, :, 0])
-    down_rows = np.diff(grid[:, 0, 1])
-    assert np.allclose(along_cols, SQUARE_SIZE_M)
-    assert np.allclose(down_rows, SQUARE_SIZE_M)
-
-
-def test_accepts_a_colour_image():
-    """The pipeline hands it `RectifiedImage.data`, which is BGR."""
-    colour = cv2.cvtColor(_render(), cv2.COLOR_GRAY2BGR)
-
-    assert _detect(colour) is not None
 
 
 def test_correspondences_recover_a_plane():
@@ -290,90 +250,6 @@ def test_the_grid_orientation_does_not_change_the_plane():
     assert np.allclose(straight, mirrored, atol=1e-3)
 
 
-# ---------- refusals ----------
-
-
-def test_returns_none_when_there_is_no_board():
-    assert _detect(np.full((600, 800), 255, np.uint8)) is None
-
-
-def test_refuses_a_grid_larger_than_the_declared_board():
-    """A different board means a different pitch, i.e. a wrong scale.
-
-    The 2025 pool-test board is 24 x 17 where the E4E board is 14 x 10. A
-    frame linked to the wrong target would otherwise be fitted at the wrong
-    scale and calibrate cleanly — the error reprojection residual cannot see.
-    """
-    fine_board = _render(cols_sq=25, rows_sq=18)
-
-    assert _detect(fine_board) is None
-
-
-@pytest.mark.parametrize(
-    ("detected", "why"),
-    [
-        ((9, 20), "one side fits, the other overruns"),
-        ((8, 15), "the overrun is a single corner"),
-        ((17, 24), "the whole 2025 board"),
-    ],
-)
-def test_a_grid_that_overruns_either_side_is_refused(detected, why):
-    """ "Fits inside the declared board" is elementwise, both sides.
-
-    A lexicographic compare of the sorted pairs passes 9 x 20 against a
-    10 x 14 board — 9 < 10 decides it and the 20 is never looked at. That is
-    not a hypothetical shape: it is a partial view of the 2025 pool board
-    (24 x 17), which would then be fitted at the E4E board's 4.2 cm pitch. A
-    wrong pitch is a wrong scale, and scale is the one error term reprojection
-    residual provably cannot see — so it would calibrate cleanly and measure
-    every fish in the dive wrong.
-
-    Asserted on the predicate rather than through an image because rendering a
-    board that detects at exactly 9 x 20 is not something a test can pin down;
-    the predicate is the part that has to be right.
-    """
-    assert not sut._fits_declared_board(  # pylint: disable=protected-access
-        detected[0], detected[1], BOARD_ROWS, BOARD_COLS
-    ), why
-
-
-@pytest.mark.parametrize(
-    "detected",
-    [
-        (10, 14),  # the whole board
-        (14, 10),  # the whole board, transposed
-        (10, 10),  # a sub-grid
-        (3, 3),  # the smallest accepted sub-grid
-        (10, 3),
-    ],
-)
-def test_a_grid_that_fits_either_way_round_is_accepted(detected):
-    """Orientation is free, so the comparison is on unordered pairs."""
-    assert sut._fits_declared_board(  # pylint: disable=protected-access
-        detected[0], detected[1], BOARD_ROWS, BOARD_COLS
-    )
-
-
-def test_accepts_the_declared_board_at_its_own_size():
-    """The refusal above must be about the geometry, not about strictness."""
-    fine_board = _render(cols_sq=25, rows_sq=18)
-
-    assert _detect(fine_board, max_rows=17, max_cols=24) is not None
-
-
-@pytest.mark.parametrize("side", [1, 2])
-def test_refuses_a_degenerate_grid(side):
-    """`solvePnP` accepts near-collinear points and returns confident junk.
-
-    A one- or two-corner-wide strip does not determine a plane, and nothing
-    downstream would notice: there is no residual check between here and
-    `LaserExtrinsics`.
-    """
-    strip = _render(cols_sq=side + 1, rows_sq=BOARD_ROWS_SQ)
-
-    assert _detect(strip) is None
-
-
 # ---------- is the dot actually ON the board? ----------
 #
 # The calibration assumes the dot lies on the board's plane, and
@@ -476,97 +352,3 @@ def test_an_occluder_means_a_dot_on_it_is_refused(squares):
     ] = 128
 
     assert not _accepts(occluded, (centre_x, centre_y))
-
-
-@pytest.mark.parametrize("radius", [2, 8, 16, 20])
-def test_a_saturated_dot_never_costs_us_its_own_frame(radius):
-    """The gate must not eat the very observations it exists to protect.
-
-    A bright dot can break local corner detection right where it sits: on a
-    perspective-warped board, a 16 px radius against a ~32 px corner spacing
-    does collapse the grid (to 7 x 10 of 10 x 14). The question that matters
-    is not whether the grid shrank but whether the DOT survives, and it does —
-    the sub-grid the detector falls back to still spans it, at every radius up
-    to a full square across.
-
-    That is the same one-square threshold from the other side: an occluder has
-    to exceed roughly a square before the surviving rectangle no longer covers
-    it. Below that the gate keeps the frame; above it, it drops the dot. The
-    limit on the gate's power and its protection against false rejection are
-    the same number.
-    """
-    board = _warped(_render())
-    height, width = board.shape[:2]
-    centre = (width // 2, height // 2)
-    dotted = board.copy()
-    cv2.circle(dotted, centre, radius, 255, -1)
-
-    assert _accepts(dotted, centre)
-
-
-def test_a_mis_latticed_detection_is_refused():
-    """The silent 2x scale error, pinned directly.
-
-    Corners two squares apart, labelled one square apart in `body_points`,
-    place the board at half its true distance — halving every depth and every
-    length downstream. Nothing else catches it: `solvePnP` succeeds, the plane
-    is perfectly self-consistent, and `check_fit_self_consistency` compares
-    2-D dots that are unaffected by the error.
-
-    Constructed rather than provoked through the detector, because the exact
-    occluder that elicits it sits on a stability boundary and would make this
-    a flaky test rather than a statement about the guard.
-    """
-    grid = np.stack(
-        np.meshgrid(np.arange(BOARD_COLS), np.arange(BOARD_ROWS)), axis=-1
-    ).astype(np.float64)
-    body = (grid * SQUARE_SIZE_M).reshape(-1, 2)
-    # The image says two squares per step; the body points say one.
-    image = (grid * SQUARE_PX * 2.0).reshape(-1, 2)
-
-    spacing = SQUARE_PX * 2.0
-    residual = sut.grid_residual_px(body, image)
-
-    # A uniformly scaled grid IS still a perfect grid, so the homography
-    # absorbs it — which is exactly why the guard cannot be the whole answer.
-    assert residual < sut.MAX_GRID_RESIDUAL_FRACTION * spacing
-
-    # What it does catch is the incoherent case: corners that are not a
-    # consistent lattice at all, which is what the detector actually returned
-    # on a heavily occluded board (median spacing 73 px where every genuine
-    # detection sat at 32 px).
-    scrambled = image.copy()
-    scrambled[::3] += SQUARE_PX * 0.8
-    assert sut.grid_residual_px(body, scrambled) > (
-        sut.MAX_GRID_RESIDUAL_FRACTION * spacing
-    )
-
-
-def test_the_quality_gate_keeps_every_genuine_detection():
-    """The gate must not cost us frames it was not aimed at.
-
-    Measured across the shapes the corpus actually produces: full board, seen
-    at an angle, cropped, and occluded. All sit at <=0.1% of a square where
-    the threshold is 5%.
-    """
-    board = _warped(_render())
-    height, width = board.shape[:2]
-    occluded = board.copy()
-    occluded[
-        height // 2 - SQUARE_PX : height // 2 + SQUARE_PX,
-        width // 2 - SQUARE_PX : width // 2 + SQUARE_PX,
-    ] = 128
-
-    for label, img in (
-        ("flat", _render()),
-        ("warped", board),
-        ("cropped", board[:, : int(width * 0.66)].copy()),
-        ("occluded", occluded),
-    ):
-        detected = _detect(img)
-        assert detected is not None, label
-        spacing = sut.median_corner_spacing(
-            detected.image_points, detected.rows, detected.cols
-        )
-        residual = sut.grid_residual_px(detected.body_points, detected.image_points)
-        assert residual < 0.01 * spacing, (label, residual, spacing)

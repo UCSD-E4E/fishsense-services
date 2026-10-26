@@ -430,7 +430,7 @@ class TestAWeightsFailureIsFinal:
             (_unset_settings, "BioclipSettingsInvalid"),
             (ModelIntegrityError("bioclip/2.5-vith14: expected sha256 ..."), "BioclipWeightsCorrupt"),
             (ModelUnavailable("bioclip/2.5-vith14: not in s3://model-weights"), "BioclipWeightsUnavailable"),
-            (KeyError("bioclip"), "BioclipNotInManifest"),
+            (KeyError("unknown model bioclip/x for target server; known: ..."), "BioclipNotInManifest"),
         ],
         ids=["settings", "integrity", "unavailable", "manifest"],
     )  # fmt: skip

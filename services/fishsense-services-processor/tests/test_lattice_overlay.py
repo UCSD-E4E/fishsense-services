@@ -6,16 +6,17 @@ This overlay exists to answer one question a human can settle in a second and
 no residual can settle at all: **are the detected corners one board square
 apart, or two?**
 
-`grid_residual_px` cannot tell, and that is not a gap in the threshold — it is
+A grid residual cannot tell, and that is not a gap in the threshold -- it is
 structural. A uniformly mis-latticed grid (every corner two squares apart,
 `body_points` labelling them one apart) is still a perfect grid, so it is an
-exact homography of the modelled grid and the residual is ~0. The guard in
-`checkerboard_detection` catches a grid whose spacing is *mixed*, which breaks
-regularity; the uniform case sails through it, through `_fits_declared_board`
-(a coarse lattice is smaller than the declared board, so it passes an upper
-bound), and through `check_fit_self_consistency` (which compares 2-D dots that
-a pure scale error does not move). It then scales every depth, the fitted
-baseline, and every length downstream.
+exact homography of the modelled grid and the residual is ~0. A residual gate
+catches a grid whose spacing is *mixed*; the uniform case sails through it,
+through a declared-board size bound (a coarse lattice is smaller), and through
+`check_fit_self_consistency` (which compares 2-D dots that a pure scale error
+does not move). It then scales every depth, the fitted baseline, and every
+length downstream. Since fishsense-core 4.3.0 the detector's `checker_parity`
+gate refuses the uniform case from the image (services' own detector,
+through v0.56.0, did not); this overlay remains the person's check.
 
 Measured 2026-09-11: five of fourteen checkerboard calibrations carry a
 baseline that is a simple multiple of the consensus 10.4 cm -- 4.00x, 2.16x,

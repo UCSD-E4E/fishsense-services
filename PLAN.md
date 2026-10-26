@@ -118,7 +118,7 @@ Plus four SQL views that Superset reads directly (§2.6).
 
 ### 2.3 Models (no MLflow anywhere in v1)
 - **Laser detector** (ResNet-34 checkpoint) — **baked into the image** from Hugging Face
-  `ucsde4e/fishsense-laser-detector`. `LASER_PREDICTOR_VERSION=2`.
+  `ucsde4e/fishsense-laser-detector`. `LASER_PREDICTOR_VERSION=3` (2026-10-24: core 4.3.0's colour rule).
 - **SAM 3.1** (head/tail, laser-centred crop) — pulled from Garage bucket **`model-weights`**
   at `{name}/{version}/{filename}`, version pinned in config, volume-cached.
   `HEADTAIL_PREDICTOR_VERSION=2`.
@@ -757,7 +757,7 @@ display.
   - structure-from-motion self-calibration as a camera-calibration producer, which also
     fits phones;
   - the E4E board pitch check (§9.25).
-- **Already ported:** `close_with_apparent_size` → `automatic_results/size_constancy.py`.
+- **Already ported:** `close_with_apparent_size` → `automatic_results/size_constancy.py`, since moved to fishsense-core `size_constancy` (core #97).
 - **Stays in the paper:** envelope, figures, target design and rendering, dataset loaders.
 
 ## 5. Phase 0 — prerequisites in `fishsense-core`

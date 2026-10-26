@@ -26,7 +26,10 @@ import numpy as np
 import pytest
 
 from fishsense_services_contracts.object_store import ObjectRef
-from fishsense_services_contracts.slate_calibration import CheckerboardTarget
+from fishsense_services_contracts.slate_calibration import (
+    CheckerboardObservation,
+    CheckerboardTarget,
+)
 from fishsense_services_processor.checkerboard import activities as sut
 from fishsense_services_processor.checkerboard.activities import (
     DetectCheckerboardLaserPointInput,
@@ -49,16 +52,20 @@ _RENDER = ObjectRef(
 _TARGET = CheckerboardTarget(rows=_ROWS, cols=_COLS, pitch_x_m=0.042, pitch_y_m=0.042)
 
 
-def _board() -> np.ndarray:
-    height = _ROWS_SQ * _SQUARE_PX + 2 * _BORDER
-    width = _COLS_SQ * _SQUARE_PX + 2 * _BORDER
+def _board_gray(square: int = _SQUARE_PX, border: int = _BORDER) -> np.ndarray:
+    height = _ROWS_SQ * square + 2 * border
+    width = _COLS_SQ * square + 2 * border
     img = np.full((height, width), 255, np.uint8)
     for row in range(_ROWS_SQ):
         for col in range(_COLS_SQ):
             if (row + col) % 2 == 0:
-                y_0, x_0 = _BORDER + row * _SQUARE_PX, _BORDER + col * _SQUARE_PX
-                img[y_0 : y_0 + _SQUARE_PX, x_0 : x_0 + _SQUARE_PX] = 0
-    return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+                y_0, x_0 = border + row * square, border + col * square
+                img[y_0 : y_0 + square, x_0 : x_0 + square] = 0
+    return img
+
+
+def _board() -> np.ndarray:
+    return cv2.cvtColor(_board_gray(), cv2.COLOR_GRAY2BGR)
 
 
 def _blank() -> np.ndarray:
@@ -265,6 +272,25 @@ def test_detect_drops_a_frame_with_no_board(rectified_is):
     assert (observation.laser_x, observation.laser_y) == (500.0, 400.0)
 
 
+@pytest.mark.parametrize(
+    "point", [[np.nan, 0.0, 1.0], [0.0, 0.0, np.inf]], ids=["nan", "inf"]
+)
+def test_detect_drops_a_point_that_is_not_finite(rectified_is, monkeypatch, point):
+    """`fishsense_core.plane.laser_point_on_plane` checks the ray for NaN but
+    not its answer; v0.48.0's own copy dropped a NaN point. A non-finite
+    point never reaches the observation or the fit (review of #350)."""
+    board = _board()
+    rectified_is(board)
+    monkeypatch.setattr(sut, "laser_point_on_plane", lambda *_: np.array(point))
+
+    observation = sut._observe(  # pylint: disable=protected-access
+        b"raw", _detect_payload(board)
+    )
+
+    assert observation.point is None
+    assert observation.skip_reason == "no_ray_plane_intersection"
+
+
 class _FakeStore:
     def __init__(self) -> None:
         self.uploaded: list[tuple[ObjectRef, bytes]] = []
@@ -313,3 +339,154 @@ async def test_a_skipped_render_writes_nothing(rectified_is, monkeypatch):
 
     assert render.skip_reason == "no_usable_board"
     assert store.uploaded == []
+
+
+# ---------- the every-other-row lattice: a live 2x scale error ----------
+#
+# fishsense-core#98 found it with core's own gate (`checker_parity`): on a
+# board seen at an angle, a saturated laser dot of 16 px radius or more makes
+# `findChessboardCornersSB` fall back to a 7 x 10 grid of the 10 x 14 board
+# that is EVERY OTHER ROW -- adjacent detected rows ~66 px apart against
+# ~33 px squares. Labelled one pitch apart, that halves the board's distance
+# along that axis, and so every depth the frame contributes. Its homography
+# is perfect, so services' own copy of the detector (through v0.56.0)
+# accepted it, and its test asserted the frame was kept. These pin the
+# refusal at the call sites, on core's synthetic frame (40 px squares, an
+# 80 px border, the warp below).
+
+
+def _warped_core_board(radius: int) -> np.ndarray:
+    """Core's `test_checkerboard.py` frame: the E4E board, warped, dotted."""
+    img = _board_gray(square=40, border=80)
+    height, width = img.shape
+    source = np.float32([[0, 0], [width, 0], [width, height], [0, height]])
+    destination = np.float32(
+        [
+            [width * 0.10, height * 0.05],
+            [width * 0.92, height * 0.16],
+            [width * 0.88, height * 0.95],
+            [width * 0.06, height * 0.86],
+        ]
+    )
+    matrix = cv2.getPerspectiveTransform(source, destination)
+    img = cv2.warpPerspective(img, matrix, (width, height), borderValue=255)
+    cv2.circle(img, (width // 2, height // 2), radius, 255, -1)
+    return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+
+
+@pytest.mark.parametrize("radius", [16, 20])
+def test_the_frame_really_is_latticed_every_other_row(radius):
+    """The precondition, so the refusals below are refusals of THIS fault.
+
+    Raw OpenCV, called as core calls it (its requested pattern and flags,
+    read from core so they cannot drift apart), on every seed core tries:
+    since 4.3.1 a frame is refused only if no seed gives a passing grid, so
+    on each one the grid must come back short, its row step twice its
+    column step, or not at all.
+    """
+    from fishsense_core import (  # pylint: disable=import-outside-toplevel
+        checkerboard as core,
+    )
+
+    gray = cv2.cvtColor(_warped_core_board(radius), cv2.COLOR_BGR2GRAY)
+    latticed = 0
+    for seed in core.DEFAULT_SEEDS:
+        cv2.setRNGSeed(int(seed))
+        found, corners, meta = cv2.findChessboardCornersSBWithMeta(
+            gray,
+            core._REQUESTED_PATTERN,  # pylint: disable=protected-access
+            core._DETECTION_FLAGS,  # pylint: disable=protected-access
+        )
+        if not found:
+            continue
+        rows, cols = int(meta.shape[0]), int(meta.shape[1])
+        grid = np.asarray(corners, np.float64).reshape(rows, cols, 2)
+        step_rows = np.median(np.linalg.norm(np.diff(grid, axis=0), axis=2))
+        step_cols = np.median(np.linalg.norm(np.diff(grid, axis=1), axis=2))
+        assert step_rows / step_cols == pytest.approx(2.0, rel=0.1), seed
+        latticed += 1
+    assert latticed, "no seed found the every-other-row grid at all"
+
+
+@pytest.mark.parametrize("radius", [16, 20])
+def test_detect_refuses_a_lattice_at_twice_the_pitch(rectified_is, radius):
+    """No point in space from a frame whose depth would be half the truth."""
+    board = _warped_core_board(radius)
+    rectified_is(board)
+
+    observation = sut._observe(  # pylint: disable=protected-access
+        b"raw", _detect_payload(board)
+    )
+
+    assert observation.point is None
+    assert observation.skip_reason == "no_usable_board"
+
+
+@pytest.mark.parametrize("radius", [16, 20])
+def test_render_refuses_a_lattice_at_twice_the_pitch(rectified_is, radius):
+    """The lattice study mirrors the fit's admission, so it drops it too."""
+    board = _warped_core_board(radius)
+    rectified_is(board)
+
+    render, jpeg = sut._render(  # pylint: disable=protected-access
+        b"raw", _payload(board)
+    )
+
+    assert render.skip_reason == "no_usable_board"
+    assert jpeg is None
+
+
+@pytest.mark.parametrize("radius", [4, 8, 12])
+def test_a_smaller_dot_still_yields_a_point(rectified_is, radius):
+    """The control: the gate must not eat the frames it exists to protect."""
+    board = _warped_core_board(radius)
+    rectified_is(board)
+
+    observation = sut._observe(  # pylint: disable=protected-access
+        b"raw", _detect_payload(board)
+    )
+
+    assert observation.skip_reason is None
+    assert observation.point is not None
+
+
+def test_detect_gives_the_same_observation_for_the_same_frame(rectified_is):
+    """Detection is seeded (since 4.3.1, a fixed sequence of seeds): an
+    occluded board used to come back as a different sub-grid per call (fishsense-core#98: 4 x 10, 5 x 3 or 3 x 3 over 20 calls),
+    and with it a different outcome for the same frame (unseeded, this one
+    flips between a point and `no_usable_board`)."""
+    board = _board()
+    height, width = board.shape[:2]
+    size = 4 * _SQUARE_PX
+    board[
+        height // 2 - size // 2 : height // 2 + size // 2,
+        width // 2 - size // 2 : width // 2 + size // 2,
+    ] = 128
+    rectified_is(board)
+    payload = _detect_payload(board, dot=(_BORDER + 1.5 * _SQUARE_PX,) * 2)
+
+    observations = {
+        sut._observe(
+            b"raw", payload
+        ).model_dump_json()  # pylint: disable=protected-access
+        for _ in range(10)
+    }
+
+    assert len(observations) == 1
+    # And the outcome itself, so a detector that always fails cannot pass by
+    # failing the same way ten times (review of #353): seeded, the occluded
+    # board is found as a sub-grid beside the occluder, and the dot is off it.
+    (only,) = observations
+    observation = CheckerboardObservation.model_validate_json(only)
+    assert observation.skip_reason == "dot_off_board"
+
+
+def test_a_frame_that_is_not_8_bit_is_an_error_not_a_skip(rectified_is):
+    """A 16-bit or float frame is a decode-path bug, not an unlucky frame, so
+    the detector raises instead of the frame being quietly dropped as
+    `no_usable_board` and the dive fitted from fewer frames."""
+    board = _board().astype(np.uint16) * 257
+    rectified_is(board)
+
+    with pytest.raises(TypeError):
+        sut._observe(b"raw", _detect_payload(board))  # pylint: disable=protected-access

@@ -1,5 +1,93 @@
 # Changelog
 
+## [0.59.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.59.0...v0.59.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **api:** a calibration fitted through a frame the zoom gate now excludes is stale ([f3a138c](https://github.com/UCSD-E4E/fishsense-services/commit/f3a138c3945299fbe7457df31c81f9001a594fd3))
+* **api:** a calibration fitted through a frame the zoom gate now excludes is stale ([89e3e7a](https://github.com/UCSD-E4E/fishsense-services/commit/89e3e7ac6ffd0dea44f7d07687f1e2bf7860e329))
+* **processor:** a weights failure refuses the worker, not the frames; bounded head/tail retries ([c705872](https://github.com/UCSD-E4E/fishsense-services/commit/c705872e6251fec9a406a9716f769812ce93f41f))
+
+## [0.59.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.58.0...v0.59.0) (2026-10-26)
+
+
+### Features
+
+* the zoom gate -- a frame shot zoomed in is neither calibrated from nor measured ([1c21fcd](https://github.com/UCSD-E4E/fishsense-services/commit/1c21fcde76daa85595b6e24cb39974e646afabcc))
+
+## [0.58.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.57.0...v0.58.0) (2026-10-25)
+
+
+### Features
+
+* **processor:** size constancy and line fitters from fishsense-core 4.3.2, calibration version size-constancy-3 (items 10-11) ([010bb8d](https://github.com/UCSD-E4E/fishsense-services/commit/010bb8d30ecb5e6568e2c03423f60fab13fe43ac))
+
+
+### Bug Fixes
+
+* **orchestrator:** the focal-length backfill reads a TG-7 frame further in ([16d015d](https://github.com/UCSD-E4E/fishsense-services/commit/16d015dafc77938efb094cecc47c65f80e921882))
+* **orchestrator:** the focal-length backfill reads a TG-7 frame further in ([845fa43](https://github.com/UCSD-E4E/fishsense-services/commit/845fa43edff147efecfc5c78d9a0323d4c5c7234))
+* the sync checks SAM 3.1 in Garage and keeps its pin for old images; one manifest resolves SAM's id and file (review of [#358](https://github.com/UCSD-E4E/fishsense-services/issues/358)) ([ea5dfb0](https://github.com/UCSD-E4E/fishsense-services/commit/ea5dfb0b51a84c01faa85af01486c6aba9e02bd8))
+
+## [0.57.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.56.0...v0.57.0) (2026-10-25)
+
+
+### Features
+
+* record each frame's focal length, and a dry-run backfill for the zoom gate ([dca2928](https://github.com/UCSD-E4E/fishsense-services/commit/dca2928c10455f3a1c92d56f1a156b461e6cae47))
+* record each frame's focal length, and a dry-run backfill for the zoom gate ([5205dc7](https://github.com/UCSD-E4E/fishsense-services/commit/5205dc77505860900f6b8e25dda38c929bc35681))
+
+
+### Bug Fixes
+
+* **processor:** adopt fishsense-core 4.3.1's checkerboard detector ([693e95b](https://github.com/UCSD-E4E/fishsense-services/commit/693e95ba614f14d4349bc049507e72e303e99a8e))
+* **processor:** checkerboard detection from fishsense-core 4.3.1, refusing 2x lattices (item 9) ([f9d2503](https://github.com/UCSD-E4E/fishsense-services/commit/f9d2503f6b77c06719119b61f85f33d7a42a3046))
+* **processor:** checkerboard frames fail once on a bad decode; restore call-site tests (review of [#353](https://github.com/UCSD-E4E/fishsense-services/issues/353)) ([9bed4ab](https://github.com/UCSD-E4E/fishsense-services/commit/9bed4ab9ccd3e3c412430fc7dff5927e81ff1ee8))
+
+
+### Documentation
+
+* **handoff:** fishsense-core checkerboard detection drops real frames ([#353](https://github.com/UCSD-E4E/fishsense-services/issues/353) waits on it) ([e15cbc3](https://github.com/UCSD-E4E/fishsense-services/commit/e15cbc3f063cdb1ae8d905720c024aeb2c359fec))
+
+## [0.56.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.55.0...v0.56.0) (2026-10-25)
+
+
+### Features
+
+* laser predictor v3 (fishsense-core 4.3.0's colour rule) ([8aadbe1](https://github.com/UCSD-E4E/fishsense-services/commit/8aadbe1fcea7ee7c383d514daf076c735310f0cb))
+* **processor:** laser colour and reflection split from fishsense-core, laser predictor v3 (items 7-8; migration 0067) ([e766c45](https://github.com/UCSD-E4E/fishsense-services/commit/e766c45003c49d664665dde60344ef1cbfda81ea))
+
+
+### Bug Fixes
+
+* **processor:** calibration guards from fishsense-core (item 6) ([4caf9d1](https://github.com/UCSD-E4E/fishsense-services/commit/4caf9d15035f298b2ffa0e978e5075542bf6ec88))
+* **processor:** read the laser colour where the detector found the dot (review of [#352](https://github.com/UCSD-E4E/fishsense-services/issues/352)) ([dc73f77](https://github.com/UCSD-E4E/fishsense-services/commit/dc73f77c9757d007b6a2052ab62a3a64596c98fc))
+* **processor:** v4 finds the template page on the board before ECC, not centred ([b19d086](https://github.com/UCSD-E4E/fishsense-services/commit/b19d086fb751fe7fbd159e5c85b7d310e41cd05f))
+
+## [0.55.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.54.1...v0.55.0) (2026-10-24)
+
+
+### Features
+
+* the v4 replay can pose a mission with a named slate template ([c5b68c4](https://github.com/UCSD-E4E/fishsense-services/commit/c5b68c4340a9855464519688caa5bc94fed846d7))
+* the v4 replay can pose a mission with a named slate template ([82ee3b5](https://github.com/UCSD-E4E/fishsense-services/commit/82ee3b5fc1f26565e1f31d0c1d04acdcce23f2b6))
+
+
+### Bug Fixes
+
+* **processor:** a slate label with no points left is skipped, not fatal (review of [#350](https://github.com/UCSD-E4E/fishsense-services/issues/350)) ([ce95d31](https://github.com/UCSD-E4E/fishsense-services/commit/ce95d314e88e3d7fd74a35dfa3574aa8cb0a6009))
+* **processor:** a slate label with no points left is skipped, not fatal (review of [#350](https://github.com/UCSD-E4E/fishsense-services/issues/350)) ([77d1045](https://github.com/UCSD-E4E/fishsense-services/commit/77d10450dbd4f13fb113400ef45c8a3f04b53832))
+* **processor:** unusable SAM scores are an abstention, mismatched labels never retry (review of [#349](https://github.com/UCSD-E4E/fishsense-services/issues/349)) ([d5e7487](https://github.com/UCSD-E4E/fishsense-services/commit/d5e748774d95141bd231c399971f1be004a0e1c4))
+
+## [0.54.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.54.0...v0.54.1) (2026-10-24)
+
+
+### Bug Fixes
+
+* **api:** the automatic drain keeps human-measured missions current too ([7c19a51](https://github.com/UCSD-E4E/fishsense-services/commit/7c19a51a56636460c633f07549c46e5752a9e0f0))
+* **api:** the automatic drain keeps human-measured missions current too ([1da8318](https://github.com/UCSD-E4E/fishsense-services/commit/1da831887f6ca6421f4733dc30d2e8803116bfe8))
+
 ## [0.54.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.53.0...v0.54.0) (2026-10-24)
 
 

@@ -1,40 +1,60 @@
-"""Label-free size-constancy laser calibration: the pure port, pinned.
+"""Label-free size-constancy calibration on the paper's sessions, as the
+calibration activity runs it.
 
-Ported from cscw-fishsense2027@96a8da07
-calibration_analysis/e1j_size_constancy/register.py (`pair_scale`, `score`'s
-weighted solve) and slate_unknown.py (`frame`, `fit_tv`), with the beam built
-as e2e_measurement/score.py `calibrations()` builds its label-free one; the
-method is wuwnet-fishsense2026@5532b99 fishsense_wuwnet/laser.py
-`close_with_apparent_size` (paper §4.3).
+The method's code is fishsense-core's `fishsense_core.size_constancy` (core
+#97), which absorbed this repo's port (`automatic_results/size_constancy.py`,
+deleted) of cscw-fishsense2027@96a8da07 calibration_analysis/
+e1j_size_constancy/register.py and slate_unknown.py. Core's own suite carries
+the synthetic, refusal and registration tests that used to live here; what
+stays is the golden check of the fit the activity
+(`automatic_calibration.activities`) actually calls, so a core upgrade that
+moves a paper session fails here.
 
 **Golden**: `fixtures/size_constancy_golden.json` holds, for the paper's ten
 calibration sessions (Table 3), the pair equations cscw's own `pair_scale`
 produced from its SIFT features, the dots, the dive line, the camera matrix
 and the stored calibration's axis; and cscw's output (`labelfree_tv.csv`).
-The port must reproduce that output -- the vanishing position to a
-micro-pixel, and so Table 3: 9 of 10 sessions within 0.05 deg of the
-known-size calibration, 10 of 10 within 0.15 deg.
 
-The rest are synthetic, CPU-only: a beam the fit must recover, a texture
-whose scale the registration must recover, and the refusals.
+**Session 114 moved** with the port to core (2026-10-23). Frame 7's pairs
+include one at log scale -37.18, which drags its first solve so far that every
+pair through it fails the robust pass. The services copy still counted it
+connected and solved it the size the gauge made up; core sizes only the
+largest connected component of the pairs the robust pass kept, so frame 7 has
+no size. The solve: 29 -> 28 frames, bootstrap SE (cscw's shared generator)
+4.41 -> 0.73 px. The fit: the services copy's trim had dropped frame 7 too,
+so it still uses 28 frames, but sized from a different solve: vanishing
+position -2273.594 -> -2273.784 px, error against the stored calibration
+-0.0446 -> -0.0485 deg (cscw: -0.129). The other nine sessions are unchanged
+(to 1e-11 px).
+
+**Session 114 moved back** with fishsense-core 4.3.2 (core #113, 2026-10-25):
+the solve drops a pair beyond 10x (`MAX_PAIR_LOG_SCALE`) before its first
+pass, and counts it as implausible. The -37.18 pair no longer drags frame 7,
+so all 29 frames are sized and fitted again: vanishing position -2273.784 ->
+-2273.558 px, error against the stored (known-size) calibration -0.0485 ->
+-0.0439 deg (cscw: -0.129), bootstrap SE 0.73 -> 0.69 px (cscw: 4.41). The
+other nine are unchanged.
 """
 
 from __future__ import annotations
 
+import itertools
 import json
 from pathlib import Path
 
-import cv2
 import numpy as np
 import pytest
 
-from fishsense_services_processor.automatic_results import size_constancy as sc
+# The module the calibration activity fits with: the test follows the call site.
+from fishsense_services_processor.automatic_calibration.activities import sc
 
 GOLDEN = json.loads(
     (Path(__file__).parent / "fixtures" / "size_constancy_golden.json").read_text()
 )["dives"]
 #: cscw's nominal focal length for turning pixels into degrees (slate_unknown.F_PX).
 F_PX = 2850.0
+#: The one session whose solve departs from cscw's (see the module docstring).
+_CSCW_DEPARTS = {"114"}
 
 
 def _pairs(d):
@@ -49,10 +69,14 @@ def _stored_vanishing(d, u):
     return float(v @ u)
 
 
-# -- golden: cscw's labelfree_tv.csv, from cscw's own pair equations -----------------
+def _fit(d):
+    return sc.fit_label_free(
+        dots=np.array(d["dots"]), pairs=_pairs(d), camera_matrix=d["camera_matrix"],
+        line=d["line"], min_frames=1, min_size_ratio=1.0,
+    )  # fmt: skip
 
 
-@pytest.mark.parametrize("mission", sorted(GOLDEN, key=int))
+@pytest.mark.parametrize("mission", sorted(set(GOLDEN) - _CSCW_DEPARTS, key=int))
 def test_reproduces_cscws_label_free_fit(mission):
     d = GOLDEN[mission]
     want = d["expected"]
@@ -73,9 +97,26 @@ def test_reproduces_cscws_label_free_fit(mission):
     assert tv - _stored_vanishing(d, u) == pytest.approx(want["err_px"], abs=1e-4)
 
 
+def test_session_114s_frame_7_is_sized_without_its_collapsed_pair():
+    """Re-pinned (2026-10-25, core 4.3.2): cscw's 29 frames at -2277.786 px;
+    4.3.0 sized 28 (frame 7 out) at -2273.784 px; 4.3.2 drops the -37.18
+    pair and sizes all 29, at -2273.558 px."""
+    d = GOLDEN["114"]
+    dots = np.array(d["dots"])
+    sizes = sc.solve_log_sizes(len(dots), _pairs(d))
+    assert sizes.connected.all()
+    u = sc.line_direction(d["line"], dots[sizes.connected])
+    t = dots[sizes.connected] @ u
+    tv = sc.fit_vanishing_position(t, np.exp(sizes.log_sizes[sizes.connected]))
+    assert tv == pytest.approx(-2273.5578981324384, abs=1e-4)
+
+
 def test_bootstrap_reproduces_cscws_standard_errors():
     """cscw draws every session's bootstrap from one generator, in Table 3's
-    order; so must this, to reproduce its SEs."""
+    order; so must this, to reproduce its SEs. Session 114 is last, so the
+    draws before it are unchanged; re-pinned (2026-10-25, core 4.3.2), its
+    own SE is 0.69 px with the collapsed pair out of the solve (cscw: 4.41;
+    4.3.0, with frame 7 out: 0.73)."""
     rng = np.random.default_rng(0)
     for mission in sorted(GOLDEN, key=int):
         d = GOLDEN[mission]
@@ -84,22 +125,18 @@ def test_bootstrap_reproduces_cscws_standard_errors():
         xy = dots[sizes.connected]
         t = xy @ sc.line_direction(d["line"], xy)
         se = sc.bootstrap_se(t, np.exp(sizes.log_sizes[sizes.connected]), rng=rng)
-        assert se == pytest.approx(d["expected"]["se_px"], rel=1e-6), mission
+        want = (
+            0.6859628145635921 if mission in _CSCW_DEPARTS else d["expected"]["se_px"]
+        )
+        assert se == pytest.approx(want, rel=1e-6), mission
 
 
 def test_table_3_all_ten_within_0_05_deg():
-    """cscw: 9 of 10 within 0.05 deg, all within 0.15. v2's frame trim drops
-    one frame of session 114 (0.129 -> 0.048 deg); the rest are cscw's fits."""
+    """cscw: 9 of 10 within 0.05 deg, all within 0.15. Session 114 (0.129 deg
+    in cscw) is 0.0439 deg."""
     errors = []
     for d in GOLDEN.values():
-        fit = sc.fit_label_free(
-            dots=np.array(d["dots"]),
-            pairs=_pairs(d),
-            camera_matrix=d["camera_matrix"],
-            line=d["line"],
-            min_frames=1,
-            min_size_ratio=1.0,
-        )
+        fit = _fit(d)
         u = np.array(fit.line_direction)
         errors.append(np.degrees((fit.vanishing_px - _stored_vanishing(d, u)) / F_PX))
     errors = np.abs(errors)
@@ -107,314 +144,109 @@ def test_table_3_all_ten_within_0_05_deg():
     assert np.median(errors) == pytest.approx(0.02, abs=0.01)
 
 
-def test_the_beam_is_built_as_cscws_label_free_calibration():
-    """score.py `calibrations()`: v = tv u + offset n; the axis is K^-1 [v, 1];
-    the origin is |O| along the locus direction in normalised coordinates."""
-    d = GOLDEN["71"]
-    k = np.array(d["camera_matrix"])
-    want = d["expected"]
-    u = np.array([want["ux"], want["uy"]])
-    n = np.array([-u[1], u[0]])
-    v = want["tv_fit"] * u + want["line_offset"] * n
-    axis = np.linalg.solve(k, [v[0], v[1], 1.0])
-    o = np.array([u[0] / k[0, 0], u[1] / k[1, 1]])
-    origin = np.append(0.104 * o / np.linalg.norm(o), 0.0)
-
-    got_origin, got_axis = sc.beam_from_vanishing(
-        want["tv_fit"], u, want["line_offset"], k
-    )
-
-    assert got_axis == pytest.approx(axis / np.linalg.norm(axis), abs=1e-12)
-    assert got_origin == pytest.approx(origin, abs=1e-12)
-
-
-# -- synthetic: a beam the fit must recover ----------------------------------------
-
-K = np.array([[2850.0, 0.0, 2000.0], [0.0, 2850.0, 1500.0], [0.0, 0.0, 1.0]])
-TRUE_O = np.append(0.104 * np.array([-0.29, -0.957]) / np.hypot(0.29, 0.957), 0.0)
-TRUE_D = np.array([0.012, 0.035, 1.0])
-
-
-def _dot_at(z):
-    p = TRUE_O + (z - TRUE_O[2]) / TRUE_D[2] * TRUE_D
-    q = K @ (p / p[2])
-    return q[:2]
-
-
-def _beam_angle(a, b):
-    a, b = np.asarray(a) / np.linalg.norm(a), np.asarray(b) / np.linalg.norm(b)
-    return float(np.degrees(np.arccos(np.clip(a @ b, -1, 1))))
-
-
-def _exact_pairs(z):
-    """Exact pairwise size ratios of an object 1/z in apparent size."""
-    logs = -np.log(z)
-    n = len(z)
-    return [sc.PairScale(i, j, logs[j] - logs[i], 20)
-            for i in range(n) for j in range(i + 1, n)]  # fmt: skip
-
-
-def test_recovers_a_known_beam_from_apparent_size_alone():
-    z = np.linspace(1.0, 3.0, 12)
-    dots = np.array([_dot_at(zi) for zi in z])
-
-    fit = sc.fit_label_free(
-        dots=dots, pairs=_exact_pairs(z), camera_matrix=K, line=None
-    )
-
-    assert fit.outcome == "accepted", fit.refusal_reason
-    assert _beam_angle(fit.laser_axis, TRUE_D) < 0.01
-    assert np.linalg.norm(fit.laser_position) == pytest.approx(0.104)
-    assert fit.laser_position[2] == 0.0
-    assert fit.size_ratio == pytest.approx(3.0)
-    assert fit.frames_used == 12
-
-
-def test_a_wrong_object_size_does_not_move_the_beam():
-    """Size constancy: the object's physical size cancels."""
-    z = np.linspace(1.0, 3.0, 12)
-    dots = np.array([_dot_at(zi) for zi in z])
-    u = sc.line_direction(None, dots)
-    t = dots @ u
-    small = sc.fit_vanishing_position(t, 1.0 / z)
-    large = sc.fit_vanishing_position(t, 7.0 / z)
-    assert small == pytest.approx(large, abs=1e-3)
-    assert (
-        _beam_angle(
-            sc.beam_from_vanishing(small, u, float(np.median(dots @ [-u[1], u[0]])), K)[
-                1
-            ],
-            TRUE_D,
-        )
-        < 0.01
-    )
-
-
-def test_a_bad_pair_is_dropped_by_the_loop_check():
-    """Pairs carry ~1 % scale noise (register's floor); one matched another
-    layer and is 35 % off. The loop of the other pairs outvotes it."""
-    z = np.linspace(1.0, 3.0, 12)
-    dots = np.array([_dot_at(zi) for zi in z])
-    rng = np.random.default_rng(3)
-    clean = [sc.PairScale(p.i, p.j, p.log_scale + rng.normal(0, 0.01), p.near)
-             for p in _exact_pairs(z)]  # fmt: skip
-    bad = list(clean)
-    bad[5] = sc.PairScale(bad[5].i, bad[5].j, bad[5].log_scale + 0.3, bad[5].near)
-
-    want = sc.fit_label_free(dots=dots, pairs=clean, camera_matrix=K)
-    got = sc.fit_label_free(dots=dots, pairs=bad, camera_matrix=K)
-
-    assert got.vanishing_px == pytest.approx(want.vanishing_px, abs=0.5)
-    assert _beam_angle(got.laser_axis, TRUE_D) < 0.05
-
-
-def _noisy_pairs(z, sd=0.01, seed=3):
-    rng = np.random.default_rng(seed)
-    return [sc.PairScale(p.i, p.j, p.log_scale + rng.normal(0, sd), p.near)
-            for p in _exact_pairs(z)]  # fmt: skip
-
-
-def test_a_frame_whose_size_disagrees_with_its_range_is_dropped():
-    """A dot on the line but at the wrong range: far down the line, on a slate
-    as near as the nearest frames (mission 80's one such frame moved its
-    vanishing point 360 px, 2026-10-19). It is dropped and the fit refitted."""
-    z = np.linspace(1.0, 3.0, 12)
-    dots = np.array([_dot_at(zi) for zi in z])
-    want = sc.fit_label_free(dots=dots, pairs=_noisy_pairs(z), camera_matrix=K)
-
-    sizes = np.append(z, 1.2)  # its slate's size: as at 1.2 m
-    pairs = _noisy_pairs(sizes)
-    got = sc.fit_label_free(
-        dots=np.vstack([dots, _dot_at(8.0)]), pairs=pairs, camera_matrix=K
-    )
-
-    assert got.outcome == "accepted", got.refusal_reason
-    assert 12 not in got.used and got.frames_used == 12
-    assert got.vanishing_px == pytest.approx(want.vanishing_px, abs=0.5)
-    assert _beam_angle(got.laser_axis, TRUE_D) < 0.05
-
-
-def _with_a_bad_frame(z_dot, z_size, n=12):
-    """`n` good frames at 1-3 m and one more whose dot is at `z_dot` on a
-    slate sized as at `z_size`; the pairs, and the same pairs without it."""
-    z = np.linspace(1.0, 3.0, n)
-    dots = np.vstack([[_dot_at(zi) for zi in z], [_dot_at(z_dot)]])
-    pairs = _noisy_pairs(np.append(z, z_size))
-    without = [p for p in pairs if n not in (p.i, p.j)]
-    return dots, pairs, without
-
-
-def test_a_trimmed_frames_pairs_no_longer_shape_the_sizes():
-    """The sizes are re-solved without the dropped frame's pairs, so the fit
-    is the fit of the frames kept, exactly (review of #136)."""
-    dots, pairs, without = _with_a_bad_frame(8.0, 1.2)
-
-    got = sc.fit_label_free(dots=dots, pairs=pairs, camera_matrix=K)
-    want = sc.fit_label_free(dots=dots[:12], pairs=without, camera_matrix=K)
-
-    assert got.used == want.used == list(range(12))
-    assert got.vanishing_px == pytest.approx(want.vanishing_px, abs=1e-6)
-
-
-@pytest.mark.parametrize(
-    "z_dot, z_size",
-    [(8.0, 0.3), (5.0, 10.0), (0.7, 5.0)],
-    ids=["pins-the-fit", "sets-the-bracket", "nearest-far-slate"],
-)
-def test_one_wrong_range_frame_costs_only_itself(z_dot, z_size):
-    """Judged by a fit it took no part in, the wrong frame is the one dropped:
-    it cannot pin the fit to the bracket it sets, or push good frames out
-    first (review of #136: it was refused `unconstrained` or
-    `too_few_frames`)."""
-    dots, pairs, without = _with_a_bad_frame(z_dot, z_size)
-
-    got = sc.fit_label_free(dots=dots, pairs=pairs, camera_matrix=K)
-    want = sc.fit_label_free(dots=dots[:12], pairs=without, camera_matrix=K)
-
-    assert got.outcome == "accepted", got.refusal_reason
-    assert got.used == list(range(12))
-    assert got.vanishing_px == pytest.approx(want.vanishing_px, abs=1e-6)
-    assert _beam_angle(got.laser_axis, TRUE_D) < 0.05
-
-
-def test_frames_within_the_noise_are_all_kept():
-    z = np.linspace(1.0, 3.0, 12)
-    dots = np.array([_dot_at(zi) for zi in z])
-    fit = sc.fit_label_free(dots=dots, pairs=_noisy_pairs(z, sd=0.015), camera_matrix=K)
-    assert fit.frames_used == 12
-
-
-@pytest.mark.parametrize("mission", sorted(set(GOLDEN) - {"114"}, key=int))
-def test_the_paper_sessions_lose_no_frame_but_114s_one(mission):
+@pytest.mark.parametrize("mission", sorted(set(GOLDEN) - _CSCW_DEPARTS, key=int))
+def test_nine_paper_sessions_are_fitted_as_cscw_fitted_them(mission):
     """cscw's frames (human dots on labelled slate frames) are consistent, so
-    nine of the ten sessions are fitted exactly as cscw fitted them."""
+    the trim drops none of theirs."""
     d = GOLDEN[mission]
-    fit = sc.fit_label_free(
-        dots=np.array(d["dots"]), pairs=_pairs(d), camera_matrix=d["camera_matrix"],
-        line=d["line"], min_frames=1, min_size_ratio=1.0,
-    )  # fmt: skip
+    fit = _fit(d)
     assert fit.frames_used == d["expected"]["frames"]
     assert fit.vanishing_px == pytest.approx(d["expected"]["tv_fit"], abs=1e-4)
 
 
-def test_session_114_loses_one_frame_and_moves_toward_the_known_size_fit():
+def test_session_114_is_fitted_on_all_29_frames():
+    """Re-pinned (2026-10-25, core 4.3.2): 29 frames (4.3.0: 28, frame 7
+    out), vanishing position -2273.784 -> -2273.558 px, error against the
+    stored calibration -0.0485 -> -0.0439 deg, SE 0.812 -> 0.781 px; the
+    collapsed pair is counted as implausible, not matched."""
     d = GOLDEN["114"]
+    fit = _fit(d)
+    u = np.array(fit.line_direction)
+    err_deg = np.degrees((fit.vanishing_px - _stored_vanishing(d, u)) / F_PX)
+    assert fit.frames_used == d["expected"]["frames"] == 29
+    assert 7 in fit.used
+    assert fit.implausible_pairs == 1
+    assert fit.vanishing_px == pytest.approx(-2273.5578981324384, abs=1e-4)
+    assert err_deg == pytest.approx(-0.04390275434929713, abs=1e-6)
+    assert fit.se_px == pytest.approx(0.781313857611461, rel=1e-6)
+
+
+# -- without a dive line (review of #354) ------------------------------------
+#
+# The activity passes `line=None` when the mission has no confident line, and
+# core then takes the direction through the dots it keeps, re-fitting it after
+# each trim. Pinned on the ten sessions with the line withheld, against the
+# same control as above: the stored (known-size) calibration.
+
+#: (frames used, vanishing position px) without the line, core 4.3.2.
+_NO_LINE = {
+    "62": (20, -2049.669730655789),
+    "63": (12, -2106.0189165834586),
+    "65": (27, -2084.9796868369435),
+    "71": (32, -2136.90081293668),
+    "77": (22, -2069.6919848884604),
+    "80": (31, -2076.036068668379),
+    "83": (26, -2047.5353760465407),
+    "87": (30, -2072.8979665605602),
+    "94": (21, -1993.2297521417825),
+    "114": (29, -2280.7259250211364),
+}
+
+
+@pytest.mark.parametrize("mission", sorted(GOLDEN, key=int))
+def test_without_a_dive_line_each_session_fits_as_well(mission):
+    """Same frames as with the line, and within the paper's 0.05 deg of the
+    stored calibration (the largest is 0.044). The direction moves by up to
+    2.4 deg (session 94) and the error does not."""
+    d = GOLDEN[mission]
     fit = sc.fit_label_free(
         dots=np.array(d["dots"]), pairs=_pairs(d), camera_matrix=d["camera_matrix"],
-        line=d["line"], min_frames=1, min_size_ratio=1.0,
+        line=None,
     )  # fmt: skip
+    frames, tv = _NO_LINE[mission]
     u = np.array(fit.line_direction)
-    err = abs(fit.vanishing_px - _stored_vanishing(d, u))
-    assert fit.frames_used == d["expected"]["frames"] - 1
-    assert err < abs(d["expected"]["err_px"])
+    err_deg = np.degrees((fit.vanishing_px - _stored_vanishing(d, u)) / F_PX)
+    assert fit.outcome == "accepted"
+    assert fit.frames_used == frames == d["expected"]["frames"]
+    assert fit.vanishing_px == pytest.approx(tv, abs=1e-3)
+    assert abs(err_deg) <= 0.05
 
 
-def test_refuses_when_the_trim_leaves_too_few_frames():
-    z = np.linspace(1.0, 3.0, 7)
-    dots = np.vstack([[_dot_at(zi) for zi in z], [_dot_at(8.0)]])
-    fit = sc.fit_label_free(
-        dots=dots, pairs=_noisy_pairs(np.append(z, 1.2)), camera_matrix=K
-    )
-    assert (fit.outcome, fit.refusal_reason) == ("refused", "too_few_frames")
+# -- the refusals the activity stores (review of #354) ------------------------
+#
+# `refusal_reason` reaches `automatic_laser_calibrations` verbatim, so a core
+# release that renames one must fail here, not in production's rows.
 
 
-# -- the refusals ----------------------------------------------------------------
+def _beyond_the_bracket(n=12, tv=-6000.0):
+    """Sizes consistent with a vanishing position past the bracket's far
+    edge, every pair matched: the fit's optimum is the bracket's edge."""
+    t = 400.0 * np.arange(n) + 200
+    s = t - tv
+    pairs = [
+        sc.PairScale(i, j, float(np.log(s[j] / s[i])), 60)
+        for i, j in itertools.combinations(range(n), 2)
+    ]
+    return np.column_stack([t, np.full(n, 900.0)]), pairs
 
 
-def test_refuses_too_few_frames():
-    z = np.linspace(1.0, 3.0, 5)
-    dots = np.array([_dot_at(zi) for zi in z])
-    fit = sc.fit_label_free(dots=dots, pairs=_exact_pairs(z), camera_matrix=K)
-    assert (fit.outcome, fit.refusal_reason) == ("refused", "too_few_frames")
-    assert fit.laser_axis is None and fit.laser_position is None
-
-
-def test_refuses_too_little_range_spread():
-    """Paper §4.3: the method needs about 1.5x in distance; sessions under
-    1.12x are unconstrained."""
-    z = np.linspace(2.0, 2.6, 12)
-    dots = np.array([_dot_at(zi) for zi in z])
-    fit = sc.fit_label_free(dots=dots, pairs=_exact_pairs(z), camera_matrix=K)
-    assert (fit.outcome, fit.refusal_reason) == ("refused", "too_little_range_spread")
-    assert fit.size_ratio == pytest.approx(1.3)
-
-
-def test_refuses_frames_no_pair_connects():
-    z = np.linspace(1.0, 3.0, 12)
-    dots = np.array([_dot_at(zi) for zi in z])
-    fit = sc.fit_label_free(dots=dots, pairs=[], camera_matrix=K)
-    assert (fit.outcome, fit.refusal_reason) == ("refused", "too_few_matched_pairs")
-
-
-def test_refuses_a_fit_pinned_at_the_search_bound():
-    """Unconstrained: the optimum is the bracket's edge, not a minimum."""
-    z = np.linspace(1.0, 3.0, 12)
-    dots = np.array([_dot_at(zi) for zi in z])
-    # Sizes that grow with range: no vanishing point explains them.
-    pairs = _exact_pairs(1.0 / z)
-    fit = sc.fit_label_free(dots=dots, pairs=pairs, camera_matrix=K)
-    assert (fit.outcome, fit.refusal_reason) == ("refused", "unconstrained")
-
-
-# -- registration: the scale between two frames ------------------------------------
-
-
-def _texture(seed=0, size=(1600, 2200)):
-    rng = np.random.default_rng(seed)
-    noise = rng.integers(0, 255, size=(size[0] // 8, size[1] // 8), dtype=np.uint8)
-    img = cv2.resize(noise, (size[1], size[0]), interpolation=cv2.INTER_CUBIC)
-    return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-
-
-def test_registration_recovers_the_scale_about_the_dot():
-    dot = np.array([1100.0, 800.0])
-    a = _texture()
-    scale = 1.25
-    m = cv2.getRotationMatrix2D((float(dot[0]), float(dot[1])), 0.0, scale)
-    b = cv2.warpAffine(a, m, (a.shape[1], a.shape[0]))
-
-    fa = sc.extract_features(a, dot)
-    fb = sc.extract_features(b, dot)
-    got = sc.pair_scale(fa, fb, dot)
-
-    assert got is not None
-    log_scale, near = got
-    assert log_scale == pytest.approx(np.log(scale), abs=0.01)
-    assert near >= sc.MIN_PAIR_NEAR
-
-
-def test_registration_needs_features():
-    empty = sc.FrameFeatures(xy=np.zeros((0, 2), np.float32), desc=None)
-    assert sc.pair_scale(empty, empty, np.array([0.0, 0.0])) is None
-
-
-def _cscw_features() -> Path | None:
-    """cscw's SIFT features (65 MB, not vendored), from a sibling checkout."""
-    for parent in Path(__file__).resolve().parents:
-        candidate = (
-            parent
-            / "cscw-fishsense2027/calibration_analysis/e1j_size_constancy/features"
-        )
-        if candidate.is_dir():
-            return candidate
-    return None
-
-
-CSCW_FEATURES = _cscw_features()
-
-
-@pytest.mark.skipif(CSCW_FEATURES is None, reason="needs ../cscw-fishsense2027")
-@pytest.mark.parametrize("mission", ["63", "94"])
-def test_registration_reproduces_cscws_pairs_from_its_features(mission):
-    """The registration itself, against the golden pairs, when the sibling
-    checkout is present."""
-    d = GOLDEN[mission]
-    features = []
-    for image_id in d["image_ids"]:
-        z = np.load(CSCW_FEATURES / f"{image_id}.npz", allow_pickle=True)
-        features.append(sc.FrameFeatures(xy=z["xy"], desc=z["desc"]))
-
-    got = sc.pair_scales(features, np.array(d["dots"]))
-
-    assert [(p.i, p.j, p.near) for p in got] == [(i, j, n) for i, j, _, n in d["pairs"]]
-    assert [p.log_scale for p in got] == pytest.approx([v for _, _, v, _ in d["pairs"]])
+def test_each_refusal_reason_the_fit_can_store():
+    d = GOLDEN["62"]
+    dots, k = np.array(d["dots"]), d["camera_matrix"]
+    first3 = [p for p in _pairs(d) if p.i < 3 and p.j < 3]
+    xy, pairs = _beyond_the_bracket()
+    reasons = [
+        sc.fit_label_free(dots=dots, pairs=[], camera_matrix=k, line=d["line"]),
+        sc.fit_label_free(dots=dots[:3], pairs=first3, camera_matrix=k, line=d["line"]),
+        sc.fit_label_free(dots=dots, pairs=_pairs(d), camera_matrix=k,
+                          line=d["line"], min_size_ratio=1e6),
+        sc.fit_label_free(dots=xy, pairs=pairs, camera_matrix=k,
+                          line=(0.0, 1.0, -900.0)),
+    ]  # fmt: skip
+    assert [r.refusal_reason for r in reasons] == [
+        "too_few_matched_pairs",
+        "too_few_frames",
+        "too_little_range_spread",
+        "unconstrained",
+    ]
+    assert all(r.outcome == "refused" and r.laser_position is None for r in reasons)

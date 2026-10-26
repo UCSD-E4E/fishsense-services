@@ -208,6 +208,30 @@ async def test_registered_captures_are_what_a_resumed_scan_skips(
         }
 
 
+async def test_a_capture_keeps_its_focal_length_and_a_rescan_without_one_keeps_it(
+    owner_engine, app_engine
+):
+    """The zoom gate's input (0069): ingest records EXIF 0x920A. A re-scan
+    that read none (an older caller) must not erase what was recorded."""
+    lab = await _tenant(owner_engine, "lab")
+    d1 = await _dive(app_engine, lab, "d1")
+    async with tenant_transaction(app_engine, lab) as conn:
+        first = await register_capture(
+            conn, lab, mission_id=d1, device_id=None, source_path="d1/P1.ORF",
+            captured_at=T0, checksum=A, focal_length_mm=14.62,
+        )  # fmt: skip
+    await _register(app_engine, lab, d1, "d1/P1.ORF", A)
+
+    async with owner_engine.begin() as conn:
+        focal = (
+            await conn.execute(
+                text("SELECT focal_length_mm FROM captures WHERE id = :c"),
+                {"c": first.capture_id},
+            )
+        ).scalar_one()
+    assert focal == pytest.approx(14.62)
+
+
 # --- finalize and containment ----------------------------------------------------
 
 

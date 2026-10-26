@@ -204,6 +204,30 @@ def test_truncated_mid_header_does_not_raise():
     assert _read(data).date_time is None
 
 
+# ── focal length (the zoom gate) ──────────────────────────────────────
+
+
+def test_reads_the_focal_length_from_the_exif_ifd():
+    """FocalLength (0x920A), a rational in mm. The TG-6 zooms 4.5-18 mm and
+    its intrinsics are calibrated at 4.5: a zoomed frame's dots sit on a
+    different line (2026-10-25, missions 374/384/386), so the gate needs it."""
+    data = build_orf(focal_length=(1462, 100))
+
+    assert _read(data).focal_length_mm == pytest.approx(14.62)
+
+
+def test_focal_length_is_none_when_absent_or_degenerate():
+    """None, never a default: an unknown focal length is not the wide end."""
+    assert _read(build_orf(focal_length=None)).focal_length_mm is None
+    assert _read(build_orf(focal_length=(45, 0))).focal_length_mm is None
+
+
+def test_big_endian_focal_length_parses():
+    data = build_orf(endian=">", magic=42, focal_length=(450, 100))
+
+    assert _read(data).focal_length_mm == pytest.approx(4.5)
+
+
 # ── the real thing ────────────────────────────────────────────────────
 
 
@@ -221,3 +245,13 @@ def test_parity_against_a_real_olympus_orf():
     assert result.artist == "FSL-07"
     assert result.model == "TG-6"
     assert result.serial_number == "BJ6C67989"
+    assert result.focal_length_mm == pytest.approx(4.5)
+
+
+@pytest.mark.skipif(not _REAL_ORF.exists(), reason="ORF fixture not present")
+def test_the_first_4_kb_of_a_real_orf_hold_the_focal_length():
+    """The backfill reads 4 KB a frame, not the 1 MB ingest reads: on a TG-6
+    the rational sits at byte 2,868."""
+    result = _read(_REAL_ORF.read_bytes()[:4096])
+
+    assert result.focal_length_mm == pytest.approx(4.5)

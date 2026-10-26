@@ -53,6 +53,7 @@ from fishsense_services_orchestrator.ingest.nas_frames import (
     build_nas_client,
     file_checksum,
     parse_taken_datetime,
+    read_focal_length,
     read_taken_datetime,
     resolve_nas_path,
 )
@@ -553,7 +554,8 @@ class IngestActivities:
         3. **Stream md5** (`file_checksum`) -- the convention all ~131k migrated
            rows follow. Getting it wrong does not error: duplicate detection
            would silently report zero overlap.
-        4. EXIF tag 0x0132, stamped UTC, offset deliberately not applied.
+        4. EXIF tag 0x0132, stamped UTC, offset deliberately not applied; and
+           the focal length (0x920A), the zoom gate's input (2026-10-25).
         5. Register it. Canonicality is the store's decision; there is no way
            to send it.
 
@@ -586,7 +588,7 @@ class IngestActivities:
                 _note_timestamp(result, existing[path])
                 continue
 
-            checksum, taken = await asyncio.to_thread(
+            checksum, taken, focal_length = await asyncio.to_thread(
                 _read_frame, nas, resolve_nas_path(path, self._nas_settings)
             )
             if taken is None:
@@ -609,6 +611,7 @@ class IngestActivities:
                 source_path=path,
                 captured_at=taken,
                 checksum=checksum,
+                focal_length_mm=focal_length,
             )
             result.registered += 1
             _note_timestamp(result, taken)
@@ -624,9 +627,12 @@ class IngestActivities:
         return result
 
 
-def _read_frame(nas: NasClient, src_path: str) -> tuple[str, datetime | None]:
-    """Download to a temp dir and return `(checksum, taken_datetime)`. Runs in a
-    worker thread: the download, the hash and the EXIF read all block."""
+def _read_frame(
+    nas: NasClient, src_path: str
+) -> tuple[str, datetime | None, float | None]:
+    """Download to a temp dir and return `(checksum, taken_datetime,
+    focal_length_mm)`. Runs in a worker thread: the download, the hash and the
+    EXIF read all block."""
     with tempfile.TemporaryDirectory() as tmpdir:
         try:
             nas.download_to(src_path=src_path, dest_dir=tmpdir)
@@ -634,7 +640,11 @@ def _read_frame(nas: NasClient, src_path: str) -> tuple[str, datetime | None]:
             raise_if_permanent_dsm_error(exc, context=src_path)
             raise
         local = Path(tmpdir) / os.path.basename(src_path)
-        return file_checksum(local), read_taken_datetime(local)
+        return (
+            file_checksum(local),
+            read_taken_datetime(local),
+            read_focal_length(local),
+        )
 
 
 def _note_timestamp(result: BatchResult, taken: datetime | None) -> None:

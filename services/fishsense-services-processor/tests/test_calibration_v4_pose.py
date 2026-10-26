@@ -140,6 +140,27 @@ def test_the_plane_and_the_dot_point_are_recovered():
     assert np.allclose(pose.dot_point(plane, dot, K), target, atol=1e-6)
 
 
+def test_the_plane_and_its_rms_come_from_one_solve(monkeypatch):
+    """One `solvePnP` gives both the plane and the rms that describes it. Two
+    solves cost twice, and saw different inputs (core casts the body to
+    float32), so the rms could describe a slightly different pose from the
+    plane returned (review of #350)."""
+    rv, tv = _pose(25.0)
+    page, refs = _page()
+    h = _h_body_to_image(rv, tv) @ _template_to_body(page.shape)
+    calls = []
+    real = cv2.solvePnP
+
+    def solve(*args, **kwargs):
+        calls.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(cv2, "solvePnP", solve)
+
+    assert pose.slate_plane(refs, DPI, h, K) is not None
+    assert len(calls) == 1
+
+
 @pytest.mark.parametrize("h", [np.zeros((3, 3)), np.full((3, 3), np.nan)])
 def test_a_degenerate_alignment_gives_no_plane(h):
     """(OpenCV places points a NaN homography sends nowhere at 0, 0.)"""
@@ -192,3 +213,52 @@ def test_three_points_are_never_trimmed():
     pts[1] = pts[1] + np.array([-0.086, 0.066, 0.0])
     fit = pose.fit_pose_points(pts)
     assert fit.used == [0, 1, 2]
+
+
+# -- a scan larger than the board (the V-Slates, 2026-10-23) -----------------------------
+
+#: The V-Slate templates are 8.5 x 14 in scans of the physical slate, with the
+#: 12 in board starting ~1.9 in from the page's left edge: centring the page on
+#: the board starts the alignment ~1 in off, and a near-symmetric V then lets
+#: it settle the wrong way round (mission 436).
+SCAN_IN = (14.0, 8.5)
+BOARD_AT_IN = 1.9
+
+
+def _scan():
+    w, h = int(SCAN_IN[0] * DPI), int(SCAN_IN[1] * DPI)
+    page = np.full((h, w), 255, np.uint8)
+    page[:, : int(0.6 * DPI)] = 200  # the scanner bed beside the board
+    x0 = int(BOARD_AT_IN * DPI)
+    v = np.int32([(x0 + 80, 120), (x0 + 330, 430), (x0 + 600, 90)])
+    cv2.polylines(page, [v], False, 0, 45)
+    cv2.putText(page, "2", (x0 + 20, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.2, 0, 3)
+    refs = np.array([(x0 + 80, 120), (x0 + 330, 430), (x0 + 600, 90),
+                     (x0 + 200, 270), (x0 + 470, 260), (x0 + 330, 360)], float)  # fmt: skip
+    return page, refs
+
+
+def _render_scan(rv, tv):
+    page, refs = _scan()
+    s = 0.0254 / DPI
+    to_body = np.array([[s, 0, -BOARD_AT_IN * 0.0254], [0, s, 0], [0, 0, 1]])
+    h = _h_body_to_image(rv, tv) @ to_body
+    img = np.full(SHAPE, 40, np.uint8)
+    board = _mask(rv, tv)
+    img[board] = 245
+    ink = cv2.warpPerspective(255 - page, h, SHAPE[::-1], flags=cv2.INTER_AREA)
+    ink[~board] = 0  # only the board is there to see
+    img = np.clip(img.astype(int) - ink, 0, 255).astype(np.uint8)
+    truth = cv2.perspectiveTransform(refs.reshape(-1, 1, 2), h).reshape(-1, 2)
+    corners = pose._project(pose._outline(pose.ASPECT, 0.0) * BOARD_M, rv, tv, K)
+    return img, page, refs, truth, corners
+
+
+@pytest.mark.parametrize("spin,turn", [(0.0, 0), (0.0, 2), (180.0, 0)])
+def test_a_scan_larger_than_the_board_is_found_where_it_sits(spin, turn):
+    rv, tv = _pose(15.0, spin)
+    img, page, refs, truth, corners = _render_scan(rv, tv)
+    h, cc = pose.align_template(img, np.roll(corners, turn, axis=0), page, DPI)
+    assert h is not None
+    got = cv2.perspectiveTransform(refs.reshape(-1, 1, 2), h).reshape(-1, 2)
+    assert np.max(np.linalg.norm(got - truth, axis=1)) < 1.5

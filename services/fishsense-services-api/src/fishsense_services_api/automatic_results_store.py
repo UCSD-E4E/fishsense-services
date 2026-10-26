@@ -9,10 +9,13 @@ run_e2e.py, score.py, tail/evaluate.py). Decided 2026-10-06:
   label, a human-path prediction or a `measurements` row; the human path is
   exactly as it was;
 * **the backlog cohort** (`AUTOMATIC_RESULTS_COHORT`): a dive of **any**
-  priority with no human measurement (no `measurements` row on any of its
-  captures), renderable (`camera_sql.RECTIFIABLE_MISSION`), with automatic work
-  outstanding; the oldest first, so the orchestrator can take the oldest
-  across the tenants it serves. Work is: a canonical frame with no automatic
+  priority, renderable (`camera_sql.RECTIFIABLE_MISSION`), with automatic work
+  outstanding; those with no human measurement (no `measurements` row on any
+  of their captures) first, then the oldest, so the orchestrator can take the
+  oldest across the tenants it serves. Human-measured dives were left out
+  until 2026-10-24, when the owner had them kept current: they are where the
+  automatic results are checked against people, and a cut-mask fix at
+  version 4 had never reached them. Work is: a canonical frame with no automatic
   head/tail at the current version; a kept mask with no automatic species at
   the current version; no automatic calibration at the current version, or one
   older than the dive's newest automatic head/tail (its candidates may have
@@ -315,7 +318,8 @@ _SPECIES_WORK = f"""NOT {_SESSION} AND EXISTS (
     )"""
 
 #: No current automatic calibration at the current version, or one older than
-#: the dive's newest frame or slate score.
+#: the dive's newest frame or slate score, or one fitted through a frame the
+#: zoom gate (0070) now leaves out.
 _CALIBRATION_WORK = """(
         EXISTS (
             SELECT 1 FROM captures c
@@ -345,6 +349,13 @@ _CALIBRATION_WORK = """(
                       )
                     )
               )
+              -- Fitted before the zoom gate, through a frame it now leaves
+              -- out (2026-10-25: mission 237, 2 of 18): refitting drops it.
+              AND NOT EXISTS (
+                  SELECT 1 FROM captures c
+                  WHERE c.tenant_id = a.tenant_id AND c.id = ANY(a.capture_ids)
+                    AND NOT focal_length_calibrated(c.focal_length_mm)
+              )
         )
     )"""
 
@@ -356,6 +367,8 @@ _LENGTHS_WORK = f"""NOT {_SESSION} AND EXISTS (
         CROSS JOIN LATERAL {_latest("automatic_head_tail_predictions")} h
         WHERE mc.tenant_id = d.tenant_id AND mc.mission_id = d.id AND c.is_canonical
           AND h.status = 'predicted'
+          -- A zoomed frame is never measured (the zoom gate, 0070).
+          AND focal_length_calibrated(c.focal_length_mm)
           -- A frame the detector now calls a slate is never measured
           -- (automatic_measure_inputs), so it is no length outstanding.
           AND NOT {_DETECTOR_SLATE}
@@ -384,7 +397,6 @@ def automatic_results_cohort(*, species: bool = True) -> str:
     if species:
         work.insert(1, _SPECIES_WORK)
     return f"""{RECTIFIABLE_MISSION}
-    AND NOT {_HUMAN_MEASURED}
     AND NOT {_EXCLUDED}
     AND NOT {_FAILED_OUT}
     AND ({" OR ".join(f"({w})" for w in work)})"""
@@ -434,6 +446,8 @@ AUTOMATIC_MEASURE_CAPTURES = f"""
                             "m.algorithm_version = :mv")} ON true
     WHERE c.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
       AND h.status = 'predicted' AND m.id IS NULL
+      -- the zoom gate (0070): its depth assumes intrinsics it was not shot at
+      AND focal_length_calibrated(c.focal_length_mm)
       AND NOT {_calibration_session(":t", ":d")}
     ORDER BY c.number
     """
@@ -463,6 +477,8 @@ AUTOMATIC_CALIBRATION_CAPTURES = f"""
     CROSS JOIN {_current_row("current_automatic_head_tail_predictions", "h")}
     WHERE c.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
       AND h.laser_x IS NOT NULL
+      -- the zoom gate (0070): a zoomed frame's dot sits on another line
+      AND focal_length_calibrated(c.focal_length_mm)
     ORDER BY c.number
     """
 
@@ -478,15 +494,16 @@ async def next_mission_for_automatic_results(
     species: bool = True,
     exclude: Sequence[uuid.UUID] = (),
 ) -> AutomaticCandidate | None:
-    """The tenant's oldest dive in the backlog cohort, other than `exclude`
-    (the dives the run already took)."""
+    """The tenant's next dive in the backlog cohort, other than `exclude`
+    (the dives the run already took): one nobody has measured first, then the
+    oldest."""
     row = (
         await conn.execute(
             text(f"""
                 SELECT d.id, d.created_at FROM missions d
                 WHERE d.tenant_id = :t AND {automatic_results_cohort(species=species)}
                   AND NOT d.id = ANY(CAST(:exclude AS uuid[]))
-                ORDER BY d.created_at, d.id
+                ORDER BY {_HUMAN_MEASURED}, d.created_at, d.id
                 LIMIT 1
                 """),
             {"t": tenant_id, "hv": headtail_version, "sv": species_version,
