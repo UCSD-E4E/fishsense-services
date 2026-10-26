@@ -63,6 +63,6 @@ def test_the_version_is_pinned():
     v9 (2026-10-19) renders in the tenant's bucket, read by URL; v10
     (2026-10-20) a render frame may carry its raw's copy too; v11 (2026-10-20)
     each render's thumbnail; v12 (2026-10-21) SAM masks stored as files; v13
-    (2026-10-21) the shadow calibration; v14 (2026-10-22) the mask backfill; v15 (2026-10-22) calibration v3's replay; v16 its SAM sizes; v17 their predicted SD; v18 calibration v4's slate pose; v19 the SimCC keypoint replay; v20 BioCLIP with model classes; v21 the `is_measurable` laser-dot gate (`low_parallax`); v22 the automatic dot's colour; v23 calibration v4's pose scores both ways up; v24 the laser-colour backfill.
+    (2026-10-21) the shadow calibration; v14 (2026-10-22) the mask backfill; v15 (2026-10-22) calibration v3's replay; v16 its SAM sizes; v17 their predicted SD; v18 calibration v4's slate pose; v19 the SimCC keypoint replay; v20 BioCLIP with model classes; v21 the `is_measurable` laser-dot gate (`low_parallax`); v22 the automatic dot's colour; v23 calibration v4's pose scores both ways up; v24 its dot on the board's own plane; v25 the laser-colour backfill.
     """
-    assert CONTRACT_VERSION == 24
+    assert CONTRACT_VERSION == 25

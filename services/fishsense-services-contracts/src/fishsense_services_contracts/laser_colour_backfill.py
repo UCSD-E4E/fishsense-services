@@ -1,4 +1,4 @@
-"""The laser-colour backfill (v24, the owner, 2026-10-26: "I need the data").
+"""The laser-colour backfill (v25, the owner, 2026-10-26: "I need the data").
 
 Automatic dots predicted before contract v22 (#375) kept no colour: the frames
 stage dropped what the laser kernel read. Head/tail v5 (#401) writes keypoints

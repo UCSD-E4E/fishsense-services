@@ -2,7 +2,7 @@
 
 New in v2. Automatic dots predicted before contract v22 kept no colour, and
 head/tail v5 never runs the dot step again. The backfill reads each dot's
-colour off its prediction's render (contract v24, the processor's
+colour off its prediction's render (contract v25, the processor's
 `laser_colour_backfill`). Here:
 
 * the work: every canonical capture's current automatic prediction with a dot

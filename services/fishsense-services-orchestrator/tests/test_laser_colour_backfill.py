@@ -1,4 +1,4 @@
-"""The laser-colour backfill (contract v24, the owner, 2026-10-26).
+"""The laser-colour backfill (contract v25, the owner, 2026-10-26).
 
 A page of a mission's automatic dots, each with the render its prediction was
 made on; one whose render is gone is counted and left out. Each page is read

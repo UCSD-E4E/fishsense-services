@@ -1,4 +1,4 @@
-"""The laser-colour backfill's processor stage (contract v24, 2026-10-26).
+"""The laser-colour backfill's processor stage (contract v25, 2026-10-26).
 
 Each automatic dot's colour is read off the render its prediction was made on,
 at the dot, by fishsense-core's `classify_laser_color` -- the live kernel's

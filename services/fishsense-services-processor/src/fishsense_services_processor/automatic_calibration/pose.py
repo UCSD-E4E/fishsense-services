@@ -425,6 +425,14 @@ def slate_plane(reference_points, dpi: int, h_template_to_image, camera_matrix):
     return plane, img, rms
 
 
+def board_plane(fit: BoardFit) -> Plane:
+    """The board's plane, in metres. The fit's model is the board with its
+    long side 1 (`_outline`), so its translation is in board lengths (12 in);
+    the rotation is the same at any scale."""
+    tvec = np.asarray(fit.tvec, float).reshape(3) * _BOARD_LONG_IN * INCH_TO_M
+    return plane_from_pose(cv2.Rodrigues(np.asarray(fit.rvec, float))[0], tvec)
+
+
 def dot_point(plane: Plane, dot, camera_matrix) -> Optional[np.ndarray]:
     """The dot's ray meeting the plane (production's `laser_point_on_plane`);
     None behind the camera."""

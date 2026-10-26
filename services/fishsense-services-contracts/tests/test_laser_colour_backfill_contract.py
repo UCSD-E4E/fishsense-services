@@ -1,4 +1,4 @@
-"""The laser-colour backfill's payloads (v24, the owner, 2026-10-26).
+"""The laser-colour backfill's payloads (v25, the owner, 2026-10-26).
 
 Automatic dots predicted before contract v22 kept no colour. The backfill
 reads each one's colour off the render it was predicted on, at the dot, with

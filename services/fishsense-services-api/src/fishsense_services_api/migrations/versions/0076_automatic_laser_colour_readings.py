@@ -2,7 +2,7 @@
 
 Automatic dots predicted before contract v22 (0072) kept no colour: the
 frames stage dropped what the laser kernel read. Head/tail v5 never runs the
-dot step again, so nothing would fill them in. The backfill (contract v24,
+dot step again, so nothing would fill them in. The backfill (contract v25,
 `laser_colour_backfill`) reads each dot's colour off the render its
 prediction was made on, at the dot, with fishsense-core's
 `classify_laser_color` -- the kernel's rule on the 8-bit render instead of

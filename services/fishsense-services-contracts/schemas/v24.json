@@ -1700,6 +1700,21 @@
             "default": null,
             "title": "Board Extra"
           },
+          "board_point": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Board Point"
+          },
           "capture_id": {
             "format": "uuid",
             "title": "Capture Id",
@@ -2395,165 +2410,6 @@
       "images"
     ],
     "title": "ClusterMissionFramesInput",
-    "type": "object"
-  },
-  "ColourFrame": {
-    "properties": {
-      "capture_id": {
-        "format": "uuid",
-        "title": "Capture Id",
-        "type": "string"
-      },
-      "prediction_id": {
-        "format": "uuid",
-        "title": "Prediction Id",
-        "type": "string"
-      },
-      "render_url": {
-        "title": "Render Url",
-        "type": "string"
-      },
-      "x": {
-        "title": "X",
-        "type": "number"
-      },
-      "y": {
-        "title": "Y",
-        "type": "number"
-      }
-    },
-    "required": [
-      "prediction_id",
-      "capture_id",
-      "render_url",
-      "x",
-      "y"
-    ],
-    "title": "ColourFrame",
-    "type": "object"
-  },
-  "ColourFramesInput": {
-    "$defs": {
-      "ColourFrame": {
-        "properties": {
-          "capture_id": {
-            "format": "uuid",
-            "title": "Capture Id",
-            "type": "string"
-          },
-          "prediction_id": {
-            "format": "uuid",
-            "title": "Prediction Id",
-            "type": "string"
-          },
-          "render_url": {
-            "title": "Render Url",
-            "type": "string"
-          },
-          "x": {
-            "title": "X",
-            "type": "number"
-          },
-          "y": {
-            "title": "Y",
-            "type": "number"
-          }
-        },
-        "required": [
-          "prediction_id",
-          "capture_id",
-          "render_url",
-          "x",
-          "y"
-        ],
-        "title": "ColourFrame",
-        "type": "object"
-      }
-    },
-    "properties": {
-      "dive_id": {
-        "format": "uuid",
-        "title": "Dive Id",
-        "type": "string"
-      },
-      "frames": {
-        "items": {
-          "$ref": "#/$defs/ColourFrame"
-        },
-        "title": "Frames",
-        "type": "array"
-      },
-      "tenant_id": {
-        "format": "uuid",
-        "title": "Tenant Id",
-        "type": "string"
-      }
-    },
-    "required": [
-      "tenant_id",
-      "dive_id",
-      "frames"
-    ],
-    "title": "ColourFramesInput",
-    "type": "object"
-  },
-  "ColourReading": {
-    "properties": {
-      "capture_id": {
-        "format": "uuid",
-        "title": "Capture Id",
-        "type": "string"
-      },
-      "color": {
-        "anyOf": [
-          {
-            "enum": [
-              "red",
-              "green"
-            ],
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Color"
-      },
-      "margin": {
-        "anyOf": [
-          {
-            "type": "number"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Margin"
-      },
-      "prediction_id": {
-        "format": "uuid",
-        "title": "Prediction Id",
-        "type": "string"
-      },
-      "status": {
-        "enum": [
-          "read",
-          "render_unavailable",
-          "decode_failed",
-          "failed"
-        ],
-        "title": "Status",
-        "type": "string"
-      }
-    },
-    "required": [
-      "prediction_id",
-      "capture_id",
-      "status"
-    ],
-    "title": "ColourReading",
     "type": "object"
   },
   "ComputeLaserDepthsInput": {
@@ -11354,6 +11210,21 @@
         ],
         "default": null,
         "title": "Board Extra"
+      },
+      "board_point": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Board Point"
       },
       "capture_id": {
         "format": "uuid",

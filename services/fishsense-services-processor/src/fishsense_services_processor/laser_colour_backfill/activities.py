@@ -5,7 +5,7 @@ decoded, and fishsense-core's `classify_laser_color` -- the live laser
 kernel's rule (`laser_predict.activities._predict_from_raw`) -- reads the
 colour at the dot. The dot is in the render's pixels, so no mapping. The
 input differs from the kernel's: an 8-bit render, not the linear raw; the run
-reports its agreement before anything is written (contract v24). A render not
+reports its agreement before anything is written (contract v25). A render not
 there or not decoding is the frame's status, not a retry."""
 
 from __future__ import annotations
