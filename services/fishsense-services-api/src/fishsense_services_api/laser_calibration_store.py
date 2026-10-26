@@ -405,6 +405,7 @@ async def _mission_dots(conn, tenant_id, mission_id) -> list[tuple[float, float]
             WHERE l.tenant_id = :tenant AND c.mission_id = :mission
               AND NOT l.superseded AND l.x IS NOT NULL AND l.y IS NOT NULL
               AND focal_length_calibrated(c.focal_length_mm)
+              AND before_beam_move(c.tenant_id, c.mission_id, c.captured_at)
             ORDER BY c.number, l.number
             """),
         {"tenant": tenant_id, "mission": mission_id},
@@ -469,6 +470,7 @@ async def slate_calibration_inputs(
                   AND NOT s.superseded
                   -- the zoom gate (0070): another focal length, other intrinsics
                   AND focal_length_calibrated(c.focal_length_mm)
+                  AND before_beam_move(c.tenant_id, c.mission_id, c.captured_at)
                 ORDER BY c.number, s.number
                 """),
             {"tenant": tenant_id, "mission": mission_id},
@@ -537,6 +539,7 @@ async def checkerboard_calibration_inputs(
             JOIN ({_LOWEST_LIVE_DOT}) dot ON dot.capture_id = c.id
             WHERE c.tenant_id = :tenant AND c.mission_id = :mission AND c.is_canonical
               AND focal_length_calibrated(c.focal_length_mm)
+              AND before_beam_move(c.tenant_id, c.mission_id, c.captured_at)
             ORDER BY c.number
             """),
         {"tenant": tenant_id, "mission": mission_id},

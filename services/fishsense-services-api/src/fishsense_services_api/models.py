@@ -1537,6 +1537,37 @@ class CaptureRaw(Base):
     created_at: Mapped[datetime] = _created_at()
 
 
+class MissionBeamMove(Base):
+    """When the laser moved mid-dive (0073): the window between the last dot
+    on the first aim and the first on the second, or no window (cleared);
+    append-only, the latest per mission current."""
+
+    __tablename__ = "mission_beam_moves"
+    __table_args__ = (
+        _fk(("tenant_id", "mission_id"), "missions"),
+        Index("mission_beam_moves_tenant_mission_idx", "tenant_id", "mission_id"),
+        CheckConstraint(
+            "(moved_after IS NULL) = (moved_before IS NULL) "
+            "AND (moved_after IS NULL OR moved_after < moved_before)",
+            name="mission_beam_moves_window_check",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    mission_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    moved_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    moved_before: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    detector_version: Mapped[str] = mapped_column(Text)
+    gain: Mapped[int | None] = mapped_column(Integer)
+    angle_deg: Mapped[float | None] = mapped_column(Double)
+    apart_px: Mapped[float | None] = mapped_column(Double)
+    dots_before: Mapped[int | None] = mapped_column(Integer)
+    dots_after: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = _created_at()
+
+
 class ShadowLaserCalibration(Base):
     """A shadow size-constancy fit or its refusal (0061); feeds nothing;
     append-only."""

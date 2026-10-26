@@ -68,6 +68,7 @@ from _slate_calibration_seed import (
     slate_label,
     slate_template,
     tenant,
+    beam_moved_after,
     zoom,
 )
 from fishsense_services_api.db import tenant_transaction
@@ -1127,6 +1128,30 @@ async def test_a_zoomed_frame_is_no_slate_observation_and_no_mission_dot(
     assert sorted(x for x, _ in inputs.mission_dots) == [1.0, 3.0]
 
 
+async def test_a_frame_after_the_laser_moved_is_no_observation_and_no_dot(
+    owner_engine, app_engine
+):
+    """The partial run (owner, 2026-10-25): once the laser's aim changed
+    mid-dive, the later frames' dots lie on another line; the fit takes the
+    part of the dive before the move."""
+    lab = await tenant(owner_engine)
+    device, _ = await device_with_camera(owner_engine, lab)
+    only = await mission(owner_engine, lab, slate=await slate_template(owner_engine),
+                         device=device)  # fmt: skip
+    first = await capture(owner_engine, lab, only, captured_at=later(1))
+    await slate_label(owner_engine, lab, first)
+    await laser_label(owner_engine, lab, first, x=1.0)
+    moved = await capture(owner_engine, lab, only, captured_at=later(10))
+    await slate_label(owner_engine, lab, moved)
+    await laser_label(owner_engine, lab, moved, x=2.0)
+    await beam_moved_after(owner_engine, first)
+
+    inputs = await _slate_inputs(app_engine, lab, only)
+
+    assert [o.capture_id for o in inputs.observations] == [first]
+    assert [x for x, _ in inputs.mission_dots] == [1.0]
+
+
 # ---------- inputs: the board ----------
 
 
@@ -1167,6 +1192,23 @@ async def test_resolver_carries_the_board_geometry(owner_engine, app_engine):
     assert [f.capture_id for f in inputs.frames] == frames
     assert [f.checksum for f in inputs.frames] == [f"{1:032x}", f"{2:032x}"]
     assert [f.laser_x for f in inputs.frames] == [601.0, 602.0]
+
+
+async def test_a_frame_after_the_laser_moved_is_no_board_frame(
+    owner_engine, app_engine
+):
+    lab = await tenant(owner_engine)
+    only, _, _ = await _board_scene(owner_engine, lab)
+    frames = []
+    for n in (1, 2):
+        frame = await capture(owner_engine, lab, only, captured_at=later(n))
+        await laser_label(owner_engine, lab, frame, x=600.0 + n)
+        frames.append(frame)
+    await beam_moved_after(owner_engine, frames[0])
+
+    inputs = await _board_inputs(app_engine, lab, only)
+
+    assert [f.capture_id for f in inputs.frames] == [frames[0]]
 
 
 async def test_a_zoomed_frame_is_no_board_frame(owner_engine, app_engine):

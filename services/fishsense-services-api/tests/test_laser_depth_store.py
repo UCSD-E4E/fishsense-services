@@ -220,6 +220,23 @@ async def test_selector_ignores_non_canonical_images(owner_engine, app_engine):
     assert await _next(app_engine, lab) is None
 
 
+async def test_selector_ignores_images_after_the_laser_moved(owner_engine, app_engine):
+    from _slate_calibration_seed import beam_moved_after
+
+    lab = await tenant(owner_engine)
+    mission_id, _ = await calibrated_dive(owner_engine, lab)
+    capture_id = await capture(owner_engine, lab, mission_id)
+    await laser_label(owner_engine, lab, capture_id)
+    earlier = await capture(owner_engine, lab, mission_id)
+    async with owner_engine.begin() as conn:  # a frame before it, unlabelled
+        await conn.execute(
+            text("UPDATE captures SET captured_at = captured_at - interval '1 hour' "
+                 "WHERE id = :c"), {"c": earlier})  # fmt: skip
+    await beam_moved_after(owner_engine, earlier)
+
+    assert await _next(app_engine, lab) is None
+
+
 async def test_selector_ignores_zoomed_images(owner_engine, app_engine):
     """The zoom gate (2026-10-25): a dot's depth assumes the camera
     calibration's intrinsics, which a zoomed frame does not have."""
