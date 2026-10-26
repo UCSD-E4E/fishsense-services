@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.61.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.60.0...v0.61.0) (2026-10-26)
+
+
+### Features
+
+* the partial run -- when the laser moved mid-dive, keep the part before the move ([1377098](https://github.com/UCSD-E4E/fishsense-services/commit/13770980aacdf99f0b8be927248760ce5a3188c7))
+* the partial run -- when the laser moved mid-dive, keep the part before the move ([adf919f](https://github.com/UCSD-E4E/fishsense-services/commit/adf919fd677c65f0d8238742cbaf2e62d31e73f3))
+
+
+### Bug Fixes
+
+* **api:** one head/tail staleness rule for the cohort and the resolver ([e9e8b6d](https://github.com/UCSD-E4E/fishsense-services/commit/e9e8b6d638778f4505347a0237dc8605a7eb9cd9))
+* **api:** the mission_beam_moves model, as 0073 creates it ([42165c5](https://github.com/UCSD-E4E/fishsense-services/commit/42165c59dfbcf8f1231391d16fe8e33c60d2c66b))
+
 ## [0.60.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.59.1...v0.60.0) (2026-10-26)
 
 
