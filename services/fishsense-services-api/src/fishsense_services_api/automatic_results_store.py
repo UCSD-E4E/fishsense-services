@@ -318,7 +318,8 @@ _SPECIES_WORK = f"""NOT {_SESSION} AND EXISTS (
     )"""
 
 #: No current automatic calibration at the current version, or one older than
-#: the dive's newest frame or slate score.
+#: the dive's newest frame or slate score, or one fitted through a frame the
+#: zoom gate (0070) now leaves out.
 _CALIBRATION_WORK = """(
         EXISTS (
             SELECT 1 FROM captures c
@@ -347,6 +348,13 @@ _CALIBRATION_WORK = """(
                             AND sp.created_at > a.created_at
                       )
                     )
+              )
+              -- Fitted before the zoom gate, through a frame it now leaves
+              -- out (2026-10-25: mission 237, 2 of 18): refitting drops it.
+              AND NOT EXISTS (
+                  SELECT 1 FROM captures c
+                  WHERE c.tenant_id = a.tenant_id AND c.id = ANY(a.capture_ids)
+                    AND NOT focal_length_calibrated(c.focal_length_mm)
               )
         )
     )"""

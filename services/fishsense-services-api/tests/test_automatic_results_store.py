@@ -928,6 +928,33 @@ async def test_a_zoomed_frame_is_no_calibration_dot(owner_engine, app_engine):
     assert sorted(x for x, _ in inputs.line_dots) == [10.0, 12.0]
 
 
+async def test_a_calibration_fitted_through_a_zoomed_frame_is_owed_again(
+    owner_engine, app_engine
+):
+    """The zoom gate came after some fits (2026-10-25: mission 237's used 2
+    zoomed frames of 18). Such a fit is stale: refitting it leaves the zoomed
+    frames out. A zoomed frame the fit did not use leaves it current."""
+    from _slate_calibration_seed import zoom
+
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    used, unused = [await capture(owner_engine, lab, mission_id) for _ in range(2)]
+    await _predict(app_engine, lab, mission_id, *[
+        AutomaticHeadTailRow(capture_id=c, status="slate_frame", laser_x=10.0,
+                             laser_y=20.0, slate_probability=0.9, predictor_version=1)
+        for c in (used, unused)
+    ])  # fmt: skip
+    await _in(app_engine, lab, persist_automatic_calibration, mission_id,
+              _label_free(capture_ids=[used]))  # fmt: skip
+    assert await _next(app_engine, lab) is None
+
+    await zoom(owner_engine, unused, 18.0)
+    assert await _next(app_engine, lab) is None
+
+    await zoom(owner_engine, used, 5.05)
+    assert await _next(app_engine, lab) == mission_id
+
+
 # -- measurements: current, stale, never the human path's -------------------------
 
 
