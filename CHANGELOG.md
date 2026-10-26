@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.59.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.59.0...v0.59.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **api:** a calibration fitted through a frame the zoom gate now excludes is stale ([f3a138c](https://github.com/UCSD-E4E/fishsense-services/commit/f3a138c3945299fbe7457df31c81f9001a594fd3))
+* **api:** a calibration fitted through a frame the zoom gate now excludes is stale ([89e3e7a](https://github.com/UCSD-E4E/fishsense-services/commit/89e3e7ac6ffd0dea44f7d07687f1e2bf7860e329))
+* **processor:** a weights failure refuses the worker, not the frames; bounded head/tail retries ([c705872](https://github.com/UCSD-E4E/fishsense-services/commit/c705872e6251fec9a406a9716f769812ce93f41f))
+
 ## [0.59.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.58.0...v0.59.0) (2026-10-26)
 
 
