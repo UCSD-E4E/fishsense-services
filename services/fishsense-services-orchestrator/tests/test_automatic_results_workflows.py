@@ -56,6 +56,8 @@ from fishsense_services_contracts.headtail_keypoints import (
     KeypointFramesInput,
     KeypointResult,
 )
+from fishsense_services_contracts.calibration_v3 import CalibrationV3Report
+from fishsense_services_contracts.calibration_v4 import SlatePose
 from fishsense_services_contracts.object_store import ObjectRef
 from fishsense_services_contracts.species_prediction import (
     PredictSpeciesImage,
@@ -93,6 +95,7 @@ from fishsense_services_orchestrator.object_store.contracts import (
 )
 
 TENANT, MISSION = uuid.uuid4(), uuid.uuid4()
+TEMPLATE = uuid.uuid4()
 TARGET = AutomaticTarget(TENANT, MISSION)
 CAMERA = uuid.uuid4()
 QUEUE = "test-automatic-results"
@@ -142,7 +145,8 @@ def _calibration_plan(n):
     return AutomaticCalibrationPlan(
         payload=FitAutomaticCalibrationInput(
             tenant_id=TENANT, mission_id=MISSION, camera_matrix=K,
-            frames=[AutomaticCalibrationFrame(capture_id=uuid.uuid4(), jpeg=REF,
+            frames=[AutomaticCalibrationFrame(capture_id=uuid.uuid4(),
+                                              jpeg_url="https://garage/r.JPG?sig",
                                               x=1.0, y=2.0) for _ in range(n)],
         ),
         camera_calibration_id=uuid.uuid4(),
@@ -182,11 +186,11 @@ def _keypoints_input(n):
 
 
 def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET,
-           renders="all", keypoints=0, refusals=0):  # fmt: skip
+           renders="all", keypoints=0, refusals=0, pose=False):  # fmt: skip
     """`selected` is the cohort's answer every time, or a list of answers in
     turn (None once it runs out). `renders`: the frames are ``all`` rendered
     already, rendered ``after`` the render step, or the tenant has
-    ``no-bucket``."""
+    ``no-bucket``. `pose`: the slate pose is owed (switched on, a template)."""
     rendered = [renders == "all"]
     cohort = list(selected) if isinstance(selected, list) else None
 
@@ -253,6 +257,30 @@ def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET,
         EVENTS.append(("persist calibration", r.outcome, r.refusal_reason))
         return uuid.uuid4()
 
+    @activity.defn(name="automatic_slate_pose_owed")
+    async def pose_owed(t: AutomaticTarget) -> bool:
+        return pose
+
+    @activity.defn(name="resolve_mission_slate_template")
+    async def pose_template(t: AutomaticTarget) -> Optional[dict]:
+        EVENTS.append(("slate template",))
+        return {"slate_template_id": str(TEMPLATE), "dpi": 300,
+                "reference_points": [[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]],
+                "slate_pdf": REF.model_dump(mode="json")}  # fmt: skip
+
+    @activity.defn(name="stage_slate_pdf")
+    async def pose_pdf(t: dict) -> bool:
+        EVENTS.append(("stage slate pdf",))
+        return True
+
+    @activity.defn(name="persist_automatic_slate_pose")
+    async def pose_out(t: AutomaticTarget, p: AutomaticCalibrationPlan,
+                       r: CalibrationV3Report, template: uuid.UUID,
+                       posed: List[uuid.UUID]) -> uuid.UUID:  # fmt: skip
+        EVENTS.append(("persist slate pose", r.outcome, r.refusal_reason, template,
+                       len(posed)))  # fmt: skip
+        return uuid.uuid4()
+
     @activity.defn(name="resolve_automatic_measure_inputs")
     async def measure_in(t: AutomaticTarget) -> Optional[AutomaticMeasurePlan]:
         return None if plan is None else _measure_plan(plan, refusals=refusals)
@@ -312,7 +340,8 @@ def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET,
     return [select, failed, frames_failed, frames_in, frames_out, species_in, species_out, cal_in,
             cal_out, measure_in, measure_out, wake_gpu, wake_per_image, wake_light,
             stage, cleanup, render_in, render_out, masks_out, refusals_out,
-            keypoints_in, keypoints_out]  # fmt: skip
+            keypoints_in, keypoints_out, pose_owed, pose_template, pose_pdf,
+            pose_out]  # fmt: skip
 
 
 @activity.defn(name="_record")
@@ -485,6 +514,34 @@ class _Calibration:  # pylint: disable=too-few-public-methods
         return _calibration_result(payload)
 
 
+@workflow.defn(name="SlatePoseFramesWorkflow")
+class _Pose:  # pylint: disable=too-few-public-methods
+    """Every frame posed but the first (its board not found)."""
+
+    @workflow.run
+    async def run(self, payload: dict) -> list:
+        await _record_child()
+        return [SlatePose(capture_id=f["capture_id"],
+                          status="no_board" if n == 0 else "posed",
+                          point=None if n == 0 else [0.0, 0.0, 1.0 + n]
+                          ).model_dump(mode="json")
+                for n, f in enumerate(payload["frames"])]  # fmt: skip
+
+
+@workflow.defn(name="ReplayAutomaticCalibrationV3Workflow")
+class _PoseFit:  # pylint: disable=too-few-public-methods
+    @workflow.run
+    async def run(self, payload: dict) -> dict:
+        await _record_child()
+        assert payload["size_source"] == "pose"
+        fitted = [k for k, v in payload["pose_points"].items() if v is not None]
+        return CalibrationV3Report(
+            mission_id=payload["payload"]["dive_id"], size_source="pose",
+            outcome="accepted", laser_position=[0.1, 0, 0], laser_axis=[0, 0, 1],
+            frames_used=len(fitted),
+        ).model_dump(mode="json")  # fmt: skip
+
+
 @workflow.defn(name="MeasureAutomaticWorkflow")
 class _Measure:  # pylint: disable=too-few-public-methods
     @workflow.run
@@ -517,9 +574,9 @@ async def _run(
                               else _PartialFrames if frames_partial else _Frames,
                               _RefusingSpecies if species_refuse
                               else _FailingSpecies if species_fails else _Species,
-                              _Keypoints]),
+                              _Keypoints, _Pose]),
             Worker(env.client, task_queue=PROCESSOR_TASK_QUEUE, activities=[_record],
-                   workflows=[_Calibration, _Render]),
+                   workflows=[_Calibration, _Render, _PoseFit]),
             Worker(env.client, task_queue=PROCESSOR_LIGHT_TASK_QUEUE,
                    activities=[_record],
                    workflows=[_Measure]),
@@ -556,6 +613,47 @@ async def test_one_mission_every_step_in_order():
         ("child", f"automatic-species-{MISSION}"),
         ("persist species", ["decode_failed"]),
     ]
+
+
+async def test_an_owed_slate_pose_is_fitted_after_size_constancy():
+    """Calibration v4 in the chain (0078; the owner, 2026-10-26): with its
+    switch on and a template, each slate frame is posed on the GPU and the
+    beam fitted through the posed dots, then written as the slate pose."""
+    await _run(AutomaticResultsForMissionWorkflow, TARGET, pose=True, slate=3)
+
+    at = EVENTS.index(("persist calibration", "accepted", None))
+    assert EVENTS[at + 1 : at + 9] == [
+        ("slate template",),
+        ("wake gpu",),
+        ("stage slate pdf",),
+        ("child", f"automatic-slate-pose-{MISSION}-0"),
+        ("wake per-image",),
+        ("child", f"automatic-slate-pose-fit-{MISSION}"),
+        ("persist slate pose", "accepted", None, TEMPLATE, 2),
+        ("wake light",),
+    ]
+
+
+async def test_a_slate_pose_not_owed_is_not_run():
+    await _run(AutomaticResultsForMissionWorkflow, TARGET)
+
+    assert not [e for e in EVENTS if "slate" in e[0]]
+
+
+async def test_without_a_real_gpu_the_slate_pose_waits():
+    """No row: the pose is owed still, and a later run with a GPU fits it."""
+    await _run(AutomaticResultsForMissionWorkflow, TARGET, pose=True,
+               mode="cpu_fallback", frames=0, keypoints=0)  # fmt: skip
+
+    assert ("slate template",) in EVENTS
+    assert not [e for e in EVENTS if e[0] == "persist slate pose"]
+
+
+async def test_no_slate_frame_is_a_slate_pose_refusal_without_a_processor():
+    await _run(AutomaticResultsForMissionWorkflow, TARGET, pose=True, slate=0)
+
+    assert ("persist slate pose", "refused", "no_candidates", TEMPLATE, 0) in EVENTS
+    assert not [e for e in EVENTS if e[0] == "child" and "slate-pose" in e[1]]
 
 
 async def test_head_tail_v5_keypoints_run_after_the_frames_and_before_the_lengths():

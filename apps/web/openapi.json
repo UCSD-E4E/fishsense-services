@@ -41,6 +41,10 @@
             ],
             "title": "Frames Used"
           },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
           "outcome": {
             "title": "Outcome",
             "type": "string"
@@ -98,7 +102,8 @@
           "pair_count",
           "size_ratio",
           "se_px",
-          "created_at"
+          "created_at",
+          "method"
         ],
         "title": "AutomaticCalibrationView",
         "type": "object"

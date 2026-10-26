@@ -1378,7 +1378,8 @@ class AutomaticHeadTailPrediction(Base):
 
 
 class AutomaticLaserCalibration(Base):
-    """A dive's label-free size-constancy calibration, accepted or refused."""
+    """A dive's automatic calibration, accepted or refused: label-free size
+    constancy, or the slate pose (0078)."""
 
     __tablename__ = "automatic_laser_calibrations"
     __table_args__ = (
@@ -1416,6 +1417,10 @@ class AutomaticLaserCalibration(Base):
     )
     core_version: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
+    #: The template a ``slate_pose`` calibration posed with (0078).
+    slate_template_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("slate_templates.id")
+    )
 
 
 class AutomaticSpeciesPrediction(Base):

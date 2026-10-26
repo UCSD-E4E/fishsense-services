@@ -844,6 +844,8 @@ export interface components {
             created_at: string;
             /** Frames Used */
             frames_used: number | null;
+            /** Method */
+            method: string;
             /** Outcome */
             outcome: string;
             /** Pair Count */

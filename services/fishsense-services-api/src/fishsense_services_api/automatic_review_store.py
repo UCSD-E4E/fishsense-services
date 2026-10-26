@@ -238,6 +238,8 @@ class AutomaticCalibration:
     size_ratio: float | None
     se_px: float | None
     created_at: datetime
+    #: ``size_constancy`` or ``slate_pose`` (0078).
+    method: str = "size_constancy"
 
 
 @dataclass(frozen=True)
@@ -307,9 +309,12 @@ async def mission_automatic(
         await conn.execute(
             text("""
                 SELECT outcome, refusal_reason, algorithm_version, frames_used,
-                       pair_count, size_ratio, se_px, created_at
+                       pair_count, size_ratio, se_px, created_at, method
                 FROM current_automatic_laser_calibrations
                 WHERE tenant_id = :t AND mission_id = :m
+                -- One per method (0078): the one the lengths would use.
+                ORDER BY outcome = 'accepted' DESC, method = 'slate_pose' DESC
+                LIMIT 1
                 """),
             params,
         )

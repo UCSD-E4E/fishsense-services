@@ -90,6 +90,8 @@ _FRAMES = text(f"""
         SELECT x.laser_position, x.laser_axis
         FROM current_automatic_laser_calibrations x
         WHERE x.tenant_id = d.tenant_id AND x.outcome = 'accepted'
+          -- the paper's label-free fit (0078 added the slate pose)
+          AND x.method = 'size_constancy'
           AND x.mission_id IN (d.id, d.calibration_source_mission_id)
         ORDER BY x.mission_id = d.id DESC LIMIT 1
     ) lf ON true
@@ -209,6 +211,7 @@ _SESSIONS = text(f"""
     LEFT JOIN mission_laser_geometry g ON g.tenant_id = d.tenant_id AND g.mission_id = d.id
     LEFT JOIN current_automatic_laser_calibrations lf
       ON lf.tenant_id = d.tenant_id AND lf.mission_id = d.id AND lf.outcome = 'accepted'
+     AND lf.method = 'size_constancy'
     WHERE d.tenant_id = :t AND d.number = ANY(:missions) AND {ADMITTED_PORT}
     ORDER BY d.number
     """)
