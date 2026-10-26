@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.59.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.58.0...v0.59.0) (2026-10-26)
+
+
+### Features
+
+* the zoom gate -- a frame shot zoomed in is neither calibrated from nor measured ([1c21fcd](https://github.com/UCSD-E4E/fishsense-services/commit/1c21fcde76daa85595b6e24cb39974e646afabcc))
+
 ## [0.58.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.57.0...v0.58.0) (2026-10-25)
 
 
