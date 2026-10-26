@@ -1039,7 +1039,18 @@ async def test_a_migrated_measurement_under_the_effective_calibration_is_current
 # -- v2: tried, made no progress --------------------------------------------------
 
 
-@pytest.mark.parametrize("reason", ["zero_length", "non_finite_length"])
+@pytest.mark.parametrize(
+    "reason",
+    # The last three since contract v21 (0071): the dot failed fishsense-core's
+    # `LaserPoint.is_measurable()`, so no length was taken.
+    [
+        "zero_length",
+        "non_finite_length",
+        "non_finite_depth",
+        "non_positive_depth",
+        "low_parallax",
+    ],
+)
 async def test_a_refused_length_drops_the_capture_out(owner_engine, app_engine, reason):
     lab = await tenant(owner_engine)
     mission_id, calibration = await calibrated_dive(owner_engine, lab)

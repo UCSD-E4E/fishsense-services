@@ -9,12 +9,12 @@ recover. The dive line is fishsense-core's `fit_dive_line` through every
 automatic dot of the dive (cscw used production's dive line, fitted the same
 way), or, too few or unconfident, the frames' own dots (cscw's fallback).
 
-The length is stage 14's geometry (`laser_geometry`: the dot's depth by the
-closest approach of the camera ray and the laser, the head and tail placed on
-the fronto-parallel plane at that depth), as cscw e2e_measurement/score.py
-`depth`/`length` compute it; unlike stage 14 the depth is gated (> 0), since
-an automatic dot behind the camera is no observation (laser_geometry's own
-advice; stage 14 keeps v1's parity).
+The length is stage 14's geometry (fishsense-core `world_point`: the dot's
+depth by the closest approach of the camera ray and the laser, the head and
+tail placed on the fronto-parallel plane at that depth), as cscw
+e2e_measurement/score.py `depth`/`length` compute it. The dot is gated on
+`LaserPoint.is_measurable()`, as stage 14's now is: a dot behind the camera,
+or one too near the laser's vanishing point to trust, is no observation.
 """
 
 from __future__ import annotations
@@ -342,6 +342,25 @@ async def test_a_dot_behind_the_camera_is_refused():
     )
     (got,) = r.lengths
     assert (got.length_m, got.refusal) == (None, "non_positive_depth")
+
+
+async def test_a_dot_near_the_vanishing_point_is_refused_as_low_parallax():
+    """core #96: the laser's own hit at 50 m triangulates to a finite,
+    positive depth (~50 m) that version 1's `depth > 0` gate measured, but
+    its camera ray meets the laser at ~0.002 rad, under fishsense-core's
+    0.005 rad: a pixel of dot error moves that depth by more than 7 %."""
+    r = await ActivityEnvironment().run(
+        measure_automatic, _measure_input(_capture(_dot_at(50.0)))
+    )
+    (got,) = r.lengths
+    assert (got.length_m, got.refusal) == (None, "low_parallax")
+    assert got.depth_m == pytest.approx(50.0, rel=0.1)
+
+
+def test_the_measurement_version_is_2_since_the_measurable_gate():
+    """2 (2026-10-23): the `is_measurable` gate refuses low-parallax dots that
+    version 1 measured, so every version-1 length is measured again."""
+    assert AUTOMATIC_MEASUREMENT_VERSION == "2"
 
 
 async def test_a_zero_length_is_refused():

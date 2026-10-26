@@ -993,6 +993,40 @@ async def test_a_length_is_current_and_drains_the_work(owner_engine, app_engine)
     assert (await _measure_inputs(app_engine, lab, mission_id)).captures == []
 
 
+async def test_a_low_parallax_refusal_is_recorded_and_drains_the_work(
+    owner_engine, app_engine
+):
+    """Measurement version 2 (contract v21, 0071): a dot too near the laser's
+    vanishing point is refused, and the refusal answers the frame's work."""
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    await _in(app_engine, lab, persist_automatic_calibration, mission_id, _label_free())
+    c = await capture(owner_engine, lab, mission_id)
+    await _predict(app_engine, lab, mission_id, _predicted(c))
+    inputs = await _in(app_engine, lab, automatic_measure_inputs, mission_id,
+                       algorithm_version="2")  # fmt: skip
+    (job,) = inputs.captures
+    await _in(app_engine, lab, persist_automatic_measurements, mission_id, [
+        AutomaticMeasurementRow(
+            capture_id=c,
+            automatic_head_tail_prediction_id=job.automatic_head_tail_prediction_id,
+            calibration_source=inputs.calibration.source,
+            automatic_laser_calibration_id=inputs.calibration.automatic_laser_calibration_id,
+            laser_calibration_id=inputs.calibration.laser_calibration_id,
+            camera_calibration_id=inputs.camera_calibration_id,
+            length_m=None, depth_m=52.2, refusal="low_parallax",
+            algorithm="laser_depth_fronto_parallel", algorithm_version="2",
+            core_version="4.3.0",
+        )
+    ])  # fmt: skip
+
+    assert await _rows(
+        owner_engine, "SELECT refusal FROM current_automatic_measurements"
+    ) == [{"refusal": "low_parallax"}]
+    assert (await _in(app_engine, lab, automatic_measure_inputs, mission_id,
+                      algorithm_version="2")).captures == []  # fmt: skip
+
+
 async def test_a_new_head_tail_makes_the_length_stale(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     mission_id, c = await _measured(owner_engine, app_engine, lab)

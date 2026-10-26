@@ -14,10 +14,13 @@ v2 changes, pinned:
   (`dropped_nan`) with nothing written -- the dive would stay in its cohort;
 * a **zero** length (head and tail on one pixel) is a refusal too: v2's
   `measurements` refuses it (CHECK length_m > 0), where v1 stored it;
-* the length is taken at the laser's depth **whatever its sign**, exactly as
-  v1's stage 14 did (`isfinite` only). The depth stage gates on `depth_m > 0`
-  and stage 14 never did; adding the gate here would change the measurement
-  parity numbers (PLAN.md §6.2), so it is left for a deliberate decision.
+* until 2026-10-23 the length was taken at the laser's depth **whatever its
+  sign**, as v1's stage 14 did (`isfinite` only). The owner gave that parity
+  up when stage 14 moved onto fishsense-core (core #96, `ALGORITHM_VERSION`
+  2): the dot must pass `LaserPoint.is_measurable()` -- finite, in front of
+  the camera, and with enough parallax -- or the capture is refused with the
+  depth stage's reasons (`non_finite_depth`, `non_positive_depth`,
+  `low_parallax`).
 """
 
 from __future__ import annotations
@@ -35,7 +38,7 @@ from fishsense_services_contracts.measurement import (
     MeasureFishCapture,
     MeasureFishInput,
 )
-from fishsense_services_processor.laser_geometry import compute_laser_point
+from fishsense_core.world_point import compute_laser_point
 from fishsense_services_processor.measurement.activities import (
     ALGORITHM,
     ALGORITHM_VERSION,
@@ -163,10 +166,12 @@ async def test_a_zero_length_is_refused_not_measured():
     assert length.depth_m == pytest.approx(1.20, abs=1e-3)
 
 
-async def test_a_non_finite_length_is_refused_not_dropped():
+async def test_a_non_finite_depth_is_refused_not_dropped():
     """v1's `dropped_nan`: the triangulation's degenerate case gives a NaN
     point, and every length at a NaN depth is NaN. v1 dropped it and wrote
-    nothing, so the image stayed unmeasured and the dive in its cohort."""
+    nothing, so the image stayed unmeasured and the dive in its cohort. v2
+    refused it as `non_finite_length`; since algorithm version 2 the depth is
+    gated first, so it is refused as what it is, `non_finite_depth`."""
     # A laser through the camera centre along the optical axis, and a dot on
     # the principal point: the two rays are the same line, and have no
     # closest point.
@@ -177,22 +182,30 @@ async def test_a_non_finite_length_is_refused_not_dropped():
     )
     capture = _capture((2048.0, 1536.0), (1900.0, 1500.0), (2100.0, 1500.0))
     # Guard the guard: the geometry really is the kernel's NaN case.
-    assert np.isnan(compute_laser_point(capture.laser, le, CAMERA_MATRIX).depth_m)
+    assert np.isnan(
+        compute_laser_point(
+            (capture.laser.x, capture.laser.y),
+            le.laser_position,
+            le.laser_axis,
+            CAMERA_MATRIX,
+        ).depth_m
+    )
 
     result = await _run(_input(le, [capture]))
 
     (length,) = result.captures
     assert length.length_m is None
     assert length.depth_m is None
-    assert length.refusal == "non_finite_length"
+    assert length.refusal == "non_finite_depth"
 
 
-async def test_a_length_at_a_negative_depth_is_still_measured_as_v1_did():
-    """Parity, deliberately. v1's stage 14 guarded only on `isfinite`, so a
-    dot on the wrong side of the principal point measured at -Z, and the
-    length at -Z equals the length at +Z. The depth stage refuses such a dot;
-    stage 14 adding the same gate would change which frames are measured, and
-    so the §6.2 parity numbers -- a decision, not a port."""
+async def test_a_dot_behind_the_camera_is_refused_not_measured():
+    """v1 parity given up (owner, 2026-10-23). v1's stage 14 guarded only on
+    `isfinite`, so a dot on the wrong side of the principal point measured at
+    -Z, and the length at -Z equals the length at +Z: a plausible number from
+    no observation. fishsense-core's `measure_length_at_depth` now refuses a
+    non-positive depth outright, and stage 14 refuses the capture first, as
+    the depth stage does."""
     le = _laser_calibration()
     head_pix, tail_pix, _ = _build_observation(
         le, np.array([-0.10, 0.00, 1.20]), np.array([0.20, 0.00, 1.20]), 1.20
@@ -204,9 +217,37 @@ async def test_a_length_at_a_negative_depth_is_still_measured_as_v1_did():
     result = await _run(_input(le, [capture]))
 
     (length,) = result.captures
+    assert length.length_m is None
+    assert length.refusal == "non_positive_depth"
     assert length.depth_m < 0
-    assert length.length_m > 0
-    assert length.refusal is None
+
+
+async def test_a_dot_near_the_lasers_vanishing_point_is_refused_as_low_parallax():
+    """core #96: near the laser's vanishing point the camera ray and the
+    laser are nearly parallel, and the triangulation returns a finite,
+    positive, untrustworthy depth. The laser's own hit at 50 m meets the
+    camera ray at ~0.002 rad, under fishsense-core's 0.005 rad, where a pixel
+    of dot error moves the depth by more than 7 %. Under version 1 it was
+    measured, at 50 m."""
+    le = _laser_calibration()
+    head_pix, tail_pix, laser_pix = _build_observation(
+        le, np.array([-0.10, 0.00, 50.0]), np.array([0.20, 0.00, 50.0]), 50.0
+    )
+    capture = _capture(laser_pix, head_pix, tail_pix)
+
+    result = await _run(_input(le, [capture]))
+
+    (length,) = result.captures
+    assert length.length_m is None
+    assert length.refusal == "low_parallax"
+    assert length.depth_m == pytest.approx(50.0, rel=0.1)
+
+
+async def test_the_algorithm_version_is_2_since_the_measurable_gate():
+    """Version 2 (2026-10-23) is version 1's geometry behind
+    `LaserPoint.is_measurable()`: the same length wherever both measure, but
+    a non-positive or low-parallax depth is now refused."""
+    assert ALGORITHM_VERSION == "2"
 
 
 async def test_the_result_names_its_algorithm_version_and_core():

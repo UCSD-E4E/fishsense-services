@@ -165,6 +165,13 @@ def _predict_from_raw(
     from fishsense_core.laser import rectify_prediction
     from fishsense_core.laser_color import classify_laser_color
 
+    k = np.array(camera_matrix, dtype=float)
+    dist = np.array(distortion_coefficients, dtype=float)
+    # The rectification the dot will get, on the principal point first: a
+    # calibration it cannot use fails before the GPU runs the frame, not after,
+    # on every retry (review of #361).
+    rectify_prediction(float(k[0, 2]), float(k[1, 2]), k, dist)
+
     image = LinearRawImage(raw_path)
     height, width = image.data.shape[:2]
     detector = _get_detector()
@@ -175,12 +182,7 @@ def _predict_from_raw(
     if x is not None and y is not None:
         if math.isfinite(x) and math.isfinite(y):
             color, margin = classify_laser_color(image.data, x, y)
-            x, y = rectify_prediction(
-                x,
-                y,
-                np.array(camera_matrix, dtype=float),
-                np.array(distortion_coefficients, dtype=float),
-            )
+            x, y = rectify_prediction(x, y, k, dist)
         else:
             _log.warning("the detector returned a non-finite dot (%s, %s)", x, y)
             x = y = None
