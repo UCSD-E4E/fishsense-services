@@ -249,7 +249,7 @@ AUTOMATIC_RESULTS_MAX_FAILURES = 3
 AUTOMATIC_FRAME_MAX_FAILURES = 3
 
 #: The steps a failure is recorded against (0040's check).
-AUTOMATIC_RESULTS_STEPS = ("frames", "calibration", "lengths", "species")
+AUTOMATIC_RESULTS_STEPS = ("frames", "keypoints", "calibration", "lengths", "species")
 
 
 #: The dive failed as often as the cohort allows (0040).
