@@ -76,3 +76,6 @@ class SlatePose(BaseModel):
     #: The direction of the page's top in the image (v23), degrees, 0 = up,
     #: clockwise positive: the orientation in the world.
     page_up_deg: Optional[float] = None
+    #: The dot on the rigid board's plane, fitted to SAM's mask (v24; camera
+    #: space, m): a range no orientation of the page decides.
+    board_point: Optional[List[float]] = None
