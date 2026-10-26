@@ -105,6 +105,7 @@ __all__ = [
     "slate_label_studio_projects",
     "slate_populate_candidates",
     "slate_preprocess_cohort",
+    "slate_preprocess_frame",
     "slate_preprocess_inputs",
     "slate_preprocess_work",
     "slate_template",
@@ -302,16 +303,24 @@ def slate_preprocess_work(marker: str, *, detector: bool = False) -> str:
     The selector and resolver pass it; 0029 froze the predicate without it,
     so `dive_pipeline_status` does not see those frames until a migration
     recreates its function."""
+    return f"""EXISTS (
+        SELECT 1 FROM captures c
+        WHERE {slate_preprocess_frame(marker, detector=detector)}
+    )"""
+
+
+def slate_preprocess_frame(marker: str, *, detector: bool = False) -> str:
+    """Capture `c` is stage-9 work in dive `d`: canonical, and marked (or
+    detected) and unlabeled, or flagged for a redraw. `slate_preprocess_work`
+    asks whether one exists; `assign-slate-templates` (2026-10-26) counts
+    them, to say how much Label Studio work a template would queue."""
     unlabeled = (
         _slate_frame_and_unlabeled(marker)
         if detector
         else _marked_and_unlabeled(marker)
     )
-    return f"""EXISTS (
-        SELECT 1 FROM captures c
-        WHERE {_CANONICAL_OF_MISSION}
-          AND (({unlabeled}) OR {_FLAGGED})
-    )"""
+    return f"""{_CANONICAL_OF_MISSION}
+          AND (({unlabeled}) OR {_FLAGGED})"""
 
 
 def slate_preprocess_cohort(marker: str, *, detector: bool = False) -> str:
