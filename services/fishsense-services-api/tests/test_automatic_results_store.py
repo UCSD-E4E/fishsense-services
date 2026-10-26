@@ -955,6 +955,89 @@ async def test_a_calibration_fitted_through_a_zoomed_frame_is_owed_again(
     assert await _next(app_engine, lab) == mission_id
 
 
+async def test_a_frame_after_the_laser_moved_is_not_measured_nor_owed(
+    owner_engine, app_engine
+):
+    """The partial run (owner, 2026-10-25): the part of the dive before the
+    move is measured; the rest is refused, and never holds the mission."""
+    from _slate_calibration_seed import beam_moved_after
+
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    first, moved = [await capture(owner_engine, lab, mission_id) for _ in range(2)]
+    await _predict(app_engine, lab, mission_id, _predicted(first), _predicted(moved),
+                   rendered=False)  # fmt: skip
+    await _in(app_engine, lab, persist_automatic_calibration, mission_id, _label_free())
+    await beam_moved_after(owner_engine, first)
+
+    inputs = await _measure_inputs(app_engine, lab, mission_id)
+    assert [m.capture_id for m in inputs.captures] == [first]
+
+    await _in(app_engine, lab, persist_automatic_measurements, mission_id, [
+        AutomaticMeasurementRow(
+            capture_id=first,
+            automatic_head_tail_prediction_id=inputs.captures[0].automatic_head_tail_prediction_id,
+            calibration_source=inputs.calibration.source,
+            automatic_laser_calibration_id=inputs.calibration.automatic_laser_calibration_id,
+            laser_calibration_id=inputs.calibration.laser_calibration_id,
+            camera_calibration_id=inputs.camera_calibration_id,
+            length_m=0.42, depth_m=2.1, algorithm="laser_depth_fronto_parallel",
+            algorithm_version="1", core_version="4.1.0",
+        )
+    ])  # fmt: skip
+    assert await _next(app_engine, lab) is None  # the moved frame owes nothing
+
+
+async def test_a_frame_after_the_laser_moved_is_no_calibration_dot(
+    owner_engine, app_engine
+):
+    from _slate_calibration_seed import beam_moved_after
+
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    await _camera(app_engine, lab, mission_id)
+    frames = [await capture(owner_engine, lab, mission_id) for _ in range(2)]
+    await _predict(app_engine, lab, mission_id, *[
+        AutomaticHeadTailRow(capture_id=f, status="slate_frame", laser_x=10.0 + i,
+                             laser_y=20.0, slate_probability=0.9, predictor_version=1)
+        for i, f in enumerate(frames)
+    ])  # fmt: skip
+    await beam_moved_after(owner_engine, frames[0])
+
+    async def detector(conn, tenant_id, d):
+        return [(f, 0.9) for f in frames]
+
+    inputs = await _in(app_engine, lab, automatic_calibration_inputs, mission_id,
+                       slate_frames=detector)  # fmt: skip
+
+    assert [c.capture_id for c in inputs.candidates] == [frames[0]]
+    assert [x for x, _ in inputs.line_dots] == [10.0]
+
+
+async def test_a_calibration_fitted_across_the_move_is_owed_again(
+    owner_engine, app_engine
+):
+    """Fitted before the move was recorded, through frames of both aims: refit
+    on the first part."""
+    from _slate_calibration_seed import beam_moved_after
+
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    first, moved = [await capture(owner_engine, lab, mission_id) for _ in range(2)]
+    await _predict(app_engine, lab, mission_id, *[
+        AutomaticHeadTailRow(capture_id=c, status="slate_frame", laser_x=10.0,
+                             laser_y=20.0, slate_probability=0.9, predictor_version=1)
+        for c in (first, moved)
+    ])  # fmt: skip
+    await _in(app_engine, lab, persist_automatic_calibration, mission_id,
+              _label_free(capture_ids=[first, moved]))  # fmt: skip
+    assert await _next(app_engine, lab) is None
+
+    await beam_moved_after(owner_engine, first)
+
+    assert await _next(app_engine, lab) == mission_id
+
+
 # -- measurements: current, stale, never the human path's -------------------------
 
 

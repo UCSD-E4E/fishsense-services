@@ -171,8 +171,8 @@ async def test_an_apply_that_writes_other_than_it_listed_writes_nothing(
     _, c = await _measured(owner_engine, app_engine, lab)
     await zoom(owner_engine, c, 18.0)
 
-    async def short(conn, ids):
-        return await withdraw_zoomed_automatic_lengths(conn, ids) - 1
+    async def short(conn, ids, *reason):
+        return await withdraw_zoomed_automatic_lengths(conn, ids, *reason) - 1
 
     monkeypatch.setattr(cli, "withdraw_zoomed_automatic_lengths", short)
 

@@ -359,3 +359,19 @@ async def zoom(engine, capture_id, focal_length_mm: float = 18.0) -> None:
             text("UPDATE captures SET focal_length_mm = :f WHERE id = :c"),
             {"f": focal_length_mm, "c": capture_id},
         )
+
+
+async def beam_moved_after(engine, capture_id) -> None:
+    """The laser moved after this frame (0073): its mission's frames captured
+    later belong to another aim."""
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("""
+                INSERT INTO mission_beam_moves (tenant_id, mission_id, moved_after,
+                                                moved_before, detector_version)
+                SELECT tenant_id, mission_id, captured_at,
+                       captured_at + interval '1 second', 'test'
+                FROM captures WHERE id = :c
+                """),
+            {"c": capture_id},
+        )

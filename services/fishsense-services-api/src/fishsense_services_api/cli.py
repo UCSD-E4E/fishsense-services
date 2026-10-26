@@ -32,6 +32,14 @@ fishsense-services-api withdraw-zoomed-lengths [--apply]
                                     # dry run: the automatic lengths on frames
                                     # shot zoomed in (0070); --apply appends a
                                     # `zoomed` refusal after each, as the owner
+fishsense-services-api detect-beam-moves [--apply]
+                                    # dry run: the missions whose laser moved
+                                    # mid-dive (0073); --apply records them, as
+                                    # the owner
+fishsense-services-api withdraw-moved-lengths [--apply]
+                                    # dry run: the automatic lengths after a
+                                    # recorded move; --apply appends a
+                                    # `beam_moved` refusal after each
 fishsense-services-api system-admin --user <sub> --grant [--apply]
                                     # dry run: may open any tenant, read-only
                                     # until they unlock it (0056)
@@ -60,6 +68,12 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from fishsense_services_api import dev_seed
+from fishsense_services_api.beam_moves import (
+    current_moves,
+    detect_beam_move,
+    mission_dots,
+    record_beam_move,
+)
 from fishsense_services_api.zoom_gate import (
     withdraw_zoomed_automatic_lengths,
     zoomed_automatic_lengths,
@@ -240,6 +254,18 @@ def build_parser() -> argparse.ArgumentParser:
         "appending a refusal after each; a dry run by default",
     )
     withdraw.add_argument("--apply", action="store_true", help="write it")
+    detect = commands.add_parser(
+        "detect-beam-moves",
+        help="find the missions whose laser moved mid-dive (0073) and record "
+        "each new move; a dry run by default",
+    )
+    detect.add_argument("--apply", action="store_true", help="record them")
+    moved = commands.add_parser(
+        "withdraw-moved-lengths",
+        help="withdraw the automatic lengths on frames after a recorded laser "
+        "move (0073), appending a refusal after each; a dry run by default",
+    )
+    moved.add_argument("--apply", action="store_true", help="write it")
     backfill = commands.add_parser(
         "backfill-mission-facts",
         help="plan (and with --apply, write) the port, deployment and purpose of "
@@ -335,7 +361,11 @@ async def main(argv: Sequence[str]) -> int:
     if args.command == "serve-tenants":
         return await _serve_tenants(args)
     if args.command == "withdraw-zoomed-lengths":
-        return await _withdraw_zoomed_lengths(args)
+        return await _withdraw_lengths(args, "zoomed", "on zoomed frames")
+    if args.command == "withdraw-moved-lengths":
+        return await _withdraw_lengths(args, "beam_moved", "after a laser move")
+    if args.command == "detect-beam-moves":
+        return await _detect_beam_moves(args)
     if args.command == "public-totals":
         return await _public_totals(args)
     if args.command == "system-admin":
@@ -691,7 +721,50 @@ async def _serve_tenants(args: argparse.Namespace) -> int:
         await engine.dispose()
 
 
-async def _withdraw_zoomed_lengths(args: argparse.Namespace) -> int:
+async def _detect_beam_moves(args: argparse.Namespace) -> int:
+    """Dry run unless --apply; the apply records exactly the moves listed."""
+    settings = _settings(MigrationSettings)
+    if settings is None:
+        return 2
+    engine = create_async_engine(settings.migration_database_url.get_secret_value())
+    try:
+        async with engine.begin() as conn:
+            recorded = await current_moves(conn)
+            found = []
+            for m in await mission_dots(conn):
+                move = detect_beam_move(m.dots)
+                if move is None:
+                    continue
+                if recorded.get(m.mission_id) == (
+                    move.moved_after,
+                    move.detector_version,
+                ):
+                    continue
+                found.append((m, move))
+            if not found:
+                print("no new move: nothing to record")
+                return 0
+            verb = (
+                "Recording" if args.apply else "DRY RUN: nothing written. Would record"
+            )
+            print(f"{verb} {len(found)} move(s):")
+            for m, move in found:
+                print(f"  mission {m.number}: after {move.moved_after.isoformat()} "
+                      f"before {move.moved_before.isoformat()}  dots "
+                      f"{move.dots_before}+{move.dots_after}, gain {move.gain}, "
+                      f"{move.angle_deg:.2f} deg, {move.apart_px:.0f} px apart")  # fmt: skip
+            if not args.apply:
+                print("\nto record them: detect-beam-moves --apply")
+                return 0
+            for m, move in found:
+                await record_beam_move(conn, m.tenant_id, m.mission_id, move)
+        print(f"recorded {len(found)}")
+        return 0
+    finally:
+        await engine.dispose()
+
+
+async def _withdraw_lengths(args: argparse.Namespace, reason: str, where: str) -> int:
     """Dry run unless --apply; the apply writes exactly the lengths listed."""
     settings = _settings(MigrationSettings)
     if settings is None:
@@ -699,26 +772,27 @@ async def _withdraw_zoomed_lengths(args: argparse.Namespace) -> int:
     engine = create_async_engine(settings.migration_database_url.get_secret_value())
     try:
         async with engine.begin() as conn:
-            listed = await zoomed_automatic_lengths(conn)
+            listed = await zoomed_automatic_lengths(conn, reason)
             if not listed:
-                print("no automatic length is on a zoomed frame: nothing to withdraw")
+                print(f"no automatic length {where}: nothing to withdraw")
                 return 0
             missions = Counter(z.mission_id for z in listed)
-            focal = Counter(round(z.focal_length_mm, 2) for z in listed)
             verb = (
                 "Withdrawing"
                 if args.apply
                 else "DRY RUN: nothing written. Would withdraw"
             )
-            print(f"{verb} {len(listed)} automatic length(s) on zoomed frames "
+            print(f"{verb} {len(listed)} automatic length(s) {where} "
                   f"in {len(missions)} mission(s):")  # fmt: skip
-            print("  by focal length (mm): " + ", ".join(
-                f"{f:g}: {n}" for f, n in sorted(focal.items())))  # fmt: skip
+            if reason == "zoomed":
+                focal = Counter(round(z.focal_length_mm, 2) for z in listed)
+                print("  by focal length (mm): " + ", ".join(
+                    f"{f:g}: {n}" for f, n in sorted(focal.items())))  # fmt: skip
             if not args.apply:
-                print("\nto write it: withdraw-zoomed-lengths --apply")
+                print(f"\nto write it: {args.command} --apply")
                 return 0
             written = await withdraw_zoomed_automatic_lengths(
-                conn, [z.measurement_id for z in listed]
+                conn, [z.measurement_id for z in listed], reason
             )
             if written != len(listed):
                 raise RuntimeError(

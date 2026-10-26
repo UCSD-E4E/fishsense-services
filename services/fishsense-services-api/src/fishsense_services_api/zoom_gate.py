@@ -13,6 +13,10 @@ length's provenance; the length stays in the history. The CLI
 the listed ones -- a row no longer current, or a frame no longer zoomed, is
 left alone, and the CLI writes nothing if that leaves a different count.
 
+The same, for a frame after the laser moved mid-dive (0073, the partial
+run): ``withdraw-moved-lengths`` appends ``beam_moved`` after each current
+automatic length on a (wide) frame after a recorded move.
+
 Run as the owner (it reads every tenant). Human lengths need no withdrawal:
 none was on a zoomed frame (0 of 3,314), and the measurement view now keeps
 them off one.
@@ -26,17 +30,26 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 __all__ = [
+    "REASONS",
     "ZoomedLength",
     "withdraw_zoomed_automatic_lengths",
     "zoomed_automatic_lengths",
 ]
 
-#: A current automatic length on a zoomed frame.
-_ZOOMED = """
+#: The refusal, and the frames it withdraws a current length from: zoomed
+#: (0070), or wide but after the laser moved (0073).
+REASONS = {
+    "zoomed": "NOT focal_length_calibrated(c.focal_length_mm)",
+    "beam_moved": "focal_length_calibrated(c.focal_length_mm) "
+    "AND NOT before_beam_move(c.tenant_id, c.mission_id, c.captured_at)",
+}
+
+
+def _lengths(reason: str) -> str:
+    return f"""
     FROM current_automatic_measurements m
     JOIN captures c ON c.tenant_id = m.tenant_id AND c.id = m.capture_id
-    WHERE m.length_m IS NOT NULL
-      AND NOT focal_length_calibrated(c.focal_length_mm)
+    WHERE m.length_m IS NOT NULL AND {REASONS[reason]}
 """
 
 
@@ -50,19 +63,22 @@ class ZoomedLength:
     focal_length_mm: float
 
 
-async def zoomed_automatic_lengths(conn: AsyncConnection) -> list[ZoomedLength]:
-    """Every current automatic length on a zoomed frame, in every tenant."""
+async def zoomed_automatic_lengths(
+    conn: AsyncConnection, reason: str = "zoomed"
+) -> list[ZoomedLength]:
+    """Every current automatic length on a frame `reason` withdraws from (a
+    zoomed one by default), in every tenant."""
     rows = await conn.execute(text(f"""
             SELECT m.tenant_id, c.mission_id, m.capture_id, m.id, m.length_m,
                    c.focal_length_mm
-            {_ZOOMED}
+            {_lengths(reason)}
             ORDER BY m.tenant_id, c.mission_id, c.number
             """))
     return [ZoomedLength(*r) for r in rows]
 
 
 async def withdraw_zoomed_automatic_lengths(
-    conn: AsyncConnection, measurement_ids: Sequence[uuid.UUID]
+    conn: AsyncConnection, measurement_ids: Sequence[uuid.UUID], reason: str = "zoomed"
 ) -> int:
     """Append a ``zoomed`` refusal after each listed length that is still
     current and still on a zoomed frame. How many were written."""
@@ -76,12 +92,12 @@ async def withdraw_zoomed_automatic_lengths(
             SELECT m.tenant_id, m.producer, m.capture_id,
                    m.automatic_head_tail_prediction_id, m.calibration_source,
                    m.automatic_laser_calibration_id, m.laser_calibration_id,
-                   m.camera_calibration_id, NULL, NULL, 'zoomed', m.algorithm,
+                   m.camera_calibration_id, NULL, NULL, :reason, m.algorithm,
                    m.algorithm_version, m.core_version
-            {_ZOOMED}
+            {_lengths(reason)}
               AND m.id = ANY(CAST(:ids AS uuid[]))
             RETURNING id
             """),
-        {"ids": list(measurement_ids)},
+        {"ids": list(measurement_ids), "reason": reason},
     )
     return len(rows.all())

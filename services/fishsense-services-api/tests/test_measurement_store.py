@@ -402,6 +402,21 @@ async def test_non_canonical_and_low_priority_are_not_selected(
     assert await _next(app_engine, lab) is None
 
 
+async def test_a_frame_after_the_laser_moved_is_not_measured(owner_engine, app_engine):
+    """The partial run (owner, 2026-10-25): the view keeps the part of the
+    dive before the move."""
+    from _slate_calibration_seed import beam_moved_after
+
+    lab = await tenant(owner_engine)
+    mission_id, _ = await calibrated_dive(owner_engine, lab)
+    first = await measurable_capture(owner_engine, lab, mission_id)
+    await measurable_capture(owner_engine, lab, mission_id)
+    await beam_moved_after(owner_engine, first)
+
+    work = await _work(app_engine, lab, mission_id)
+    assert [w.capture_id for w in work.captures] == [first]
+
+
 async def test_a_zoomed_frame_is_not_measured(owner_engine, app_engine):
     """The zoom gate (2026-10-25): the measurement view leaves out a frame shot
     zoomed in -- its depth and length assume intrinsics it was not shot at --
