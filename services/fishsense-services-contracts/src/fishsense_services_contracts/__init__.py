@@ -32,6 +32,11 @@ from fishsense_services_contracts.task_queues import (
     PROCESSOR_TASK_QUEUE,
 )
 
+#: v23 (2026-10-25): calibration v4's slate pose scores the template both
+#: ways up and keeps the loser's correlation and the page's up in the image
+#: (`SlatePose.ecc_other`, `SlatePose.page_up_deg`): on 17 of 445
+#: human-labelled frames v4 chose the wrong way up and nothing it recorded
+#: told them apart (436). Optional, so v22 payloads still parse.
 #: v22 (2026-10-25): an automatic frame's dot carries its colour
 #: (`AutomaticFrameResult.laser_color`/`laser_color_margin`), which the laser
 #: kernel always read and the frames stage dropped. Optional; v21 parses.
@@ -88,7 +93,7 @@ from fishsense_services_contracts.task_queues import (
 #: JSON is unchanged -- each renamed field keeps its old name on the wire
 #: (`renamed.py`) -- so a v6 processor and a v7 orchestrator interoperate; only
 #: the published schema's model names differ.
-CONTRACT_VERSION = 22
+CONTRACT_VERSION = 23
 
 
 def _discover_models() -> tuple[type[BaseModel], ...]:

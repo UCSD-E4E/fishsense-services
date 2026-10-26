@@ -115,6 +115,37 @@ def test_the_pattern_is_aligned_either_way_up(spin, turn):
     assert np.max(np.linalg.norm(got - truth, axis=1)) < 1.5
 
 
+def _aligned(spin, turn):
+    rv, tv = _pose(15.0, spin)
+    img, page, refs, truth, corners = _render(rv, tv)
+    return (
+        pose.align_template_both(img, np.roll(corners, turn, axis=0), page, DPI),
+        refs,
+        truth,
+    )
+
+
+@pytest.mark.parametrize("turn", [0, 1, 2, 3])
+def test_both_orientations_are_scored_and_the_page_s_up_is_recorded(turn):
+    """The 436 failure (2026-10-25): on a near-symmetric pattern v4 chose the
+    wrong way up on 17 of 445 human-labelled frames, and nothing it recorded
+    told them apart. The losing orientation's correlation is the margin a
+    check needs; the page's up, in the image, is the orientation in the
+    world -- whichever corner the board fit starts from (`turn`), and half a
+    turn of the slate moves it half a turn."""
+    upright, refs, truth = _aligned(0.0, turn)
+    spun, _, _ = _aligned(180.0, turn)
+
+    got = cv2.perspectiveTransform(refs.reshape(-1, 1, 2), upright.h).reshape(-1, 2)
+    assert np.max(np.linalg.norm(got - truth, axis=1)) < 1.5
+    for a in (upright, spun):
+        assert a.ecc > pose.ECC_MIN
+        assert a.ecc_other is not None and a.ecc_other < a.ecc - 0.05
+    turned = (spun.page_up_deg - upright.page_up_deg) % 360.0
+    assert abs(turned - 180.0) < 20.0
+    assert abs(upright.page_up_deg - _aligned(0.0, 0)[0].page_up_deg) < 5.0
+
+
 def test_a_blank_board_is_not_aligned_with_confidence():
     rv, tv = _pose(15.0)
     _, page, _, _, corners = _render(rv, tv)
