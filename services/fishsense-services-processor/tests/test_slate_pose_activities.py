@@ -89,6 +89,7 @@ async def test_a_frame_is_posed_and_the_pdf_read_once():
     # The other way up's correlation and the page's up reach the payload (v23).
     assert out[0].ecc_other is not None and out[0].ecc_other < out[0].ecc
     assert out[0].page_up_deg is not None
+    assert out[0].board_point is not None and len(out[0].board_point) == 3
 
 
 async def test_a_render_not_there_is_the_frames_status():

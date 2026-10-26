@@ -60,6 +60,11 @@ def test_a_slate_frame_is_posed_and_its_dot_put_on_the_slate():
     # Both orientations scored, and the page's up recorded (2026-10-25).
     assert out["ecc_other"] < out["ecc"]
     assert -180.0 <= out["page_up_deg"] <= 180.0
+    # The dot on the board's own plane (2026-10-26): the rigid board fitted
+    # to SAM's mask, which no orientation of the page decides -- a second
+    # range for the dot, within 2% of the truth here.
+    board = np.array(out["board_point"])
+    assert abs(board[2] - target[2]) < 0.02 * target[2]
 
 
 def test_the_second_prompt_is_tried_when_the_first_has_no_mask():
