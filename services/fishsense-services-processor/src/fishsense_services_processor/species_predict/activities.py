@@ -30,11 +30,9 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from fishsense_core.models import ModelIntegrityError, ModelUnavailable
-from pydantic import ValidationError
 from temporalio import activity
-from temporalio.exceptions import ApplicationError
 
+from fishsense_services_contracts.refusals import BIOCLIP
 from fishsense_services_contracts.species_prediction import (
     SPECIES_FALLBACK_MODEL_ID,
     SPECIES_FALLBACK_PREDICTOR_VERSION,
@@ -50,21 +48,9 @@ from fishsense_services_processor.species_predict.classifier import (
     is_out_of_memory,
 )
 from fishsense_services_processor.species_predict.predict import predict_species
+from fishsense_services_processor.weights import refuse_unloadable_weights
 
 __all__ = ["SpeciesPredictActivities"]
-
-#: Why BioCLIP's weights cannot load, by what the fetch raised: each its own
-#: Temporal error type. The settings (`ValidationError`) are read on first
-#: use, inside the fetch; `KeyError` is a manifest with no BioCLIP entry.
-_WEIGHTS_FAILURES: tuple[tuple[type[BaseException], str, str], ...] = (
-    (ValidationError, "BioclipSettingsInvalid",
-     "FISHSENSE_BIOCLIP_* or FISHSENSE_MODEL_WEIGHTS_* is missing or invalid"),
-    (ModelIntegrityError, "BioclipWeightsCorrupt",
-     "the weights in model-weights are not the pinned file"),
-    (ModelUnavailable, "BioclipWeightsUnavailable",
-     "the weights are not in model-weights"),
-    (KeyError, "BioclipNotInManifest", "the manifest has no BioCLIP entry"),
-)  # fmt: skip
 
 _TIERS = {
     SPECIES_PRIMARY_MODEL_ID: SPECIES_PREDICTOR_VERSION,
@@ -109,17 +95,14 @@ class SpeciesPredictActivities:
         return self._store
 
     async def _verified_weights(self, model_id: str) -> tuple[Path, str]:
-        try:
+        """The verified weights, or a non-retryable ``Bioclip{kind}`` (the
+        shared mapping since 2026-10-24)."""
+        with refuse_unloadable_weights(
+            BIOCLIP,
+            "BioCLIP",
+            settings="FISHSENSE_BIOCLIP_* or FISHSENSE_MODEL_WEIGHTS_*",
+        ):
             return await self._bioclip_weights(model_id)
-        except tuple(cause for cause, _, _ in _WEIGHTS_FAILURES) as exc:
-            error_type, why = next(
-                (t, w) for cause, t, w in _WEIGHTS_FAILURES if isinstance(exc, cause)
-            )
-            raise ApplicationError(
-                f"BioCLIP's weights cannot load: {why}: {exc}",
-                type=error_type,
-                non_retryable=True,
-            ) from exc
 
     async def _load(self, model_id: str) -> BioclipClassifier:
         directory, weights_id = await self._verified_weights(model_id)

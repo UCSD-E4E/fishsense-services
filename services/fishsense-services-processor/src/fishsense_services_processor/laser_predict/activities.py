@@ -59,6 +59,13 @@ v2 changes:
 * **a non-finite dot is a non-detection.** A NaN passes `is not None`; v1's
   colour code raised on it, and it would otherwise be rectified, gated and
   stored.
+* **weights that cannot load are final** (2026-10-24): settings missing,
+  bytes that aren't the pinned file, an object not in the bucket, or no
+  manifest entry fail non-retryably as ``LaserDetector{kind}``
+  (`weights.refuse_unloadable_weights`). Before, each frame retried the
+  download until its tries ran out -- without limit here, where the
+  workflow sets no retry policy -- and in the automatic frames (whose dot
+  comes from this detector) every frame of the mission was left out for it.
 
 torch, cv2 and the checkpoint are only needed at run time, so
 `fishsense_core.laser`, `fishsense_core.laser_color` (which imports the
@@ -83,11 +90,13 @@ from fishsense_services_contracts.laser import (
     LaserPredictionResult,
 )
 from fishsense_services_contracts.laser_region import point_in_laser_region
+from fishsense_services_contracts.refusals import LASER_DETECTOR
 from fishsense_services_contracts.object_store import ObjectStoreConnection
 from fishsense_services_processor.laser_predict.workflow import (
     PredictLaserImageInput,
 )
 from fishsense_services_processor.object_store import ProcessorObjectStore
+from fishsense_services_processor.weights import refuse_unloadable_weights
 
 __all__ = ["predict_laser_image"]
 
@@ -116,14 +125,17 @@ def _load_detector() -> Any:
 
 
 def _get_detector() -> Any:
-    """The process-wide detector, loaded on first use (double-checked lock)."""
+    """The process-wide detector, loaded on first use (double-checked lock).
+    Weights that cannot load are a non-retryable ``LaserDetector{kind}``,
+    and nothing is cached, so a fixed pod loads on its next try."""
     global _DETECTOR  # pylint: disable=global-statement
     if _DETECTOR is not None:
         return _DETECTOR
     with _DETECTOR_LOCK:
         if _DETECTOR is None:
             _log.info("loading LaserDetector from the model-weights store")
-            _DETECTOR = _load_detector()
+            with refuse_unloadable_weights(LASER_DETECTOR, "the laser detector"):
+                _DETECTOR = _load_detector()
     return _DETECTOR
 
 

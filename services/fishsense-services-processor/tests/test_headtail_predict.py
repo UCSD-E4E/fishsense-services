@@ -25,6 +25,7 @@ the v2 changes:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import sys
 import types
@@ -46,11 +47,13 @@ from fishsense_core.models import (
     builtin_manifest,
 )
 from moto import mock_aws
-from temporalio import activity
+from temporalio import activity, workflow
+from temporalio.client import WorkflowFailureError
+from temporalio.common import RetryPolicy
 from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
-from temporalio.worker import Worker
+from temporalio.worker import Replayer, UnsandboxedWorkflowRunner, Worker
 
 from fishsense_services_contracts.headtail import (
     HEADTAIL_FALLBACK_PREDICTOR_VERSION,
@@ -736,7 +739,7 @@ class TestAWeightsFailureIsFinal:
             (_unset_weights_settings, "Sam3SettingsInvalid"),
             (ModelIntegrityError("sam3/3.1: expected sha256 ..."), "Sam3WeightsCorrupt"),
             (ModelUnavailable("sam3/3.1: not in s3://model-weights"), "Sam3WeightsUnavailable"),
-            (KeyError("sam3"), "Sam3NotInManifest"),
+            (KeyError("unknown model sam3/x for target server; known: ..."), "Sam3NotInManifest"),
         ],
         ids=["settings", "integrity", "unavailable", "manifest"],
     )  # fmt: skip
@@ -809,6 +812,219 @@ async def test_workflow_fans_out_one_prediction_per_image_and_returns_them():
 
     assert [r.capture_id for r in results] == captures
     assert sorted(seen) == sorted((c, timedelta(minutes=15)) for c in captures)
+
+
+async def _run_predict_workflow(
+    stub, workflow_cls=PredictHeadtailImagesWorkflow, runner=None, images=None
+):
+    """Images (one by default) through the workflow; the client's error, or
+    its history."""
+    payload = PredictHeadtailImagesInput(
+        tenant_id=uuid.uuid4(), mission_id=uuid.uuid4(), images=images or [_payload()]
+    )
+    async with await WorkflowEnvironment.start_time_skipping(
+        data_converter=DATA_CONVERTER
+    ) as env:
+        async with Worker(env.client, task_queue="t-ht", workflows=[workflow_cls],
+                          activities=[stub],
+                          **({"workflow_runner": runner} if runner else {})):  # fmt: skip
+            handle = await env.client.start_workflow(
+                "PredictHeadtailImagesWorkflow", payload, id=f"t-ht-{uuid.uuid4()}",
+                task_queue="t-ht", execution_timeout=timedelta(hours=2),
+            )  # fmt: skip
+            try:
+                await handle.result()
+            except WorkflowFailureError as exc:
+                return exc, await handle.fetch_history()
+            return None, await handle.fetch_history()
+
+
+async def test_a_failing_image_is_tried_a_bounded_number_of_times():
+    """2026-10-24: the workflow set no retry policy, so an image no worker
+    could finish (a crash, an OOM) retried without limit -- every 100 s at
+    Temporal's default ceiling -- until the parent's child timeout, holding
+    the GPU queue. It gets `IMAGE_ATTEMPTS` tries, as the processor's other
+    per-frame workflows give theirs."""
+    from fishsense_services_processor.headtail_predict.workflow import IMAGE_ATTEMPTS
+
+    attempts = []
+
+    @activity.defn(name="predict_headtail_image")
+    async def stub(image: PredictHeadtailImage) -> HeadtailPredictionResult:
+        attempts.append(activity.info().attempt)
+        raise RuntimeError("CUDA out of memory")
+
+    error, _ = await _run_predict_workflow(stub)
+    assert error is None, "a failing image is left out, not the child failed"
+    assert attempts == list(range(1, IMAGE_ATTEMPTS + 1))
+
+
+async def test_an_image_that_fails_its_tries_costs_only_itself():
+    """Review of #364: failing the child threw away every other image's
+    prediction, and one image that always fails failed its dive every hour.
+    Left out, it has no current prediction, so the parent selects it again
+    next run; the others are returned to be persisted."""
+    good, bad = _payload(capture_id=uuid.uuid4()), _payload(capture_id=uuid.uuid4())
+
+    @activity.defn(name="predict_headtail_image")
+    async def stub(image: PredictHeadtailImage) -> HeadtailPredictionResult:
+        if image.capture_id == bad.capture_id:
+            raise RuntimeError("CUDA out of memory")
+        return HeadtailPredictionResult(capture_id=image.capture_id, status="predicted")
+
+    payload = PredictHeadtailImagesInput(
+        tenant_id=uuid.uuid4(), mission_id=uuid.uuid4(), images=[good, bad]
+    )
+    async with await WorkflowEnvironment.start_time_skipping(
+        data_converter=DATA_CONVERTER
+    ) as env:
+        async with Worker(env.client, task_queue="t-ht2",
+                          workflows=[PredictHeadtailImagesWorkflow], activities=[stub]):  # fmt: skip
+            results = await env.client.execute_workflow(
+                PredictHeadtailImagesWorkflow.run, payload, id=f"t-ht2-{uuid.uuid4()}",
+                task_queue="t-ht2", result_type=List[HeadtailPredictionResult],
+            )  # fmt: skip
+
+    assert [r.capture_id for r in results] == [good.capture_id]
+
+
+@pytest.mark.parametrize(
+    "error_type", ["NoGpuForSam3", "Sam3WeightsCorrupt", "Sam3SettingsInvalid"]
+)
+async def test_a_worker_refusal_is_never_retried(error_type):
+    """Even raised retryable (an older worker, a slip), a refusal is the
+    worker's: the policy names every one non-retryable."""
+    attempts = []
+
+    @activity.defn(name="predict_headtail_image")
+    async def stub(image: PredictHeadtailImage) -> HeadtailPredictionResult:
+        attempts.append(1)
+        raise ApplicationError("refused", type=error_type)
+
+    error, _ = await _run_predict_workflow(stub)
+    assert error.cause.cause.type == error_type
+    assert len(attempts) == 1
+
+
+@workflow.defn(name="PredictHeadtailImagesWorkflow")
+class _BeforeTheRetryPolicy:  # pylint: disable=too-few-public-methods
+    """The workflow as it was before 2026-10-24 (no retry policy), under its
+    registered name: what a child in flight across the deploy ran."""
+
+    @workflow.run
+    async def run(self, payload: PredictHeadtailImagesInput) -> list:
+        return list(
+            await asyncio.gather(
+                *[
+                    workflow.execute_activity(
+                        "predict_headtail_image",
+                        image,
+                        start_to_close_timeout=timedelta(minutes=15),
+                        result_type=HeadtailPredictionResult,
+                    )
+                    for image in payload.images
+                ]
+            )
+        )
+
+
+@workflow.defn(name="PredictHeadtailImagesWorkflow")
+class _FailFast:  # pylint: disable=too-few-public-methods
+    """#364 before its review: a bounded retry, and an image that fails its
+    tries fails the child."""
+
+    @workflow.run
+    async def run(self, payload: PredictHeadtailImagesInput) -> list:
+        return list(
+            await asyncio.gather(
+                *[
+                    workflow.execute_activity(
+                        "predict_headtail_image",
+                        image,
+                        start_to_close_timeout=timedelta(minutes=15),
+                        retry_policy=RetryPolicy(
+                            initial_interval=timedelta(seconds=10),
+                            maximum_attempts=3,
+                        ),
+                        result_type=HeadtailPredictionResult,
+                    )
+                    for image in payload.images
+                ]
+            )
+        )
+
+
+async def test_a_child_that_failed_fast_replays_as_it_ran():
+    """The leave-out is behind `workflow.patched`: a history in which an
+    image failed its tries and failed the child -- under the code before --
+    replays under the new code without a determinism error, rather than
+    being completed as if the image had been left out."""
+
+    @activity.defn(name="predict_headtail_image")
+    async def stub(image: PredictHeadtailImage) -> HeadtailPredictionResult:
+        raise RuntimeError("CUDA out of memory")
+
+    error, history = await _run_predict_workflow(
+        stub, _FailFast, runner=UnsandboxedWorkflowRunner()
+    )
+    assert error is not None
+
+    replayed = await Replayer(
+        workflows=[PredictHeadtailImagesWorkflow], data_converter=DATA_CONVERTER
+    ).replay_workflow(history, raise_on_replay_failure=False)
+    assert replayed.replay_failure is None
+
+
+@workflow.defn(name="PredictHeadtailImagesWorkflow")
+class _AnotherActivity:  # pylint: disable=too-few-public-methods
+    """The replay control: a real change (another activity type)."""
+
+    @workflow.run
+    async def run(self, payload: PredictHeadtailImagesInput) -> list:
+        return [
+            await workflow.execute_activity(
+                "another_activity",
+                image,
+                start_to_close_timeout=timedelta(minutes=15),
+                result_type=HeadtailPredictionResult,
+            )
+            for image in payload.images
+        ]
+
+
+async def test_a_child_started_before_the_retry_policy_replays():
+    """Replay safety, measured rather than assumed: a history written by the
+    workflow without a retry policy -- its image failing once, then passing
+    -- replays under the new one. Temporal's determinism check matches a
+    scheduled activity by its id and type, not its options, so the policy
+    is not part of it. The control: the same history under a workflow that
+    schedules another activity type is caught as non-deterministic, so the
+    replayer would see a real change."""
+    tries = []
+
+    @activity.defn(name="predict_headtail_image")
+    async def stub(image: PredictHeadtailImage) -> HeadtailPredictionResult:
+        tries.append(1)
+        if len(tries) == 1:
+            raise RuntimeError("transient")
+        return HeadtailPredictionResult(capture_id=image.capture_id, status="predicted")
+
+    error, history = await _run_predict_workflow(
+        stub, _BeforeTheRetryPolicy, runner=UnsandboxedWorkflowRunner()
+    )
+    assert error is None and len(tries) == 2
+
+    replayed = await Replayer(
+        workflows=[PredictHeadtailImagesWorkflow], data_converter=DATA_CONVERTER
+    ).replay_workflow(history, raise_on_replay_failure=False)
+    assert replayed.replay_failure is None
+
+    control = await Replayer(
+        workflows=[_AnotherActivity],
+        data_converter=DATA_CONVERTER,
+        workflow_runner=UnsandboxedWorkflowRunner(),
+    ).replay_workflow(history, raise_on_replay_failure=False)
+    assert control.replay_failure is not None
 
 
 # -- the stored mask (contract 12, 2026-10-21) ------------------------------------

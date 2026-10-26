@@ -33,11 +33,10 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
-from fishsense_core.models import ModelIntegrityError, ModelUnavailable
-from pydantic import ValidationError
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+from fishsense_services_contracts.refusals import SLATE_DETECTOR
 from fishsense_services_contracts.slate_presence import (
     SLATE_DETECTOR_MODEL_NAME,
     SLATE_DETECTOR_VERSION,
@@ -49,6 +48,7 @@ from fishsense_services_processor.slate_detect.frame import (
     render_frame,
     render_settings,
 )
+from fishsense_services_processor.weights import refuse_unloadable_weights
 
 __all__ = ["CheckpointInvalid", "SlateDetectActivities"]
 
@@ -57,20 +57,6 @@ class CheckpointInvalid(ValueError):
     """The verified file is not a checkpoint this stage can load. The model
     module's own error is translated to this one, so the activity can name it
     without importing torch."""
-
-
-#: Why the weights cannot load, by what the fetch raised: each its own
-#: Temporal error type. The settings (`ValidationError`) are read on first
-#: use, inside the fetch; `KeyError` is a manifest with no entry.
-_WEIGHTS_FAILURES: tuple[tuple[type[BaseException], str, str], ...] = (
-    (ValidationError, "SlateDetectorSettingsInvalid",
-     "FISHSENSE_SLATE_DETECTOR_* or FISHSENSE_MODEL_WEIGHTS_* is missing or invalid"),
-    (ModelIntegrityError, "SlateDetectorWeightsCorrupt",
-     "the weights in model-weights are not the pinned file"),
-    (ModelUnavailable, "SlateDetectorWeightsUnavailable",
-     "the weights are not in model-weights"),
-    (KeyError, "SlateDetectorNotInManifest", "the manifest has no slate-detector entry"),
-)  # fmt: skip
 
 
 def _installed(package: str) -> str | None:
@@ -126,17 +112,14 @@ class SlateDetectActivities:
         return self._store
 
     async def _verified_weights(self) -> tuple[Path, str]:
-        try:
+        """The verified weights, or a non-retryable ``SlateDetector{kind}``
+        (the shared mapping since 2026-10-24)."""
+        with refuse_unloadable_weights(
+            SLATE_DETECTOR,
+            "the slate detector",
+            settings="FISHSENSE_SLATE_DETECTOR_* or FISHSENSE_MODEL_WEIGHTS_*",
+        ):
             return await self._weights()
-        except tuple(cause for cause, _, _ in _WEIGHTS_FAILURES) as exc:
-            error_type, why = next(
-                (t, w) for cause, t, w in _WEIGHTS_FAILURES if isinstance(exc, cause)
-            )
-            raise ApplicationError(
-                f"the slate detector's weights cannot load: {why}: {exc}",
-                type=error_type,
-                non_retryable=True,
-            ) from exc
 
     async def _loaded(self) -> Any:
         async with self._lock:
