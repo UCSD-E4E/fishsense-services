@@ -107,6 +107,14 @@ async def _backlog_mission(owner_engine, lab, *, priority="low", **kwargs):
     )
 
 
+async def _next_without_species(app_engine, lab):
+    """The cohort's next dive with species off: a rendered fish owes species
+    too, which these tests are not about."""
+    candidate = await _in(app_engine, lab, next_mission_for_automatic_results,
+                          **VERSIONS, species=False)  # fmt: skip
+    return None if candidate is None else candidate.mission_id
+
+
 async def _next(app_engine, lab):
     candidate = await _in(
         app_engine, lab, next_mission_for_automatic_results, **VERSIONS
@@ -136,9 +144,11 @@ async def _camera(app_engine, lab, mission_id) -> uuid.UUID:
 _NO_RENDER = {"raw_unavailable", "decode_failed"}
 
 
-async def _predict(app_engine, lab, mission_id, *rows, rendered=True):
+async def _predict(app_engine, lab, mission_id, *rows, rendered=True, keypoints=True):
     """Append rows; `rendered`, each frame with a raw names render 1 under the
-    mission's camera, as the frames stage writes them (0049)."""
+    mission's camera, as the frames stage writes them (0049). `keypoints`:
+    each rendered fish also gets SimCC keypoints that agree with its SAM rule
+    (head/tail v5), so it is ready to measure as v5 leaves a frame."""
     if rendered:
         camera = await _camera(app_engine, lab, mission_id)
         rows = [
@@ -146,9 +156,30 @@ async def _predict(app_engine, lab, mission_id, *rows, rendered=True):
             else replace(r, jpeg_render_version=1, jpeg_camera_calibration_id=camera)
             for r in rows
         ]  # fmt: skip
-    return await _in(
+    written = await _in(
         app_engine, lab, persist_automatic_head_tails, mission_id, list(rows)
     )
+    if keypoints:
+        from fishsense_services_api.automatic_results_store import (
+            AutomaticKeypointRow,
+            automatic_keypoint_inputs,
+            persist_automatic_keypoints,
+        )
+
+        mine = {r.capture_id for r in rows}
+        heads = {r.capture_id: r for r in rows}
+        owed = [w for w in await _in(app_engine, lab, automatic_keypoint_inputs,
+                                     mission_id) if w.capture_id in mine]  # fmt: skip
+        await _in(app_engine, lab, persist_automatic_keypoints, mission_id, [
+            AutomaticKeypointRow(
+                prediction_id=w.prediction_id, capture_id=w.capture_id,
+                status="predicted",
+                head=[heads[w.capture_id].head_x, heads[w.capture_id].head_y],
+                tail=[heads[w.capture_id].tail_x, heads[w.capture_id].tail_y],
+                confidence=0.5, checkpoint="simcc@test")
+            for w in owed
+        ])  # fmt: skip
+    return written
 
 
 def _label_free(**extra) -> AutomaticCalibrationRow:
@@ -883,21 +914,21 @@ async def test_a_zoomed_frame_does_not_hold_its_mission_in_the_cohort(
     owner_engine, app_engine
 ):
     """Never measured, so never a length outstanding -- else its mission is
-    picked every hour (as a detector slate would be). Unrendered, so it owes
-    no species either: species does not depend on the zoom, and stays owed."""
+    picked every hour (as a detector slate would be). Species is off here:
+    it does not depend on the zoom, and stays owed."""
     from _slate_calibration_seed import zoom
 
     lab = await tenant(owner_engine)
     mission_id = await _backlog_mission(owner_engine, lab)
     c = await capture(owner_engine, lab, mission_id)
-    await _predict(app_engine, lab, mission_id, _predicted(c), rendered=False)
+    await _predict(app_engine, lab, mission_id, _predicted(c))
     # After the prediction, so the calibration is current.
     await _in(app_engine, lab, persist_automatic_calibration, mission_id, _label_free())
-    assert await _next(app_engine, lab) == mission_id  # its length is owed
+    assert await _next_without_species(app_engine, lab) == mission_id  # length owed
 
     await zoom(owner_engine, c, 14.62)
 
-    assert await _next(app_engine, lab) is None
+    assert await _next_without_species(app_engine, lab) is None
 
 
 async def test_a_zoomed_frame_is_no_calibration_dot(owner_engine, app_engine):
@@ -965,8 +996,7 @@ async def test_a_frame_after_the_laser_moved_is_not_measured_nor_owed(
     lab = await tenant(owner_engine)
     mission_id = await _backlog_mission(owner_engine, lab)
     first, moved = [await capture(owner_engine, lab, mission_id) for _ in range(2)]
-    await _predict(app_engine, lab, mission_id, _predicted(first), _predicted(moved),
-                   rendered=False)  # fmt: skip
+    await _predict(app_engine, lab, mission_id, _predicted(first), _predicted(moved))
     await _in(app_engine, lab, persist_automatic_calibration, mission_id, _label_free())
     await beam_moved_after(owner_engine, first)
 
@@ -977,6 +1007,7 @@ async def test_a_frame_after_the_laser_moved_is_not_measured_nor_owed(
         AutomaticMeasurementRow(
             capture_id=first,
             automatic_head_tail_prediction_id=inputs.captures[0].automatic_head_tail_prediction_id,
+            automatic_keypoint_prediction_id=inputs.captures[0].automatic_keypoint_prediction_id,
             calibration_source=inputs.calibration.source,
             automatic_laser_calibration_id=inputs.calibration.automatic_laser_calibration_id,
             laser_calibration_id=inputs.calibration.laser_calibration_id,
@@ -985,7 +1016,9 @@ async def test_a_frame_after_the_laser_moved_is_not_measured_nor_owed(
             algorithm_version="1", core_version="4.1.0",
         )
     ])  # fmt: skip
-    assert await _next(app_engine, lab) is None  # the moved frame owes nothing
+    assert (
+        await _next_without_species(app_engine, lab) is None
+    )  # the moved frame owes nothing
 
 
 async def test_a_frame_after_the_laser_moved_is_no_calibration_dot(
@@ -1054,6 +1087,7 @@ async def _measured(owner_engine, app_engine, lab, **predicted):
         AutomaticMeasurementRow(
             capture_id=c,
             automatic_head_tail_prediction_id=job.automatic_head_tail_prediction_id,
+            automatic_keypoint_prediction_id=job.automatic_keypoint_prediction_id,
             calibration_source=inputs.calibration.source,
             automatic_laser_calibration_id=inputs.calibration.automatic_laser_calibration_id,
             laser_calibration_id=inputs.calibration.laser_calibration_id,
@@ -1095,6 +1129,7 @@ async def test_a_low_parallax_refusal_is_recorded_and_drains_the_work(
         AutomaticMeasurementRow(
             capture_id=c,
             automatic_head_tail_prediction_id=job.automatic_head_tail_prediction_id,
+            automatic_keypoint_prediction_id=job.automatic_keypoint_prediction_id,
             calibration_source=inputs.calibration.source,
             automatic_laser_calibration_id=inputs.calibration.automatic_laser_calibration_id,
             laser_calibration_id=inputs.calibration.laser_calibration_id,

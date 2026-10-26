@@ -776,3 +776,89 @@ async def test_the_dots_colour_reaches_the_row():
     await _run(_acts(catalog).persist_automatic_frames, TARGET, [result])
 
     assert [(r.laser_color, r.laser_color_margin) for r in written] == [("red", 0.4)]
+
+
+# -- head/tail v5: keypoints ----------------------------------------------------------
+
+
+async def test_keypoint_frames_carry_their_render_and_sam_box():
+    """SimCC's crop is cut from the SAM box, in the pixels of the render the
+    prediction was made on (the replay's payload, #329)."""
+    from fishsense_services_api.automatic_results_store import AutomaticKeypointFrame
+
+    a, ht = uuid.uuid4(), uuid.uuid4()
+    catalog = _Catalog(automatic_keypoint_inputs=[
+        AutomaticKeypointFrame(a, "cc" * 16, False, ht, [1, 2, 30, 40],
+                               AUTOMATIC_JPEG_RENDER_VERSION, CAMERA)])  # fmt: skip
+
+    got = await _run(_acts(catalog, renders=_Renders(_render(a, "cc" * 16)))
+                     .resolve_automatic_keypoint_inputs, TARGET)  # fmt: skip
+
+    (f,) = got.frames
+    assert (f.prediction_id, f.capture_id, f.mask_bbox) == (ht, a, [1, 2, 30, 40])
+    assert f.render_url == _url("cc" * 16)
+
+
+async def test_simccs_answers_are_persisted_as_they_came():
+    from fishsense_services_contracts.headtail_keypoints import KeypointResult
+
+    catalog = _Catalog(persist_automatic_keypoints=lambda t, m, rows: len(rows))
+    ht, c = uuid.uuid4(), uuid.uuid4()
+
+    n = await _run(_acts(catalog).persist_automatic_keypoints, TARGET, [
+        KeypointResult(prediction_id=ht, capture_id=c, status="predicted",
+                       head=[1.0, 2.0], tail=[3.0, 4.0], confidence=0.3,
+                       crop=[0, 0, 9, 9], checkpoint="simcc@e12")])  # fmt: skip
+
+    _, (_, _, (row,)), _ = catalog.calls[-1]
+    assert n == 1
+    assert (row.prediction_id, row.capture_id, row.status) == (ht, c, "predicted")
+    assert (row.head, row.tail, row.checkpoint) == ([1.0, 2.0], [3.0, 4.0], "simcc@e12")
+
+
+async def test_a_length_records_the_keypoints_it_was_measured_from_and_a_review_its_refusal():
+    from fishsense_services_api.automatic_results_store import AutomaticMeasureRefusal
+
+    cal = MeasurementCalibration("label_free", uuid.uuid4(), None, [0.1, 0, 0],
+                                 [0, 0, 1])  # fmt: skip
+    model, fish, review = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    kp, kp_review = uuid.uuid4(), uuid.uuid4()
+    catalog = _Catalog(
+        automatic_measure_inputs=AutomaticMeasureInputs(
+            cal, CAMERA, [[1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0]],
+            [AutomaticMeasureCapture(model, uuid.uuid4(), 1, 2, 3, 4, 5, 6),
+             AutomaticMeasureCapture(fish, uuid.uuid4(), 1, 2, 3, 4, 5, 6, kp)],
+            [AutomaticMeasureRefusal(review, uuid.uuid4(), kp_review,
+                                     "keypoints_disagree")]),
+        persist_automatic_measurements=lambda t, m, rows: len(rows),
+    )  # fmt: skip
+    acts = _acts(catalog)
+    plan = await _run(acts.resolve_automatic_measure_inputs, TARGET)
+    assert len(plan.payload.captures) == 2 and len(plan.refusals) == 1
+
+    from fishsense_services_contracts.automatic_results import (
+        AutomaticLength,
+        MeasureAutomaticResult,
+    )
+
+    result = MeasureAutomaticResult(
+        mission_id=MISSION, algorithm="a", algorithm_version="2", core_version="4.3.2",
+        lengths=[AutomaticLength(capture_id=c.capture_id,
+                                 automatic_head_tail_prediction_id=c.automatic_head_tail_prediction_id,
+                                 length_m=0.3, depth_m=2.0)
+                 for c in plan.payload.captures])  # fmt: skip
+    await _run(acts.persist_automatic_measurements, TARGET, plan, result)
+    lengths = catalog.calls[-1][1][2]
+    assert {r.capture_id: r.automatic_keypoint_prediction_id for r in lengths} == {
+        model: None,
+        fish: kp,
+    }
+
+    await _run(acts.persist_automatic_measure_refusals, TARGET, plan)
+    (refusal,) = catalog.calls[-1][1][2]
+    assert (refusal.capture_id, refusal.refusal, refusal.length_m) == (
+        review,
+        "keypoints_disagree",
+        None,
+    )
+    assert refusal.automatic_keypoint_prediction_id == kp_review
