@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.62.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.62.0...v0.62.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **api:** the beam-move detector decides nothing for a mission under 16 dots ([3a57f01](https://github.com/UCSD-E4E/fishsense-services/commit/3a57f01b064fffac7e7339db00665d63941489fe))
+
 ## [0.62.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.61.0...v0.62.0) (2026-10-26)
 
 
