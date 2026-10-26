@@ -480,18 +480,26 @@ async def clear_headtail_needs_reprocess(
 # -- predict --------------------------------------------------------------------------
 
 
-#: The dot behind current prediction `p` has been superseded: the row may be
-#: of the wrong fish. *Superseded*, not "no longer live": a dot reopened in
-#: Label Studio (the sync sets `completed` false, never `superseded`) leaves
-#: the row standing. One spelling for the cohort, the resolver and the flag
-#: the processor reads (`existing_laser_superseded`). Indented as it renders
-#: inside `_needs_prediction`, whose text `dive_pipeline_status_rows()` froze
-#: (0029, 0046, 0050, 0063).
-_PREDICTION_LASER_SUPERSEDED = """EXISTS (
+def _prediction_laser_superseded(alias: str) -> str:
+    """The dot behind current prediction `alias` has been superseded: the row
+    may be of the wrong fish. *Superseded*, not "no longer live": a dot
+    reopened in Label Studio (the sync sets `completed` false and keeps its
+    coordinates; it never supersedes, and edits a dot in place) leaves the
+    row standing. One spelling for the cohort, the resolver and the flag the
+    processor reads (`existing_laser_superseded`), each on its own alias
+    (review of #362: the resolver's outer `p` and the cohort's inner one
+    relied on SQL scoping). Indented as it renders inside
+    `_needs_prediction`, whose text `dive_pipeline_status_rows()` froze
+    (0029, 0046, 0050, 0063, 0067; test_the_cohort_is_what_the_status_function_froze).
+    """
+    return f"""EXISTS (
                           SELECT 1 FROM laser_labels dead
-                          WHERE dead.tenant_id = p.tenant_id
-                            AND dead.id = p.laser_label_id AND dead.superseded
+                          WHERE dead.tenant_id = {alias}.tenant_id
+                            AND dead.id = {alias}.laser_label_id AND dead.superseded
                       )"""
+
+
+_PREDICTION_LASER_SUPERSEDED = _prediction_laser_superseded("p")
 
 
 def _needs_prediction(version_param: str) -> str:
@@ -581,46 +589,49 @@ async def headtail_predict_captures(
     only when other work brought the dive up, and rewritten even by a
     GPU-less worker, since the flag defeated NO_UPGRADE_AVAILABLE.
     """
-    params = {"t": tenant_id, "d": mission_id, "version": predictor_version}
-    dots: dict[uuid.UUID, list[LaserDot]] = {}
-    for r in await conn.execute(
-        text(f"""
-            SELECT l.capture_id, l.id, l.x, l.y FROM laser_labels l
-            JOIN captures c ON c.tenant_id = l.tenant_id AND c.id = l.capture_id
-            WHERE c.tenant_id = :t AND c.mission_id = :d AND {VALID_LASER}
-            ORDER BY l.number
-            """),
-        params,
-    ):
-        dots.setdefault(r.capture_id, []).append(LaserDot(r.id, r.x, r.y))
-
+    # One statement (review of #362): `needs` and the dots are read in one
+    # snapshot, so a capture the cohort's predicate keeps -- which requires a
+    # live dot -- always has its dots. Two statements under READ COMMITTED
+    # could straddle a sync that withdrew the capture's last dot.
     rows = await conn.execute(
         text(f"""
             SELECT c.id, c.checksum, c.v1_id IS NOT NULL AS from_v1,
-                   {_needs_prediction(":version")} AS needs,
-                   p.capture_id IS NOT NULL AS predicted,
-                   {_PREDICTION_LASER_SUPERSEDED} AS laser_superseded
+                   cur.capture_id IS NOT NULL AS predicted,
+                   {_prediction_laser_superseded("cur")} AS laser_superseded,
+                   live.dots
             FROM captures c
-            LEFT JOIN current_head_tail_predictions p
-              ON p.tenant_id = c.tenant_id AND p.capture_id = c.id
+            LEFT JOIN current_head_tail_predictions cur
+              ON cur.tenant_id = c.tenant_id AND cur.capture_id = c.id
+            CROSS JOIN LATERAL (
+                SELECT coalesce(
+                    json_agg(json_build_array(l.id, l.x, l.y) ORDER BY l.number),
+                    '[]'::json
+                ) AS dots
+                FROM laser_labels l
+                WHERE l.tenant_id = c.tenant_id AND l.capture_id = c.id
+                  AND {VALID_LASER}
+            ) live
             WHERE c.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
+              AND {_needs_prediction(":version")}
             ORDER BY c.number
             """),
-        params,
+        {"t": tenant_id, "d": mission_id, "version": predictor_version},
     )
-    return [
-        PredictCapture(
-            capture_id=r.id,
-            checksum=r.checksum,
-            from_v1=r.from_v1,
-            # `needs` holds a live dot, read in the same snapshot.
-            dots=tuple(dots[r.id]),
-            has_existing_prediction=r.predicted,
-            existing_laser_superseded=r.laser_superseded,
+    out = []
+    for r in rows:
+        if not r.dots:  # not reachable in one snapshot; never a crash
+            continue
+        out.append(
+            PredictCapture(
+                capture_id=r.id,
+                checksum=r.checksum,
+                from_v1=r.from_v1,
+                dots=tuple(LaserDot(uuid.UUID(i), x, y) for i, x, y in r.dots),
+                has_existing_prediction=r.predicted,
+                existing_laser_superseded=r.laser_superseded,
+            )
         )
-        for r in rows
-        if r.needs
-    ]
+    return out
 
 
 async def persist_headtail_predictions(

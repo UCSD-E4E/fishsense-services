@@ -1222,7 +1222,7 @@ async def test_the_resolver_and_the_cohort_agree_on_a_predictions_dot(
     mission = await _dive(owner_engine, lab)
     capture = await _capture(owner_engine, lab, mission)
     used = await _laser(owner_engine, lab, capture, **dot)
-    await _laser(owner_engine, lab, capture, x=11.0, y=21.0)  # still live
+    other = await _laser(owner_engine, lab, capture, x=11.0, y=21.0)  # still live
     await _prediction(owner_engine, lab, capture, laser=used, version=version)
 
     selected = await _next_predict(app_engine, lab) == mission
@@ -1232,6 +1232,49 @@ async def test_the_resolver_and_the_cohort_agree_on_a_predictions_dot(
     assert selected == (version != V or dot == {"superseded": True})
     for picked in needing:
         assert picked.existing_laser_superseded == (dot == {"superseded": True})
+        # And what the processor crops around: the live dots only, in order,
+        # never the dead one (review of #362).
+        assert [d.laser_label_id for d in picked.dots] == (
+            [used, other] if dot == {} else [other]
+        )
+        assert picked.has_existing_prediction
+
+
+def test_the_dead_dot_term_binds_to_the_alias_it_is_given():
+    """The cohort renders it on its own `p` (the text the status function
+    froze); the resolver on its own alias, so neither depends on SQL scoping
+    picking the right `p` (review of #362)."""
+    from fishsense_services_api import headtail_store
+
+    term = (
+        headtail_store._prediction_laser_superseded
+    )  # pylint: disable=protected-access
+    assert "dead.id = cur.laser_label_id" in term("cur")
+    assert "p." not in term("cur")
+    assert (
+        term("p") == headtail_store._PREDICTION_LASER_SUPERSEDED
+    )  # pylint: disable=protected-access
+
+
+def test_the_cohort_is_what_the_status_function_froze():
+    """`dive_pipeline_status_rows()` holds the cohort as text the migration
+    rendered (0029, recreated by 0046/0050/0063/0067), frozen in the
+    database: a change to the store's predicate would not reach it, and the
+    view and the selector would disagree with no test failing (review of
+    #362). The capture-level predicate, rendered today at the frozen
+    version, must be in the latest function verbatim; when it is not, ship a
+    migration that recreates the function."""
+    import importlib
+
+    from fishsense_services_api import headtail_store
+
+    latest = importlib.import_module(
+        "fishsense_services_api.migrations.versions.0067_laser_predictor_v3"
+    )
+    rendered = headtail_store._needs_prediction(  # pylint: disable=protected-access
+        str(latest.HEADTAIL_PREDICTOR_VERSION)
+    )
+    assert latest.FUNCTION_SQL.count(rendered) == 1
 
 
 async def test_skips_non_canonical_images(owner_engine, app_engine):
