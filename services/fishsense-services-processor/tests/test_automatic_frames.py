@@ -681,6 +681,50 @@ async def test_a_weights_failure_fails_the_run_and_leaves_no_frame_out(error_typ
     assert len(attempts) == 2, "one try a frame: not retried"
 
 
+async def test_a_run_from_before_the_wider_refusals_replays_as_it_ran(monkeypatch):
+    """Review of #364: which failures fail the run is workflow code. A run in
+    flight at the deploy, whose frame the code before left out for
+    `Sam3WeightsCorrupt` (only `NoGpuForSam3` failed a run then), must replay
+    under the new code as it ran -- left out, completed -- not raise. The
+    history is recorded with the lookup returning the old list and no patch
+    marker, as the code before ran."""
+    from temporalio import activity
+    from temporalio.worker import Replayer, UnsandboxedWorkflowRunner
+
+    from fishsense_services_processor.automatic_frames import workflow as wf
+
+    @activity.defn(name="predict_automatic_frame")
+    async def stub(payload: PredictAutomaticFrameInput) -> AutomaticFrameResult:
+        raise ApplicationError("weights", type="Sam3WeightsCorrupt", non_retryable=True)
+
+    payload = PredictAutomaticFramesInput(
+        tenant_id=TENANT, mission_id=uuid.uuid4(), camera_matrix=K,
+        distortion_coefficients=[0.0] * 5,
+        frames=[AutomaticFrame(capture_id=uuid.uuid4(), raw=ObjectRef(bucket="s", key="r"),
+                               jpeg=_ref("preprocess_headtail_jpeg"))],
+    )  # fmt: skip
+    monkeypatch.setattr(wf, "refusals", lambda widened, legacy: legacy)
+    async with await WorkflowEnvironment.start_time_skipping(
+        data_converter=DATA_CONVERTER
+    ) as env:
+        async with Worker(env.client, task_queue="t-auto-old", activities=[stub],
+                          workflows=[PredictAutomaticFramesWorkflow],
+                          workflow_runner=UnsandboxedWorkflowRunner()):  # fmt: skip
+            handle = await env.client.start_workflow(
+                PredictAutomaticFramesWorkflow.run, payload,
+                id=f"t-auto-old-{uuid.uuid4()}", task_queue="t-auto-old",
+                execution_timeout=timedelta(hours=1),
+            )  # fmt: skip
+            assert await handle.result() == [], "the code before left it out"
+            history = await handle.fetch_history()
+    monkeypatch.undo()
+
+    replayed = await Replayer(
+        workflows=[PredictAutomaticFramesWorkflow], data_converter=DATA_CONVERTER
+    ).replay_workflow(history, raise_on_replay_failure=False)
+    assert replayed.replay_failure is None
+
+
 async def test_each_frame_logs_its_peak_gpu_memory(monkeypatch, caplog):
     """Review of #110: the GPU cap rests on how much one SAM 3.1 frame takes,
     which nobody had measured. Each frame logs the process's peak GPU memory

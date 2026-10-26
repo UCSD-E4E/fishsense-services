@@ -15,6 +15,7 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError, ApplicationError
 
 with workflow.unsafe.imports_passed_through():
+    from fishsense_services_processor.worker_refusals import refusals
     import annotated_types  # noqa: F401  pylint: disable=unused-import
     import pydantic  # noqa: F401  pylint: disable=unused-import
 
@@ -29,6 +30,8 @@ __all__ = ["BackfillMasksWorkflow", "FRAME_ATTEMPTS"]
 
 FRAME_ATTEMPTS = 3
 _WORKER_REFUSALS = SAM3_REFUSALS
+#: Before #364 (`worker_refusals`): what a run started then replays with.
+_LEGACY_REFUSALS = ("NoGpuForSam3",)
 
 
 @workflow.defn
@@ -57,9 +60,8 @@ class BackfillMasksWorkflow:
         for frame, outcome in zip(payload.frames, outcomes):
             if isinstance(outcome, ActivityError):
                 cause = outcome.cause
-                if (
-                    isinstance(cause, ApplicationError)
-                    and cause.type in _WORKER_REFUSALS
+                if isinstance(cause, ApplicationError) and cause.type in refusals(
+                    _WORKER_REFUSALS, _LEGACY_REFUSALS
                 ):
                     raise outcome
                 workflow.logger.warning("mask backfill capture=%s left out: %s",

@@ -61,13 +61,43 @@ def _invalid_settings():
     return ModelWeightsSettings()
 
 
+def _unparseable_settings():
+    # pydantic-settings' own error: a value it cannot even parse.
+    from pydantic_settings import SettingsError
+
+    raise SettingsError('error parsing value for field "cache_dir" from source')
+
+
+def _not_in_manifest():
+    # The KeyError core's manifest raises for an entry it has not got.
+    from fishsense_core.models import builtin_manifest
+
+    builtin_manifest().resolve("no-such-model", "1")
+
+
+def _a_model_that_does_not_validate():
+    # A ValidationError that is not the pod's settings': a manifest entry or a
+    # checkpoint description that stops validating after an upgrade.
+    from pydantic import BaseModel
+
+    class Entry(BaseModel):
+        size: int
+
+    Entry(size="not a size")
+
+
 CAUSES = [
     (_invalid_settings, "SettingsInvalid"),
+    (_unparseable_settings, "SettingsInvalid"),
     (ModelIntegrityError("m/1: expected sha256 ..."), "WeightsCorrupt"),
     (ModelUnavailable("m/1: not in s3://model-weights/m/1/f"), "WeightsUnavailable"),
-    (KeyError("m"), "NotInManifest"),
+    (_not_in_manifest, "NotInManifest"),
+    (_a_model_that_does_not_validate, "LoadInvalid"),
 ]
-CAUSE_IDS = ["settings", "integrity", "unavailable", "manifest"]
+CAUSE_IDS = [
+    "settings", "settings-unparseable", "integrity", "unavailable", "manifest",
+    "load-invalid",
+]  # fmt: skip
 
 
 def _raise(failure):
@@ -95,20 +125,25 @@ def test_each_cause_is_its_own_non_retryable_type(no_weights_env, failure, kind)
     assert e.value.message.startswith("the laser detector's weights cannot load")
 
 
-def test_a_validation_error_from_anything_but_settings_is_not_blamed_on_them():
-    """Only a settings class's ValidationError means the pod's settings are
-    missing or invalid (review of #358). One from a model -- a core manifest
-    entry that no longer validates after an upgrade, say -- propagates as
-    itself, rather than sending an operator to check the Secret."""
-    from pydantic import BaseModel, ValidationError
-
-    class Entry(BaseModel):
-        size: int
-
-    with pytest.raises(ValidationError) as e:
+def test_a_load_that_does_not_validate_is_not_blamed_on_the_settings(no_weights_env):
+    """Deterministic, so not retried; but named for what failed, not sent to
+    the Secret (review of #358, and of #364: propagated, it was retryable,
+    and charged every frame of the mission)."""
+    with pytest.raises(ApplicationError) as e:
         with weights.refuse_unloadable_weights(LASER_DETECTOR, "the laser detector"):
-            Entry(size="not a size")
-    assert e.value.title == "Entry"
+            _a_model_that_does_not_validate()
+    assert e.value.type == "LaserDetectorLoadInvalid"
+    assert "FISHSENSE_MODEL_WEIGHTS" not in e.value.message
+
+
+def test_a_key_error_that_is_not_the_manifests_is_not_called_one():
+    """Only core's "unknown model" KeyError is a missing manifest entry
+    (review of #364): one from a checkpoint's state dict, or an environment
+    lookup, inside the load is something else and propagates as itself."""
+    with pytest.raises(KeyError) as e:
+        with weights.refuse_unloadable_weights(LASER_DETECTOR, "the laser detector"):
+            raise KeyError("model")
+    assert e.value.args == ("model",)
 
 
 @pytest.mark.parametrize(
@@ -179,8 +214,14 @@ def test_a_pod_without_weights_settings_refuses_the_laser_detector(
 
 @pytest.mark.parametrize(("failure", "kind"), CAUSES, ids=CAUSE_IDS)
 async def test_a_keypoint_model_weights_failure_is_final(no_weights_env, failure, kind):
+    """And refuses before reading the frame's render (review of #364): on a
+    pod whose weights cannot load, every frame of a chunk otherwise read its
+    render from Garage first."""
+    reads = []
+
     class _Store:
         async def download_image(self, url):
+            reads.append(url)
             return b"jpeg"
 
     acts = HeadtailKeypointActivities(
@@ -194,6 +235,7 @@ async def test_a_keypoint_model_weights_failure_is_final(no_weights_env, failure
     with pytest.raises(ApplicationError) as e:
         await ActivityEnvironment().run(acts.predict_headtail_keypoints, frame)
     assert (e.value.type, e.value.non_retryable) == (f"HeadtailKeypoints{kind}", True)
+    assert reads == []
 
 
 # -- every workflow that leaves frames out knows the refusals -----------------------

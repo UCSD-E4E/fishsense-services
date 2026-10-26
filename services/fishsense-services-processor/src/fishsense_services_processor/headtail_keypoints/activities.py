@@ -53,6 +53,10 @@ class HeadtailKeypointActivities:  # pylint: disable=too-few-public-methods
         if not self._cuda_available():
             raise ApplicationError("the keypoint model runs on a CUDA GPU",
                                    type="NoGpuForKeypoints", non_retryable=True)  # fmt: skip
+        # The model before the render (review of #364): weights that cannot
+        # load refuse the worker, so no frame reads its render first.
+        with refuse_unloadable_weights(HEADTAIL_KEYPOINTS, "the keypoint model"):
+            detector = await asyncio.to_thread(self._detector)
         ids = {"prediction_id": frame.prediction_id, "capture_id": frame.capture_id}
         try:
             jpeg = await self._object_store().download_image(url=frame.render_url)
@@ -60,8 +64,6 @@ class HeadtailKeypointActivities:  # pylint: disable=too-few-public-methods
             activity.logger.warning("capture=%s: render unavailable: %s",
                                     frame.capture_id, exc)  # fmt: skip
             return KeypointResult(**ids, status="render_unavailable")
-        with refuse_unloadable_weights(HEADTAIL_KEYPOINTS, "the keypoint model"):
-            detector = await asyncio.to_thread(self._detector)
         try:
             found = await asyncio.to_thread(
                 keypoints_frame, jpeg, frame.mask_bbox, detector

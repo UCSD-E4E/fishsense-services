@@ -49,6 +49,7 @@ from fishsense_core.models import (
 from moto import mock_aws
 from temporalio import activity, workflow
 from temporalio.client import WorkflowFailureError
+from temporalio.common import RetryPolicy
 from fishsense_services_contracts.temporal import DATA_CONVERTER
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
@@ -814,11 +815,12 @@ async def test_workflow_fans_out_one_prediction_per_image_and_returns_them():
 
 
 async def _run_predict_workflow(
-    stub, workflow_cls=PredictHeadtailImagesWorkflow, runner=None
+    stub, workflow_cls=PredictHeadtailImagesWorkflow, runner=None, images=None
 ):
-    """One image through the workflow; the client's error, or its history."""
+    """Images (one by default) through the workflow; the client's error, or
+    its history."""
     payload = PredictHeadtailImagesInput(
-        tenant_id=uuid.uuid4(), mission_id=uuid.uuid4(), images=[_payload()]
+        tenant_id=uuid.uuid4(), mission_id=uuid.uuid4(), images=images or [_payload()]
     )
     async with await WorkflowEnvironment.start_time_skipping(
         data_converter=DATA_CONVERTER
@@ -853,8 +855,37 @@ async def test_a_failing_image_is_tried_a_bounded_number_of_times():
         raise RuntimeError("CUDA out of memory")
 
     error, _ = await _run_predict_workflow(stub)
-    assert error is not None, "a failing image fails the child"
+    assert error is None, "a failing image is left out, not the child failed"
     assert attempts == list(range(1, IMAGE_ATTEMPTS + 1))
+
+
+async def test_an_image_that_fails_its_tries_costs_only_itself():
+    """Review of #364: failing the child threw away every other image's
+    prediction, and one image that always fails failed its dive every hour.
+    Left out, it has no current prediction, so the parent selects it again
+    next run; the others are returned to be persisted."""
+    good, bad = _payload(capture_id=uuid.uuid4()), _payload(capture_id=uuid.uuid4())
+
+    @activity.defn(name="predict_headtail_image")
+    async def stub(image: PredictHeadtailImage) -> HeadtailPredictionResult:
+        if image.capture_id == bad.capture_id:
+            raise RuntimeError("CUDA out of memory")
+        return HeadtailPredictionResult(capture_id=image.capture_id, status="predicted")
+
+    payload = PredictHeadtailImagesInput(
+        tenant_id=uuid.uuid4(), mission_id=uuid.uuid4(), images=[good, bad]
+    )
+    async with await WorkflowEnvironment.start_time_skipping(
+        data_converter=DATA_CONVERTER
+    ) as env:
+        async with Worker(env.client, task_queue="t-ht2",
+                          workflows=[PredictHeadtailImagesWorkflow], activities=[stub]):  # fmt: skip
+            results = await env.client.execute_workflow(
+                PredictHeadtailImagesWorkflow.run, payload, id=f"t-ht2-{uuid.uuid4()}",
+                task_queue="t-ht2", result_type=List[HeadtailPredictionResult],
+            )  # fmt: skip
+
+    assert [r.capture_id for r in results] == [good.capture_id]
 
 
 @pytest.mark.parametrize(
@@ -895,6 +926,53 @@ class _BeforeTheRetryPolicy:  # pylint: disable=too-few-public-methods
                 ]
             )
         )
+
+
+@workflow.defn(name="PredictHeadtailImagesWorkflow")
+class _FailFast:  # pylint: disable=too-few-public-methods
+    """#364 before its review: a bounded retry, and an image that fails its
+    tries fails the child."""
+
+    @workflow.run
+    async def run(self, payload: PredictHeadtailImagesInput) -> list:
+        return list(
+            await asyncio.gather(
+                *[
+                    workflow.execute_activity(
+                        "predict_headtail_image",
+                        image,
+                        start_to_close_timeout=timedelta(minutes=15),
+                        retry_policy=RetryPolicy(
+                            initial_interval=timedelta(seconds=10),
+                            maximum_attempts=3,
+                        ),
+                        result_type=HeadtailPredictionResult,
+                    )
+                    for image in payload.images
+                ]
+            )
+        )
+
+
+async def test_a_child_that_failed_fast_replays_as_it_ran():
+    """The leave-out is behind `workflow.patched`: a history in which an
+    image failed its tries and failed the child -- under the code before --
+    replays under the new code without a determinism error, rather than
+    being completed as if the image had been left out."""
+
+    @activity.defn(name="predict_headtail_image")
+    async def stub(image: PredictHeadtailImage) -> HeadtailPredictionResult:
+        raise RuntimeError("CUDA out of memory")
+
+    error, history = await _run_predict_workflow(
+        stub, _FailFast, runner=UnsandboxedWorkflowRunner()
+    )
+    assert error is not None
+
+    replayed = await Replayer(
+        workflows=[PredictHeadtailImagesWorkflow], data_converter=DATA_CONVERTER
+    ).replay_workflow(history, raise_on_replay_failure=False)
+    assert replayed.replay_failure is None
 
 
 @workflow.defn(name="PredictHeadtailImagesWorkflow")

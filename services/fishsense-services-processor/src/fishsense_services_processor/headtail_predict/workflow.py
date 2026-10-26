@@ -15,11 +15,18 @@ port's, set no retry policy, so an image no worker could finish (a crash, an
 OOM) retried without limit, every 100 s at Temporal's default ceiling, until
 the parent's 6 h child timeout -- holding the GPU queue the whole time. The
 policy is the processor's other per-frame workflows' (`automatic_frames`,
-`slate_pose`, ...): 10 s first backoff, three tries, and a worker's refusal
-(`SAM3_REFUSALS`: no GPU, weights that cannot load) never retried. An image
-that fails them all still fails the child, as before, only sooner: the
-parent persists nothing of a failed child, so leaving it out instead would
-need the parent to know it is owed.
+`slate_pose`, ...), with room for a short outage: 10 s first backoff,
+doubling, `IMAGE_ATTEMPTS` tries (about 2.5 minutes), and a worker's refusal
+(`SAM3_REFUSALS`: no GPU, weights that cannot load) never retried.
+
+**An image that fails its tries is left out** (review of #364), as those
+workflows leave a frame out: failing the child would cost every other
+image's prediction, since the parent persists nothing of a failed child,
+and one image that always fails would fail its dive every hour. Left out,
+it has no current prediction, so the parent's next run selects it again; a
+worker's refusal still fails the run. Behind `workflow.patched`, decided at
+the start of the run: one started before keeps failing on the first image's
+failure, as it did.
 
 **Replay.** The policy travels in the ScheduleActivityTask command, but
 Temporal's determinism check matches a scheduled activity by its id and
@@ -34,6 +41,7 @@ from typing import List
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
+from temporalio.exceptions import ActivityError, ApplicationError
 
 with workflow.unsafe.imports_passed_through():
     import annotated_types  # noqa: F401  pylint: disable=unused-import
@@ -46,14 +54,17 @@ with workflow.unsafe.imports_passed_through():
         PredictHeadtailImagesInput,
     )
 
-__all__ = ["IMAGE_ATTEMPTS", "PredictHeadtailImagesWorkflow"]
+__all__ = ["IMAGE_ATTEMPTS", "LEFT_OUT_PATCH", "PredictHeadtailImagesWorkflow"]
 
-IMAGE_ATTEMPTS = 3
+IMAGE_ATTEMPTS = 5
 _IMAGE_RETRY = RetryPolicy(
     initial_interval=timedelta(seconds=10),
+    backoff_coefficient=2.0,
     maximum_attempts=IMAGE_ATTEMPTS,
     non_retryable_error_types=list(SAM3_REFUSALS),
 )
+#: Images that fail their tries are left out (see the module docstring).
+LEFT_OUT_PATCH = "headtail-images-left-out"
 
 
 @workflow.defn
@@ -68,7 +79,8 @@ class PredictHeadtailImagesWorkflow:
             payload.mission_id,
             len(payload.images),
         )
-        results = await asyncio.gather(
+        leave_out = workflow.patched(LEFT_OUT_PATCH)
+        outcomes = await asyncio.gather(
             *[
                 workflow.execute_activity(
                     "predict_headtail_image",
@@ -78,6 +90,22 @@ class PredictHeadtailImagesWorkflow:
                     result_type=HeadtailPredictionResult,
                 )
                 for image in payload.images
-            ]
+            ],
+            return_exceptions=leave_out,
         )
-        return list(results)
+        results: List[HeadtailPredictionResult] = []
+        for image, outcome in zip(payload.images, outcomes):
+            if not isinstance(outcome, BaseException):
+                results.append(outcome)
+                continue
+            cause = outcome.cause if isinstance(outcome, ActivityError) else None
+            if not isinstance(outcome, ActivityError) or (
+                isinstance(cause, ApplicationError) and cause.type in SAM3_REFUSALS
+            ):
+                raise outcome  # a refusal, a cancellation, or a bug
+            workflow.logger.warning(
+                "headtail image capture=%s left out after its tries: %s",
+                image.capture_id,
+                cause or outcome,
+            )
+        return results

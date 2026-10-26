@@ -151,7 +151,7 @@ class RunAutomaticMissionsWorkflow:
             }
             row = {"number": mission["number"], "mission_id": mission["mission_id"],
                    "report": None, "error": None}  # fmt: skip
-            refused = False
+            refused: Optional[str] = None
             try:
                 row["report"] = await workflow.execute_child_workflow(
                     "AutomaticResultsForDiveWorkflow",
@@ -163,10 +163,13 @@ class RunAutomaticMissionsWorkflow:
                 )
             except ChildWorkflowError as exc:
                 row["error"] = str(exc.cause or exc)
-                refused = (
+                if (
                     isinstance(exc.cause, ApplicationError)
                     and exc.cause.type == "AutomaticWorkerRefused"
-                )
+                ):
+                    # The refusal's type rides in the error's details.
+                    details = exc.cause.details or ("",)
+                    refused = str(details[0] or "")
             except WorkflowAlreadyStartedError:
                 row["error"] = "already running (another by-hand run has it)"
             workflow.logger.info(
@@ -174,8 +177,11 @@ class RunAutomaticMissionsWorkflow:
             )
             report["missions"].append(row)
             # A processor's refusal is every dive's alike (2026-10-24): stop.
-            if refused and workflow.patched(REFUSAL_PATCH):
-                report["stopped"] = "worker refused"
+            if refused is not None and workflow.patched(REFUSAL_PATCH):
+                # Named, as the drain names it (review of #364).
+                report["stopped"] = (
+                    f"worker refused ({refused})" if refused else "worker refused"
+                )
                 break
             # With no GPU every dive behind this one would wait out the wake
             # and skip too (2026-10-18, the first validation run): stop, as

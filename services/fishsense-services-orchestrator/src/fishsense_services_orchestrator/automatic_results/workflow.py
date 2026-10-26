@@ -159,6 +159,9 @@ class AutomaticMissionReport:
     #: worker's fault, recorded against nothing; every dive behind this one
     #: would be refused too, and the run stops.
     refused: Optional[str] = None
+    #: That refusal's type (e.g. ``Sam3WeightsCorrupt``), as data: the drain
+    #: and a by-hand run name it without parsing `refused` (review of #364).
+    refusal_type: Optional[str] = None
 
 
 @dataclass
@@ -416,6 +419,18 @@ async def _species(
     try:
         await _species_step(target, gpu, report)
     except (ActivityError, ChildWorkflowError) as exc:
+        refusal = _refusal(exc)
+        if refusal is not None and workflow.patched(SPECIES_REFUSAL_PATCH):
+            # The worker's, as any step's refusal: every dive behind this one
+            # would wake the GPU to be refused alike (review of #364). The
+            # dive keeps its lengths; nothing is recorded against it.
+            workflow.logger.error(
+                "automatic species for dive=%s refused by the processor: %s: %s",
+                target.mission_id, refusal.type, refusal.message,
+            )  # fmt: skip
+            report.refused = f"species: {refusal.type}: {refusal.message}"
+            report.refusal_type = refusal.type
+            return
         report.species_failed = True
         workflow.logger.warning(
             "automatic species failed for dive=%s; lengths are kept: %s",
@@ -518,6 +533,10 @@ class StepRefused(Exception):
 #: The change that stopped a processor's refusal costing a dive a strike
 #: (2026-10-24): a run started before it replays recording the failure.
 REFUSAL_PATCH = "automatic-worker-refusal-not-a-strike"
+#: The change that made a species refusal stop the run like any step's
+#: (review of #364): a run started before it replays logging it as a species
+#: failure and going on.
+SPECIES_REFUSAL_PATCH = "automatic-species-refusal-stops"
 
 
 def _refusal(exc: BaseException) -> Optional[ApplicationError]:
@@ -569,6 +588,7 @@ async def _run_for_mission(
         return report, gpu
     except StepRefused as exc:
         report.refused = str(exc)
+        report.refusal_type = exc.refusal_type
         return report, gpu
     # Isolated: a species failure is logged, and the dive keeps its lengths.
     await _species(target, gpu, report)
@@ -599,6 +619,7 @@ class AutomaticResultsForMissionWorkflow:
             raise ApplicationError(
                 f"automatic {report.refused} (dive {target.mission_id}; the "
                 "processor's refusal, recorded against nothing)",
+                report.refusal_type,  # details: the type, for `run_missions`
                 type="AutomaticWorkerRefused",
                 non_retryable=True,
             )
@@ -645,6 +666,6 @@ class AutomaticResultsParentWorkflow:
                 break
             if report.refused:
                 # Every dive behind it would be refused alike.
-                stopped = f"worker refused ({report.refused.split(': ')[1]})"
+                stopped = f"worker refused ({report.refusal_type})"
                 break
         return AutomaticRunReport(missions=missions, stopped=stopped)

@@ -47,6 +47,7 @@ import asyncio
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Optional
 from urllib.parse import urlsplit
 
 import boto3
@@ -60,7 +61,7 @@ from fishsense_core.models import (
     fetch,
 )
 from pydantic import SecretStr, ValidationError, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict, SettingsError
 from temporalio.exceptions import ApplicationError
 
 from fishsense_services_contracts.refusals import WEIGHTS_FAILURE_KINDS
@@ -236,24 +237,17 @@ async def afetch_weights(
     )
 
 
-#: What a load raises when the weights cannot load, and why, in
-#: `WEIGHTS_FAILURE_KINDS`' order. The settings (`ValidationError`) are read
-#: on first use, inside the load; `KeyError` is a manifest with no such entry.
-#: `ModelUnavailable` is final too: this store raises it only for a key the
-#: bucket lacks (`GarageWeightStore.download_to`), which a retry cannot add;
-#: any other S3 error (an outage, a 5xx, a 403) propagates as itself, and
-#: stays retryable.
-_CAUSES: tuple[tuple[type[BaseException], str], ...] = tuple(
-    zip(
-        (ValidationError, ModelIntegrityError, ModelUnavailable, KeyError),
-        (
-            "{settings} is missing or invalid",
-            "the file in model-weights is not the pinned one",
-            "the file is not in model-weights",
-            "the manifest has no entry for it",
-        ),
-    )
-)
+#: Why weights cannot load, by `WEIGHTS_FAILURE_KINDS`' name.
+_WHY = {
+    "SettingsInvalid": "{settings} is missing or invalid",
+    "WeightsCorrupt": "the file in model-weights is not the pinned one",
+    "WeightsUnavailable": "the file is not in model-weights",
+    "NotInManifest": "the manifest has no entry for it",
+    "LoadInvalid": "something it loads does not validate (its manifest entry "
+    "or model description: check fishsense-core's version)",
+}
+if set(_WHY) != set(WEIGHTS_FAILURE_KINDS):  # one list, both sides
+    raise ImportError("weights._WHY and refusals.WEIGHTS_FAILURE_KINDS disagree")
 
 
 def _settings_classes() -> set[str]:
@@ -268,12 +262,38 @@ def _settings_classes() -> set[str]:
     return names
 
 
-def _is_settings(exc: ValidationError) -> bool:
-    """Whether a ValidationError is a settings class's (its `title` names the
-    class). Only that one means the pod's settings are missing or invalid
-    (review of #358): a model's -- a core manifest entry that no longer
-    validates, say -- propagates as itself."""
-    return exc.title in _settings_classes()
+def _kind(exc: BaseException) -> Optional[str]:
+    """Which weights failure `exc` is, or None for one a retry might pass.
+
+    * the pod's settings: a settings class's `ValidationError` (its `title`
+      names the class), or pydantic-settings' `SettingsError` (a value it
+      cannot parse);
+    * `ModelIntegrityError`: not the pinned bytes;
+    * `ModelUnavailable`: final too, since this store raises it only for a
+      key the bucket lacks (`GarageWeightStore.download_to`), which a retry
+      cannot add; any other S3 error (an outage, a 5xx, a 403) propagates as
+      itself, and stays retryable;
+    * core's manifest `KeyError` ("unknown model ..."). Any other `KeyError`
+      -- a checkpoint's state dict, an environment lookup -- is not a missing
+      entry, and propagates (review of #364);
+    * any other `ValidationError`: deterministic, so final, and named for what
+      it is rather than blamed on the settings (reviews of #358 and #364).
+    """
+    if isinstance(exc, SettingsError):
+        return "SettingsInvalid"
+    if isinstance(exc, ValidationError):
+        return "SettingsInvalid" if exc.title in _settings_classes() else "LoadInvalid"
+    if isinstance(exc, ModelIntegrityError):
+        return "WeightsCorrupt"
+    if isinstance(exc, ModelUnavailable):
+        return "WeightsUnavailable"
+    if (
+        isinstance(exc, KeyError)
+        and exc.args
+        and str(exc.args[0]).startswith("unknown model ")
+    ):
+        return "NotInManifest"
+    return None
 
 
 @contextmanager
@@ -285,21 +305,19 @@ def refuse_unloadable_weights(
 ) -> Iterator[None]:
     """Run a model's load; weights that cannot load leave it as a
     non-retryable `ApplicationError` of type ``{model}{kind}`` (``model`` is
-    one of `fishsense_services_contracts.refusals`' names), saying which
-    cause. ``label`` names the model in the message, ``settings`` the
-    settings it reads. Anything else propagates unchanged."""
+    one of `fishsense_services_contracts.refusals`' names, ``kind`` one of its
+    `WEIGHTS_FAILURE_KINDS`), saying which cause. ``label`` names the model
+    in the message, ``settings`` the settings it reads. Anything else
+    propagates unchanged."""
     try:
         yield
-    except tuple(cause for cause, _ in _CAUSES) as exc:
-        if isinstance(exc, ValidationError) and not _is_settings(exc):
+    except Exception as exc:  # pylint: disable=broad-except
+        kind = _kind(exc)
+        if kind is None:
             raise
-        kind, why = next(
-            (kind, why)
-            for (cause, why), kind in zip(_CAUSES, WEIGHTS_FAILURE_KINDS)
-            if isinstance(exc, cause)
-        )
         raise ApplicationError(
-            f"{label}'s weights cannot load: {why.format(settings=settings)}: {exc}",
+            f"{label}'s weights cannot load: "
+            f"{_WHY[kind].format(settings=settings)}: {exc}",
             type=f"{model}{kind}",
             non_retryable=True,
         ) from exc

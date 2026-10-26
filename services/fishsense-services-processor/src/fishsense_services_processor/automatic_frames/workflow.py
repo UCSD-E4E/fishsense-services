@@ -29,6 +29,7 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError, ApplicationError
 
 with workflow.unsafe.imports_passed_through():
+    from fishsense_services_processor.worker_refusals import refusals
     import annotated_types  # noqa: F401  pylint: disable=unused-import
     import pydantic  # noqa: F401  pylint: disable=unused-import
 
@@ -46,6 +47,8 @@ FRAME_ATTEMPTS = 3
 #: The worker's refusals, not a frame's: every frame would refuse alike, so
 #: the run fails with the cause rather than leaving each frame out.
 _WORKER_REFUSALS = AUTOMATIC_FRAME_REFUSALS
+#: Before #364 (`worker_refusals`): what a run started then replays with.
+_LEGACY_REFUSALS = ("NoGpuForSam3",)
 _FRAME_RETRY = RetryPolicy(
     initial_interval=timedelta(seconds=10),
     maximum_attempts=FRAME_ATTEMPTS,
@@ -55,7 +58,9 @@ _FRAME_RETRY = RetryPolicy(
 
 def _worker_refusal(error: ActivityError) -> bool:
     cause = error.cause
-    return isinstance(cause, ApplicationError) and cause.type in _WORKER_REFUSALS
+    return isinstance(cause, ApplicationError) and cause.type in refusals(
+        _WORKER_REFUSALS, _LEGACY_REFUSALS
+    )
 
 
 @workflow.defn

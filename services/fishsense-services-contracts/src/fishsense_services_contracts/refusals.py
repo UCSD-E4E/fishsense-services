@@ -39,12 +39,15 @@ __all__ = [
 
 #: Why weights cannot load, as the processor's mapping names each cause:
 #: the settings are missing or invalid; the bytes are not the pinned file;
-#: the object is not in `model-weights`; the manifest has no such entry.
+#: the object is not in `model-weights`; the manifest has no such entry;
+#: something else the load reads does not validate (a manifest entry or a
+#: model description, after an upgrade: review of #364).
 WEIGHTS_FAILURE_KINDS = (
     "SettingsInvalid",
     "WeightsCorrupt",
     "WeightsUnavailable",
     "NotInManifest",
+    "LoadInvalid",
 )
 
 SAM3 = "Sam3"

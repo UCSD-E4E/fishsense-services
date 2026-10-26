@@ -69,8 +69,8 @@ class _ForMission:  # pylint: disable=too-few-public-methods
             }
         if target["dive_id"] in REFUSED:
             raise ApplicationError(
-                "frames: Sam3WeightsCorrupt: ...", type="AutomaticWorkerRefused",
-                non_retryable=True,
+                "frames: Sam3WeightsCorrupt: ...", "Sam3WeightsCorrupt",
+                type="AutomaticWorkerRefused", non_retryable=True,
             )  # fmt: skip
         if target["dive_id"] == str(MISSIONS[1]):
             raise ApplicationError(
@@ -201,7 +201,8 @@ async def test_apply_stops_at_the_first_mission_the_processor_refuses():
         REFUSED.clear()
 
     assert RAN == [f"automatic-results-{MISSIONS[0]}"]
-    assert report["stopped"] == "worker refused"
+    # Named, as the drain names it (review of #364).
+    assert report["stopped"] == "worker refused (Sam3WeightsCorrupt)"
     assert "Sam3WeightsCorrupt" in report["missions"][0]["error"]
 
 
