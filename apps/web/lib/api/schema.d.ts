@@ -878,6 +878,14 @@ export interface components {
             /** Depth M */
             depth_m: number | null;
             head: components["schemas"]["PixelPoint"] | null;
+            /** Head Tail Source */
+            head_tail_source: string | null;
+            /** Keypoint Checkpoint */
+            keypoint_checkpoint: string | null;
+            /** Keypoint Disagreement */
+            keypoint_disagreement: number | null;
+            /** Keypoint Status */
+            keypoint_status: string | null;
             laser: components["schemas"]["PixelPoint"] | null;
             /** Laser Color */
             laser_color: string | null;
@@ -923,8 +931,10 @@ export interface components {
             render_url: string | null;
             /** Render Width */
             render_width: number | null;
+            sam_head: components["schemas"]["PixelPoint"] | null;
             /** Sam Score */
             sam_score: number | null;
+            sam_tail: components["schemas"]["PixelPoint"] | null;
             /** Slate Probability */
             slate_probability: number | null;
             /** Species */

@@ -57,8 +57,21 @@ class AutomaticFrameView(BaseModel):
     #: ``dot`` (read with the dot), ``render`` (backfilled off the render,
     #: 0076), or None when there is no reading.
     laser_color_source: str | None
+    #: SimCC's keypoints when the frame has them (head/tail v5: what its
+    #: length is measured from, and what an accept takes), else the SAM rule's.
     head: PixelPoint | None
     tail: PixelPoint | None
+    #: ``simcc`` or ``sam_rule``; None when there are no points.
+    head_tail_source: str | None
+    #: The SAM rule's points (the mask's extremes), whichever is shown.
+    sam_head: PixelPoint | None
+    sam_tail: PixelPoint | None
+    #: ``predicted``, ``keypoints_disagree`` (sent to review: SimCC's length
+    #: and the SAM rule's differ by over 15%), ``keypoints_refused``; None
+    #: when the frame has no keypoints (a fish model's).
+    keypoint_status: str | None
+    keypoint_disagreement: float | None
+    keypoint_checkpoint: str | None
     mask_bbox: list[int] | None
     sam_score: float | None
     slate_probability: float | None
@@ -232,6 +245,12 @@ def add_automatic_routes(
             laser_color_source=found.laser_color_source,
             head=_point(found.head),
             tail=_point(found.tail),
+            head_tail_source=found.head_tail_source,
+            sam_head=_point(found.sam_head),
+            sam_tail=_point(found.sam_tail),
+            keypoint_status=found.keypoint_status,
+            keypoint_disagreement=found.keypoint_disagreement,
+            keypoint_checkpoint=found.keypoint_checkpoint,
             mask_bbox=found.mask_bbox,
             sam_score=found.sam_score,
             slate_probability=found.slate_probability,

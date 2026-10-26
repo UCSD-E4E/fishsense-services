@@ -183,6 +183,50 @@
               }
             ]
           },
+          "head_tail_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Head Tail Source"
+          },
+          "keypoint_checkpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keypoint Checkpoint"
+          },
+          "keypoint_disagreement": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keypoint Disagreement"
+          },
+          "keypoint_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keypoint Status"
+          },
           "laser": {
             "anyOf": [
               {
@@ -387,6 +431,16 @@
             ],
             "title": "Render Width"
           },
+          "sam_head": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PixelPoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "sam_score": {
             "anyOf": [
               {
@@ -397,6 +451,16 @@
               }
             ],
             "title": "Sam Score"
+          },
+          "sam_tail": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PixelPoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "slate_probability": {
             "anyOf": [
@@ -476,6 +540,12 @@
           "laser_color_source",
           "head",
           "tail",
+          "head_tail_source",
+          "sam_head",
+          "sam_tail",
+          "keypoint_status",
+          "keypoint_disagreement",
+          "keypoint_checkpoint",
           "mask_bbox",
           "sam_score",
           "slate_probability",

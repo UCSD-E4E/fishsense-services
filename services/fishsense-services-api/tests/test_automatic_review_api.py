@@ -47,6 +47,12 @@ async def test_a_member_reads_what_the_run_made_of_a_frame(
     assert body["status"] == "predicted"
     assert body["head"] == {"x": 1800.0, "y": 1500.0}
     assert body["tail"] == {"x": 2300.0, "y": 1480.0}
+    # Its keypoints agree with the SAM rule here; which one is shown is named.
+    assert body["head_tail_source"] == "simcc"
+    assert body["sam_head"] == {"x": 1800.0, "y": 1500.0}
+    assert body["sam_tail"] == {"x": 2300.0, "y": 1480.0}
+    assert body["keypoint_status"] == "predicted"
+    assert body["keypoint_disagreement"] == 0.0
     assert body["laser"] == {"x": 2000.0, "y": 1500.0}
     assert body["length_m"] == 0.42
     assert f"/fishsense-tenant-lab/{key}" in body["render_url"]
