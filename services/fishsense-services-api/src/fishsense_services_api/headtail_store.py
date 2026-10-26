@@ -480,6 +480,28 @@ async def clear_headtail_needs_reprocess(
 # -- predict --------------------------------------------------------------------------
 
 
+def _prediction_laser_superseded(alias: str) -> str:
+    """The dot behind current prediction `alias` has been superseded: the row
+    may be of the wrong fish. *Superseded*, not "no longer live": a dot
+    reopened in Label Studio (the sync sets `completed` false and keeps its
+    coordinates; it never supersedes, and edits a dot in place) leaves the
+    row standing. One spelling for the cohort, the resolver and the flag the
+    processor reads (`existing_laser_superseded`), each on its own alias
+    (review of #362: the resolver's outer `p` and the cohort's inner one
+    relied on SQL scoping). Indented as it renders inside
+    `_needs_prediction`, whose text `dive_pipeline_status_rows()` froze
+    (0029, 0046, 0050, 0063, 0067; test_the_cohort_is_what_the_status_function_froze).
+    """
+    return f"""EXISTS (
+                          SELECT 1 FROM laser_labels dead
+                          WHERE dead.tenant_id = {alias}.tenant_id
+                            AND dead.id = {alias}.laser_label_id AND dead.superseded
+                      )"""
+
+
+_PREDICTION_LASER_SUPERSEDED = _prediction_laser_superseded("p")
+
+
 def _needs_prediction(version_param: str) -> str:
     """Capture `c` needs a prediction: a live dot, no human label, and no
     prediction or a stale current one."""
@@ -491,11 +513,7 @@ def _needs_prediction(version_param: str) -> str:
                 WHERE p.tenant_id = c.tenant_id AND p.capture_id = c.id
                   AND (
                       p.predictor_version IS DISTINCT FROM {version_param}
-                      OR EXISTS (
-                          SELECT 1 FROM laser_labels dead
-                          WHERE dead.tenant_id = p.tenant_id
-                            AND dead.id = p.laser_label_id AND dead.superseded
-                      )
+                      OR {_PREDICTION_LASER_SUPERSEDED}
                   )
             )
         )"""
@@ -556,56 +574,61 @@ async def headtail_predict_captures(
     """The dive's images needing a prediction, with their live dots and what
     their current row is (v1's `select_images_needing_prediction`).
 
-    Stale is a version other than `predictor_version` (NULL included) or a
-    `laser_label_id` no longer among the image's live dots. The activity is
-    told whether a row exists and whether its dot died, because only it knows
-    whether it has a GPU, and so whether it can improve on the row.
-    """
-    params = {"t": tenant_id, "d": mission_id}
-    dots: dict[uuid.UUID, list[LaserDot]] = {}
-    for r in await conn.execute(
-        text(f"""
-            SELECT l.capture_id, l.id, l.x, l.y FROM laser_labels l
-            JOIN captures c ON c.tenant_id = l.tenant_id AND c.id = l.capture_id
-            WHERE c.tenant_id = :t AND c.mission_id = :d AND {VALID_LASER}
-            ORDER BY l.number
-            """),
-        params,
-    ):
-        dots.setdefault(r.capture_id, []).append(LaserDot(r.id, r.x, r.y))
+    Which images is the cohort's own predicate (`_needs_prediction`), asked
+    per capture, so the resolver mirrors its selector exactly: stale is a
+    version other than `predictor_version` (NULL included) or a row whose dot
+    has been superseded. The activity is told whether a row exists and whether
+    its dot was superseded, because only it knows whether it has a GPU, and
+    so whether it can improve on the row.
 
+    v2 (2026-10-24): v1's resolver (and this port of it) called the row's dot
+    dead when it was not among the image's *live* dots, where its selector
+    said *superseded*. A dot reopened in Label Studio is neither live nor
+    superseded, so its capture -- with another live dot -- was fresh to the
+    cohort and `dive_pipeline_status`, stale to the resolver: re-predicted
+    only when other work brought the dive up, and rewritten even by a
+    GPU-less worker, since the flag defeated NO_UPGRADE_AVAILABLE.
+    """
+    # One statement (review of #362): `needs` and the dots are read in one
+    # snapshot, so a capture the cohort's predicate keeps -- which requires a
+    # live dot -- always has its dots. Two statements under READ COMMITTED
+    # could straddle a sync that withdrew the capture's last dot.
     rows = await conn.execute(
         text(f"""
             SELECT c.id, c.checksum, c.v1_id IS NOT NULL AS from_v1,
-                   {_LIVE_LABEL} AS labelled,
-                   p.capture_id IS NOT NULL AS predicted,
-                   p.predictor_version, p.laser_label_id
+                   cur.capture_id IS NOT NULL AS predicted,
+                   {_prediction_laser_superseded("cur")} AS laser_superseded,
+                   live.dots
             FROM captures c
-            LEFT JOIN current_head_tail_predictions p
-              ON p.tenant_id = c.tenant_id AND p.capture_id = c.id
+            LEFT JOIN current_head_tail_predictions cur
+              ON cur.tenant_id = c.tenant_id AND cur.capture_id = c.id
+            CROSS JOIN LATERAL (
+                SELECT coalesce(
+                    json_agg(json_build_array(l.id, l.x, l.y) ORDER BY l.number),
+                    '[]'::json
+                ) AS dots
+                FROM laser_labels l
+                WHERE l.tenant_id = c.tenant_id AND l.capture_id = c.id
+                  AND {VALID_LASER}
+            ) live
             WHERE c.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
+              AND {_needs_prediction(":version")}
             ORDER BY c.number
             """),
-        params,
+        {"t": tenant_id, "d": mission_id, "version": predictor_version},
     )
     out = []
     for r in rows:
-        live = dots.get(r.id)
-        if not live or r.labelled:
+        if not r.dots:  # not reachable in one snapshot; never a crash
             continue
-        dead = r.laser_label_id is not None and r.laser_label_id not in {
-            d.laser_label_id for d in live
-        }
-        if r.predicted and r.predictor_version == predictor_version and not dead:
-            continue  # fresh
         out.append(
             PredictCapture(
                 capture_id=r.id,
                 checksum=r.checksum,
                 from_v1=r.from_v1,
-                dots=tuple(live),
+                dots=tuple(LaserDot(uuid.UUID(i), x, y) for i, x, y in r.dots),
                 has_existing_prediction=r.predicted,
-                existing_laser_superseded=dead,
+                existing_laser_superseded=r.laser_superseded,
             )
         )
     return out

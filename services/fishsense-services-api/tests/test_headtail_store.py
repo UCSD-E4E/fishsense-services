@@ -1183,8 +1183,8 @@ async def test_reselects_a_stale_or_null_version(owner_engine, app_engine, versi
 async def test_reselects_when_the_predictions_laser_was_superseded(
     owner_engine, app_engine
 ):
-    """A prediction naming a label no longer in the live set was made from a
-    dot since dead-lettered; the surviving dot is the one to use."""
+    """A prediction naming a dot since superseded (dead-lettered) may be of
+    the wrong fish; the surviving dot is the one to use."""
     lab = await _tenant(owner_engine)
     mission = await _dive(owner_engine, lab)
     capture = await _capture(owner_engine, lab, mission)
@@ -1199,6 +1199,82 @@ async def test_reselects_when_the_predictions_laser_was_superseded(
         True,
         True,
     )
+
+
+@pytest.mark.parametrize(
+    "dot",
+    [{}, {"superseded": True}, {"completed": False}, {"x": None, "y": None}],
+    ids=["live", "superseded", "incomplete", "no-coordinates"],
+)
+@pytest.mark.parametrize("version", [V, FALLBACK])
+async def test_the_resolver_and_the_cohort_agree_on_a_predictions_dot(
+    owner_engine, app_engine, dot, version
+):
+    """Resolvers mirror their selectors exactly (v1's rule). The cohort calls
+    a current-version row stale when its dot is *superseded*; the resolver
+    once called it stale when its dot was merely not live, so a dot reopened
+    in Label Studio (sync sets `completed` false, never `superseded`) left a
+    row the cohort called fresh -- the dive never selected for it, nor counted
+    pending in `dive_pipeline_status` -- that the resolver re-predicted
+    whenever other work brought the dive up, and that a GPU-less worker then
+    rewrote (`existing_laser_superseded` defeats NO_UPGRADE_AVAILABLE)."""
+    lab = await _tenant(owner_engine)
+    mission = await _dive(owner_engine, lab)
+    capture = await _capture(owner_engine, lab, mission)
+    used = await _laser(owner_engine, lab, capture, **dot)
+    other = await _laser(owner_engine, lab, capture, x=11.0, y=21.0)  # still live
+    await _prediction(owner_engine, lab, capture, laser=used, version=version)
+
+    selected = await _next_predict(app_engine, lab) == mission
+    needing = await _needing(app_engine, lab, mission)
+
+    assert selected == bool(needing)
+    assert selected == (version != V or dot == {"superseded": True})
+    for picked in needing:
+        assert picked.existing_laser_superseded == (dot == {"superseded": True})
+        # And what the processor crops around: the live dots only, in order,
+        # never the dead one (review of #362).
+        assert [d.laser_label_id for d in picked.dots] == (
+            [used, other] if dot == {} else [other]
+        )
+        assert picked.has_existing_prediction
+
+
+def test_the_dead_dot_term_binds_to_the_alias_it_is_given():
+    """The cohort renders it on its own `p` (the text the status function
+    froze); the resolver on its own alias, so neither depends on SQL scoping
+    picking the right `p` (review of #362)."""
+    from fishsense_services_api import headtail_store
+
+    term = (
+        headtail_store._prediction_laser_superseded
+    )  # pylint: disable=protected-access
+    assert "dead.id = cur.laser_label_id" in term("cur")
+    assert "p." not in term("cur")
+    assert (
+        term("p") == headtail_store._PREDICTION_LASER_SUPERSEDED
+    )  # pylint: disable=protected-access
+
+
+def test_the_cohort_is_what_the_status_function_froze():
+    """`dive_pipeline_status_rows()` holds the cohort as text the migration
+    rendered (0029, recreated by 0046/0050/0063/0067), frozen in the
+    database: a change to the store's predicate would not reach it, and the
+    view and the selector would disagree with no test failing (review of
+    #362). The capture-level predicate, rendered today at the frozen
+    version, must be in the latest function verbatim; when it is not, ship a
+    migration that recreates the function."""
+    import importlib
+
+    from fishsense_services_api import headtail_store
+
+    latest = importlib.import_module(
+        "fishsense_services_api.migrations.versions.0067_laser_predictor_v3"
+    )
+    rendered = headtail_store._needs_prediction(  # pylint: disable=protected-access
+        str(latest.HEADTAIL_PREDICTOR_VERSION)
+    )
+    assert latest.FUNCTION_SQL.count(rendered) == 1
 
 
 async def test_skips_non_canonical_images(owner_engine, app_engine):
