@@ -66,6 +66,7 @@ from fishsense_services_api.slate_store import (
     record_slate_label,
     slate_label_studio_projects,
     slate_populate_candidates,
+    slate_preprocess_work,
     slate_preprocess_inputs,
     slate_template_for_task,
     supersede_stale_slate_labels,
@@ -199,6 +200,46 @@ async def test_a_dead_lettered_slate_label_does_not_count_as_done(
     await slate_label(owner_engine, lab, frame, superseded=True)
 
     assert await _next(app_engine, lab) == only
+
+
+async def test_a_retired_slate_label_counts_as_done(owner_engine, app_engine):
+    """v2 (0077; mission 436, 2026-10-26): a label superseded for a stated
+    reason (``superseded_reason``, e.g. ``mirrored``) was retired on purpose.
+    Its frame is not work again, or populate would re-anchor and revive it."""
+    lab = await tenant(owner_engine)
+    only = await _slate_mission(owner_engine, lab)
+    frame = await capture(owner_engine, lab, only)
+    await species(owner_engine, lab, frame)
+    await slate_label(owner_engine, lab, frame, completed=True,
+                      superseded_reason="mirrored")  # fmt: skip
+
+    assert await _next(app_engine, lab) is None
+
+
+async def test_the_marker_only_predicate_counts_a_retired_label_as_done(
+    owner_engine, app_engine
+):
+    """`slate_preprocess_work` without the detector is what a migration
+    freezes into `dive_pipeline_status` (0029): it says the same."""
+    lab = await tenant(owner_engine)
+    only = await _slate_mission(owner_engine, lab)
+    frame = await capture(owner_engine, lab, only)
+    await species(owner_engine, lab, frame)
+    label = await slate_label(owner_engine, lab, frame, completed=True,
+                              superseded_reason="mirrored")  # fmt: skip
+    work = slate_preprocess_work(":marker")
+
+    async def has_work():
+        async with tenant_transaction(app_engine, lab) as conn:
+            return (await conn.execute(text(
+                f"SELECT {work} FROM missions d WHERE d.id = :m"),
+                {"m": only, "marker": SLATE_MARKER})).scalar_one()  # fmt: skip
+
+    assert await has_work() is False
+    async with owner_engine.begin() as conn:  # dead-lettered: work again
+        await conn.execute(text("UPDATE slate_labels SET superseded_reason = NULL "
+                                "WHERE id = :i"), {"i": label})  # fmt: skip
+    assert await has_work() is True
 
 
 async def test_a_superseded_species_marker_does_not_select_the_mission(
@@ -668,6 +709,20 @@ async def test_an_incomplete_slate_label_keeps_its_frame_a_target(
     assert [c.capture_id for c in await _candidates(app_engine, lab, only)] == [frame]
 
 
+async def test_a_retired_label_keeps_its_frame_out_of_populate(
+    owner_engine, app_engine
+):
+    """Retired on purpose (0077): not drawn again for a labeller."""
+    lab = await tenant(owner_engine)
+    only = await _slate_mission(owner_engine, lab)
+    frame = await capture(owner_engine, lab, only)
+    await species(owner_engine, lab, frame)
+    await slate_label(owner_engine, lab, frame, completed=True,
+                      superseded_reason="mirrored")  # fmt: skip
+
+    assert await _candidates(app_engine, lab, only) == []
+
+
 async def test_populate_targets_canonical_frames_only(owner_engine, app_engine):
     """v2: v1 took every marked image. A duplicate frame shares its canonical
     twin's checksum and so its JPEG and task URL, and two rows cannot anchor
@@ -758,6 +813,24 @@ async def test_re_recording_revives_the_row_and_keeps_what_the_labeler_did(
     assert row.reference_points == [[1.0, 2.0]]
     assert row.needs_reprocess is True
     assert row.image_url == "s3://b/k"
+
+
+async def test_re_recording_does_not_revive_a_retired_label(owner_engine, app_engine):
+    """A label retired on purpose (0077) stays retired if its task is anchored
+    again; only a dead-lettered one (no reason) is revived."""
+    lab = await tenant(owner_engine)
+    only = await _slate_mission(owner_engine, lab)
+    frame = await capture(owner_engine, lab, only)
+    label = await slate_label(owner_engine, lab, frame, task=4002, completed=True,
+                              superseded_reason="mirrored")  # fmt: skip
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        await record_slate_label(
+            conn, lab, frame, ls_project_id=66, ls_task_id=4002, image_url="s3://b/k"
+        )
+
+    row = await _row(owner_engine, label)
+    assert (row.superseded, row.superseded_reason) == (True, "mirrored")
 
 
 async def test_a_task_cannot_anchor_another_tenants_capture(owner_engine, app_engine):
