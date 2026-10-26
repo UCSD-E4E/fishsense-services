@@ -32,6 +32,9 @@ from fishsense_services_contracts.task_queues import (
     PROCESSOR_TASK_QUEUE,
 )
 
+#: v25 (2026-10-26): the laser-colour backfill (`laser_colour_backfill`:
+#: `ColourFramesInput`, `ColourReading`), each pre-v22 automatic dot's colour
+#: read off its render. New models only; v24 parses.
 #: v24 (2026-10-26): calibration v4's slate pose records the dot on the rigid
 #: board's own plane too (`SlatePose.board_point`), a range no orientation of
 #: the page decides: the cross-check 436's wrong-way-up frames need, which
@@ -97,7 +100,7 @@ from fishsense_services_contracts.task_queues import (
 #: JSON is unchanged -- each renamed field keeps its old name on the wire
 #: (`renamed.py`) -- so a v6 processor and a v7 orchestrator interoperate; only
 #: the published schema's model names differ.
-CONTRACT_VERSION = 24
+CONTRACT_VERSION = 25
 
 
 def _discover_models() -> tuple[type[BaseModel], ...]:

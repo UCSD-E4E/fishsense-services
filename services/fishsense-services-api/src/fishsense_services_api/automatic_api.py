@@ -54,6 +54,9 @@ class AutomaticFrameView(BaseModel):
     #: when it gave no reading, and on every row from before.
     laser_color: str | None
     laser_color_margin: float | None
+    #: ``dot`` (read with the dot), ``render`` (backfilled off the render,
+    #: 0076), or None when there is no reading.
+    laser_color_source: str | None
     #: SimCC's keypoints when the frame has them (head/tail v5: what its
     #: length is measured from, and what an accept takes), else the SAM rule's.
     head: PixelPoint | None
@@ -153,6 +156,9 @@ class AutomaticLengthView(BaseModel):
     laser_confidence: float | None
     #: The automatic dot's colour (0072); None when unread or from before.
     laser_color: str | None
+    laser_color_margin: float | None
+    #: ``dot``, ``render`` (backfilled off the render, 0076), or None.
+    laser_color_source: str | None
     sam_score: float | None
     #: The predicted choice, as Label Studio spells it.
     species: str | None
@@ -236,6 +242,7 @@ def add_automatic_routes(
             laser_confidence=found.laser_confidence,
             laser_color=found.laser_color,
             laser_color_margin=found.laser_color_margin,
+            laser_color_source=found.laser_color_source,
             head=_point(found.head),
             tail=_point(found.tail),
             head_tail_source=found.head_tail_source,

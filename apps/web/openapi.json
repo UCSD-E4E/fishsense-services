@@ -259,6 +259,17 @@
             ],
             "title": "Laser Color Margin"
           },
+          "laser_color_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Laser Color Source"
+          },
           "laser_confidence": {
             "anyOf": [
               {
@@ -526,6 +537,7 @@
           "laser_confidence",
           "laser_color",
           "laser_color_margin",
+          "laser_color_source",
           "head",
           "tail",
           "head_tail_source",
@@ -649,6 +661,28 @@
             ],
             "title": "Laser Color"
           },
+          "laser_color_margin": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Laser Color Margin"
+          },
+          "laser_color_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Laser Color Source"
+          },
           "laser_confidence": {
             "anyOf": [
               {
@@ -745,6 +779,8 @@
           "calibration_source",
           "laser_confidence",
           "laser_color",
+          "laser_color_margin",
+          "laser_color_source",
           "sam_score",
           "species",
           "scientific_name",

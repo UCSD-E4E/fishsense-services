@@ -10,14 +10,27 @@ import { colourLabel, colourRows, sourcesDisagree, type LaserColours } from "./l
 const counts = (red: number, green: number, unread = 0) => ({ red, green, unread });
 
 describe("colourLabel", () => {
-  it("is the colour, with the margin when there is one", () => {
+  // The owner, 2026-10-26: the margin as how far apart the channels are, in
+  // plain words; a signed number read as if something were wrong.
+  it("is the colour, with how far apart the channels are", () => {
     expect(colourLabel("red")).toBe("Red");
-    expect(colourLabel("green", 0.314)).toBe("Green (margin 0.31)");
+    expect(colourLabel("red", 163.479)).toBe("Red, 163 levels apart");
+    expect(colourLabel("green", -116.98)).toBe("Green, 117 levels apart");
+  });
+
+  it("says a reading too close to call is one, not that nothing was read", () => {
+    expect(colourLabel(null, 2.4)).toBe("Too close to call (2 levels apart)");
+    expect(colourLabel(null, -1.6)).toBe("Too close to call (2 levels apart)");
   });
 
   it("says when the dot gave no reading", () => {
     expect(colourLabel(null)).toBe("Not read");
-    expect(colourLabel(undefined, 0.5)).toBe("Not read");
+    expect(colourLabel(undefined, null)).toBe("Not read");
+  });
+
+  it("says when the colour was read off the render later", () => {
+    expect(colourLabel("green", -90, "render")).toBe("Green, 90 levels apart (read from the render)");
+    expect(colourLabel("red", 50, "dot")).toBe("Red, 50 levels apart");
   });
 });
 
