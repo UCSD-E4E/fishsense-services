@@ -93,6 +93,10 @@ with workflow.unsafe.imports_passed_through():
         MeasureAutomaticResult,
         PredictAutomaticFramesInput,
     )
+    from fishsense_services_contracts.headtail_keypoints import (
+        KeypointFramesInput,
+        KeypointResult,
+    )
     from fishsense_services_contracts.species_prediction import (
         SPECIES_STATUS_NO_UPGRADE_AVAILABLE,
         PredictSpeciesImagesInput,
@@ -410,6 +414,40 @@ async def _frames(
             await cleanup_raw(staging)
 
 
+#: Automatic head/tail v5 (owner, 2026-10-24/25): SimCC keypoints on each
+#: non-model frame's SAM box, between the frames and the calibration, and the
+#: lengths' refusals for frames sent to review. A run started before it
+#: replays without either.
+KEYPOINTS_PATCH = "automatic-headtail-v5-keypoints"
+
+
+async def _keypoints(
+    target: AutomaticTarget, gpu: _Gpu, report: AutomaticMissionReport
+) -> None:
+    """SimCC on the frames owed keypoints (the processor's keypoint workflow,
+    the replay's, #329); only a real GPU runs it, as the frames."""
+    inputs: KeypointFramesInput = await _db(
+        "resolve_automatic_keypoint_inputs",
+        target,
+        result_type=KeypointFramesInput,
+    )
+    if not inputs.frames:
+        return
+    if not await gpu.ready():
+        _skip_for_gpu("keypoints", gpu, report)
+        return
+    ran, results = await _child(
+        "PredictHeadtailKeypointsWorkflow",
+        inputs,
+        child_id=f"automatic-keypoints-{target.mission_id}",
+        task_queue=PROCESSOR_GPU_TASK_QUEUE,
+        timeout=gpu_child_timeout(len(inputs.frames)),
+        result_type=List[KeypointResult],
+    )
+    if ran and results:
+        await _db("persist_automatic_keypoints", target, results, result_type=int)
+
+
 async def _species(
     target: AutomaticTarget, gpu: _Gpu, report: AutomaticMissionReport
 ) -> None:
@@ -501,7 +539,11 @@ async def _lengths(target: AutomaticTarget) -> None:
         target,
         result_type=Optional[AutomaticMeasurePlan],
     )
-    if plan is None or not plan.payload.captures:
+    if plan is None:
+        return
+    if plan.refusals and workflow.patched(KEYPOINTS_PATCH):
+        await _db("persist_automatic_measure_refusals", target, plan, result_type=int)
+    if not plan.payload.captures:
         return
     await wake_light_processor()
     ran, result = await _child(
@@ -581,6 +623,8 @@ async def _run_for_mission(
     try:
         if not await _step(target, "frames", lambda: _frames(target, gpu, report)):
             return report, gpu
+        if workflow.patched(KEYPOINTS_PATCH):
+            await _step(target, "keypoints", lambda: _keypoints(target, gpu, report))
         await _step(target, "calibration", lambda: _calibration(target))
         await _step(target, "lengths", lambda: _lengths(target))
     except StepFailed as exc:

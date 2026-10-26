@@ -36,7 +36,9 @@ run_e2e.py, score.py, tail/evaluate.py). Decided 2026-10-06:
 from __future__ import annotations
 
 import json
+import math
 import uuid
+
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -53,6 +55,13 @@ from fishsense_services_api.service_principal import ServicePrincipal
 from fishsense_services_api.slate_presence_store import detector_slate_frame
 
 __all__ = [
+    "KEYPOINT_DISAGREEMENT",
+    "KEYPOINTS_PREDICTOR_VERSION",
+    "AutomaticKeypointFrame",
+    "AutomaticKeypointRow",
+    "AutomaticMeasureRefusal",
+    "automatic_keypoint_inputs",
+    "persist_automatic_keypoints",
     "missions_with_automatic_dots",
     "AUTOMATIC_PRODUCER",
     "AUTOMATIC_RESULTS_COHORT",
@@ -360,14 +369,64 @@ _CALIBRATION_WORK = """(
         )
     )"""
 
+#: Automatic head/tail v5 (owner, 2026-10-24/25): fishsense-core's SimCC
+#: keypoints on the frame's SAM box replace the SAM rule's extreme points for
+#: every frame but the fish models'. Its rows are `automatic_keypoint_
+#: predictions` (0074), beside the head/tail rows, which stay as they are.
+KEYPOINTS_PREDICTOR_VERSION = 5
+#: Where SimCC's and the SAM rule's lengths differ by more than this share of
+#: the SAM rule's, the frame goes to review instead of being measured (owner,
+#: 2026-10-24: 15%; 11% of non-model frames on the replay).
+KEYPOINT_DISAGREEMENT = 0.15
+
+#: Capture `c` is a fish model's frame, which keeps the SAM rule: its mission
+#: is a ``known_length`` one or its human species label names a Fish Model --
+#: exactly the 29 model missions, 2,717 frames (2026-10-25).
+_MODEL_FRAME = """(
+    EXISTS (SELECT 1 FROM missions mm
+            WHERE mm.tenant_id = c.tenant_id AND mm.id = c.mission_id
+              AND mm.purpose = 'known_length')
+    OR EXISTS (SELECT 1 FROM measurement_subjects ms
+               WHERE ms.tenant_id = c.tenant_id AND ms.capture_id = c.id
+                 AND ms.model_name IS NOT NULL)
+)"""
+
+#: Prediction `h`'s latest keypoints, as `k` (LATERAL), by the (tenant,
+#: prediction, seq) index -- not through the current view, which the planner
+#: rebuilds whole (2026-10-21's 145 s measure query).
+_KEYPOINTS = """LATERAL (
+        SELECT k.* FROM automatic_keypoint_predictions k
+        WHERE k.tenant_id = h.tenant_id AND k.automatic_head_tail_prediction_id = h.id
+        ORDER BY k.seq DESC
+        LIMIT 1
+    ) k"""
+#: `k` is at the current version.
+_KEYPOINTS_CURRENT = f"k.predictor_version = {KEYPOINTS_PREDICTOR_VERSION}"
+
+#: A non-model frame's rendered SAM prediction with no keypoints yet (never
+#: in a calibration session, never a slate).
+_KEYPOINTS_WORK = f"""NOT {_SESSION} AND EXISTS (
+        SELECT 1 FROM captures c
+        CROSS JOIN LATERAL {_latest("automatic_head_tail_predictions")} h
+        LEFT JOIN {_KEYPOINTS} ON true
+        WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id AND c.is_canonical
+          AND h.status = 'predicted' AND h.jpeg_render_version IS NOT NULL
+          AND NOT {_DETECTOR_SLATE} AND NOT {_MODEL_FRAME}
+          AND (k.id IS NULL OR NOT {_KEYPOINTS_CURRENT})
+    )"""
+
 #: A predicted fish with no current automatic length while a calibration
-#: exists (never in a calibration session).
+#: exists (never in a calibration session). A non-model frame is owed one
+#: only once it has keypoints, and a length is current only for the
+#: keypoints it was measured from (NULL: the SAM rule's, a model frame's).
 _LENGTHS_WORK = f"""NOT {_SESSION} AND EXISTS (
         SELECT 1 FROM automatic_measurement_calibrations mc
         JOIN captures c ON c.tenant_id = mc.tenant_id AND c.mission_id = mc.mission_id
         CROSS JOIN LATERAL {_latest("automatic_head_tail_predictions")} h
+        LEFT JOIN {_KEYPOINTS} ON true
         WHERE mc.tenant_id = d.tenant_id AND mc.mission_id = d.id AND c.is_canonical
           AND h.status = 'predicted'
+          AND ({_MODEL_FRAME} OR {_KEYPOINTS_CURRENT})
           -- A zoomed frame is never measured (the zoom gate, 0070).
           AND focal_length_calibrated(c.focal_length_mm)
           AND before_beam_move(c.tenant_id, c.mission_id, c.captured_at)
@@ -384,6 +443,7 @@ _LENGTHS_WORK = f"""NOT {_SESSION} AND EXISTS (
                 AND m.automatic_laser_calibration_id
                     IS NOT DISTINCT FROM mc.automatic_laser_calibration_id
                 AND m.laser_calibration_id IS NOT DISTINCT FROM mc.laser_calibration_id
+                AND m.automatic_keypoint_prediction_id IS NOT DISTINCT FROM k.id
               ORDER BY m.seq DESC
               LIMIT 1
           ) IS DISTINCT FROM :mv
@@ -395,7 +455,7 @@ def automatic_results_cohort(*, species: bool = True) -> str:
     adds. Any priority. `:hv`, `:sv`, `:cv`, `:mv` are the stages' current
     versions (`:sv` unused with `species` off). Species has its own switch
     (2026-10-15): off, a dive whose only work is species is not in it."""
-    work = [_FRAMES_WORK, _CALIBRATION_WORK, _LENGTHS_WORK]
+    work = [_FRAMES_WORK, _KEYPOINTS_WORK, _CALIBRATION_WORK, _LENGTHS_WORK]
     if species:
         work.insert(1, _SPECIES_WORK)
     return f"""{RECTIFIABLE_MISSION}
@@ -441,13 +501,20 @@ def _current_row(view: str, alias: str, where: str = "") -> str:
 
 AUTOMATIC_MEASURE_CAPTURES = f"""
     SELECT h.capture_id, h.id, h.laser_x, h.laser_y, h.head_x, h.head_y,
-           h.tail_x, h.tail_y
+           h.tail_x, h.tail_y, {_MODEL_FRAME} AS model_frame, k.id AS keypoint_id,
+           k.status AS keypoint_status, k.head_x AS k_head_x, k.head_y AS k_head_y,
+           k.tail_x AS k_tail_x, k.tail_y AS k_tail_y
     FROM captures c
     CROSS JOIN {_current_row("current_automatic_head_tail_predictions", "h")}
+    LEFT JOIN {_KEYPOINTS} ON true
     LEFT JOIN {_current_row("current_automatic_measurements", "m",
-                            "m.algorithm_version = :mv")} ON true
+                            "m.algorithm_version = :mv AND "
+                            "m.automatic_keypoint_prediction_id IS NOT DISTINCT FROM k.id")
+              } ON true
     WHERE c.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
       AND h.status = 'predicted' AND m.id IS NULL
+      -- head/tail v5: a non-model frame waits for its keypoints
+      AND ({_MODEL_FRAME} OR {_KEYPOINTS_CURRENT})
       -- the zoom gate (0070): its depth assumes intrinsics it was not shot at
       AND focal_length_calibrated(c.focal_length_mm)
       AND before_beam_move(c.tenant_id, c.mission_id, c.captured_at)
@@ -872,6 +939,133 @@ async def persist_automatic_head_tails(
     return len(ids)
 
 
+# -- keypoints (head/tail v5) ----------------------------------------------------------
+
+AUTOMATIC_KEYPOINT_CAPTURES = f"""
+    SELECT c.id, c.checksum, c.v1_id IS NOT NULL AS from_v1, h.id AS head_tail_id,
+           h.mask_bbox, h.jpeg_render_version, h.jpeg_camera_calibration_id
+    FROM captures c
+    CROSS JOIN {_current_row("current_automatic_head_tail_predictions", "h")}
+    LEFT JOIN {_KEYPOINTS} ON true
+    WHERE c.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
+      AND h.status = 'predicted' AND h.jpeg_render_version IS NOT NULL
+      AND NOT {_DETECTOR_SLATE} AND NOT {_MODEL_FRAME}
+      AND NOT {_calibration_session(":t", ":d")}
+      AND (k.id IS NULL OR NOT {_KEYPOINTS_CURRENT})
+    ORDER BY c.number
+    """
+
+
+@dataclass(frozen=True)
+class AutomaticKeypointFrame:
+    """A non-model frame's SAM prediction owed keypoints: SimCC's crop is cut
+    from `mask_bbox`, in pixels of the render named."""
+
+    capture_id: uuid.UUID
+    checksum: str
+    from_v1: bool
+    prediction_id: uuid.UUID
+    mask_bbox: list[int]
+    jpeg_render_version: int
+    jpeg_camera_calibration_id: uuid.UUID | None
+
+
+async def automatic_keypoint_inputs(
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
+) -> list[AutomaticKeypointFrame]:
+    """The dive's frames owed keypoints at `KEYPOINTS_PREDICTOR_VERSION`: each
+    non-model frame's current, rendered SAM prediction (never a slate, never
+    in a calibration session) with none yet."""
+    rows = await conn.execute(
+        text(AUTOMATIC_KEYPOINT_CAPTURES), {"t": tenant_id, "d": mission_id}
+    )
+    return [
+        AutomaticKeypointFrame(r.id, r.checksum, r.from_v1, r.head_tail_id,
+                               list(r.mask_bbox), r.jpeg_render_version,
+                               r.jpeg_camera_calibration_id)  # fmt: skip
+        for r in rows
+    ]
+
+
+@dataclass(frozen=True)
+class AutomaticKeypointRow:
+    """SimCC's answer for one prediction: ``predicted`` (points in render
+    px) or ``refused`` (the model refused the box)."""
+
+    prediction_id: uuid.UUID
+    capture_id: uuid.UUID
+    status: str
+    head: list[float] | None = None
+    tail: list[float] | None = None
+    confidence: float | None = None
+    crop: list[int] | None = None
+    checkpoint: str | None = None
+
+
+async def persist_automatic_keypoints(
+    conn: AsyncConnection,
+    tenant_id: uuid.UUID,
+    mission_id: uuid.UUID,
+    rows: Sequence[AutomaticKeypointRow],
+) -> int:
+    """Append keypoints for predictions still their frames' current ones,
+    flagging a disagreement with the SAM rule over `KEYPOINT_DISAGREEMENT`
+    (``keypoints_disagree``) and a refused box (``keypoints_refused``); both
+    lengths are recorded. Any other status (the render was not there) writes
+    nothing: the frame stays owed. Returns how many rows were written."""
+    rows = [r for r in rows if r.status in ("predicted", "refused")]
+    if not rows:
+        return 0
+    await _check_captures(conn, tenant_id, mission_id, [r.capture_id for r in rows])
+    current = {
+        r.id: r
+        for r in await conn.execute(
+            text("""
+                SELECT id, capture_id, head_x, head_y, tail_x, tail_y
+                FROM current_automatic_head_tail_predictions
+                WHERE tenant_id = :t AND capture_id = ANY(:c) AND status = 'predicted'
+                """),
+            {"t": tenant_id, "c": [r.capture_id for r in rows]},
+        )
+    }
+    written = 0
+    for r in rows:
+        h = current.get(r.prediction_id)
+        if h is None or h.capture_id != r.capture_id:
+            continue  # superseded since it was planned: its frame is owed again
+        sam = float(math.hypot(h.head_x - h.tail_x, h.head_y - h.tail_y))
+        values = dict(
+            tenant_id=tenant_id, capture_id=r.capture_id, prediction=r.prediction_id,
+            head_x=None, head_y=None, tail_x=None, tail_y=None,
+            confidence=r.confidence, crop=r.crop, sam=sam, simcc=None,
+            disagreement=None, version=KEYPOINTS_PREDICTOR_VERSION,
+            checkpoint=r.checkpoint, status="keypoints_refused",
+        )  # fmt: skip
+        if r.status == "predicted":
+            simcc = float(math.hypot(r.head[0] - r.tail[0], r.head[1] - r.tail[1]))
+            off = abs(simcc - sam) / sam if sam > 0 else float("inf")
+            values.update(
+                head_x=r.head[0], head_y=r.head[1], tail_x=r.tail[0], tail_y=r.tail[1],
+                simcc=simcc, disagreement=off,
+                status="keypoints_disagree" if off > KEYPOINT_DISAGREEMENT else "predicted",
+            )  # fmt: skip
+        await conn.execute(
+            text("""
+                INSERT INTO automatic_keypoint_predictions (
+                    tenant_id, capture_id, automatic_head_tail_prediction_id, status,
+                    head_x, head_y, tail_x, tail_y, confidence, crop,
+                    sam_rule_length_px, simcc_length_px, disagreement,
+                    predictor_version, checkpoint)
+                VALUES (:tenant_id, :capture_id, :prediction, :status, :head_x,
+                        :head_y, :tail_x, :tail_y, :confidence, :crop, :sam, :simcc,
+                        :disagreement, :version, :checkpoint)
+                """),
+            values,
+        )
+        written += 1
+    return written
+
+
 # -- species ------------------------------------------------------------------------
 
 
@@ -1110,6 +1304,18 @@ class AutomaticMeasureCapture:
     head_y: float
     tail_x: float
     tail_y: float
+    #: The keypoints these points are (v5); None: the SAM rule's, a model's.
+    automatic_keypoint_prediction_id: uuid.UUID | None = None
+
+
+@dataclass(frozen=True)
+class AutomaticMeasureRefusal:
+    """A frame its keypoints sent to review (v5): refused, not measured."""
+
+    capture_id: uuid.UUID
+    automatic_head_tail_prediction_id: uuid.UUID
+    automatic_keypoint_prediction_id: uuid.UUID
+    reason: str
 
 
 @dataclass(frozen=True)
@@ -1118,6 +1324,7 @@ class AutomaticMeasureInputs:
     camera_calibration_id: uuid.UUID | None
     camera_matrix: list[list[float]] | None
     captures: list[AutomaticMeasureCapture]
+    refusals: list[AutomaticMeasureRefusal] = field(default_factory=list)
 
 
 async def automatic_measure_inputs(
@@ -1147,6 +1354,20 @@ async def automatic_measure_inputs(
         {"t": tenant_id, "d": mission_id, "mv": algorithm_version},
     )
     slate = await _slate_probabilities(slate_frames, conn, tenant_id, mission_id)
+    rows = [r for r in rows if slate.get(r.capture_id, 0.0) < SLATE_FRAME_THRESHOLD]
+    captures, refusals = [], []
+    for r in rows:
+        if r.model_frame:
+            captures.append(AutomaticMeasureCapture(
+                r.capture_id, r.id, r.laser_x, r.laser_y,
+                r.head_x, r.head_y, r.tail_x, r.tail_y))  # fmt: skip
+        elif r.keypoint_status == "predicted":
+            captures.append(AutomaticMeasureCapture(
+                r.capture_id, r.id, r.laser_x, r.laser_y, r.k_head_x, r.k_head_y,
+                r.k_tail_x, r.k_tail_y, r.keypoint_id))  # fmt: skip
+        else:
+            refusals.append(AutomaticMeasureRefusal(
+                r.capture_id, r.id, r.keypoint_id, r.keypoint_status))  # fmt: skip
     return AutomaticMeasureInputs(
         calibration=MeasurementCalibration(
             source=cal.calibration_source,
@@ -1157,12 +1378,8 @@ async def automatic_measure_inputs(
         ),
         camera_calibration_id=cal.camera_calibration_id,
         camera_matrix=[[float(x) for x in r] for r in cal.camera_matrix],
-        captures=[
-            AutomaticMeasureCapture(r.capture_id, r.id, r.laser_x, r.laser_y,
-                                    r.head_x, r.head_y, r.tail_x, r.tail_y)  # fmt: skip
-            for r in rows
-            if slate.get(r.capture_id, 0.0) < SLATE_FRAME_THRESHOLD
-        ],
+        captures=captures,
+        refusals=refusals,
     )
 
 
@@ -1180,6 +1397,8 @@ class AutomaticMeasurementRow:
     length_m: float | None = None
     depth_m: float | None = None
     refusal: str | None = None
+    #: The keypoints measured from (v5); None: the SAM rule's.
+    automatic_keypoint_prediction_id: uuid.UUID | None = None
 
 
 async def persist_automatic_measurements(
@@ -1195,7 +1414,28 @@ async def persist_automatic_measurements(
         return 0
     await _check_captures(conn, tenant_id, mission_id, [r.capture_id for r in rows])
     await _check_head_tails(conn, tenant_id, rows)
+    await _check_keypoints(conn, tenant_id, rows)
     return len(await _insert(conn, "automatic_measurements", tenant_id, rows))
+
+
+async def _check_keypoints(conn, tenant_id, rows) -> None:
+    """Each length's keypoints are its own head/tail's."""
+    named = {r.automatic_keypoint_prediction_id for r in rows} - {None}
+    if not named:
+        return
+    owner = dict(
+        (await conn.execute(text("""
+            SELECT id, automatic_head_tail_prediction_id
+            FROM automatic_keypoint_predictions WHERE tenant_id = :t AND id = ANY(:ids)
+            """), {"t": tenant_id, "ids": list(named)})).all()
+    )  # fmt: skip
+    for r in rows:
+        k = r.automatic_keypoint_prediction_id
+        if k is not None and owner.get(k) != r.automatic_head_tail_prediction_id:
+            raise ForeignHeadTail(
+                f"automatic keypoints {k} are not head/tail "
+                f"{r.automatic_head_tail_prediction_id}'s"
+            )
 
 
 class AutomaticResultsCatalog(ServicePrincipal):
@@ -1273,6 +1513,18 @@ class AutomaticResultsCatalog(ServicePrincipal):
             return await persist_automatic_head_tails(
                 conn, tenant_id, mission_id, rows, masks
             )
+
+    async def automatic_keypoint_inputs(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
+    ) -> list[AutomaticKeypointFrame]:
+        async with self._tenant(tenant_id) as conn:
+            return await automatic_keypoint_inputs(conn, tenant_id, mission_id)
+
+    async def persist_automatic_keypoints(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, rows
+    ) -> int:
+        async with self._tenant(tenant_id) as conn:
+            return await persist_automatic_keypoints(conn, tenant_id, mission_id, rows)
 
     async def automatic_species_captures(
         self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, species_version: int

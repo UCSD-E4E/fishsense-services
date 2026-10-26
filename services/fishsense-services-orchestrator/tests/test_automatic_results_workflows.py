@@ -51,6 +51,11 @@ from fishsense_services_contracts.automatic_results import (
     MeasureAutomaticResult,
     PredictAutomaticFramesInput,
 )
+from fishsense_services_contracts.headtail_keypoints import (
+    KeypointFrame,
+    KeypointFramesInput,
+    KeypointResult,
+)
 from fishsense_services_contracts.object_store import ObjectRef
 from fishsense_services_contracts.species_prediction import (
     PredictSpeciesImage,
@@ -144,7 +149,11 @@ def _calibration_plan(n):
     )  # fmt: skip
 
 
-def _measure_plan(n):
+def _measure_plan(n, *, refusals=0):
+    from fishsense_services_orchestrator.automatic_results.activities import (
+        AutomaticMeasureRefusalItem,
+    )
+
     return AutomaticMeasurePlan(
         payload=MeasureAutomaticInput(
             tenant_id=TENANT, mission_id=MISSION, camera_matrix=K,
@@ -156,11 +165,24 @@ def _measure_plan(n):
         ),
         calibration_source="stored", automatic_laser_calibration_id=None,
         laser_calibration_id=uuid.uuid4(), camera_calibration_id=None,
+        refusals=[AutomaticMeasureRefusalItem(
+            capture_id=uuid.uuid4(), automatic_head_tail_prediction_id=uuid.uuid4(),
+            automatic_keypoint_prediction_id=uuid.uuid4(), reason="keypoints_disagree",
+        ) for _ in range(refusals)],
+    )  # fmt: skip
+
+
+def _keypoints_input(n):
+    return KeypointFramesInput(
+        tenant_id=TENANT, mission_id=MISSION,
+        frames=[KeypointFrame(prediction_id=uuid.uuid4(), capture_id=uuid.uuid4(),
+                              render_url="https://garage/r.JPG?sig",
+                              mask_bbox=[1, 2, 3, 4]) for _ in range(n)],
     )  # fmt: skip
 
 
 def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET,
-           renders="all"):  # fmt: skip
+           renders="all", keypoints=0, refusals=0):  # fmt: skip
     """`selected` is the cohort's answer every time, or a list of answers in
     turn (None once it runs out). `renders`: the frames are ``all`` rendered
     already, rendered ``after`` the render step, or the tenant has
@@ -233,7 +255,21 @@ def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET,
 
     @activity.defn(name="resolve_automatic_measure_inputs")
     async def measure_in(t: AutomaticTarget) -> Optional[AutomaticMeasurePlan]:
-        return None if plan is None else _measure_plan(plan)
+        return None if plan is None else _measure_plan(plan, refusals=refusals)
+
+    @activity.defn(name="persist_automatic_measure_refusals")
+    async def refusals_out(t: AutomaticTarget, p: AutomaticMeasurePlan) -> int:
+        EVENTS.append(("persist refusals", [r.reason for r in p.refusals]))
+        return len(p.refusals)
+
+    @activity.defn(name="resolve_automatic_keypoint_inputs")
+    async def keypoints_in(t: AutomaticTarget) -> KeypointFramesInput:
+        return _keypoints_input(keypoints)
+
+    @activity.defn(name="persist_automatic_keypoints")
+    async def keypoints_out(t: AutomaticTarget, r: List[KeypointResult]) -> int:
+        EVENTS.append(("persist keypoints", len(r)))
+        return len(r)
 
     @activity.defn(name="persist_automatic_measurements")
     async def measure_out(t: AutomaticTarget, p: AutomaticMeasurePlan,
@@ -275,7 +311,8 @@ def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET,
 
     return [select, failed, frames_failed, frames_in, frames_out, species_in, species_out, cal_in,
             cal_out, measure_in, measure_out, wake_gpu, wake_per_image, wake_light,
-            stage, cleanup, render_in, render_out, masks_out]  # fmt: skip
+            stage, cleanup, render_in, render_out, masks_out, refusals_out,
+            keypoints_in, keypoints_out]  # fmt: skip
 
 
 @activity.defn(name="_record")
@@ -339,6 +376,17 @@ class _Frames:  # pylint: disable=too-few-public-methods
             start_to_close_timeout=timedelta(seconds=10),
         )
         return _frame_results(payload)
+
+
+@workflow.defn(name="PredictHeadtailKeypointsWorkflow")
+class _Keypoints:  # pylint: disable=too-few-public-methods
+    @workflow.run
+    async def run(self, payload: dict) -> list:
+        await _record_child()
+        return [KeypointResult(prediction_id=f["prediction_id"],
+                               capture_id=f["capture_id"], status="predicted",
+                               head=[1.0, 2.0], tail=[3.0, 4.0]).model_dump(mode="json")
+                for f in payload["frames"]]  # fmt: skip
 
 
 @workflow.defn(name="PredictSpeciesImagesWorkflow")
@@ -468,7 +516,8 @@ async def _run(
                               else _FailingFrames if frames_fail
                               else _PartialFrames if frames_partial else _Frames,
                               _RefusingSpecies if species_refuse
-                              else _FailingSpecies if species_fails else _Species]),
+                              else _FailingSpecies if species_fails else _Species,
+                              _Keypoints]),
             Worker(env.client, task_queue=PROCESSOR_TASK_QUEUE, activities=[_record],
                    workflows=[_Calibration, _Render]),
             Worker(env.client, task_queue=PROCESSOR_LIGHT_TASK_QUEUE,
@@ -507,6 +556,46 @@ async def test_one_mission_every_step_in_order():
         ("child", f"automatic-species-{MISSION}"),
         ("persist species", ["decode_failed"]),
     ]
+
+
+async def test_head_tail_v5_keypoints_run_after_the_frames_and_before_the_lengths():
+    """Automatic head/tail v5 (owner, 2026-10-24/25): SimCC on each non-model
+    frame's SAM box, on the GPU, after the frames and before calibration and
+    lengths -- which measure from them."""
+    await _run(AutomaticResultsForMissionWorkflow, TARGET, keypoints=3)
+    assert EVENTS == [
+        ("wake gpu",),
+        ("stage",),
+        ("child", f"automatic-frames-{MISSION}"),
+        ("persist frames", 2),
+        ("cleanup",),
+        ("child", f"automatic-keypoints-{MISSION}"),
+        ("persist keypoints", 3),
+        ("wake per-image",),
+        ("child", f"automatic-calibration-{MISSION}"),
+        ("persist calibration", "accepted", None),
+        ("wake light",),
+        ("child", f"automatic-measure-{MISSION}"),
+        ("persist lengths", 1),
+        ("child", f"automatic-species-{MISSION}"),
+        ("persist species", ["decode_failed"]),
+    ]
+
+
+async def test_without_a_real_gpu_the_keypoints_wait_and_say_so():
+    report = await _run(AutomaticResultsForMissionWorkflow, TARGET, mode="cpu_fallback",
+                        frames=0, keypoints=2, species=0)  # fmt: skip
+    assert not any(e[0] == "persist keypoints" for e in EVENTS)
+    assert any(s.startswith("keypoints: no GPU") for s in report.skipped)
+
+
+async def test_frames_sent_to_review_are_refused_with_nothing_to_measure():
+    """A frame whose keypoints disagree with the SAM rule has no length: its
+    refusal is written without a processor, even when nothing else is owed."""
+    await _run(AutomaticResultsForMissionWorkflow, TARGET, frames=0, species=0,
+               plan=0, refusals=2)  # fmt: skip
+    assert ("persist refusals", ["keypoints_disagree", "keypoints_disagree"]) in EVENTS
+    assert ("child", f"automatic-measure-{MISSION}") not in EVENTS
 
 
 async def test_frames_without_a_render_are_rendered_first_on_the_same_staging():

@@ -33,8 +33,8 @@ from __future__ import annotations
 
 import dataclasses
 import uuid
-from dataclasses import dataclass
-from typing import Any, List, Optional, Protocol, Annotated
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Protocol, Annotated
 
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
@@ -45,6 +45,8 @@ from fishsense_services_api.automatic_results_store import (
     AutomaticCandidate,
     AutomaticFramesInputs,
     AutomaticHeadTailRow,
+    AutomaticKeypointFrame,
+    AutomaticKeypointRow,
     AutomaticMeasureInputs,
     AutomaticMeasurementRow,
     AutomaticSpeciesCapture,
@@ -56,6 +58,7 @@ from fishsense_services_contracts.automatic_results import (
     AUTOMATIC_HEADTAIL_PREDICTOR_VERSION,
     AUTOMATIC_JPEG_RENDER_VERSION,
     AUTOMATIC_HEADTAIL_STATUSES,
+    AUTOMATIC_MEASUREMENT_ALGORITHM,
     AUTOMATIC_MEASUREMENT_VERSION,
     AutomaticCalibrationFrame,
     AutomaticCalibrationResult,
@@ -66,6 +69,11 @@ from fishsense_services_contracts.automatic_results import (
     MeasureAutomaticInput,
     MeasureAutomaticResult,
     PredictAutomaticFramesInput,
+)
+from fishsense_services_contracts.headtail_keypoints import (
+    KeypointFrame,
+    KeypointFramesInput,
+    KeypointResult,
 )
 from fishsense_services_contracts.laser_region import LASER_REGION_POLYGON
 from fishsense_services_contracts.renders import render_key
@@ -128,6 +136,17 @@ class AutomaticCalibrationPlan:
 
 
 @dataclass(frozen=True)
+class AutomaticMeasureRefusalItem:
+    """A frame its keypoints sent to review (head/tail v5): refused, not
+    measured."""
+
+    capture_id: uuid.UUID
+    automatic_head_tail_prediction_id: uuid.UUID
+    automatic_keypoint_prediction_id: uuid.UUID
+    reason: str
+
+
+@dataclass(frozen=True)
 class AutomaticMeasurePlan:
     """The lengths to compute, and the calibration they are computed under."""
 
@@ -136,6 +155,11 @@ class AutomaticMeasurePlan:
     automatic_laser_calibration_id: Optional[uuid.UUID]
     laser_calibration_id: Optional[uuid.UUID]
     camera_calibration_id: Optional[uuid.UUID]
+    #: Head/tail v5: each capture's keypoints its points are (by capture id;
+    #: absent, the SAM rule's), and the frames to refuse instead. Defaulted,
+    #: so a plan from before v5 still decodes.
+    keypoint_ids: Dict[str, str] = field(default_factory=dict)
+    refusals: List[AutomaticMeasureRefusalItem] = field(default_factory=list)
 
 
 class AutomaticResultsCatalog(Protocol):
@@ -154,6 +178,12 @@ class AutomaticResultsCatalog(Protocol):
     async def persist_automatic_head_tails(
         self, tenant_id, mission_id, rows
     ) -> int: ...
+
+    async def automatic_keypoint_inputs(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
+    ) -> list[AutomaticKeypointFrame]: ...
+
+    async def persist_automatic_keypoints(self, tenant_id, mission_id, rows) -> int: ...
 
     async def automatic_species_captures(
         self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, species_version: int
@@ -636,12 +666,90 @@ class AutomaticResultsActivities:
                 camera_matrix=inputs.camera_matrix,
                 laser_position=cal.laser_position,
                 laser_axis=cal.laser_axis,
-                captures=[AutomaticMeasureCapture(**vars(c)) for c in inputs.captures],
+                captures=[
+                    AutomaticMeasureCapture(
+                        **{
+                            k: v
+                            for k, v in vars(c).items()
+                            if k != "automatic_keypoint_prediction_id"
+                        }
+                    )
+                    for c in inputs.captures
+                ],
             ),
             calibration_source=cal.source,
             automatic_laser_calibration_id=cal.automatic_laser_calibration_id,
             laser_calibration_id=cal.laser_calibration_id,
             camera_calibration_id=inputs.camera_calibration_id,
+            keypoint_ids={
+                str(c.capture_id): str(c.automatic_keypoint_prediction_id)
+                for c in inputs.captures
+                if c.automatic_keypoint_prediction_id is not None
+            },
+            refusals=[AutomaticMeasureRefusalItem(**vars(r)) for r in inputs.refusals],
+        )
+
+    @activity.defn(name="persist_automatic_measure_refusals")
+    async def persist_automatic_measure_refusals(
+        self, target: AutomaticTarget, plan: AutomaticMeasurePlan
+    ) -> int:
+        """Head/tail v5: a frame sent to review gets a refusal, so it has no
+        length (and a SAM-rule length from before stops being current).
+        Nothing is measured, so no processor runs."""
+        rows = [
+            AutomaticMeasurementRow(
+                capture_id=r.capture_id,
+                automatic_head_tail_prediction_id=r.automatic_head_tail_prediction_id,
+                automatic_keypoint_prediction_id=r.automatic_keypoint_prediction_id,
+                calibration_source=plan.calibration_source,
+                automatic_laser_calibration_id=plan.automatic_laser_calibration_id,
+                laser_calibration_id=plan.laser_calibration_id,
+                camera_calibration_id=plan.camera_calibration_id,
+                refusal=r.reason,
+                algorithm=AUTOMATIC_MEASUREMENT_ALGORITHM,
+                algorithm_version=AUTOMATIC_MEASUREMENT_VERSION,
+                core_version="none: refused before measuring",
+            )
+            for r in plan.refusals
+        ]
+        return await self._write(
+            target, self._catalog.persist_automatic_measurements, rows
+        )
+
+    @activity.defn(name="resolve_automatic_keypoint_inputs")
+    async def resolve_automatic_keypoint_inputs(
+        self, target: AutomaticTarget
+    ) -> KeypointFramesInput:
+        """Head/tail v5: each non-model frame owed SimCC keypoints, with its
+        render presigned and its SAM box."""
+        owed = await self._catalog.automatic_keypoint_inputs(
+            target.tenant_id, target.mission_id
+        )
+        urls = await self._recorded_renders(target, owed)
+        return KeypointFramesInput(
+            tenant_id=target.tenant_id,
+            mission_id=target.mission_id,
+            frames=[
+                KeypointFrame(prediction_id=f.prediction_id, capture_id=f.capture_id,
+                              render_url=url, mask_bbox=f.mask_bbox)  # fmt: skip
+                for f, url in zip(owed, urls)
+            ],
+        )
+
+    @activity.defn(name="persist_automatic_keypoints")
+    async def persist_automatic_keypoints(
+        self, target: AutomaticTarget, results: List[KeypointResult]
+    ) -> int:
+        rows = [
+            AutomaticKeypointRow(
+                prediction_id=r.prediction_id, capture_id=r.capture_id,
+                status=r.status, head=r.head, tail=r.tail, confidence=r.confidence,
+                crop=r.crop, checkpoint=r.checkpoint,
+            )  # fmt: skip
+            for r in results
+        ]
+        return await self._write(
+            target, self._catalog.persist_automatic_keypoints, rows
         )
 
     @activity.defn(name="persist_automatic_measurements")
@@ -661,6 +769,11 @@ class AutomaticResultsActivities:
                 automatic_laser_calibration_id=plan.automatic_laser_calibration_id,
                 laser_calibration_id=plan.laser_calibration_id,
                 camera_calibration_id=plan.camera_calibration_id,
+                automatic_keypoint_prediction_id=(
+                    uuid.UUID(plan.keypoint_ids[str(x.capture_id)])
+                    if str(x.capture_id) in plan.keypoint_ids
+                    else None
+                ),
                 length_m=x.length_m,
                 depth_m=x.depth_m,
                 refusal=x.refusal,

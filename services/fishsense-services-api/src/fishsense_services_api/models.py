@@ -1445,19 +1445,26 @@ class AutomaticMeasurement(Base):
     """An automatic length (or why not), naming its head/tail and calibration."""
 
     __tablename__ = "automatic_measurements"
-    __table_args__ = (
-        UniqueConstraint("tenant_id", "id"),
-        _fk(("tenant_id", "capture_id"), "captures"),
-        _fk(
-            ("tenant_id", "automatic_head_tail_prediction_id"),
-            "automatic_head_tail_predictions",
-        ),
-        _fk(
-            ("tenant_id", "automatic_laser_calibration_id"),
-            "automatic_laser_calibrations",
-        ),
-        _fk(("tenant_id", "laser_calibration_id"), "laser_calibrations"),
-        _fk(("tenant_id", "camera_calibration_id"), "camera_calibrations"),
+    __table_args__ = (UniqueConstraint("tenant_id", "id"), _fk(
+        ("tenant_id", "capture_id"), "captures"
+    ), _fk(
+        ("tenant_id", "automatic_head_tail_prediction_id"),
+        "automatic_head_tail_predictions",
+    ), _fk(
+        ("tenant_id", "automatic_laser_calibration_id"),
+        "automatic_laser_calibrations",
+    ), _fk(
+        ("tenant_id", "laser_calibration_id"), "laser_calibrations"
+    ), _fk(
+        ("tenant_id", "camera_calibration_id"), "camera_calibrations"
+    ), ForeignKeyConstraint(
+        ["tenant_id", "automatic_keypoint_prediction_id"],
+        [
+            "automatic_keypoint_predictions.tenant_id",
+            "automatic_keypoint_predictions.id",
+        ],
+        name="automatic_measurements_keypoints_fkey",
+        ),  # fmt: skip
         _capture_seq_index("automatic_measurements"),
     )
 
@@ -1477,6 +1484,46 @@ class AutomaticMeasurement(Base):
     algorithm: Mapped[str] = mapped_column(Text)
     algorithm_version: Mapped[str] = mapped_column(Text)
     core_version: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+    #: The keypoints measured from (v5, 0074); NULL: the SAM rule's.
+    automatic_keypoint_prediction_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+
+
+class AutomaticKeypointPrediction(Base):
+    """SimCC's head and tail on an automatic head/tail prediction's SAM box
+    (head/tail v5, 0074): ``predicted``, ``keypoints_disagree`` (to review) or
+    ``keypoints_refused``; append-only."""
+
+    __tablename__ = "automatic_keypoint_predictions"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        _fk(("tenant_id", "capture_id"), "captures"),
+        _fk(
+            ("tenant_id", "automatic_head_tail_prediction_id"),
+            "automatic_head_tail_predictions",
+        ),
+        Index("automatic_keypoint_predictions_tenant_prediction_idx", "tenant_id",
+              "automatic_head_tail_prediction_id", "seq"),  # fmt: skip
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    producer: Mapped[str] = _producer()
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    automatic_head_tail_prediction_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    status: Mapped[str] = mapped_column(Text)
+    head_x: Mapped[float | None] = mapped_column(Double)
+    head_y: Mapped[float | None] = mapped_column(Double)
+    tail_x: Mapped[float | None] = mapped_column(Double)
+    tail_y: Mapped[float | None] = mapped_column(Double)
+    confidence: Mapped[float | None] = mapped_column(Double)
+    crop: Mapped[list[int] | None] = mapped_column(ARRAY(Integer))
+    sam_rule_length_px: Mapped[float | None] = mapped_column(Double)
+    simcc_length_px: Mapped[float | None] = mapped_column(Double)
+    disagreement: Mapped[float | None] = mapped_column(Double)
+    predictor_version: Mapped[int] = mapped_column(Integer)
+    checkpoint: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
 
 
