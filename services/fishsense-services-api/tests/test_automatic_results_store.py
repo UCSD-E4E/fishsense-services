@@ -861,6 +861,73 @@ async def test_a_frame_the_detector_now_calls_a_slate_is_not_measured(
     assert inputs.captures == []
 
 
+async def test_a_zoomed_frame_is_not_measured(owner_engine, app_engine):
+    """The zoom gate (2026-10-25): a zoomed frame's depth and length assume
+    intrinsics it was not shot at. 152 automatic lengths were on zoomed
+    frames when the focal lengths were recorded."""
+    from _slate_calibration_seed import zoom
+
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    await _in(app_engine, lab, persist_automatic_calibration, mission_id, _label_free())
+    wide, zoomed = [await capture(owner_engine, lab, mission_id) for _ in range(2)]
+    await _predict(app_engine, lab, mission_id, _predicted(wide), _predicted(zoomed))
+    await zoom(owner_engine, zoomed, 18.0)
+
+    inputs = await _measure_inputs(app_engine, lab, mission_id)
+
+    assert [m.capture_id for m in inputs.captures] == [wide]
+
+
+async def test_a_zoomed_frame_does_not_hold_its_mission_in_the_cohort(
+    owner_engine, app_engine
+):
+    """Never measured, so never a length outstanding -- else its mission is
+    picked every hour (as a detector slate would be). Unrendered, so it owes
+    no species either: species does not depend on the zoom, and stays owed."""
+    from _slate_calibration_seed import zoom
+
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    c = await capture(owner_engine, lab, mission_id)
+    await _predict(app_engine, lab, mission_id, _predicted(c), rendered=False)
+    # After the prediction, so the calibration is current.
+    await _in(app_engine, lab, persist_automatic_calibration, mission_id, _label_free())
+    assert await _next(app_engine, lab) == mission_id  # its length is owed
+
+    await zoom(owner_engine, c, 14.62)
+
+    assert await _next(app_engine, lab) is None
+
+
+async def test_a_zoomed_frame_is_no_calibration_dot(owner_engine, app_engine):
+    """Neither a slate candidate nor a dot on the dive line: its dot sits on
+    another line (missions 374, 384, 386). Covers the live label-free fit and
+    the v3/v4 replays, which read the same inputs."""
+    from _slate_calibration_seed import zoom
+
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    await _camera(app_engine, lab, mission_id)
+    frames = [await capture(owner_engine, lab, mission_id) for _ in range(3)]
+    await _predict(app_engine, lab, mission_id, *[
+        AutomaticHeadTailRow(capture_id=f, status="slate_frame", laser_x=10.0 + i,
+                             laser_y=20.0, slate_probability=0.9, predictor_version=1)
+        for i, f in enumerate(frames)
+    ])  # fmt: skip
+    await zoom(owner_engine, frames[1], 18.0)
+    await zoom(owner_engine, frames[2], 4.5)
+
+    async def detector(conn, tenant_id, d):
+        return [(f, 0.9) for f in frames]
+
+    inputs = await _in(app_engine, lab, automatic_calibration_inputs, mission_id,
+                       slate_frames=detector)  # fmt: skip
+
+    assert [c.capture_id for c in inputs.candidates] == [frames[0], frames[2]]
+    assert sorted(x for x, _ in inputs.line_dots) == [10.0, 12.0]
+
+
 # -- measurements: current, stale, never the human path's -------------------------
 
 

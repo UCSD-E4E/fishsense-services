@@ -68,6 +68,7 @@ from _slate_calibration_seed import (
     slate_label,
     slate_template,
     tenant,
+    zoom,
 )
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.laser_calibration_store import (
@@ -1103,6 +1104,29 @@ async def test_stage_13_refuses_a_template_it_cannot_scale(owner_engine, app_eng
         await _slate_inputs(app_engine, lab, only)
 
 
+async def test_a_zoomed_frame_is_no_slate_observation_and_no_mission_dot(
+    owner_engine, app_engine
+):
+    """The zoom gate (2026-10-25): a frame shot zoomed in has other
+    intrinsics, so its slate pose and its dot would bend the fit and the
+    gates the fit is judged by. A frame with no focal length recorded (a
+    phone, or not yet read) is not zoomed."""
+    lab = await tenant(owner_engine)
+    device, _ = await device_with_camera(owner_engine, lab)
+    only = await mission(owner_engine, lab, slate=await slate_template(owner_engine),
+                         device=device)  # fmt: skip
+    wide = await _observation(owner_engine, lab, only, x=1.0)
+    zoomed = await _observation(owner_engine, lab, only, x=2.0)
+    unknown = await _observation(owner_engine, lab, only, x=3.0)
+    await zoom(owner_engine, wide, 4.5)
+    await zoom(owner_engine, zoomed, 18.0)
+
+    inputs = await _slate_inputs(app_engine, lab, only)
+
+    assert [o.capture_id for o in inputs.observations] == [wide, unknown]
+    assert sorted(x for x, _ in inputs.mission_dots) == [1.0, 3.0]
+
+
 # ---------- inputs: the board ----------
 
 
@@ -1143,6 +1167,24 @@ async def test_resolver_carries_the_board_geometry(owner_engine, app_engine):
     assert [f.capture_id for f in inputs.frames] == frames
     assert [f.checksum for f in inputs.frames] == [f"{1:032x}", f"{2:032x}"]
     assert [f.laser_x for f in inputs.frames] == [601.0, 602.0]
+
+
+async def test_a_zoomed_frame_is_no_board_frame(owner_engine, app_engine):
+    """The zoom gate (2026-10-25): the board fit assumes the camera
+    calibration's intrinsics, which a zoomed frame does not have."""
+    lab = await tenant(owner_engine)
+    only, _, _ = await _board_scene(owner_engine, lab)
+    frames = []
+    for n in (1, 2):
+        frame = await capture(owner_engine, lab, only)
+        await laser_label(owner_engine, lab, frame, x=600.0 + n)
+        frames.append(frame)
+    await zoom(owner_engine, frames[1], 9.01)
+
+    inputs = await _board_inputs(app_engine, lab, only)
+
+    assert [f.capture_id for f in inputs.frames] == [frames[0]]
+    assert [x for x, _ in inputs.mission_dots] == [601.0]
 
 
 @pytest.mark.parametrize(

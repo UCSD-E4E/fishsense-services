@@ -29,6 +29,7 @@ from fishsense_services_api.focal_length_store import (
 from fishsense_services_orchestrator.ingest.nas_frames import NasSettings
 from fishsense_services_orchestrator.ops.focal_lengths.activities import (
     FOCAL_HEADER_BYTES,
+    FOCAL_RETRY_BYTES,
     FocalLengthActivities,
 )
 from fishsense_services_orchestrator.ops.focal_lengths.contracts import (
@@ -106,8 +107,18 @@ async def _read(catalog, nas, apply=False):
     )
 
 
-def _orf(focal):
-    return build_orf(focal_length=focal) + b"\0" * 20_000
+def _orf(focal, *, serial="BJ6C67989"):
+    return build_orf(focal_length=focal, serial_number=serial) + b"\0" * 80_000
+
+
+def _tg7(focal):
+    """A TG-7's Exif IFD sits past the first 4 KB (missions 480-487,
+    2026-10-25): here, behind a long MakerNote."""
+    data = _orf(focal, serial="X" * 6_000)
+    from fishsense_services_orchestrator.ingest.exif import read_exif
+
+    assert read_exif(data[:4096]).focal_length_mm is None
+    return data
 
 
 async def test_the_missions_to_read_come_from_every_tenant_served():
@@ -146,6 +157,22 @@ async def test_only_the_first_4_kb_of_each_frame_is_read():
 
     assert nas.reads == [(f"{ROOT}/{DIVE}/P1.ORF", 0, FOCAL_HEADER_BYTES)]
     assert FOCAL_HEADER_BYTES == 4096
+
+
+async def test_a_tg7_frame_is_read_again_further_in():
+    """4 KB holds a TG-6's FocalLength but not a TG-7's: a frame with none in
+    4 KB is read again to `FOCAL_RETRY_BYTES` before it is unreadable."""
+    frames = _frames("P1.ORF")
+    catalog = FakeCatalog(frames)
+    nas = FakeNas({"P1.ORF": _tg7((450, 100))})
+
+    report = await _read(catalog, nas, apply=True)
+
+    assert report.focal_lengths == {"4.50": 1}
+    assert report.unreadable_count == 0
+    assert [length for _, _, length in nas.reads] == [4096, FOCAL_RETRY_BYTES]
+    assert FOCAL_RETRY_BYTES == 65536
+    assert catalog.recorded == {frames[0].id: pytest.approx(4.5)}
 
 
 async def test_apply_records_each_frames_focal_length():
