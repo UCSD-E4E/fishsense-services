@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.60.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.59.1...v0.60.0) (2026-10-26)
+
+
+### Features
+
+* keep the automatic dot's laser colour, and show laser colour everywhere ([c6b8ad7](https://github.com/UCSD-E4E/fishsense-services/commit/c6b8ad7d0b42eb56772703ebb0bda240c25c3794))
+* laser point and length from fishsense-core, refusing unmeasurable dots (item 5; contract v21, migration 0071) ([a6b832e](https://github.com/UCSD-E4E/fishsense-services/commit/a6b832ed2048a402893dd1e4a303971180ddd631))
+
 ## [0.59.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.59.0...v0.59.1) (2026-10-26)
 
 
