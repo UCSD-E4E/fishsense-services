@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.63.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.62.1...v0.63.0) (2026-10-26)
+
+
+### Features
+
+* automatic head/tail v5 -- SimCC keypoints, the SAM rule for fish models, and review over 15% ([e3fb855](https://github.com/UCSD-E4E/fishsense-services/commit/e3fb8550a4ec3835893ee3f1bf6135e08ad2248a))
+
 ## [0.62.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.62.0...v0.62.1) (2026-10-26)
 
 
