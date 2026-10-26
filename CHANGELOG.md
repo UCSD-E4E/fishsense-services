@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.63.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.63.0...v0.63.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* head/tail v5's keypoints step can record its failure ([dac9b27](https://github.com/UCSD-E4E/fishsense-services/commit/dac9b2743c0e55b7909f016e192e23274a7124fc))
+* head/tail v5's keypoints step can record its failure ([7309639](https://github.com/UCSD-E4E/fishsense-services/commit/7309639fcd9538c829b6b11d8b4c77961a2ba114))
+
 ## [0.63.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.62.1...v0.63.0) (2026-10-26)
 
 
