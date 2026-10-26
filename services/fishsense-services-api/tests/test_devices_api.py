@@ -260,6 +260,7 @@ async def test_every_operation_has_an_explicit_operation_id(offline_client):
         "list_members",
         "list_mission_automatic_lengths",
         "list_mission_captures",
+        "list_mission_laser_colors",
         "list_missions",
         "list_my_memberships",
         "list_my_tokens",

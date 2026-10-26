@@ -49,6 +49,7 @@ EXPECTED_TOOLS = {
     "get_capture_automatic",
     "list_automatic_lengths",
     "list_mission_automatic_lengths",
+    "list_mission_laser_colors",
     "list_capture_reviews",
     "list_observations",
     "get_observation",
@@ -437,3 +438,24 @@ async def test_mounting_keeps_the_apps_own_lifespan(app_engine):
     async with app.router.lifespan_context(app):
         assert endpoint.running
     assert ran == ["start", "stop"]
+
+
+async def test_every_missions_laser_colours_in_one_call(
+    agent, tenants, owner_engine, app_engine
+):
+    from test_automatic_results_store import _measured
+
+    mission_id, _ = await _measured(owner_engine, app_engine, tenants["lab"],
+                                    laser_color="red")  # fmt: skip
+    async with owner_engine.connect() as conn:
+        number = (
+            await conn.execute(
+                text("SELECT number FROM missions WHERE id = :m"), {"m": mission_id}
+            )
+        ).scalar_one()
+
+    listed = await agent.call("list_mission_laser_colors", slug="lab")
+
+    (row,) = listed["missions"]
+    assert row["mission_number"] == number
+    assert row["automatic"] == {"red": 1, "green": 0, "unread": 0}
