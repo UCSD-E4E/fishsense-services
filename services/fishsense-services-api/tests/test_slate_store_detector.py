@@ -147,6 +147,18 @@ async def test_a_mission_with_a_persons_slate_label_is_not_fed_by_the_detector(
     assert await _next(app_engine, lab) is None
 
 
+async def test_a_retired_slate_label_is_still_a_persons_work(owner_engine, app_engine):
+    """Retired on purpose (0077): a person did the mission's slate work, so
+    the detector does not take it over."""
+    lab = await tenant(owner_engine)
+    only = await _slate_mission(owner_engine, lab)
+    await slate_label(owner_engine, lab, await capture(owner_engine, lab, only),
+                      completed=True, superseded_reason="mirrored")  # fmt: skip
+    await slate_presence(owner_engine, lab, await capture(owner_engine, lab, only))
+
+    assert await _next(app_engine, lab) is None
+
+
 @pytest.mark.parametrize(
     "label", [{"superseded": True}, {"project": None, "source": "import"}]
 )
