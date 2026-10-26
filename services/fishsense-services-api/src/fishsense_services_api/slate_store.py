@@ -58,6 +58,11 @@ v2 changes:
   whose cursor would not re-send it. The reprocess flag stays, as in v1;
 * the sync writes only the columns it owns (never `needs_reprocess` or
   `superseded`), as the laser sync's port does;
+* **a label retired on purpose stays retired** (0077; mission 436's mirrored
+  labels, 2026-10-26): superseded with a reason (``superseded_reason``), it
+  is settled -- its frame is not stage-9 work, populate does not draw it, and
+  re-anchoring its task does not revive it. A dead-lettered label (no reason)
+  still counts as undone and is revived, as in v1;
 * the camera is the dive's device's current camera calibration (v1: the
   camera's intrinsics);
 * **the slate detector feeds it too** (new; `slate_presence_store`,
@@ -193,6 +198,12 @@ class SlateTaskTemplate:
     slate_template_id: uuid.UUID | None
 
 
+def _settled(alias: str) -> str:
+    """Slate label `alias` holds its frame: live, or retired on purpose
+    (superseded with a reason, 0077) -- not merely dead-lettered."""
+    return f"(NOT {alias}.superseded OR {alias}.superseded_reason IS NOT NULL)"
+
+
 #: A capture of dive `d` (aliased) that is its canonical copy.
 _CANONICAL_OF_MISSION = """
     c.tenant_id = d.tenant_id AND c.mission_id = d.id AND c.is_canonical
@@ -212,7 +223,7 @@ def _marked_and_unlabeled(marker: str) -> str:
     AND NOT EXISTS (
         SELECT 1 FROM slate_labels s
         WHERE s.tenant_id = c.tenant_id AND s.capture_id = c.id
-          AND s.ls_project_id IS NOT NULL AND NOT s.superseded
+          AND s.ls_project_id IS NOT NULL AND {_settled("s")}
     )
 """
 
@@ -235,7 +246,7 @@ def _no_persons_slate_work(marker: str) -> str:
         SELECT 1 FROM captures pc
         JOIN slate_labels ps ON ps.tenant_id = pc.tenant_id AND ps.capture_id = pc.id
         WHERE pc.tenant_id = d.tenant_id AND pc.mission_id = d.id AND pc.is_canonical
-          AND ps.ls_project_id IS NOT NULL AND NOT ps.superseded
+          AND ps.ls_project_id IS NOT NULL AND {_settled("ps")}
           AND ps.slate_presence_prediction_id IS NULL
     )
 """
@@ -259,7 +270,7 @@ def _slate_frame_and_unlabeled(marker: str) -> str:
     AND NOT EXISTS (
         SELECT 1 FROM slate_labels s
         WHERE s.tenant_id = c.tenant_id AND s.capture_id = c.id
-          AND s.ls_project_id IS NOT NULL AND NOT s.superseded
+          AND s.ls_project_id IS NOT NULL AND {_settled("s")}
     )
 """
 
@@ -569,7 +580,7 @@ async def slate_populate_candidates(
               AND NOT EXISTS (
                   SELECT 1 FROM slate_labels s
                   WHERE s.tenant_id = c.tenant_id AND s.capture_id = c.id
-                    AND s.completed AND NOT s.superseded
+                    AND s.completed AND {_settled("s")}
               )
             ORDER BY c.captured_at, c.number
             """),
@@ -607,7 +618,7 @@ async def record_slate_label(
             ON CONFLICT (tenant_id, capture_id, ls_project_id) DO UPDATE SET
                 ls_task_id = excluded.ls_task_id,
                 image_url = excluded.image_url,
-                superseded = false,
+                superseded = slate_labels.superseded_reason IS NOT NULL,
                 slate_presence_prediction_id = excluded.slate_presence_prediction_id
             """),
         {"tenant": tenant_id, "capture": capture_id, "project": ls_project_id,

@@ -722,10 +722,17 @@ class SlateLabel(_LabelCore, Base):
     #: The slate detector's prediction that queued this frame (migration
     #: 0035); NULL for a frame a person marked, and every v1 row.
     slate_presence_prediction_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    #: Why it was retired on purpose (0077), e.g. ``mirrored``; only on a
+    #: superseded label. NULL: live, or dead-lettered.
+    superseded_reason: Mapped[str | None] = mapped_column(Text)
 
     @classmethod
     def _extra_table_args(cls) -> tuple:
         return (
+            CheckConstraint(
+                "superseded_reason IS NULL OR superseded",
+                name="slate_labels_superseded_reason_check",
+            ),
             ForeignKeyConstraint(
                 ["tenant_id", "slate_presence_prediction_id"],
                 [
