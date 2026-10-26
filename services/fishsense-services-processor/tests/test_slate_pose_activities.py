@@ -86,6 +86,9 @@ async def test_a_frame_is_posed_and_the_pdf_read_once():
     assert store.images == ["https://g/0", "https://g/1"] and len(store.pdfs) == 1
     assert out[0].capture_id == req.frames[0].capture_id
     assert np.linalg.norm(np.array(out[0].point) - target) < 0.005 * target[2]
+    # The other way up's correlation and the page's up reach the payload (v23).
+    assert out[0].ecc_other is not None and out[0].ecc_other < out[0].ecc
+    assert out[0].page_up_deg is not None
 
 
 async def test_a_render_not_there_is_the_frames_status():

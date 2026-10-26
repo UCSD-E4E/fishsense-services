@@ -57,6 +57,9 @@ def test_a_slate_frame_is_posed_and_its_dot_put_on_the_slate():
     # the point within 0.3% of its range
     assert np.linalg.norm(np.array(out["point"]) - target) < 0.003 * target[2]
     assert len(out["reference_image_points"]) == len(refs)
+    # Both orientations scored, and the page's up recorded (2026-10-25).
+    assert out["ecc_other"] < out["ecc"]
+    assert -180.0 <= out["page_up_deg"] <= 180.0
 
 
 def test_the_second_prompt_is_tried_when_the_first_has_no_mask():

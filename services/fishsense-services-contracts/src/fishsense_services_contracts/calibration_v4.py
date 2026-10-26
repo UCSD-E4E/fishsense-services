@@ -70,3 +70,9 @@ class SlatePose(BaseModel):
     reference_image_points: List[List[float]] = []
     #: The dot's point on the slate (camera space, m).
     point: Optional[List[float]] = None
+    #: The other way up's correlation (v23): the margin of the orientation
+    #: chosen; None if it did not converge.
+    ecc_other: Optional[float] = None
+    #: The direction of the page's top in the image (v23), degrees, 0 = up,
+    #: clockwise positive: the orientation in the world.
+    page_up_deg: Optional[float] = None
