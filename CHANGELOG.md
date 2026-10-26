@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.65.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.64.0...v0.65.0) (2026-10-26)
+
+
+### Features
+
+* **review:** show SimCC's head and tail on the review page (head/tail v5) ([9c68c92](https://github.com/UCSD-E4E/fishsense-services/commit/9c68c92b3330019eeb8522a09961402560440a6f))
+
 ## [0.64.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.63.1...v0.64.0) (2026-10-26)
 
 
