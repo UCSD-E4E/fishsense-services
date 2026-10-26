@@ -35,6 +35,11 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api.laser_colour_store import (
+    dot_colour_columns,
+    dot_colour_join,
+)
+
 __all__ = [
     "AutomaticCalibration",
     "AutomaticFailure",
@@ -64,6 +69,9 @@ class AutomaticFrame:
     #: None when it gave no reading, and on every row from before.
     laser_color: str | None
     laser_color_margin: float | None
+    #: ``dot`` (read with the dot), ``render`` (backfilled off its render,
+    #: 0076), or None when there is no reading.
+    laser_color_source: str | None
     head: Point | None
     tail: Point | None
     mask_bbox: list[int] | None
@@ -103,7 +111,7 @@ async def automatic_frame(
     """What the automatic run made of the frame now; None if it never got to it."""
     row = (
         await conn.execute(
-            text("""
+            text(f"""
                 SELECT h.*, r.id AS render_id, r.bucket AS render_bucket,
                        r.key AS render_key,
                        r.width AS render_width, r.height AS render_height,
@@ -112,8 +120,10 @@ async def automatic_frame(
                        m.length_m, m.depth_m, m.refusal, m.calibration_source,
                        m.algorithm AS m_algorithm,
                        m.algorithm_version AS m_algorithm_version,
-                       s.predicted_choice, s.top1_probability, s.margin, s.top5
+                       s.predicted_choice, s.top1_probability, s.margin, s.top5,
+                       {dot_colour_columns("h")}
                 FROM current_automatic_head_tail_predictions h
+                {dot_colour_join("h")}
                 LEFT JOIN LATERAL (
                     SELECT r.id, r.bucket, r.key, r.width, r.height FROM capture_renders r
                     WHERE r.tenant_id = h.tenant_id AND r.capture_id = h.capture_id
@@ -147,6 +157,7 @@ async def automatic_frame(
         laser_confidence=row.laser_confidence,
         laser_color=row.laser_color,
         laser_color_margin=row.laser_color_margin,
+        laser_color_source=row.laser_color_source,
         head=_point(row.head_x, row.head_y),
         tail=_point(row.tail_x, row.tail_y),
         mask_bbox=None if row.mask_bbox is None else list(row.mask_bbox),

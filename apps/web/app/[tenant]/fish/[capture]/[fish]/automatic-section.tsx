@@ -109,7 +109,7 @@ export function AutomaticSection({
           )}
           <Row label="Laser depth">{frame.depth_m != null ? `${frame.depth_m.toFixed(2)} m` : "—"}</Row>
           {frame.laser && (
-            <Row label="Laser colour">{colourLabel(frame.laser_color, frame.laser_color_margin)}</Row>
+            <Row label="Laser colour">{colourLabel(frame.laser_color, frame.laser_color_margin, frame.laser_color_source)}</Row>
           )}
           <Row label="Calibration">
             {frame.calibration_source === "label_free"

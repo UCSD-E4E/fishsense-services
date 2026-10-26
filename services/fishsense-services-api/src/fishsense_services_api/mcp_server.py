@@ -73,7 +73,9 @@ INSTRUCTIONS = (
     "is null (a page may be short and still have a next). A mission's "
     "`laser_colors` counts its frames by laser colour from three sources "
     "(labellers, the human path's predictions, the automatic dot): say which "
-    "you use, and say so when they disagree. When you report "
+    "you use, and say so when they disagree. An automatic dot's "
+    "`laser_color_source` is `dot` (read with the dot) or `render` (read off "
+    "its render later, by a backfill). When you report "
     "numbers, give how many fish or frames they rest on. These tools only "
     "read; changes are made in the web app."
 )

@@ -1527,6 +1527,37 @@ class AutomaticKeypointPrediction(Base):
     created_at: Mapped[datetime] = _created_at()
 
 
+class AutomaticLaserColourReading(Base):
+    """An automatic dot's colour read off its render after the fact (0076):
+    the backfill of dots predicted before contract v22; append-only, and
+    never over the dot's own colour."""
+
+    __tablename__ = "automatic_laser_colour_readings"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        _fk(("tenant_id", "capture_id"), "captures"),
+        _fk(
+            ("tenant_id", "automatic_head_tail_prediction_id"),
+            "automatic_head_tail_predictions",
+        ),
+        Index("automatic_laser_colour_readings_tenant_prediction_idx", "tenant_id",
+              "automatic_head_tail_prediction_id", "seq"),  # fmt: skip
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    automatic_head_tail_prediction_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    #: ``red``/``green``; NULL when too close to call or not readable.
+    color: Mapped[str | None] = mapped_column(Text)
+    color_margin: Mapped[float | None] = mapped_column(Double)
+    #: ``render``: read off the prediction's render, not the raw.
+    source: Mapped[str] = mapped_column(Text)
+    reading_version: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = _created_at()
+
+
 class CaptureRender(Base):
     """A capture's raw rectified to a JPEG in its tenant's bucket, or why not
     (0051); append-only, current = latest ``seq`` per capture."""

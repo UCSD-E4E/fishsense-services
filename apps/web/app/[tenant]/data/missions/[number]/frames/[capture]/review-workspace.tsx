@@ -378,7 +378,7 @@ export function ReviewWorkspace({
         {kind === "laser" && frame.laser && (
           <p className="mb-3 text-sm text-fg-2">
             The model read this dot&apos;s colour as{" "}
-            <strong className="text-fg">{colourLabel(frame.laser_color, frame.laser_color_margin)}</strong>.
+            <strong className="text-fg">{colourLabel(frame.laser_color, frame.laser_color_margin, frame.laser_color_source)}</strong>.
           </p>
         )}
 

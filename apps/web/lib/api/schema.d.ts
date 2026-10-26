@@ -883,6 +883,8 @@ export interface components {
             laser_color: string | null;
             /** Laser Color Margin */
             laser_color_margin: number | null;
+            /** Laser Color Source */
+            laser_color_source: string | null;
             /** Laser Confidence */
             laser_confidence: number | null;
             /** Length M */
@@ -965,6 +967,10 @@ export interface components {
             human_length_m: number | null;
             /** Laser Color */
             laser_color: string | null;
+            /** Laser Color Margin */
+            laser_color_margin: number | null;
+            /** Laser Color Source */
+            laser_color_source: string | null;
             /** Laser Confidence */
             laser_confidence: number | null;
             /** Length M */
