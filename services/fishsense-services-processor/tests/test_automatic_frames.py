@@ -906,3 +906,54 @@ def test_the_shadow_adapter_refuses_missing_scores_before_copying_masks():
     with pytest.raises(ValueError, match="without scores"):
         pair_masks_and_scores([_Mask(), _Mask()], None)
     assert _Mask.copied == 0
+
+
+# -- the dot's colour (contract v22, 2026-10-25) ---------------------------------
+#
+# The laser kernel reads the dot's colour off its pixels; the frames stage
+# dropped it (`prediction, *_, checkpoint`), so no automatic row had one.
+
+
+def _coloured(color="green", margin=0.31):
+    return LaserDot(DOT[0], DOT[1], 0.93, 3, "laser@x", color, margin)
+
+
+def test_the_dots_colour_is_kept_whatever_the_frame_becomes():
+    fish = automatic_frame_result(
+        capture_id=CAPTURE, dot=_coloured(), jpeg_bytes=_jpeg(),
+        segmenter=_Scored([(_mask_at(*DOT), 0.81)]), checkpoint="sam3/3.1@abc",
+        core_version="4.1.0",
+    )  # fmt: skip
+    slate = automatic_frame_result(
+        capture_id=CAPTURE, dot=_coloured("red", 0.5), jpeg_bytes=_jpeg(),
+        segmenter=_Scored([]), checkpoint="sam3/3.1@abc", core_version="4.1.0",
+        is_slate=True, slate_probability=0.97,
+    )  # fmt: skip
+
+    assert (fish.laser_color, fish.laser_color_margin) == ("green", 0.31)
+    assert (slate.laser_color, slate.laser_color_margin) == ("red", 0.5)
+
+
+def test_a_dot_with_no_reading_has_no_colour():
+    r = _result(_Scored([(_mask_at(*DOT), 0.81)]))
+
+    assert (r.laser_color, r.laser_color_margin) == (None, None)
+
+
+def test_the_stage_keeps_the_kernels_colour(monkeypatch):
+    from types import SimpleNamespace
+
+    from fishsense_services_processor.automatic_frames import stage
+    from fishsense_services_processor.laser_predict import activities as laser
+
+    prediction = SimpleNamespace(x=10.0, y=20.0, confidence=0.8)
+    monkeypatch.setattr(
+        laser,
+        "_predict_from_raw",
+        lambda *a: (prediction, 4000, 3000, "red", 0.42, "laser@x"),
+    )
+
+    dot = stage._predict_dot(Path("x.ORF"), [[1, 0, 0]], [0.0])
+
+    assert (dot.color, dot.color_margin) == ("red", 0.42)
+    assert (dot.x, dot.y, dot.checkpoint) == (10.0, 20.0, "laser@x")

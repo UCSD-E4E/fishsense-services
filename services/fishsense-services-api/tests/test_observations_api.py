@@ -297,6 +297,8 @@ class TestDetail:
             "dot": {"x": 1925.0, "y": 1310.0},
             "head": {"x": 1600.0, "y": 1125.0},
             "tail": {"x": 2200.0, "y": 1360.0},
+            # The seed's label names no colour.
+            "color": None,
         }
         assert body["device_points"] is None
         assert body["algorithm"] == "laser_depth_fronto_parallel"

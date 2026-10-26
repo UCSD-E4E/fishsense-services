@@ -193,6 +193,28 @@
               }
             ]
           },
+          "laser_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Laser Color"
+          },
+          "laser_color_margin": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Laser Color Margin"
+          },
           "laser_confidence": {
             "anyOf": [
               {
@@ -438,6 +460,8 @@
           "predicted_at",
           "laser",
           "laser_confidence",
+          "laser_color",
+          "laser_color_margin",
           "head",
           "tail",
           "mask_bbox",
@@ -544,6 +568,17 @@
             ],
             "title": "Human Length M"
           },
+          "laser_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Laser Color"
+          },
           "laser_confidence": {
             "anyOf": [
               {
@@ -639,6 +674,7 @@
           "depth_m",
           "calibration_source",
           "laser_confidence",
+          "laser_color",
           "sam_score",
           "species",
           "scientific_name",
@@ -1096,6 +1132,29 @@
           "cleared"
         ],
         "title": "Cleared",
+        "type": "object"
+      },
+      "ColourCountsView": {
+        "properties": {
+          "green": {
+            "title": "Green",
+            "type": "integer"
+          },
+          "red": {
+            "title": "Red",
+            "type": "integer"
+          },
+          "unread": {
+            "title": "Unread",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "red",
+          "green",
+          "unread"
+        ],
+        "title": "ColourCountsView",
         "type": "object"
       },
       "ConfidenceGeometry": {
@@ -1643,6 +1702,27 @@
         "title": "KindReviewView",
         "type": "object"
       },
+      "LaserColoursView": {
+        "description": "Frames by laser colour, per source; counts, never a verdict, so a\nmission whose sources disagree shows it (`laser_colour_store`).",
+        "properties": {
+          "automatic": {
+            "$ref": "#/components/schemas/ColourCountsView"
+          },
+          "labels": {
+            "$ref": "#/components/schemas/ColourCountsView"
+          },
+          "predictions": {
+            "$ref": "#/components/schemas/ColourCountsView"
+          }
+        },
+        "required": [
+          "labels",
+          "predictions",
+          "automatic"
+        ],
+        "title": "LaserColoursView",
+        "type": "object"
+      },
       "LaserEvidenceView": {
         "properties": {
           "calibration_producer": {
@@ -1655,6 +1735,17 @@
               }
             ],
             "title": "Calibration Producer"
+          },
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
           },
           "depth_m": {
             "anyOf": [
@@ -1715,7 +1806,8 @@
           "calibration_producer",
           "dot",
           "head",
-          "tail"
+          "tail",
+          "color"
         ],
         "title": "LaserEvidenceView",
         "type": "object"
@@ -2451,6 +2543,9 @@
             ],
             "title": "Device Name"
           },
+          "laser_colors": {
+            "$ref": "#/components/schemas/LaserColoursView"
+          },
           "name": {
             "anyOf": [
               {
@@ -2626,7 +2721,8 @@
           "notes",
           "port_note",
           "country",
-          "region"
+          "region",
+          "laser_colors"
         ],
         "title": "MissionDetail",
         "type": "object"

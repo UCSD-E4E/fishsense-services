@@ -761,3 +761,18 @@ def test_the_api_repeats_the_window_and_the_cut_mask_version():
         HEADTAIL_CROP_HEIGHT,
     )
     assert api.CUT_MASK_FIX_VERSION == AUTOMATIC_HEADTAIL_PREDICTOR_VERSION == 4
+
+
+async def test_the_dots_colour_reaches_the_row():
+    """Contract v22 (2026-10-25): the processor sends the colour it read off
+    the dot, and the row keeps it."""
+    written = []
+    catalog = _Catalog(
+        persist_automatic_head_tails=lambda t, d, rows, *masks: written.extend(rows)
+        or len(rows)
+    )
+    result = _frame_result(laser_color="red", laser_color_margin=0.4)
+
+    await _run(_acts(catalog).persist_automatic_frames, TARGET, [result])
+
+    assert [(r.laser_color, r.laser_color_margin) for r in written] == [("red", 0.4)]

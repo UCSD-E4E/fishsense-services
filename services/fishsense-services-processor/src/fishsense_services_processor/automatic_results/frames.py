@@ -64,6 +64,10 @@ class LaserDot:
     confidence: float
     predictor_version: int
     checkpoint: Optional[str]
+    #: The colour the laser kernel read off the dot, and how clearly
+    #: (contract v22, 2026-10-25); None when it gave no reading.
+    color: Optional[str] = None
+    color_margin: Optional[float] = None
 
 
 def automatic_frame_result(
@@ -94,6 +98,8 @@ def automatic_frame_result(
         laser_confidence=dot.confidence,
         laser_predictor_version=dot.predictor_version,
         laser_checkpoint=dot.checkpoint,
+        laser_color=dot.color,
+        laser_color_margin=dot.color_margin,
     )
     if is_slate:
         return AutomaticFrameResult(status="slate_frame", **base)

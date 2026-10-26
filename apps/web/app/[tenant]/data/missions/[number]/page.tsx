@@ -18,6 +18,7 @@ import { AutomaticRun, hasRun } from "@/app/[tenant]/data/missions/automatic-run
 import { FactsForms } from "@/app/[tenant]/data/missions/facts-forms";
 import { deploymentHref, PortBadge } from "@/app/[tenant]/data/missions/mission-table";
 import { paths } from "@/lib/tenant-paths";
+import { colourRows, sourcesDisagree, type LaserColours } from "@/lib/laser-colour";
 
 export const dynamic = "force-dynamic";
 
@@ -134,6 +135,8 @@ export default async function MissionPage({ params, searchParams }: Props) {
         </p>
       )}
 
+      <LaserColourSection colours={mission.laser_colors} />
+
       {hasRun(run) && <AutomaticRun run={run} />}
 
       {captures && captures.captures.length > 0 && (
@@ -177,5 +180,48 @@ export default async function MissionPage({ params, searchParams }: Props) {
 
       {isAdmin && <FactsForms slug={tenant} mission={mission} deployments={deployments} />}
     </main>
+  );
+}
+
+/** The mission's frames by laser colour, per source (0072): counts, so a
+ *  mission whose sources disagree shows it. Hidden when no source read a dot. */
+function LaserColourSection({ colours }: { colours: LaserColours }) {
+  const rows = colourRows(colours);
+  if (rows.every((r) => r.total === 0)) return null;
+  return (
+    <section className="mb-8" aria-labelledby="laser-colour">
+      <h2 id="laser-colour" className="mb-3 text-lg font-semibold">
+        Laser colour
+      </h2>
+      {sourcesDisagree(colours) && (
+        <p role="note" className="mb-3 text-sm text-warn">
+          The sources mostly read different colours: check this mission&apos;s laser.
+        </p>
+      )}
+      <table className="w-full max-w-xl text-sm">
+        <thead className="text-left text-fg-2">
+          <tr className="border-b border-line">
+            <th className="py-2 pr-4 font-medium">Read by</th>
+            <th className="py-2 pr-4 font-medium">Red</th>
+            <th className="py-2 pr-4 font-medium">Green</th>
+            <th className="py-2 font-medium">Not read</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-line">
+          {rows.map((r) => (
+            <tr key={r.source}>
+              <td className="py-2 pr-4">{r.source}</td>
+              <td className="py-2 pr-4 tabular-nums">{r.red.toLocaleString()}</td>
+              <td className="py-2 pr-4 tabular-nums">{r.green.toLocaleString()}</td>
+              <td className="py-2 tabular-nums">{r.unread.toLocaleString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="mt-2 text-xs text-fg-2">
+        Frames with a laser dot. Labellers choose a colour; the laser stage and the automatic dot read
+        it off the dot&apos;s pixels.
+      </p>
+    </section>
   );
 }

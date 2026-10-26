@@ -32,6 +32,9 @@ from fishsense_services_contracts.task_queues import (
     PROCESSOR_TASK_QUEUE,
 )
 
+#: v22 (2026-10-25): an automatic frame's dot carries its colour
+#: (`AutomaticFrameResult.laser_color`/`laser_color_margin`), which the laser
+#: kernel always read and the frames stage dropped. Optional; v21 parses.
 #: v21 (2026-10-23): a laser dot is refused unless fishsense-core's
 #: `LaserPoint.is_measurable()` passes (core #96): `low_parallax` joins the
 #: laser-depth refusal's reasons (`laser_depth.DotRefusal`), and stage 14's
@@ -85,7 +88,7 @@ from fishsense_services_contracts.task_queues import (
 #: JSON is unchanged -- each renamed field keeps its old name on the wire
 #: (`renamed.py`) -- so a v6 processor and a v7 orchestrator interoperate; only
 #: the published schema's model names differ.
-CONTRACT_VERSION = 21
+CONTRACT_VERSION = 22
 
 
 def _discover_models() -> tuple[type[BaseModel], ...]:

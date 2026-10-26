@@ -60,6 +60,10 @@ class AutomaticFrame:
     #: Full-frame pixels of the render below.
     laser: Point | None
     laser_confidence: float | None
+    #: The dot's colour as the laser kernel read it, and how clearly (0072);
+    #: None when it gave no reading, and on every row from before.
+    laser_color: str | None
+    laser_color_margin: float | None
     head: Point | None
     tail: Point | None
     mask_bbox: list[int] | None
@@ -141,6 +145,8 @@ async def automatic_frame(
         created_at=row.created_at,
         laser=_point(row.laser_x, row.laser_y),
         laser_confidence=row.laser_confidence,
+        laser_color=row.laser_color,
+        laser_color_margin=row.laser_color_margin,
         head=_point(row.head_x, row.head_y),
         tail=_point(row.tail_x, row.tail_y),
         mask_bbox=None if row.mask_bbox is None else list(row.mask_bbox),

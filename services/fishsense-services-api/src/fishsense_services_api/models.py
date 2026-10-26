@@ -1345,6 +1345,9 @@ class AutomaticHeadTailPrediction(Base):
     laser_confidence: Mapped[float | None] = mapped_column(Double)
     laser_predictor_version: Mapped[int | None] = mapped_column(Integer)
     laser_checkpoint: Mapped[str | None] = mapped_column(Text)
+    #: The dot's colour, ``red`` or ``green``, and how clearly (0072).
+    laser_color: Mapped[str | None] = mapped_column(Text)
+    laser_color_margin: Mapped[float | None] = mapped_column(Double)
     head_x: Mapped[float | None] = mapped_column(Double)
     head_y: Mapped[float | None] = mapped_column(Double)
     tail_x: Mapped[float | None] = mapped_column(Double)

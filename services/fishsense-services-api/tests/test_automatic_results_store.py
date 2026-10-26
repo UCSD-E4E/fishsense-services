@@ -958,11 +958,13 @@ async def test_a_calibration_fitted_through_a_zoomed_frame_is_owed_again(
 # -- measurements: current, stale, never the human path's -------------------------
 
 
-async def _measured(owner_engine, app_engine, lab):
+async def _measured(owner_engine, app_engine, lab, **predicted):
+    """A mission with one current automatic length; ``predicted`` overrides
+    the frame's prediction (`_predicted`)."""
     mission_id = await _backlog_mission(owner_engine, lab)
     await _in(app_engine, lab, persist_automatic_calibration, mission_id, _label_free())
     c = await capture(owner_engine, lab, mission_id)
-    await _predict(app_engine, lab, mission_id, _predicted(c))
+    await _predict(app_engine, lab, mission_id, _predicted(c, **predicted))
     inputs = await _measure_inputs(app_engine, lab, mission_id)
     (job,) = inputs.captures
     await _in(app_engine, lab, persist_automatic_measurements, mission_id, [
