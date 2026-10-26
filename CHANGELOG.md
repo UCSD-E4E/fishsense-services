@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.64.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.63.1...v0.64.0) (2026-10-26)
+
+
+### Features
+
+* **processor:** record the slate's point on the board outline's plane (contract v24) ([89213d5](https://github.com/UCSD-E4E/fishsense-services/commit/89213d5f0f5281c21d28be8ff82cdf8fc13b9593))
+* **processor:** record the slate's point on the board outline's plane (contract v24) ([40d897e](https://github.com/UCSD-E4E/fishsense-services/commit/40d897e5e5f24d9ea9a59c2171c5aa4ebf5d57b9))
+
+
+### Bug Fixes
+
+* **deploy:** bump krg-infra pin (compose GC-root fix); verify both compose path forms ([c80f93b](https://github.com/UCSD-E4E/fishsense-services/commit/c80f93bcd806207787adda63136d3236f50074c9))
+
 ## [0.63.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.63.0...v0.63.1) (2026-10-26)
 
 
