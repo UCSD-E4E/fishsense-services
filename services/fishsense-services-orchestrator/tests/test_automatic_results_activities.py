@@ -764,7 +764,7 @@ def test_the_api_repeats_the_window_and_the_cut_mask_version():
 
 
 async def test_the_dots_colour_reaches_the_row():
-    """Contract v21 (2026-10-24): the processor sends the colour it read off
+    """Contract v22 (2026-10-25): the processor sends the colour it read off
     the dot, and the row keeps it."""
     written = []
     catalog = _Catalog(

@@ -638,6 +638,93 @@ async def test_no_gpu_fails_the_whole_run_with_its_cause():
     assert "no GPU" in str(failure.value.cause.cause or failure.value.cause)
 
 
+@pytest.mark.parametrize(
+    "error_type",
+    ["Sam3WeightsCorrupt", "Sam3SettingsInvalid", "LaserDetectorWeightsUnavailable",
+     "LaserDetectorNotInManifest"],
+)  # fmt: skip
+async def test_a_weights_failure_fails_the_run_and_leaves_no_frame_out(error_type):
+    """2026-10-24: a model's weights that cannot load are the worker's, as
+    no GPU is. Left out, every frame of the mission was recorded as a frame
+    failure (0044) and, at three runs, given up as ``frame_failed`` -- for a
+    fault in the pod, not the frames. The run fails with the cause, once."""
+    from temporalio import activity
+    from temporalio.client import WorkflowFailureError
+
+    attempts = []
+
+    @activity.defn(name="predict_automatic_frame")
+    async def stub(payload: PredictAutomaticFrameInput) -> AutomaticFrameResult:
+        attempts.append(1)
+        raise ApplicationError("weights", type=error_type, non_retryable=True)
+
+    payload = PredictAutomaticFramesInput(
+        tenant_id=TENANT, mission_id=uuid.uuid4(), camera_matrix=K,
+        distortion_coefficients=[0.0] * 5,
+        frames=[AutomaticFrame(capture_id=uuid.uuid4(), raw=ObjectRef(bucket="s", key="r"),
+                               jpeg=_ref("preprocess_headtail_jpeg"))
+                for _ in range(2)],
+    )  # fmt: skip
+    async with await WorkflowEnvironment.start_time_skipping(
+        data_converter=DATA_CONVERTER
+    ) as env:
+        async with Worker(env.client, task_queue="t-auto", activities=[stub],
+                          workflows=[PredictAutomaticFramesWorkflow]):  # fmt: skip
+            with pytest.raises(WorkflowFailureError) as failure:
+                await env.client.execute_workflow(
+                    PredictAutomaticFramesWorkflow.run, payload,
+                    id=f"t-auto-{uuid.uuid4()}", task_queue="t-auto",
+                    result_type=List[AutomaticFrameResult],
+                    execution_timeout=timedelta(hours=1),
+                )  # fmt: skip
+    assert failure.value.cause.cause.type == error_type
+    assert len(attempts) == 2, "one try a frame: not retried"
+
+
+async def test_a_run_from_before_the_wider_refusals_replays_as_it_ran(monkeypatch):
+    """Review of #364: which failures fail the run is workflow code. A run in
+    flight at the deploy, whose frame the code before left out for
+    `Sam3WeightsCorrupt` (only `NoGpuForSam3` failed a run then), must replay
+    under the new code as it ran -- left out, completed -- not raise. The
+    history is recorded with the lookup returning the old list and no patch
+    marker, as the code before ran."""
+    from temporalio import activity
+    from temporalio.worker import Replayer, UnsandboxedWorkflowRunner
+
+    from fishsense_services_processor.automatic_frames import workflow as wf
+
+    @activity.defn(name="predict_automatic_frame")
+    async def stub(payload: PredictAutomaticFrameInput) -> AutomaticFrameResult:
+        raise ApplicationError("weights", type="Sam3WeightsCorrupt", non_retryable=True)
+
+    payload = PredictAutomaticFramesInput(
+        tenant_id=TENANT, mission_id=uuid.uuid4(), camera_matrix=K,
+        distortion_coefficients=[0.0] * 5,
+        frames=[AutomaticFrame(capture_id=uuid.uuid4(), raw=ObjectRef(bucket="s", key="r"),
+                               jpeg=_ref("preprocess_headtail_jpeg"))],
+    )  # fmt: skip
+    monkeypatch.setattr(wf, "refusals", lambda widened, legacy: legacy)
+    async with await WorkflowEnvironment.start_time_skipping(
+        data_converter=DATA_CONVERTER
+    ) as env:
+        async with Worker(env.client, task_queue="t-auto-old", activities=[stub],
+                          workflows=[PredictAutomaticFramesWorkflow],
+                          workflow_runner=UnsandboxedWorkflowRunner()):  # fmt: skip
+            handle = await env.client.start_workflow(
+                PredictAutomaticFramesWorkflow.run, payload,
+                id=f"t-auto-old-{uuid.uuid4()}", task_queue="t-auto-old",
+                execution_timeout=timedelta(hours=1),
+            )  # fmt: skip
+            assert await handle.result() == [], "the code before left it out"
+            history = await handle.fetch_history()
+    monkeypatch.undo()
+
+    replayed = await Replayer(
+        workflows=[PredictAutomaticFramesWorkflow], data_converter=DATA_CONVERTER
+    ).replay_workflow(history, raise_on_replay_failure=False)
+    assert replayed.replay_failure is None
+
+
 async def test_each_frame_logs_its_peak_gpu_memory(monkeypatch, caplog):
     """Review of #110: the GPU cap rests on how much one SAM 3.1 frame takes,
     which nobody had measured. Each frame logs the process's peak GPU memory
@@ -821,7 +908,7 @@ def test_the_shadow_adapter_refuses_missing_scores_before_copying_masks():
     assert _Mask.copied == 0
 
 
-# -- the dot's colour (contract v21, 2026-10-24) ---------------------------------
+# -- the dot's colour (contract v22, 2026-10-25) ---------------------------------
 #
 # The laser kernel reads the dot's colour off its pixels; the frames stage
 # dropped it (`prediction, *_, checkpoint`), so no automatic row had one.

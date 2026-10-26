@@ -757,7 +757,7 @@ display.
   - structure-from-motion self-calibration as a camera-calibration producer, which also
     fits phones;
   - the E4E board pitch check (§9.25).
-- **Already ported:** `close_with_apparent_size` → `automatic_results/size_constancy.py`.
+- **Already ported:** `close_with_apparent_size` → `automatic_results/size_constancy.py`, since moved to fishsense-core `size_constancy` (core #97).
 - **Stays in the paper:** envelope, figures, target design and rendering, dataset loaders.
 
 ## 5. Phase 0 — prerequisites in `fishsense-core`

@@ -166,7 +166,7 @@ class AutomaticLength:
     depth_m: float | None
     calibration_source: str
     laser_confidence: float | None
-    #: The dot's colour as the laser kernel read it (0068); None when it gave
+    #: The dot's colour as the laser kernel read it (0072); None when it gave
     #: no reading, and on rows from before.
     laser_color: str | None
     sam_score: float | None

@@ -29,7 +29,7 @@ from typing import List, Optional
 
 from temporalio import activity, workflow
 from fishsense_services_contracts.temporal import DATA_CONVERTER
-from temporalio.exceptions import ApplicationError
+from temporalio.exceptions import ActivityError, ApplicationError, ChildWorkflowError
 from temporalio.client import WorkflowFailureError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
@@ -359,6 +359,28 @@ class _FailingFrames:  # pylint: disable=too-few-public-methods
         raise ApplicationError("cannot finish", type="Boom", non_retryable=True)
 
 
+@activity.defn(name="_refuse")
+async def _refuse(error_type: str) -> None:
+    raise ApplicationError("the weights cannot load", type=error_type,
+                           non_retryable=True)  # fmt: skip
+
+
+@workflow.defn(name="PredictAutomaticFramesWorkflow")
+class _RefusingFrames:  # pylint: disable=too-few-public-methods
+    """The processor's refusal as it arrives: its frame activity's
+    non-retryable weights failure, re-raised by the child (the processor's
+    `automatic_frames.workflow`)."""
+
+    @workflow.run
+    async def run(self, payload: dict) -> list:
+        await _record_child()
+        await workflow.execute_activity(
+            "_refuse", "Sam3WeightsCorrupt",
+            start_to_close_timeout=timedelta(seconds=10),
+        )  # fmt: skip
+        return []
+
+
 @workflow.defn(name="PredictAutomaticFramesWorkflow")
 class _PartialFrames:  # pylint: disable=too-few-public-methods
     """One frame failed every try and is left out (the processor's rule)."""
@@ -371,14 +393,27 @@ class _PartialFrames:  # pylint: disable=too-few-public-methods
 
 @workflow.defn(name="PredictSpeciesImagesWorkflow")
 class _FailingSpecies:  # pylint: disable=too-few-public-methods
-    """BioCLIP unprovisioned: the processor's `BioclipSettingsInvalid`."""
+    """A species child that fails, not refused: a GPU out of memory."""
 
     @workflow.run
     async def run(self, payload: dict) -> list:
         await _record_child()
-        raise ApplicationError(
-            "BIOCLIP pins missing", type="BioclipSettingsInvalid", non_retryable=True
-        )
+        raise ApplicationError("CUDA out of memory", type="RuntimeError")
+
+
+@workflow.defn(name="PredictSpeciesImagesWorkflow")
+class _RefusingSpecies:  # pylint: disable=too-few-public-methods
+    """BioCLIP's weights that cannot load: the processor's refusal, as its
+    species activity raises it."""
+
+    @workflow.run
+    async def run(self, payload: dict) -> list:
+        await _record_child()
+        await workflow.execute_activity(
+            "_refuse", "BioclipWeightsCorrupt",
+            start_to_close_timeout=timedelta(seconds=10),
+        )  # fmt: skip
+        return []
 
 
 @workflow.defn(name="RenderCapturesWorkflow")
@@ -412,7 +447,8 @@ class _Measure:  # pylint: disable=too-few-public-methods
 
 async def _run(
     workflow_cls=AutomaticResultsForMissionWorkflow, *args, species_fails=False,
-    frames_fail=False, frames_partial=False, **stubs,
+    frames_fail=False, frames_partial=False, frames_refuse=False,
+    species_refuse=False, runner=None, history=None, **stubs,
 ):  # fmt: skip
     EVENTS.clear()
     SELECTS.clear()
@@ -424,12 +460,15 @@ async def _run(
         workers = [
             Worker(env.client, task_queue=QUEUE, activities=_stubs(**stubs),
                    workflows=[AutomaticResultsForMissionWorkflow,
-                              AutomaticResultsParentWorkflow]),
+                              AutomaticResultsParentWorkflow],
+                   **({"workflow_runner": runner} if runner else {})),
             Worker(env.client, task_queue=PROCESSOR_GPU_TASK_QUEUE,
-                   activities=[_record, _record_masks],
-                   workflows=[_FailingFrames if frames_fail
+                   activities=[_record, _record_masks, _refuse],
+                   workflows=[_RefusingFrames if frames_refuse
+                              else _FailingFrames if frames_fail
                               else _PartialFrames if frames_partial else _Frames,
-                              _FailingSpecies if species_fails else _Species]),
+                              _RefusingSpecies if species_refuse
+                              else _FailingSpecies if species_fails else _Species]),
             Worker(env.client, task_queue=PROCESSOR_TASK_QUEUE, activities=[_record],
                    workflows=[_Calibration, _Render]),
             Worker(env.client, task_queue=PROCESSOR_LIGHT_TASK_QUEUE,
@@ -437,9 +476,17 @@ async def _run(
                    workflows=[_Measure]),
         ]  # fmt: skip
         async with workers[0], workers[1], workers[2], workers[3]:
-            return await env.client.execute_workflow(
+            if history is None:
+                return await env.client.execute_workflow(
+                    workflow_cls.run, *args, id=f"{QUEUE}-{uuid.uuid4()}",
+                    task_queue=QUEUE,
+                )  # fmt: skip
+            handle = await env.client.start_workflow(
                 workflow_cls.run, *args, id=f"{QUEUE}-{uuid.uuid4()}", task_queue=QUEUE
             )
+            result = await handle.result()
+            history.append(await handle.fetch_history())
+            return result
 
 
 async def test_one_mission_every_step_in_order():
@@ -621,6 +668,91 @@ async def test_a_mission_whose_step_fails_is_recorded_cleaned_up_and_passed_over
     ]
     assert [e[0] for e in EVENTS].count("cleanup") == 2
     assert not [e for e in EVENTS if e[0] == "persist calibration"]
+
+
+async def test_a_worker_refusal_is_no_strike_and_stops_the_drain():
+    """2026-10-24: a processor whose weights cannot load (or with no GPU)
+    refuses every frame alike. The frames child failing on it was recorded
+    as the dive's failure -- and the drain went on to the next dive, and the
+    next, a strike against each (at three the cohort leaves a dive for an
+    operator) for a fault in the pod. It is the worker's: nothing is recorded
+    against the dive or its frames, the scratch is cleaned up, the run stops
+    at the first dive, and says why."""
+    missions = [_target(), _target(), _target()]
+    report = await _run(
+        AutomaticResultsParentWorkflow, selected=missions, frames_refuse=True
+    )
+    assert report.stopped == "worker refused (Sam3WeightsCorrupt)"
+    assert [d.mission_id for d in report.missions] == [missions[0].mission_id]
+    (mission,) = report.missions
+    assert mission.failed is None
+    assert mission.refused.startswith("frames: Sam3WeightsCorrupt")
+    assert mission.refusal_type == "Sam3WeightsCorrupt"
+    assert not [e for e in EVENTS if e[0] in ("failed", "frame failures")]
+    assert ("cleanup",) in EVENTS
+    assert len(SELECTS) == 1
+
+
+async def test_a_species_refusal_stops_the_drain_and_keeps_the_lengths():
+    """Review of #364: species was isolated from every failure, refusals
+    included, so BioCLIP weights that cannot load woke the GPU for every
+    dive of the drain window, each refused alike. A refusal stops the run,
+    as any step's does; the dive keeps its lengths (species is last), and
+    nothing is recorded against it."""
+    missions = [_target(), _target()]
+    report = await _run(
+        AutomaticResultsParentWorkflow, selected=missions, species_refuse=True
+    )
+    assert report.stopped == "worker refused (BioclipWeightsCorrupt)"
+    (mission,) = report.missions
+    assert mission.refusal_type == "BioclipWeightsCorrupt"
+    assert mission.refused.startswith("species: BioclipWeightsCorrupt")
+    assert not mission.species_failed
+    assert ("persist lengths", 1) in EVENTS
+    assert not [e for e in EVENTS if e[0] == "failed"]
+
+
+async def test_a_run_from_before_species_refusals_stopped_replays_as_it_ran(
+    monkeypatch,
+):
+    """The species refusal is behind `workflow.patched`: a dive run started
+    before it, whose species was refused and logged as a species failure
+    (the run completing), replays under the new code as it ran, rather than
+    turning into a refused run."""
+    from temporalio.worker import Replayer, UnsandboxedWorkflowRunner
+
+    async def species_before(target, gpu, report):
+        try:
+            await sut._species_step(target, gpu, report)
+        except (ActivityError, ChildWorkflowError):
+            report.species_failed = True
+
+    monkeypatch.setattr(sut, "_species", species_before)
+    history: list = []
+    report = await _run(
+        AutomaticResultsForMissionWorkflow, TARGET, species_refuse=True,
+        runner=UnsandboxedWorkflowRunner(), history=history,
+    )  # fmt: skip
+    monkeypatch.undo()
+    assert report.species_failed and report.refused is None
+
+    replayed = await Replayer(
+        workflows=[AutomaticResultsForMissionWorkflow], data_converter=DATA_CONVERTER
+    ).replay_workflow(history[0], raise_on_replay_failure=False)
+    assert replayed.replay_failure is None
+
+
+async def test_a_worker_refusal_fails_a_mission_run_by_hand_unrecorded():
+    """By hand, a refused dive must not read as done either -- but it is not
+    the dive's failure, so nothing is recorded against it."""
+    try:
+        await _run(AutomaticResultsForMissionWorkflow, TARGET, frames_refuse=True)
+    except WorkflowFailureError as exc:
+        assert exc.cause.type == "AutomaticWorkerRefused"
+    else:
+        raise AssertionError("a refused dive run by hand must fail")
+    assert not [e for e in EVENTS if e[0] in ("failed", "frame failures")]
+    assert ("cleanup",) in EVENTS
 
 
 async def test_a_mission_handed_back_twice_ends_the_run():

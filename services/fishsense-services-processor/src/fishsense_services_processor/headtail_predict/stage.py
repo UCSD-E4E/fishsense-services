@@ -4,9 +4,10 @@ On the GPU role: its queue prefers a GPU and is served by the CPU-fallback
 Deployment when none starts, where the stage runs fishsense-core's Mask R-CNN
 instead (v1's GPU data-worker, fishsense-lite@77e8f8e5 roles.py).
 
-The object store, the weight store and the SAM 3.1 pin are read on first use,
-not here: the registry imports every stage wherever it runs, and only a pod
-with a GPU ever fetches SAM 3.1's weights.
+The object store and the weight store are read on first use, not here: the
+registry imports every stage wherever it runs, and only a pod with a GPU ever
+fetches SAM 3.1's weights. Their pin is fishsense-core's (`weights`); until
+2026-10-23 it was read from `FISHSENSE_SAM3_*` settings here as well.
 """
 
 from functools import cache
@@ -15,10 +16,7 @@ from fishsense_services_contracts.object_store import ObjectStoreConnection
 from fishsense_services_processor.headtail_predict.activities import (
     HeadtailPredictActivities,
 )
-from fishsense_services_processor.headtail_predict.weights import (
-    Sam3Settings,
-    fetch_sam3,
-)
+from fishsense_services_processor.headtail_predict.weights import fetch_sam3
 from fishsense_services_processor.headtail_predict.workflow import (
     PredictHeadtailImagesWorkflow,
 )
@@ -35,14 +33,14 @@ def _store() -> ProcessorObjectStore:
 
 
 @cache
-def _weights() -> tuple[GarageWeightStore, ModelWeightsSettings, Sam3Settings]:
+def _weights() -> tuple[GarageWeightStore, ModelWeightsSettings]:
     settings = ModelWeightsSettings()
-    return GarageWeightStore.from_settings(settings), settings, Sam3Settings()
+    return GarageWeightStore.from_settings(settings), settings
 
 
 async def _sam3_checkpoint():
-    store, settings, sam3 = _weights()
-    return await fetch_sam3(store=store, cache_dir=settings.cache_dir, settings=sam3)
+    store, settings = _weights()
+    return await fetch_sam3(store=store, cache_dir=settings.cache_dir)
 
 
 _ACTIVITIES = HeadtailPredictActivities(

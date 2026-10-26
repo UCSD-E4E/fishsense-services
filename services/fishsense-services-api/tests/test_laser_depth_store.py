@@ -220,6 +220,20 @@ async def test_selector_ignores_non_canonical_images(owner_engine, app_engine):
     assert await _next(app_engine, lab) is None
 
 
+async def test_selector_ignores_zoomed_images(owner_engine, app_engine):
+    """The zoom gate (2026-10-25): a dot's depth assumes the camera
+    calibration's intrinsics, which a zoomed frame does not have."""
+    from _slate_calibration_seed import zoom
+
+    lab = await tenant(owner_engine)
+    mission_id, _ = await calibrated_dive(owner_engine, lab)
+    capture_id = await capture(owner_engine, lab, mission_id)
+    await laser_label(owner_engine, lab, capture_id)
+    await zoom(owner_engine, capture_id, 12.73)
+
+    assert await _next(app_engine, lab) is None
+
+
 async def test_selector_skips_low_priority_missions(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     mission_id, _ = await calibrated_dive(owner_engine, lab, priority="low")
@@ -680,6 +694,33 @@ async def test_persist_records_a_fallback_labels_refusal_and_its_siblings_depth(
 
     assert (persisted.written, persisted.refused) == (1, 1)
     assert [row[0] for row in await _depths(owner_engine, capture_id)] == [good]
+
+
+async def test_a_low_parallax_refusal_keeps_its_positive_depth_and_drops_the_label(
+    owner_engine, app_engine
+):
+    """Contract v21 (0071): a dot too near the laser's vanishing point is
+    refused with the finite, positive depth the solve gave -- a number no
+    other refusal may hold -- and the cohort stops offering its label."""
+    lab = await tenant(owner_engine)
+    mission_id, calibration = await calibrated_dive(owner_engine, lab)
+    capture_id, label = await _labelled(owner_engine, lab, mission_id)
+
+    persisted = await _persist(
+        app_engine,
+        lab,
+        mission_id,
+        calibration,
+        refusals=[DepthRefusal(capture_id, label, 100.0, 200.0, "low_parallax", 52.2)],
+    )
+
+    assert (persisted.written, persisted.refused) == (0, 1)
+    async with owner_engine.connect() as conn:
+        stored = (
+            await conn.execute(text("SELECT reason, depth_m FROM laser_depth_refusals"))
+        ).one()
+    assert tuple(stored) == ("low_parallax", 52.2)
+    assert (await _work(app_engine, lab, mission_id)).captures == []
 
 
 async def test_persisting_twice_writes_once(owner_engine, app_engine):

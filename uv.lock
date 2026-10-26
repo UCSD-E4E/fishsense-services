@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = "==3.13.*"
 resolution-markers = [
     "sys_platform == 'win32'",
@@ -555,8 +555,8 @@ wheels = [
 
 [[package]]
 name = "fishsense-core"
-version = "4.3.0"
-source = { url = "https://github.com/UCSD-E4E/fishsense-core/releases/download/fishsense-core-v4.3.0/fishsense_core-4.3.0-cp313-cp313-manylinux_2_34_x86_64.whl" }
+version = "4.3.2"
+source = { url = "https://github.com/UCSD-E4E/fishsense-core/releases/download/fishsense-core-v4.3.2/fishsense_core-4.3.2-cp313-cp313-manylinux_2_34_x86_64.whl" }
 dependencies = [
     { name = "numpy" },
     { name = "opencv-python-headless" },
@@ -565,7 +565,7 @@ dependencies = [
     { name = "scipy" },
 ]
 wheels = [
-    { url = "https://github.com/UCSD-E4E/fishsense-core/releases/download/fishsense-core-v4.3.0/fishsense_core-4.3.0-cp313-cp313-manylinux_2_34_x86_64.whl", hash = "sha256:1862f2da6ffe8f6981694f9380198b9661e292c774397b8d3649183aef49fe19" },
+    { url = "https://github.com/UCSD-E4E/fishsense-core/releases/download/fishsense-core-v4.3.2/fishsense_core-4.3.2-cp313-cp313-manylinux_2_34_x86_64.whl", hash = "sha256:ead8003b53ef4730a0bc931c02e757082b5136d9b08650b09673030c3f27eaa7" },
 ]
 
 [package.optional-dependencies]
@@ -605,7 +605,7 @@ provides-extras = ["denoise", "headtail-keypoints", "laser-detector", "rectified
 
 [[package]]
 name = "fishsense-services"
-version = "0.55.0"
+version = "0.57.0"
 source = { virtual = "." }
 
 [package.dev-dependencies]
@@ -632,7 +632,7 @@ dev = [
 
 [[package]]
 name = "fishsense-services-api"
-version = "0.55.0"
+version = "0.57.0"
 source = { editable = "services/fishsense-services-api" }
 dependencies = [
     { name = "alembic" },
@@ -667,7 +667,7 @@ requires-dist = [
 
 [[package]]
 name = "fishsense-services-contracts"
-version = "0.55.0"
+version = "0.57.0"
 source = { editable = "services/fishsense-services-contracts" }
 dependencies = [
     { name = "pydantic" },
@@ -684,7 +684,7 @@ requires-dist = [
 
 [[package]]
 name = "fishsense-services-orchestrator"
-version = "0.55.0"
+version = "0.57.0"
 source = { editable = "services/fishsense-services-orchestrator" }
 dependencies = [
     { name = "boto3" },
@@ -725,7 +725,7 @@ dev = [{ name = "fishsense-services-processor", editable = "services/fishsense-s
 
 [[package]]
 name = "fishsense-services-processor"
-version = "0.55.0"
+version = "0.57.0"
 source = { editable = "services/fishsense-services-processor" }
 dependencies = [
     { name = "boto3" },
@@ -755,10 +755,10 @@ torch = [
 requires-dist = [
     { name = "boto3", specifier = ">=1.35.0" },
     { name = "einops", marker = "extra == 'torch'", specifier = ">=0.8.0" },
-    { name = "fishsense-core", marker = "python_full_version != '3.13.*'", specifier = "==4.3.0" },
-    { name = "fishsense-core", marker = "python_full_version == '3.13.*'", url = "https://github.com/UCSD-E4E/fishsense-core/releases/download/fishsense-core-v4.3.0/fishsense_core-4.3.0-cp313-cp313-manylinux_2_34_x86_64.whl" },
-    { name = "fishsense-core", extras = ["laser-detector", "slate", "headtail-keypoints"], marker = "python_full_version == '3.13.*' and extra == 'torch'", url = "https://github.com/UCSD-E4E/fishsense-core/releases/download/fishsense-core-v4.3.0/fishsense_core-4.3.0-cp313-cp313-manylinux_2_34_x86_64.whl" },
-    { name = "fishsense-core", extras = ["laser-detector", "slate", "headtail-keypoints"], marker = "python_full_version != '3.13.*' and extra == 'torch'", specifier = "==4.3.0" },
+    { name = "fishsense-core", marker = "python_full_version != '3.13.*'", specifier = "==4.3.2" },
+    { name = "fishsense-core", marker = "python_full_version == '3.13.*'", url = "https://github.com/UCSD-E4E/fishsense-core/releases/download/fishsense-core-v4.3.2/fishsense_core-4.3.2-cp313-cp313-manylinux_2_34_x86_64.whl" },
+    { name = "fishsense-core", extras = ["laser-detector", "slate", "headtail-keypoints"], marker = "python_full_version == '3.13.*' and extra == 'torch'", url = "https://github.com/UCSD-E4E/fishsense-core/releases/download/fishsense-core-v4.3.2/fishsense_core-4.3.2-cp313-cp313-manylinux_2_34_x86_64.whl" },
+    { name = "fishsense-core", extras = ["laser-detector", "slate", "headtail-keypoints"], marker = "python_full_version != '3.13.*' and extra == 'torch'", specifier = "==4.3.2" },
     { name = "fishsense-services-contracts", editable = "services/fishsense-services-contracts" },
     { name = "open-clip-torch", marker = "extra == 'torch'", specifier = "==3.3.0" },
     { name = "pandas", specifier = ">=2.3.3" },

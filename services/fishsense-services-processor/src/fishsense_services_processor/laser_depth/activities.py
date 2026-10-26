@@ -9,11 +9,7 @@ writing (its cohort decides what is current); this activity keeps v1's
 per-image rule:
 
 * try the image's valid labels **in the order given** (v1: ascending label
-  id) and take the first whose depth is finite and **> 0**. The gate is
-  `depth_m > 0`, not finiteness: the kernel reports "these rays never meet"
-  as the origin, and a dot on the wrong side of the principal point as a
-  negative Z -- both finite, and a length computed at a negative depth is
-  identical to its positive twin, so nothing downstream would notice;
+  id) and take the first that gives a usable depth;
 * a later label is tried when an earlier one is degenerate: dropping the
   image would leave the image-keyed cohort offering the dive forever (the
   dive-279 wedge, from the other side);
@@ -29,16 +25,25 @@ v2 changes:
   it until the label or the calibration changes;
 * a directionless laser axis fails the activity **non-retryably**: it is a
   property of the dive's calibration, so every image fails the same way, and
-  v1 retried it for the activity's whole hour.
+  v1 retried it for the activity's whole hour;
+* **the gate is fishsense-core's `LaserPoint.is_measurable()`** (2026-10-23,
+  core #96; contract v21), where v1 and v2 until then asked for a finite
+  depth `> 0`. The triangulation answers every pixel: rays that never meet
+  come back at the origin, a dot on the wrong side of the principal point
+  behind the camera, and -- the case `depth_m > 0` let through -- a dot near
+  the laser's vanishing point, where the two rays are nearly parallel, at a
+  finite, positive, wrong depth. `parallax_rad` catches that last one
+  (`low_parallax`). The projection itself moved to fishsense-core with it
+  (`world_point.compute_laser_point`, ported from this repo's
+  `laser_geometry.py`, now gone); on 20,000 random dots the two agreed
+  exactly.
 """
 
 from __future__ import annotations
 
-import importlib.metadata
 import math
 
 from temporalio import activity
-from temporalio.exceptions import ApplicationError
 
 from fishsense_services_contracts.laser_depth import (
     ComputeLaserDepthsInput,
@@ -47,14 +52,13 @@ from fishsense_services_contracts.laser_depth import (
     LaserDepthOutcome,
     LaserDepthRefusal,
 )
-from fishsense_services_processor.laser_geometry import compute_laser_point
+from fishsense_services_processor.laser_dots import (
+    core_version,
+    dot_refusal,
+    laser_point,
+)
 
-__all__ = ["compute_laser_depths", "core_version"]
-
-
-def core_version() -> str:
-    """The fishsense-core wheel doing the geometry, as results record it."""
-    return importlib.metadata.version("fishsense-core")
+__all__ = ["compute_laser_depths"]
 
 
 def _finite(value: float) -> float | None:
@@ -72,20 +76,16 @@ async def compute_laser_depths(
         depth: LaserDepth | None = None
         refusals: list[LaserDepthRefusal] = []
         for dot in capture.laser_labels:
-            try:
-                point = compute_laser_point(
-                    dot, payload.calibration, payload.camera_matrix
-                )
-            except ValueError as exc:
-                # The kernel refuses a zero-length (or non-finite) axis. It is
-                # the dive's calibration, not this image, that is broken.
-                raise ApplicationError(
-                    f"laser calibration {payload.calibration.laser_calibration_id}"
-                    f" of dive {payload.mission_id} is unusable: {exc}",
-                    type="UnusableLaserCalibration",
-                    non_retryable=True,
-                ) from exc
-            if math.isfinite(point.depth_m) and point.depth_m > 0.0:
+            point = laser_point(
+                (dot.x, dot.y),
+                payload.calibration.laser_position,
+                payload.calibration.laser_axis,
+                payload.camera_matrix,
+                of=f"laser calibration {payload.calibration.laser_calibration_id}"
+                f" of dive {payload.mission_id}",
+            )
+            reason = dot_refusal(point)
+            if reason is None:
                 depth = LaserDepth(
                     laser_label_id=dot.laser_label_id,
                     x=dot.x,
@@ -99,31 +99,32 @@ async def compute_laser_depths(
                 )
                 break
             activity.logger.debug(
-                "dive_id=%s capture_id=%s laser_label_id=%s: depth=%s; "
-                "trying the capture's next valid label",
+                "dive_id=%s capture_id=%s laser_label_id=%s: depth=%s "
+                "parallax_rad=%s (%s); trying the capture's next valid label",
                 payload.mission_id,
                 capture.capture_id,
                 dot.laser_label_id,
                 point.depth_m,
+                point.parallax_rad,
+                reason,
             )
             refusals.append(
                 LaserDepthRefusal(
                     laser_label_id=dot.laser_label_id,
                     x=dot.x,
                     y=dot.y,
-                    reason=(
-                        "non_positive_depth"
-                        if math.isfinite(point.depth_m)
-                        else "non_finite_depth"
-                    ),
-                    depth_m=_finite(point.depth_m),
+                    reason=reason,
+                    # What the solve said; never a depth `laser_depths` would
+                    # take, or it would have been one. A broken solve's finite
+                    # depth is not recorded: it carries nothing.
+                    depth_m=(None if reason == "non_finite_depth" else point.depth_m),
                 )
             )
         if depth is None:
             refused += 1
             activity.logger.warning(
                 "dive_id=%s capture_id=%s: none of its %d valid laser label(s) "
-                "intersect laser_calibration_id=%s in front of the camera; "
+                "gives a measurable depth under laser_calibration_id=%s; "
                 "refusing it",
                 payload.mission_id,
                 capture.capture_id,

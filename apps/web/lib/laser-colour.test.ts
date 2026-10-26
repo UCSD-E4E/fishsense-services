@@ -1,4 +1,4 @@
-// The laser's colour, as the web shows it (0068; the owner, 2026-10-24).
+// The laser's colour, as the web shows it (0072; the owner, 2026-10-24).
 // Pinned here:
 //  * a dot's colour reads as a word, with how clearly the kernel read it;
 //  * a dot with no reading says so, rather than guessing;

@@ -1,8 +1,8 @@
-"""The automatic dot's colour (contract v21, 2026-10-24).
+"""The automatic dot's colour (contract v22, 2026-10-25).
 
 The laser kernel always read the dot's colour off its pixels; the automatic
 frames stage dropped it, so no automatic row had one. It is now kept on the
-row (``laser_color``/``laser_color_margin``, 0068) and shown wherever the
+row (``laser_color``/``laser_color_margin``, 0072) and shown wherever the
 automatic dot is: a frame's result, the lengths list, and a mission's colour
 counts beside the human labels' and the human-path predictions'.
 """

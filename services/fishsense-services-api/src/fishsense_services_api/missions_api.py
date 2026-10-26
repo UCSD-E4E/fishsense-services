@@ -62,7 +62,7 @@ class LaserColoursView(BaseModel):
     labels: ColourCountsView
     #: The human path's laser stage, read off the dot.
     predictions: ColourCountsView
-    #: The automatic chain's dot, read by the same kernel (0068).
+    #: The automatic chain's dot, read by the same kernel (0072).
     automatic: ColourCountsView
 
 

@@ -349,3 +349,13 @@ async def slate_presence(
 
 
 PRESENCE_SHA = "b8d377ba22d155e7056a5e9ae747fdd0970c7c73dee981bbee17d95c8156cf78"
+
+
+async def zoom(engine, capture_id, focal_length_mm: float = 18.0) -> None:
+    """The frame was shot zoomed in (EXIF 0x920A, 0069): its intrinsics are
+    not the camera calibration's, which is at the TG-6's 4.5 mm wide end."""
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE captures SET focal_length_mm = :f WHERE id = :c"),
+            {"f": focal_length_mm, "c": capture_id},
+        )

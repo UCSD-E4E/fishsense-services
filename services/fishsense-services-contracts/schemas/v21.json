@@ -545,34 +545,6 @@
         "default": null,
         "title": "Laser Checkpoint"
       },
-      "laser_color": {
-        "anyOf": [
-          {
-            "enum": [
-              "red",
-              "green"
-            ],
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Laser Color"
-      },
-      "laser_color_margin": {
-        "anyOf": [
-          {
-            "type": "number"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Laser Color Margin"
-      },
       "laser_confidence": {
         "anyOf": [
           {
@@ -2660,7 +2632,8 @@
           "reason": {
             "enum": [
               "non_finite_depth",
-              "non_positive_depth"
+              "non_positive_depth",
+              "low_parallax"
             ],
             "title": "Reason",
             "type": "string"
@@ -3140,6 +3113,14 @@
       },
       "refusal": {
         "anyOf": [
+          {
+            "enum": [
+              "non_finite_depth",
+              "non_positive_depth",
+              "low_parallax"
+            ],
+            "type": "string"
+          },
           {
             "enum": [
               "non_finite_length",
@@ -4756,7 +4737,8 @@
           "reason": {
             "enum": [
               "non_finite_depth",
-              "non_positive_depth"
+              "non_positive_depth",
+              "low_parallax"
             ],
             "title": "Reason",
             "type": "string"
@@ -4834,7 +4816,8 @@
       "reason": {
         "enum": [
           "non_finite_depth",
-          "non_positive_depth"
+          "non_positive_depth",
+          "low_parallax"
         ],
         "title": "Reason",
         "type": "string"
@@ -6157,6 +6140,14 @@
           },
           "refusal": {
             "anyOf": [
+              {
+                "enum": [
+                  "non_finite_depth",
+                  "non_positive_depth",
+                  "low_parallax"
+                ],
+                "type": "string"
+              },
               {
                 "enum": [
                   "non_finite_length",

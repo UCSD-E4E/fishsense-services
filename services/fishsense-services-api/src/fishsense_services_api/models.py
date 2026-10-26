@@ -434,6 +434,9 @@ class Capture(Base):
     #: Where an imported phone capture came from (0058); a synced one has
     #: its uploader instead.
     imported_from: Mapped[str | None] = mapped_column(Text)
+    #: EXIF FocalLength (0x920A), mm (0069): the zoom gate's input. NULL is
+    #: unknown (not read yet, or a phone capture).
+    focal_length_mm: Mapped[float | None] = mapped_column(Double)
 
 
 class CameraCalibration(Base):
@@ -1173,8 +1176,8 @@ class Measurement(Base):
 
 
 class LaserDepthRefusal(Base):
-    """A laser label tried under a calibration that gave no depth in front of
-    the camera (migration 0025): "tried, made no progress"."""
+    """A laser label tried under a calibration that gave no measurable depth
+    (migration 0025; `low_parallax` since 0071): "tried, made no progress"."""
 
     __tablename__ = "laser_depth_refusals"
     __table_args__ = (
@@ -1191,10 +1194,13 @@ class LaserDepthRefusal(Base):
             ["laser_calibrations.tenant_id", "laser_calibrations.id"],
         ),
         CheckConstraint(
-            "reason IN ('non_finite_depth', 'non_positive_depth')",
+            "reason IN ('non_finite_depth', 'non_positive_depth', 'low_parallax')",
             name="laser_depth_refusals_reason_check",
         ),
-        CheckConstraint("depth_m <= 0", name="laser_depth_refusals_depth_m_check"),
+        CheckConstraint(
+            "depth_m <= 0 OR reason = 'low_parallax'",
+            name="laser_depth_refusals_depth_m_check",
+        ),
         Index(
             "laser_depth_refusals_tenant_id_capture_id_idx", "tenant_id", "capture_id"
         ),
@@ -1216,8 +1222,9 @@ class LaserDepthRefusal(Base):
 
 
 class MeasurementRefusal(Base):
-    """A capture's measurement inputs that gave no usable length, or a real
-    fish no name could be read from (migration 0025)."""
+    """A capture's measurement inputs that gave no usable length -- since 0071
+    including a laser dot that is not measurable -- or a real fish no name
+    could be read from (migration 0025)."""
 
     __tablename__ = "measurement_refusals"
     __table_args__ = (
@@ -1242,7 +1249,8 @@ class MeasurementRefusal(Base):
             ["head_tail_labels.tenant_id", "head_tail_labels.id"],
         ),
         CheckConstraint(
-            "reason IN ('non_finite_length', 'zero_length', 'unparseable_species')",
+            "reason IN ('non_finite_length', 'zero_length', 'unparseable_species',"
+            " 'non_finite_depth', 'non_positive_depth', 'low_parallax')",
             name="measurement_refusals_reason_check",
         ),
         Index(
@@ -1337,7 +1345,7 @@ class AutomaticHeadTailPrediction(Base):
     laser_confidence: Mapped[float | None] = mapped_column(Double)
     laser_predictor_version: Mapped[int | None] = mapped_column(Integer)
     laser_checkpoint: Mapped[str | None] = mapped_column(Text)
-    #: The dot's colour, ``red`` or ``green``, and how clearly (0068).
+    #: The dot's colour, ``red`` or ``green``, and how clearly (0072).
     laser_color: Mapped[str | None] = mapped_column(Text)
     laser_color_margin: Mapped[float | None] = mapped_column(Double)
     head_x: Mapped[float | None] = mapped_column(Double)

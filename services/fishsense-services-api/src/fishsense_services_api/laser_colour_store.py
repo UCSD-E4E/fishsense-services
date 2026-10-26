@@ -7,7 +7,7 @@ which, frame by frame:
   "Red Laser" / "Green Laser"); live labels with a dot only;
 * **predictions**: the human path's laser stage, read off the dot's pixels
   (``current_laser_predictions.color``; 98% per frame on 332 dots);
-* **automatic**: the automatic chain's dot, read by the same kernel (0068).
+* **automatic**: the automatic chain's dot, read by the same kernel (0072).
 
 Counts, never a verdict: a mission whose sources disagree is worth seeing, and
 a majority would hide it (the orchestrator's `mission_laser_label` takes one,

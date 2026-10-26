@@ -50,7 +50,7 @@ class AutomaticFrameView(BaseModel):
     #: Full-frame pixels of ``render_url``'s image.
     laser: PixelPoint | None
     laser_confidence: float | None
-    #: ``red`` or ``green``, as the laser kernel read the dot (0068); None
+    #: ``red`` or ``green``, as the laser kernel read the dot (0072); None
     #: when it gave no reading, and on every row from before.
     laser_color: str | None
     laser_color_margin: float | None
@@ -138,7 +138,7 @@ class AutomaticLengthView(BaseModel):
     #: Always ``label_free`` (0064): the automatic stack alone.
     calibration_source: str
     laser_confidence: float | None
-    #: The automatic dot's colour (0068); None when unread or from before.
+    #: The automatic dot's colour (0072); None when unread or from before.
     laser_color: str | None
     sam_score: float | None
     #: The predicted choice, as Label Studio spells it.

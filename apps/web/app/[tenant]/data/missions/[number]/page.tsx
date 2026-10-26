@@ -183,7 +183,7 @@ export default async function MissionPage({ params, searchParams }: Props) {
   );
 }
 
-/** The mission's frames by laser colour, per source (0068): counts, so a
+/** The mission's frames by laser colour, per source (0072): counts, so a
  *  mission whose sources disagree shows it. Hidden when no source read a dot. */
 function LaserColourSection({ colours }: { colours: LaserColours }) {
   const rows = colourRows(colours);

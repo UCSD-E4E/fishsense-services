@@ -19,7 +19,12 @@ v2 changes:
   one pixel), which v2's `measurements` refuses (CHECK length_m > 0); either
   way the capture stayed in the cohort and the dive never drained;
 * **the result names its algorithm, version and core**, which 0013 requires of
-  every server measurement.
+  every server measurement;
+* v21 (2026-10-23, core #96): the dot must pass fishsense-core's
+  `LaserPoint.is_measurable()` before a length is taken, and one that fails
+  is refused with the depth stage's reasons (`laser_depth.DotRefusal`). Until
+  then stage 14 measured at the dot's depth whatever its sign (v1 parity, which
+  the owner gave up), and a non-finite depth came back as `non_finite_length`.
 """
 
 from typing import Annotated, Literal, Self
@@ -29,6 +34,7 @@ from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 from fishsense_services_contracts.laser_depth import (
     CameraMatrix,
+    DotRefusal,
     FiniteFloat,
     LaserCalibrationGeometry,
     LaserDot,
@@ -81,7 +87,9 @@ class FishLength(BaseModel):
     length_m: Annotated[float, Field(gt=0, allow_inf_nan=False)] | None
     #: The laser dot's depth the length was taken at; None when not finite.
     depth_m: FiniteFloat | None
-    refusal: Literal["non_finite_length", "zero_length"] | None
+    #: The dot's own refusals (v21: stage 14 gates on `is_measurable()` before
+    #: measuring), or the length's: not finite, or zero.
+    refusal: DotRefusal | Literal["non_finite_length", "zero_length"] | None
 
     @model_validator(mode="after")
     def _a_length_or_a_refusal(self) -> Self:

@@ -1,4 +1,4 @@
-"""The automatic dot keeps its colour (contract v21, 2026-10-24).
+"""The automatic dot keeps its colour (contract v22, 2026-10-25).
 
 The laser kernel reads the dot's colour off its pixels (``laser_predictions.
 color``, 0003; fishsense-core's `laser_color` since 0067), and the automatic
@@ -15,16 +15,16 @@ row had one. ``automatic_head_tail_predictions`` gains it:
 expanded when it was made, so it is replaced to carry them (0049's pattern;
 OR REPLACE keeps its grants and appends the new columns).
 
-Revision ID: 0068
-Revises: 0067
+Revision ID: 0072
+Revises: 0071
 """
 
 from alembic import context, op
 
 from fishsense_services_api.schema_audit import RESEARCH_ROLE
 
-revision = "0068"
-down_revision = "0067"
+revision = "0072"
+down_revision = "0071"
 
 TABLE = "automatic_head_tail_predictions"
 VIEW = "current_automatic_head_tail_predictions"

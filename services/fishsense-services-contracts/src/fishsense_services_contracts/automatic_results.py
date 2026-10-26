@@ -46,6 +46,16 @@ other frame is as under 3, so the API counts a version-3 row of an uncut mask
 as done (`automatic_results_store.head_tail_current`) and the drain re-runs
 only the cut ones.
 
+`AUTOMATIC_MEASUREMENT_VERSION` 2 (2026-10-23, fishsense-core #96): the dot
+must pass `LaserPoint.is_measurable()` -- finite, in front of the camera, and
+its camera ray at least 0.005 rad off the laser -- where version 1 asked only
+for a positive depth. Near the laser's vanishing point the triangulation
+returns a finite, positive, untrustworthy depth (a pixel of dot error moves it
+more than 7 % there); version 2 refuses it as `low_parallax`. Every other
+length is unchanged to float precision (20,000 random dots: core matched
+version 1's geometry exactly), but the cohort selects on the version, so the
+bump measures every automatic frame again (light queue, geometry only).
+
 `AUTOMATIC_JPEG_RENDER_VERSION` names that render: the raw decoded and
 rectified by fishsense-core with the camera's matrix and distortion, then
 encoded (processor `headtail_preprocess.rectify_and_encode_jpeg`). It and the
@@ -63,6 +73,21 @@ and a frame whose size disagrees with its place on the line is dropped
 (`size_constancy.trim_frames`). Version 1 fitted both: a reflection's run of
 off-line dots moved session 77's vanishing point by 1,600 px, and one
 wrong-range dot moved mission 80's by 360 px.
+``size-constancy-3`` (2026-10-25): the size-constancy fit is fishsense-core
+4.3.2's (`fishsense_core.size_constancy`), which absorbed this repo's port of
+cscw's. Named, not numbered, so a row cannot be read as calibration v3 (the
+screen-consensus-check replay, `automatic_calibration.v3`), which no row
+records (review of #354). Core sizes only the largest connected component
+of the pairs the robust pass kept, drops a pair beyond 10x before solving,
+and measures no scale from a pair whose inliers collapse to one spot; with no
+dive line the direction follows the trim. On cscw's ten sessions: nine fit
+as under 2 (to 1e-11 px), and session 114 keeps all 29 frames with its
+collapsed pair (log scale -37) counted implausible, its error against the
+stored calibration -0.0446 -> -0.0439 deg. Production's cohort was re-fitted
+read-only before this shipped (#354). The bump re-fits every dive in the
+cohort (`automatic_results_store._CALIBRATION_WORK` selects on
+`algorithm_version`); each accepted fit is a new row, so the lengths that
+used the dive's label-free calibration are measured again.
 
 Not in ``MODELS``: integration publishes schemas once for every slice.
 """
@@ -105,11 +130,12 @@ __all__ = [
 AUTOMATIC_HEADTAIL_PREDICTOR_VERSION = 4
 #: The one render every step reads (`renders.RENDER_VERSION`).
 AUTOMATIC_JPEG_RENDER_VERSION = RENDER_VERSION
-AUTOMATIC_CALIBRATION_VERSION = "2"
-AUTOMATIC_MEASUREMENT_VERSION = "1"
+AUTOMATIC_CALIBRATION_VERSION = "size-constancy-3"
+AUTOMATIC_MEASUREMENT_VERSION = "2"
 
 #: Stage 14's single-depth fronto-parallel projection (processor
-#: `measurement.activities.ALGORITHM`), with the depth gated to > 0.
+#: `measurement.activities.ALGORITHM`), behind fishsense-core's
+#: `LaserPoint.is_measurable()`.
 AUTOMATIC_MEASUREMENT_ALGORITHM = "laser_depth_fronto_parallel"
 
 #: The SAM 3.1 score a kept mask needs (paper §6.3: 0.5 covers 72 % of the
@@ -201,8 +227,8 @@ class AutomaticFrameResult(BaseModel):
     laser_predictor_version: Optional[int] = None
     laser_checkpoint: Optional[str] = None
     #: The dot's colour, read off its pixels by the laser stage's kernel
-    #: (`laser.LaserPrediction.color`), and how clearly (v21, 2026-10-24).
-    #: None when the dot gave no reading, or from a v20 processor.
+    #: (`laser.LaserPrediction.color`), and how clearly (v22, 2026-10-25).
+    #: None when the dot gave no reading, or from a v21 processor.
     laser_color: Optional[Literal["red", "green"]] = None
     laser_color_margin: Optional[float] = None
     head_x: Optional[float] = None
@@ -319,7 +345,11 @@ class AutomaticLength(BaseModel):
     automatic_head_tail_prediction_id: UUID
     length_m: Optional[float] = None
     depth_m: Optional[float] = None
-    #: Why no length: `non_positive_depth`, `non_finite_length`, `zero_length`.
+    #: Why no length: the dot's reason (`laser_depth.DotRefusal`:
+    #: `non_finite_depth`, `non_positive_depth`, `low_parallax`; version 2,
+    #: and before it a non-finite depth was stored as `non_positive_depth`),
+    #: `non_finite_length`, `zero_length`, or `zoomed` (the CLI's withdrawal,
+    #: 0070). The API's CHECK repeats them (migration 0071).
     refusal: Optional[str] = None
 
 

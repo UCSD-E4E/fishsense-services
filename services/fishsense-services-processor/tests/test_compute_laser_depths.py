@@ -131,7 +131,7 @@ async def test_records_the_residual_for_an_inconsistent_dot():
 async def test_refuses_to_store_an_impossible_depth():
     """The kernel signals "these rays do not meet" with a zero or negative Z
     rather than NaN, and a negative depth yields a perfectly ordinary-looking
-    length downstream (see test_laser_geometry). Storing one would launder a
+    length downstream (fishsense-core `world_point`'s docstring). Storing one would launder a
     bad label into a plausible distance.
 
     v2: the refusal comes back, naming the label and what it said, so the
@@ -318,3 +318,47 @@ async def test_a_zero_length_axis_fails_the_activity_for_good():
 
     assert raised.value.non_retryable
     assert "laser_axis" in str(raised.value)
+
+
+async def test_a_dot_near_the_lasers_vanishing_point_is_refused_as_low_parallax():
+    """core #96: a dot near the laser's vanishing point, where its camera ray
+    and the laser are nearly parallel, triangulates to a finite, *positive*
+    depth that `depth_m > 0` let through. Here the dot is the laser's own hit
+    at 50 m: the camera ray meets the laser at ~0.002 rad, below
+    fishsense-core's `DEFAULT_MIN_PARALLAX_RAD` (0.005), where one pixel of dot
+    error moves the depth by more than 7 %. `LaserPoint.is_measurable()` is the
+    gate; the refusal names the parallax and keeps what the solve said."""
+    calibration = _laser_calibration()
+    label = uuid4()
+    x, y = _laser_pixel(calibration, 50.0)
+
+    result = await _run(
+        _input(
+            [LaserDepthCapture(capture_id=uuid4(), laser_labels=[_dot(label, x, y)])]
+        )
+    )
+
+    (outcome,) = result.captures
+    assert outcome.depth is None
+    (refusal,) = outcome.refusals
+    assert refusal.laser_label_id == label
+    assert refusal.reason == "low_parallax"
+    # Finite and positive: the old gate would have stored it.
+    assert refusal.depth_m == pytest.approx(50.0, rel=0.1)
+
+
+async def test_a_far_dot_with_enough_parallax_still_gives_a_depth():
+    """The gate's other side: at 15 m the parallax (~0.007 rad) clears the
+    threshold, so the depth is stored, not refused."""
+    calibration = _laser_calibration()
+    x, y = _laser_pixel(calibration, 15.0)
+
+    result = await _run(
+        _input(
+            [LaserDepthCapture(capture_id=uuid4(), laser_labels=[_dot(uuid4(), x, y)])]
+        )
+    )
+
+    (outcome,) = result.captures
+    assert outcome.depth.depth_m == pytest.approx(15.0, rel=0.05)
+    assert outcome.refusals == []

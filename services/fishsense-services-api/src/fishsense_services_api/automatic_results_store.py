@@ -318,7 +318,8 @@ _SPECIES_WORK = f"""NOT {_SESSION} AND EXISTS (
     )"""
 
 #: No current automatic calibration at the current version, or one older than
-#: the dive's newest frame or slate score.
+#: the dive's newest frame or slate score, or one fitted through a frame the
+#: zoom gate (0070) now leaves out.
 _CALIBRATION_WORK = """(
         EXISTS (
             SELECT 1 FROM captures c
@@ -348,6 +349,13 @@ _CALIBRATION_WORK = """(
                       )
                     )
               )
+              -- Fitted before the zoom gate, through a frame it now leaves
+              -- out (2026-10-25: mission 237, 2 of 18): refitting drops it.
+              AND NOT EXISTS (
+                  SELECT 1 FROM captures c
+                  WHERE c.tenant_id = a.tenant_id AND c.id = ANY(a.capture_ids)
+                    AND NOT focal_length_calibrated(c.focal_length_mm)
+              )
         )
     )"""
 
@@ -359,6 +367,8 @@ _LENGTHS_WORK = f"""NOT {_SESSION} AND EXISTS (
         CROSS JOIN LATERAL {_latest("automatic_head_tail_predictions")} h
         WHERE mc.tenant_id = d.tenant_id AND mc.mission_id = d.id AND c.is_canonical
           AND h.status = 'predicted'
+          -- A zoomed frame is never measured (the zoom gate, 0070).
+          AND focal_length_calibrated(c.focal_length_mm)
           -- A frame the detector now calls a slate is never measured
           -- (automatic_measure_inputs), so it is no length outstanding.
           AND NOT {_DETECTOR_SLATE}
@@ -436,6 +446,8 @@ AUTOMATIC_MEASURE_CAPTURES = f"""
                             "m.algorithm_version = :mv")} ON true
     WHERE c.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
       AND h.status = 'predicted' AND m.id IS NULL
+      -- the zoom gate (0070): its depth assumes intrinsics it was not shot at
+      AND focal_length_calibrated(c.focal_length_mm)
       AND NOT {_calibration_session(":t", ":d")}
     ORDER BY c.number
     """
@@ -465,6 +477,8 @@ AUTOMATIC_CALIBRATION_CAPTURES = f"""
     CROSS JOIN {_current_row("current_automatic_head_tail_predictions", "h")}
     WHERE c.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
       AND h.laser_x IS NOT NULL
+      -- the zoom gate (0070): a zoomed frame's dot sits on another line
+      AND focal_length_calibrated(c.focal_length_mm)
     ORDER BY c.number
     """
 
@@ -750,7 +764,7 @@ class AutomaticHeadTailRow:
     laser_confidence: float | None = None
     laser_predictor_version: int | None = None
     laser_checkpoint: str | None = None
-    #: The dot's colour as the laser kernel read it, and how clearly (0068).
+    #: The dot's colour as the laser kernel read it, and how clearly (0072).
     laser_color: str | None = None
     laser_color_margin: float | None = None
     head_x: float | None = None

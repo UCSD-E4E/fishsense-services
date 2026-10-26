@@ -21,6 +21,16 @@ Kept from the script, exactly, so its pool result reproduces
 - the bootstrap SE, frames resampled with replacement, one generator per
   (session, variant) so a fit's SE doesn't depend on which others run.
 
+The estimator is fishsense-core's (core #97): `fit_vanishing_position` and
+`beam_from_vanishing` in `fishsense_core.size_constancy` are this module's
+former `fit_tv` and `beam` line for line, and the bootstrap is its
+`bootstrap_se` with this script's generator and draws,
+``bootstrap_se(t, s, rng=np.random.default_rng([session, variant]),
+draws=500)``. The pool rows reproduce unchanged (2026-10-23). What stays here
+is the shadow stage's own: the per-variant seeding, and the evaluation
+against a reference calibration (`err_deg`, `angle_deg`), which is not
+calibration.
+
 v2 additions, none of which changes a ported number:
 - `err_deg_fx`: the same offset at the camera's own fx, which the paper
   reports (author, 2026-10-21);
@@ -35,7 +45,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
-from scipy.optimize import minimize_scalar
+from fishsense_core import size_constancy as sc
 
 __all__ = [
     "F_PX",
@@ -44,8 +54,6 @@ __all__ = [
     "O_DESIGN_M",
     "PortFit",
     "VARIANT_INDEX",
-    "beam",
-    "fit_tv",
     "port_fit",
 ]
 
@@ -57,36 +65,9 @@ MIN_FRAMES = 8
 N_BOOT = 500
 #: The assumed laser offset, m: the fleet median of 31 stored calibrations,
 #: standing in for the mount's CAD value (score.py `O_DESIGN_M`).
-O_DESIGN_M = 0.104
+O_DESIGN_M = sc.O_DESIGN_M
 #: The script's variants, whose index seeds each one's bootstrap.
 VARIANT_INDEX = {"sam3": 0, "corners": 1, "sam3_all": 2, "sam3_predline": 3}
-
-
-def fit_tv(t: np.ndarray, s: np.ndarray) -> float:
-    """slate_unknown.fit_tv: the vanishing position along the line."""
-    t, s = np.asarray(t, float), np.asarray(s, float)
-    hi = t.min() - 5.0
-    return minimize_scalar(
-        lambda tv: np.var(np.log(s / (t - tv))),
-        bounds=(hi - 4000.0, hi),
-        method="bounded",
-    ).x
-
-
-def beam(
-    tv: float, u: np.ndarray, off: float, K: np.ndarray, o_mag: float = O_DESIGN_M
-) -> tuple[np.ndarray, np.ndarray]:
-    """``(origin, axis)`` of the laser from its vanishing position: the axis as
-    size_constancy_sam.py builds it, the origin as score.calibrations does."""
-    u = np.asarray(u, float)
-    K = np.asarray(K, float)
-    n = np.array([-u[1], u[0]])
-    v = tv * u + off * n
-    axis = np.linalg.solve(K, [v[0], v[1], 1.0])
-    axis /= np.linalg.norm(axis)
-    o = np.array([u[0] / K[0][0], u[1] / K[1][1]])
-    origin = np.append(o_mag * o / np.linalg.norm(o), 0.0)
-    return origin, axis
 
 
 @dataclass(frozen=True)
@@ -127,14 +108,9 @@ def port_fit(
     calibration's axis. `seed` is ``(session, VARIANT_INDEX[variant])``."""
     xy, s, u, K = (np.asarray(a, float) for a in (xy, s, u, K))
     t = xy @ u
-    tv = fit_tv(t, s)
-    brng = np.random.default_rng(list(seed))
-    boots = [
-        fit_tv(t[k], s[k])
-        for k in (brng.integers(0, len(t), len(t)) for _ in range(n_boot))
-    ]
-    origin, axis = beam(tv, u, off, K, o_mag)
-    se_px = float(np.std(boots))
+    tv = sc.fit_vanishing_position(t, s)
+    se_px = sc.bootstrap_se(t, s, rng=np.random.default_rng(list(seed)), draws=n_boot)
+    origin, axis = sc.beam_from_vanishing(tv, u, off, K, o_mag)
     log_r = np.log(s) - np.log(t - tv)
     out = dict(
         tv=float(tv),

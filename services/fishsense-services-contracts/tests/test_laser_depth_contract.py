@@ -197,3 +197,60 @@ def test_the_result_names_the_core_that_made_it():
     assert ComputeLaserDepthsResult.model_validate_json(result.model_dump_json()) == (
         result
     )
+
+
+def test_a_low_parallax_refusal_carries_the_depth_the_solve_gave():
+    """v21 (core #96): a dot too near the laser's vanishing point is refused as
+    `low_parallax`, with the finite, often positive, depth the solve said."""
+    refusal = LaserDepthRefusal(
+        laser_label_id=uuid4(), x=2046.2, y=1470.0, reason="low_parallax", depth_m=52.2
+    )
+
+    assert LaserDepthRefusal.model_validate_json(refusal.model_dump_json()) == refusal
+
+
+def test_a_v20_refusal_still_parses():
+    """Replay: a payload recorded under v20 names only its two reasons."""
+    for reason, depth in (("non_positive_depth", -0.4), ("non_finite_depth", None)):
+        payload = (
+            f'{{"laser_label_id": "{uuid4()}", "x": 1.0, "y": 2.0,'
+            f' "reason": "{reason}", "depth_m": {"null" if depth is None else depth}}}'
+        )
+        assert LaserDepthRefusal.model_validate_json(payload).reason == reason
+
+
+# -- a refusal's depth (review of #361) -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("reason", "depth_m", "ok"),
+    [
+        ("non_positive_depth", -0.5, True),
+        ("non_positive_depth", 0.0, True),
+        ("non_positive_depth", 2.0, False),
+        ("non_finite_depth", None, True),
+        ("non_finite_depth", 3.2, False),
+        ("low_parallax", 25.0, True),
+        ("low_parallax", -3.0, True),
+    ],
+)
+def test_a_refusals_depth_is_never_one_laser_depths_would_take(reason, depth_m, ok):
+    """At most 0 (or none) unless the reason is `low_parallax`: what the
+    API's CHECK holds (0071), rejected at the boundary rather than at the
+    insert, where the persist would fail and retry."""
+    from uuid import uuid4
+
+    from pydantic import ValidationError
+
+    from fishsense_services_contracts.laser_depth import LaserDepthRefusal
+
+    def make():
+        return LaserDepthRefusal(
+            laser_label_id=uuid4(), x=1.0, y=2.0, reason=reason, depth_m=depth_m
+        )
+
+    if ok:
+        make()
+    else:
+        with pytest.raises(ValidationError):
+            make()

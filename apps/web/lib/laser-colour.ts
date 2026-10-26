@@ -1,5 +1,5 @@
 /**
- * The laser's colour, as the web shows it (0068; the owner, 2026-10-24).
+ * The laser's colour, as the web shows it (0072; the owner, 2026-10-24).
  *
  * One rig shoots one colour for a whole dive. A dot's colour is what the laser
  * kernel read off its pixels (the automatic dot, the human path's laser
