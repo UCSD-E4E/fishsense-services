@@ -1742,6 +1742,22 @@ async def test_strikes_with_no_progress_between_still_leave_the_mission(
     assert await _next(app_engine, lab) is None
 
 
+@pytest.mark.parametrize("step", ["frames", "keypoints", "calibration", "lengths"])
+async def test_every_step_the_chain_runs_can_record_its_failure(
+    owner_engine, app_engine, step
+):
+    """2026-10-26: head/tail v5's keypoints step failed on mission 347, and
+    recording it broke the step check -- the run failed instead of striking
+    the mission. Every step `_step` runs must be one the table allows."""
+    from fishsense_services_api.automatic_results_store import AUTOMATIC_RESULTS_STEPS
+
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    await _in(app_engine, lab, record_automatic_results_failure, mission_id,
+              step=step, error="x")  # fmt: skip
+    assert step in AUTOMATIC_RESULTS_STEPS
+
+
 async def test_a_failure_needs_a_known_step(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     mission_id = await _backlog_mission(owner_engine, lab)
