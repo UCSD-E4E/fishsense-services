@@ -43,6 +43,11 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api.laser_colour_store import (
+    dot_colour_columns,
+    dot_colour_join,
+)
+
 __all__ = [
     "AutomaticCalibration",
     "AutomaticFailure",
@@ -72,6 +77,9 @@ class AutomaticFrame:
     #: None when it gave no reading, and on every row from before.
     laser_color: str | None
     laser_color_margin: float | None
+    #: ``dot`` (read with the dot), ``render`` (backfilled off its render,
+    #: 0076), or None when there is no reading.
+    laser_color_source: str | None
     #: SimCC's points when the frame has them, else the SAM rule's.
     head: Point | None
     tail: Point | None
@@ -123,7 +131,7 @@ async def automatic_frame(
     """What the automatic run made of the frame now; None if it never got to it."""
     row = (
         await conn.execute(
-            text("""
+            text(f"""
                 SELECT h.*, r.id AS render_id, r.bucket AS render_bucket,
                        r.key AS render_key,
                        r.width AS render_width, r.height AS render_height,
@@ -133,11 +141,13 @@ async def automatic_frame(
                        m.algorithm AS m_algorithm,
                        m.algorithm_version AS m_algorithm_version,
                        s.predicted_choice, s.top1_probability, s.margin, s.top5,
+                       {dot_colour_columns("h")},
                        k.status AS k_status, k.head_x AS k_head_x,
                        k.head_y AS k_head_y, k.tail_x AS k_tail_x,
                        k.tail_y AS k_tail_y, k.disagreement AS k_disagreement,
                        k.checkpoint AS k_checkpoint
                 FROM current_automatic_head_tail_predictions h
+                {dot_colour_join("h")}
                 LEFT JOIN LATERAL (
                     SELECT * FROM automatic_keypoint_predictions k
                     WHERE k.tenant_id = h.tenant_id
@@ -181,6 +191,7 @@ async def automatic_frame(
         laser_confidence=row.laser_confidence,
         laser_color=row.laser_color,
         laser_color_margin=row.laser_color_margin,
+        laser_color_source=row.laser_color_source,
         head=head,
         tail=tail,
         head_tail_source=(None if head is None else "simcc" if simcc else "sam_rule"),

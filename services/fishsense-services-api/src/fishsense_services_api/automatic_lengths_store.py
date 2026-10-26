@@ -38,6 +38,10 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from fishsense_services_api.laser_colour_store import (
+    dot_colour_columns,
+    dot_colour_join,
+)
 from fishsense_services_api.review_store import COUNTS_SQL
 from fishsense_services_api.slate_presence_store import detector_slate_frame
 
@@ -104,7 +108,7 @@ _ROWS_SQL = f"""
     SELECT d.number AS mission_number, c.id AS capture_id,
            c.number AS capture_number, c.captured_at,
            m.length_m, m.depth_m, m.calibration_source,
-           h.laser_confidence, h.laser_color, h.sam_score,
+           h.laser_confidence, {dot_colour_columns("h")}, h.sam_score,
            s.predicted_choice AS species, {_SCIENTIFIC} AS scientific_name,
            s.top1_probability AS species_probability, s.margin AS species_margin,
            (SELECT CASE WHEN count(*) = 1 THEN max(o.length_m) END
@@ -117,6 +121,7 @@ _ROWS_SQL = f"""
     JOIN missions d ON d.tenant_id = c.tenant_id AND d.id = c.mission_id
     JOIN automatic_head_tail_predictions h
       ON h.tenant_id = m.tenant_id AND h.id = m.automatic_head_tail_prediction_id
+    {dot_colour_join("h")}
     LEFT JOIN s ON s.capture_id = m.capture_id
      AND s.automatic_head_tail_prediction_id = m.automatic_head_tail_prediction_id
     WHERE NOT {detector_slate_frame()}
@@ -169,6 +174,9 @@ class AutomaticLength:
     #: The dot's colour as the laser kernel read it (0072); None when it gave
     #: no reading, and on rows from before.
     laser_color: str | None
+    laser_color_margin: float | None
+    #: ``dot``, ``render`` (backfilled, 0076), or None.
+    laser_color_source: str | None
     sam_score: float | None
     species: str | None
     scientific_name: str | None
