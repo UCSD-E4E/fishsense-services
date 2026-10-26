@@ -739,7 +739,7 @@ class TestAWeightsFailureIsFinal:
             (_unset_weights_settings, "Sam3SettingsInvalid"),
             (ModelIntegrityError("sam3/3.1: expected sha256 ..."), "Sam3WeightsCorrupt"),
             (ModelUnavailable("sam3/3.1: not in s3://model-weights"), "Sam3WeightsUnavailable"),
-            (KeyError("sam3"), "Sam3NotInManifest"),
+            (KeyError("unknown model sam3/x for target server; known: ..."), "Sam3NotInManifest"),
         ],
         ids=["settings", "integrity", "unavailable", "manifest"],
     )  # fmt: skip

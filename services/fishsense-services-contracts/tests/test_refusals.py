@@ -18,6 +18,8 @@ def test_the_names_already_recorded_are_kept():
         "Sam3WeightsCorrupt",
         "Sam3WeightsUnavailable",
         "Sam3NotInManifest",
+        # New with the review of #364: kept names unchanged, one added.
+        "Sam3LoadInvalid",
     }
     assert {
         "SlateDetectorSettingsInvalid",
