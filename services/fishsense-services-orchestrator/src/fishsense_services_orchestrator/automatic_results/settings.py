@@ -14,7 +14,11 @@ starts:
   failure never costs a dive its lengths; off, the cohort holds no dive for
   species work. Needs the BioCLIP weights pinned in the processor's secret
   (``FISHSENSE_BIOCLIP_*``), which the converge's processor-secret sync
-  writes (``ops.processor_secret_sync``).
+  writes (``ops.processor_secret_sync``);
+* ``SLATE_POSE_ENABLED`` (default **false**; 0078, the owner 2026-10-26):
+  the slate-pose calibration (calibration v4) for missions with a slate
+  template, preferred by their lengths over size constancy. Off until its
+  read-only validation on every mission has been reviewed.
 """
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -27,3 +31,4 @@ class AutomaticResultsSettings(BaseSettings):
 
     enabled: bool = False
     species_enabled: bool = True
+    slate_pose_enabled: bool = False
