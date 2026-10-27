@@ -35,7 +35,7 @@ __all__ = [
     "dot_colour_columns",
     "dot_colour_join",
     "mission_laser_colours",
-    "tenant_laser_colours",
+    "tenant_laser_colors",
 ]
 
 #: How a label names each colour.
@@ -144,7 +144,7 @@ async def mission_laser_colours(
 _TENANT_SQL = f"""
     SELECT 'labels' AS source, d.number,
            CASE l.label WHEN 'Red Laser' THEN 'red' WHEN 'Green Laser' THEN 'green'
-           END AS colour,
+           END AS color,
            count(DISTINCT l.capture_id) AS n
     FROM laser_labels l
     JOIN captures c ON c.tenant_id = l.tenant_id AND c.id = l.capture_id
@@ -169,7 +169,7 @@ _TENANT_SQL = f"""
 """
 
 
-async def tenant_laser_colours(
+async def tenant_laser_colors(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> dict[int, MissionLaserColours]:
     """Every mission with a dot from any source, by number: what
@@ -179,7 +179,7 @@ async def tenant_laser_colours(
         counts = found.setdefault(
             row.number, {"labels": {}, "predictions": {}, "automatic": {}}
         )
-        key = row.colour if row.colour in ("red", "green") else "unread"
+        key = row.color if row.color in ("red", "green") else "unread"
         counts[row.source][key] = counts[row.source].get(key, 0) + row.n
     return {
         number: MissionLaserColours(
