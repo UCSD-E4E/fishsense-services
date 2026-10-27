@@ -107,15 +107,22 @@ class HeadTailSync:
 async def label_studio_projects(
     conn: AsyncConnection, tenant_id: uuid.UUID, kind: str
 ) -> list[int]:
-    """The tenant's Label Studio projects holding live labels of `kind`."""
+    """The tenant's Label Studio projects holding live labels of `kind`, but
+    not a retired one (0079): it may be deleted in Label Studio, and a kept
+    live label in it must not fail every sync run."""
     rows = await conn.execute(
         text(f"""
-            SELECT DISTINCT ls_project_id FROM {_TABLES[kind]}
-            WHERE tenant_id = :tenant AND ls_project_id IS NOT NULL
-              AND NOT superseded
-            ORDER BY ls_project_id
+            SELECT DISTINCT l.ls_project_id FROM {_TABLES[kind]} l
+            WHERE l.tenant_id = :tenant AND l.ls_project_id IS NOT NULL
+              AND NOT l.superseded
+              AND NOT EXISTS (
+                  SELECT 1 FROM label_studio_projects p
+                  WHERE p.tenant_id = l.tenant_id AND p.kind = :kind
+                    AND p.ls_project_id = l.ls_project_id
+                    AND p.retired_at IS NOT NULL)
+            ORDER BY l.ls_project_id
             """),
-        {"tenant": tenant_id},
+        {"tenant": tenant_id, "kind": kind},
     )
     return list(rows.scalars())
 

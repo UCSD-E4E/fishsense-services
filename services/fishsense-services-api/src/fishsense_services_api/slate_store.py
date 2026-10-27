@@ -682,13 +682,21 @@ async def mission_has_slate_labels_in_project(
 async def slate_label_studio_projects(
     conn: AsyncConnection, tenant_id: uuid.UUID
 ) -> list[int]:
-    """The tenant's Label Studio projects holding live slate labels."""
+    """The tenant's Label Studio projects holding live slate labels, but not a
+    retired one (0079; mission 508's pool-test project, 2026-10-26): it may be
+    deleted in Label Studio, and a kept live label in it must not fail every
+    sync run."""
     rows = await conn.execute(
         text("""
-            SELECT DISTINCT ls_project_id FROM slate_labels
-            WHERE tenant_id = :tenant AND ls_project_id IS NOT NULL
-              AND NOT superseded
-            ORDER BY ls_project_id
+            SELECT DISTINCT s.ls_project_id FROM slate_labels s
+            WHERE s.tenant_id = :tenant AND s.ls_project_id IS NOT NULL
+              AND NOT s.superseded
+              AND NOT EXISTS (
+                  SELECT 1 FROM label_studio_projects p
+                  WHERE p.tenant_id = s.tenant_id AND p.kind = 'slate'
+                    AND p.ls_project_id = s.ls_project_id
+                    AND p.retired_at IS NOT NULL)
+            ORDER BY s.ls_project_id
             """),
         {"tenant": tenant_id},
     )

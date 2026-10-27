@@ -120,6 +120,28 @@ async def test_projects_are_the_distinct_live_laser_label_projects(
         assert await label_studio_projects(conn, lab, "laser") == [43]
 
 
+async def test_a_retired_project_is_not_listed(owner_engine, app_engine):
+    """A project retired on purpose (0079) may be deleted in Label Studio, and
+    a live label in it (a person's kept work) must not make every sync run
+    fail. Only that kind's record retires it: the same id of another kind
+    does not."""
+    lab = await _tenant(owner_engine)
+    for project, task in ((43, 1), (44, 2)):
+        capture = await _capture(app_engine, lab)
+        await _laser(owner_engine, lab, capture, project=project, task=task)
+    async with owner_engine.begin() as conn:
+        await conn.execute(
+            text("INSERT INTO label_studio_projects (tenant_id, kind, ls_project_id, "
+                 "title, retired_at, retired_reason) VALUES "
+                 "(:t, 'laser', 44, 'x', now(), 'pool test'), "
+                 "(:t, 'slate', 43, 'y', now(), 'pool test')"),
+            {"t": lab},
+        )  # fmt: skip
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        assert await label_studio_projects(conn, lab, "laser") == [43]
+
+
 async def test_another_tenants_projects_are_not_listed(owner_engine, app_engine):
     lab, partner = await _tenant(owner_engine), await _tenant(owner_engine, "partner")
     await _laser(owner_engine, partner, await _capture(app_engine, partner),

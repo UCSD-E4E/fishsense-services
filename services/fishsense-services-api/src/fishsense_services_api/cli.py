@@ -51,6 +51,12 @@ fishsense-services-api retire-slate-labels --tenant lab --mission 436 \\
                                     # a reason (0077) and withdraw the
                                     # mission's calibration made from them;
                                     # --apply <fingerprint>, as the owner
+fishsense-services-api retire-slate-project --tenant lab --mission 508 \\
+    --reason 'pool test' [--clear-template] [--allow-completed]
+                                    # dry run: retire the mission's slate
+                                    # Label Studio projects (0079), supersede
+                                    # their placeholders, and clear its slate
+                                    # template; --apply <fingerprint>
 fishsense-services-api system-admin --user <sub> --grant [--apply]
                                     # dry run: may open any tenant, read-only
                                     # until they unlock it (0056)
@@ -66,6 +72,7 @@ import argparse
 import asyncio
 import json
 import re
+import shlex
 import sys
 import uuid
 from collections import Counter
@@ -150,6 +157,12 @@ from fishsense_services_api.slate_label_retirement import (
     RetirementRefused,
     apply_retirement,
     plan_retirement,
+)
+from fishsense_services_api.slate_project_retirement import (
+    ProjectRetirementPlan,
+    ProjectRetirementRefused,
+    apply_project_retirement,
+    plan_project_retirement,
 )
 from fishsense_services_api.tenant_stores import TenantStores
 from fishsense_services_api.settings import (
@@ -327,6 +340,32 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="FINGERPRINT",
         help="write the plan whose dry run printed this fingerprint",
     )
+    project = commands.add_parser(
+        "retire-slate-project",
+        help="retire a mission's slate Label Studio projects (0079), supersede "
+        "their placeholders, and optionally clear its slate template; a dry run "
+        "by default",
+    )
+    project.add_argument("--tenant", required=True, help="the tenant's slug, or its id")
+    project.add_argument("--mission", required=True, type=int, help="its number")
+    project.add_argument(
+        "--reason", required=True,
+        help="why, e.g. 'pool test'; recorded on the projects and placeholders",
+    )  # fmt: skip
+    project.add_argument(
+        "--clear-template", action="store_true",
+        help="also clear the mission's slate template",
+    )  # fmt: skip
+    project.add_argument(
+        "--allow-completed", action="store_true",
+        help="go ahead although completed labels are live in the projects; they "
+        "stay live (not superseded) but are no longer synced",
+    )  # fmt: skip
+    project.add_argument(
+        "--apply",
+        metavar="FINGERPRINT",
+        help="write the plan whose dry run printed this fingerprint",
+    )
     backfill = commands.add_parser(
         "backfill-mission-facts",
         help="plan (and with --apply, write) the port, deployment and purpose of "
@@ -437,6 +476,8 @@ async def main(argv: Sequence[str]) -> int:
         return await _assign_slate_templates(args)
     if args.command == "retire-slate-labels":
         return await _retire_slate_labels(args)
+    if args.command == "retire-slate-project":
+        return await _retire_slate_project(args)
     if args.command == "infer-deployments":
         return await _infer_deployments(args)
     if args.command == "backfill-v1-measurement-inputs":
@@ -853,6 +894,81 @@ async def _retire_slate_labels(args: argparse.Namespace) -> int:
             f"{args.tenant} --mission {args.mission} {labels} --reason "
             f"{plan.reason!r} --apply {plan.fingerprint}"
         )
+        return 0
+    finally:
+        await engine.dispose()
+
+
+def format_project_retirement_plan(plan: ProjectRetirementPlan) -> str:
+    """The dry run's report: the projects it retires, the placeholders it
+    supersedes, the completed labels it keeps, and the template."""
+    lines = [f"mission {plan.mission_number}: retire {len(plan.projects)} slate "
+             f"project(s) ({plan.reason}); no row is deleted, no point moved"]  # fmt: skip
+    for project in plan.projects:
+        lines.append(
+            f"  project {project.ls_project_id}  {project.title!r}: "
+            f"{len(project.placeholders)} placeholder(s) superseded, "
+            f"{len(project.completed)} completed kept"
+        )
+        for label in project.completed:
+            lines.append(f"    kept live, no longer synced: slate label {label}")
+    if plan.template_id is None:
+        lines.append("no slate template")
+    else:
+        what = "cleared" if plan.clear_template else "kept"
+        lines.append(
+            f"slate template {plan.template_name!r} ({plan.template_id}): {what}"
+        )
+    return "\n".join(lines)
+
+
+async def _retire_slate_project(args: argparse.Namespace) -> int:
+    """Dry run unless --apply names the fingerprint of the plan reviewed; as
+    the schema owner."""
+    settings = _settings(MigrationSettings)
+    if settings is None:
+        return 2
+    engine = create_async_engine(settings.migration_database_url.get_secret_value())
+    options = {
+        "clear_template": args.clear_template,
+        "allow_completed": args.allow_completed,
+    }
+    try:
+        tenant_id = await _tenant_id(engine, args.tenant)
+        if tenant_id is None:
+            print(f"unknown tenant {args.tenant!r}", file=sys.stderr)
+            return 1
+        try:
+            if args.apply:
+                async with tenant_transaction(engine, tenant_id) as conn:
+                    applied = await apply_project_retirement(
+                        conn, tenant_id, args.mission, args.reason,
+                        expect=args.apply, **options,
+                    )  # fmt: skip
+                print(
+                    f"applied {args.apply}: retired {applied.projects} slate "
+                    f"project(s), superseded {applied.placeholders} placeholder(s)"
+                    + ("; cleared the slate template" if applied.template_cleared
+                       else "")
+                )  # fmt: skip
+                return 0
+            async with tenant_transaction(engine, tenant_id) as conn:
+                plan = await plan_project_retirement(
+                    conn, tenant_id, args.mission, args.reason, **options
+                )
+        except (PlanChanged, ProjectRetirementRefused) as error:
+            print(f"nothing written: {error}", file=sys.stderr)
+            return 1
+        print("DRY RUN: nothing written")
+        print(format_project_retirement_plan(plan))
+        words = ["retire-slate-project", "--tenant", args.tenant,
+                 "--mission", str(args.mission), "--reason", plan.reason]  # fmt: skip
+        if args.clear_template:
+            words.append("--clear-template")
+        if args.allow_completed:
+            words.append("--allow-completed")
+        words += ["--apply", plan.fingerprint]
+        print(f"\nto write exactly this plan: {shlex.join(words)}")
         return 0
     finally:
         await engine.dispose()

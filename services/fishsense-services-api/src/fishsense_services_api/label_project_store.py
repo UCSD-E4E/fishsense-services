@@ -18,7 +18,14 @@ v2 changes:
 * **only a titled record is trusted.** migrate-v1 records each project v1's
   labels point at, untitled, against the dive holding most of its labels --
   the grandfathered shared projects included. The title search heals those
-  records when it finds the dive's own project.
+  records when it finds the dive's own project;
+* **a retired project is not the dive's any more** (0079; the owner,
+  2026-10-26: mission 508, a pool test, was given a slate project by a
+  template from an automatic vote). It is not found here, and recording it
+  again is refused: with the record skipped, populate's title search would
+  find it in Label Studio and silently hand it back. A populate that finds it
+  fails loudly instead, before touching Label Studio; delete or rename the
+  project there, or leave the mission's frames alone.
 """
 
 import uuid
@@ -33,6 +40,7 @@ __all__ = [
     "KINDS",
     "MissionForTitle",
     "LabelProjectCatalog",
+    "ProjectRetired",
     "RecordedProject",
     "mission_for_title",
     "record_project",
@@ -42,6 +50,11 @@ __all__ = [
 #: Migration 0020's kinds: v1's four per-dive labeling projects and the
 #: checkerboard lattice study (one project for every dive).
 KINDS = ("laser", "head_tail", "slate", "species", "checkerboard_lattice")
+
+
+class ProjectRetired(RuntimeError):
+    """The Label Studio project was retired on purpose (0079), and is not to
+    be used again."""
 
 
 @dataclass(frozen=True)
@@ -85,7 +98,7 @@ async def recorded_project(
     Keyed on the dive, not the title, so a renamed dive keeps its project. A
     project of no dive (the lattice study) is keyed on its fixed `title`.
     Newest first: a project recreated after its predecessor was deleted in
-    Label Studio is the one to use.
+    Label Studio is the one to use. A retired project (0079) is never found.
     """
     if mission_id is None:
         match, params = "mission_id IS NULL AND title = :title", {"title": title}
@@ -96,7 +109,7 @@ async def recorded_project(
             text(f"""
                 SELECT ls_project_id, title FROM label_studio_projects
                 WHERE tenant_id = :tenant AND kind = :kind
-                  AND title IS NOT NULL AND {match}
+                  AND title IS NOT NULL AND retired_at IS NULL AND {match}
                 ORDER BY created_at DESC, ls_project_id DESC
                 LIMIT 1
                 """),
@@ -118,8 +131,24 @@ async def record_project(
     """Record that `ls_project_id` is the dive's project of `kind`.
 
     A project already recorded (migrate-v1's untitled row) is healed in place:
-    its title filled in and its dive set to the one the title names.
+    its title filled in and its dive set to the one the title names. A
+    retired project (0079) is refused, and its record left as it is.
     """
+    retired = (
+        await conn.execute(
+            text("""
+                SELECT retired_reason FROM label_studio_projects
+                WHERE tenant_id = :tenant AND kind = :kind
+                  AND ls_project_id = :project AND retired_at IS NOT NULL
+                """),
+            {"tenant": tenant_id, "kind": kind, "project": ls_project_id},
+        )
+    ).scalar_one_or_none()
+    if retired is not None:
+        raise ProjectRetired(
+            f"Label Studio {kind} project {ls_project_id} ({title!r}) was retired "
+            f"({retired}); delete or rename it in Label Studio rather than reuse it"
+        )
     await conn.execute(
         text("""
             INSERT INTO label_studio_projects
