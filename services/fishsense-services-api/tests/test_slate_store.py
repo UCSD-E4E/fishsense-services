@@ -48,6 +48,7 @@ from _slate_calibration_seed import (
     device_with_camera,
     mission,
     later,
+    ls_project,
     slate_label,
     slate_template,
     species,
@@ -944,6 +945,23 @@ async def test_projects_are_the_distinct_live_slate_label_projects(
 
     async with tenant_transaction(app_engine, lab) as conn:
         assert await slate_label_studio_projects(conn, lab) == [66]
+
+
+async def test_a_retired_slate_project_is_not_synced(owner_engine, app_engine):
+    """A retired project (0079; mission 508's pool test, 2026-10-26) may be
+    deleted in Label Studio, so the sync leaves it alone even while a kept,
+    completed label in it is live. Only a slate record retires it."""
+    lab = await tenant(owner_engine)
+    only = await _slate_mission(owner_engine, lab)
+    for project in (66, 300745, 300747):
+        await slate_label(owner_engine, lab, await capture(owner_engine, lab, only),
+                          project=project, completed=True)  # fmt: skip
+    await ls_project(owner_engine, lab, only, 300745, retired_reason="pool test")
+    await ls_project(owner_engine, lab, only, 300747, kind="laser",
+                     retired_reason="pool test")  # fmt: skip
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        assert await slate_label_studio_projects(conn, lab) == [66, 300747]
 
 
 async def test_a_task_updates_its_slate_label(owner_engine, app_engine):

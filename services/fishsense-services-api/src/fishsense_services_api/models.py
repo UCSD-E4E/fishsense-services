@@ -1301,6 +1301,10 @@ class LabelStudioProject(Base):
         ForeignKeyConstraint(
             ["tenant_id", "mission_id"], ["missions.tenant_id", "missions.id"]
         ),
+        CheckConstraint(
+            "(retired_at IS NULL) = (retired_reason IS NULL)",
+            name="label_studio_projects_retired_check",
+        ),
     )
 
     id: Mapped[uuid.UUID] = _id()
@@ -1310,6 +1314,10 @@ class LabelStudioProject(Base):
     ls_project_id: Mapped[int] = mapped_column(Integer)
     title: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
+    #: Retired on purpose, and why (0079): not synced, not found or recorded
+    #: again as its mission's project.
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retired_reason: Mapped[str | None] = mapped_column(Text)
 
 
 # -- automatic results (migration 0036; new in v2) ------------------------

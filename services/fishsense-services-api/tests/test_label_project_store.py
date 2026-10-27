@@ -32,6 +32,7 @@ from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.label_project_store import (
     KINDS,
     MissionForTitle,
+    ProjectRetired,
     LabelProjectCatalog,
     RecordedProject,
     mission_for_title,
@@ -219,6 +220,55 @@ async def test_the_newest_record_wins(owner_engine, app_engine):
         )
 
     assert found is not None and found.ls_project_id == 12
+
+
+async def _retire(owner_engine, tenant, ls_project_id, reason="pool test"):
+    async with owner_engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE label_studio_projects SET retired_at = now(), "
+                 "retired_reason = :why WHERE tenant_id = :t AND ls_project_id = :p"),
+            {"t": tenant, "p": ls_project_id, "why": reason},
+        )  # fmt: skip
+
+
+async def test_a_retired_project_is_not_found(owner_engine, app_engine):
+    """A retired project (0079; mission 508's pool test, 2026-10-26) is not
+    the mission's project any more: populate must not send tasks to it."""
+    lab = await _tenant(owner_engine)
+    mission = await _dive(owner_engine, lab)
+    async with tenant_transaction(app_engine, lab) as conn:
+        await record_project(conn, lab, "slate", mission_id=mission,
+                             ls_project_id=300745, title="t")  # fmt: skip
+    await _retire(owner_engine, lab, 300745)
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        assert (
+            await recorded_project(conn, lab, "slate", mission_id=mission, title="t")
+            is None
+        )
+
+
+async def test_a_retired_project_is_not_recorded_again(owner_engine, app_engine):
+    """With the record skipped, populate searches Label Studio by title and
+    would find the retired project there and record it again -- silently
+    giving the mission its retired project back. Recording it is refused, and
+    the record stays retired."""
+    lab = await _tenant(owner_engine)
+    mission = await _dive(owner_engine, lab)
+    async with tenant_transaction(app_engine, lab) as conn:
+        await record_project(conn, lab, "slate", mission_id=mission,
+                             ls_project_id=300745, title="t")  # fmt: skip
+    await _retire(owner_engine, lab, 300745)
+
+    with pytest.raises(ProjectRetired, match="300745.*pool test"):
+        async with tenant_transaction(app_engine, lab) as conn:
+            await record_project(conn, lab, "slate", mission_id=mission,
+                                 ls_project_id=300745, title="t")  # fmt: skip
+
+    async with owner_engine.connect() as conn:
+        assert (
+            await conn.execute(text("SELECT retired_reason FROM label_studio_projects"))
+        ).scalar_one() == "pool test"
 
 
 async def test_a_project_of_no_mission_is_found_by_title(owner_engine, app_engine):

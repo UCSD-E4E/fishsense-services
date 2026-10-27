@@ -379,3 +379,30 @@ async def beam_moved_after(engine, capture_id) -> None:
                 """),
             {"c": capture_id},
         )
+
+
+async def ls_project(
+    engine,
+    tenant_id,
+    mission_id,
+    ls_project_id: int,
+    *,
+    kind: str = "slate",
+    title: str | None = None,
+    retired_reason: str | None = None,
+) -> None:
+    """A recorded Label Studio project (0020); `retired_reason` retires it
+    (0079)."""
+    await run(
+        engine,
+        "INSERT INTO label_studio_projects (tenant_id, mission_id, kind, "
+        "ls_project_id, title, retired_at, retired_reason) VALUES (:t, :m, :k, "
+        ":p, :title, CASE WHEN CAST(:why AS text) IS NULL THEN NULL "
+        "ELSE now() END, :why)",
+        t=tenant_id,
+        m=mission_id,
+        k=kind,
+        p=ls_project_id,
+        title=title if title is not None else f"Reef #{ls_project_id} - Slate",
+        why=retired_reason,
+    )
