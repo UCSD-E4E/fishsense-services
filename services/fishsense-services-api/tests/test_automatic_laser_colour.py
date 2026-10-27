@@ -157,10 +157,10 @@ async def test_an_observation_shows_its_labels_colour(
     assert body["laser"]["color"] == "green"
 
 
-# -- every mission's colours in one read (the owner, 2026-10-26) --------------------
+# -- every mission's colors in one read (the owner, 2026-10-26) --------------------
 
 
-async def test_every_missions_colours_in_one_read_match_each_missions_own(
+async def test_every_missions_colors_in_one_read_match_each_missions_own(
     client, seed_memberships, owner_engine, app_engine
 ):
     lab = await _lab(seed_memberships)
@@ -196,7 +196,7 @@ async def test_a_mission_with_no_dot_is_left_out(
     assert (await _get(client, "/tenants/lab/laser-colors")).json() == []
 
 
-async def test_another_tenants_colours_are_not_there(
+async def test_another_tenants_colors_are_not_there(
     client, seed_memberships, owner_engine, app_engine
 ):
     from test_observations_api import OUTSIDER

@@ -440,7 +440,7 @@ async def test_mounting_keeps_the_apps_own_lifespan(app_engine):
     assert ran == ["start", "stop"]
 
 
-async def test_every_missions_laser_colours_in_one_call(
+async def test_every_missions_laser_colors_in_one_call(
     agent, tenants, owner_engine, app_engine
 ):
     from test_automatic_results_store import _measured
