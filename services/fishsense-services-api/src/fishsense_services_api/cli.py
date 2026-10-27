@@ -40,6 +40,11 @@ fishsense-services-api withdraw-moved-lengths [--apply]
                                     # dry run: the automatic lengths after a
                                     # recorded move; --apply appends a
                                     # `beam_moved` refusal after each
+fishsense-services-api assign-slate-templates --tenant lab --from mapping.json
+                                    # dry run: record the slate template of
+                                    # missions with none (the owner,
+                                    # 2026-10-26), and the Label Studio and
+                                    # calibration work that sets off;
 fishsense-services-api retire-slate-labels --tenant lab --mission 436 \\
     --label <id> [--label <id> ...] --reason mirrored
                                     # dry run: supersede the slate labels with
@@ -134,6 +139,12 @@ from fishsense_services_api.range_trend_store import (
     range_trend_inputs,
 )
 from fishsense_services_api.schema_audit import tenancy_violations
+from fishsense_services_api.slate_template_assignment import (
+    AssignmentPlan,
+    AssignmentRefused,
+    apply_assignment,
+    plan_assignment,
+)
 from fishsense_services_api.slate_label_retirement import (
     RetirementPlan,
     RetirementRefused,
@@ -278,6 +289,25 @@ def build_parser() -> argparse.ArgumentParser:
         "move (0073), appending a refusal after each; a dry run by default",
     )
     moved.add_argument("--apply", action="store_true", help="write it")
+    assign = commands.add_parser(
+        "assign-slate-templates",
+        help="record the slate template of missions that have none, from a "
+        "mapping file; a dry run by default",
+    )
+    assign.add_argument("--tenant", required=True, help="the tenant's slug, or its id")
+    assign.add_argument(
+        "--from",
+        dest="mapping",
+        required=True,
+        type=Path,
+        help='JSON: {"missions": {"<number>": {"template_v1": <int>} | '
+        '{"template": "<name>"}, ...}, "source": "<where the choices come from>"}',
+    )
+    assign.add_argument(
+        "--apply",
+        metavar="FINGERPRINT",
+        help="write the plan whose dry run printed this fingerprint",
+    )
     retire = commands.add_parser(
         "retire-slate-labels",
         help="supersede a mission's slate labels with a reason (0077) and "
@@ -403,6 +433,8 @@ async def main(argv: Sequence[str]) -> int:
         return await _system_admin(args)
     if args.command == "backfill-mission-facts":
         return await _backfill_mission_facts(args)
+    if args.command == "assign-slate-templates":
+        return await _assign_slate_templates(args)
     if args.command == "retire-slate-labels":
         return await _retire_slate_labels(args)
     if args.command == "infer-deployments":
@@ -615,6 +647,83 @@ async def _backfill_mission_facts(args: argparse.Namespace) -> int:
             f"\nto write exactly this plan: backfill-mission-facts --tenant "
             f"{args.tenant} --ingested-before {args.ingested_before.isoformat()} "
             f"{again + ' ' if again else ''}--apply {plan.fingerprint}"
+        )
+        return 0
+    finally:
+        await engine.dispose()
+
+
+def format_assignment_plan(plan: AssignmentPlan) -> str:
+    """The dry run's report: what it sets, what it leaves, what it sets off."""
+    lines = [f"source: {plan.source}",
+             f"assign {len(plan.assign)} missions a slate template "
+             "(only where none is set)"]  # fmt: skip
+    for a in plan.assign:
+        lines.append(f"  mission {a.mission_number}: {a.template_name}")
+    lines.append("unchanged: " + (", ".join(str(n) for n in plan.unchanged) or "none"))
+    for c in plan.conflicts:
+        lines.append(
+            f"conflict: mission {c.mission_number} is on {c.current_template_name}, "
+            f"not {c.wanted_template_name}; left alone"
+        )
+    lines.append(
+        f"stage 9 (slate preprocessing, new Label Studio work): "
+        f"{len(plan.slate_preprocessing)} missions entering, "
+        f"{sum(w.frames for w in plan.slate_preprocessing)} frames"
+    )
+    for w in plan.slate_preprocessing:
+        lines.append(f"  mission {w.mission_number}: {w.frames} frames")
+    for label, numbers in (
+        ("stage 13 (laser calibration) entering", plan.laser_calibration),
+        ("checkerboard calibration entering", plan.checkerboard_entering),
+        ("checkerboard calibration leaving", plan.checkerboard_leaving),
+    ):
+        lines.append(f"{label}: " + (", ".join(map(str, numbers)) or "none"))
+    lines.append(
+        "each assigned mission's calibration_links_changed_at is stamped, as the "
+        "portal's slate setter does: any standing calibration refusal expires"
+    )
+    return "\n".join(lines)
+
+
+async def _assign_slate_templates(args: argparse.Namespace) -> int:
+    """Dry run unless --apply names the fingerprint of the plan reviewed; as
+    the schema owner."""
+    try:
+        mapping = json.loads(args.mapping.read_text())
+    except (OSError, ValueError) as error:
+        print(f"{args.mapping}: {error}", file=sys.stderr)
+        return 2
+    settings = _settings(MigrationSettings)
+    if settings is None:
+        return 2
+    engine = create_async_engine(settings.migration_database_url.get_secret_value())
+    try:
+        tenant_id = await _tenant_id(engine, args.tenant)
+        if tenant_id is None:
+            print(f"unknown tenant {args.tenant!r}", file=sys.stderr)
+            return 1
+        try:
+            if args.apply:
+                async with tenant_transaction(engine, tenant_id) as conn:
+                    applied = await apply_assignment(
+                        conn, tenant_id, mapping, expect=args.apply
+                    )
+                print(
+                    f"applied {args.apply}: set {applied.missions} missions' "
+                    "slate templates"
+                )
+                return 0
+            async with tenant_transaction(engine, tenant_id) as conn:
+                plan = await plan_assignment(conn, tenant_id, mapping)
+        except (PlanChanged, AssignmentRefused) as error:
+            print(f"nothing written: {error}", file=sys.stderr)
+            return 1
+        print("DRY RUN: nothing written")
+        print(format_assignment_plan(plan))
+        print(
+            f"\nto write exactly this plan: assign-slate-templates --tenant "
+            f"{args.tenant} --from {args.mapping} --apply {plan.fingerprint}"
         )
         return 0
     finally:
