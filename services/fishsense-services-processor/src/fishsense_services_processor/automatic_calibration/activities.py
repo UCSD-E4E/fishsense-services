@@ -217,7 +217,8 @@ def replay_v3(
     (parallel to `kept`: each frame's dot on its automatically posed slate,
     camera-space m; None: not posed) the beam is fitted through them
     (calibration v4, `pose.fit_pose_points`): v3's screen, consensus and
-    check are kept."""
+    check are kept, two posed slates are an answer, and the fit carries its
+    error bar (`scale_sd`; 2026-10-27)."""
     pairs_of = pairs_of or sc.pair_scales
     dots = np.array([[f.x, f.y] for f in kept], float).reshape(-1, 2)
     dive_line = mission_line(payload.line_dots) if payload.line_dots else None
@@ -227,7 +228,8 @@ def replay_v3(
         idx = list(indices)
         if points is not None:
             return pose.fit_pose_points([points[i] for i in idx],
-                                        min_frames=v3.MIN_FRAMES)  # fmt: skip
+                                        min_frames=pose.MIN_POSE_FRAMES,
+                                        camera_matrix=payload.camera_matrix)  # fmt: skip
         if sizes is not None:
             # No gate in the replay: its draws are what set the threshold.
             return v3.fit_known_sizes(dots[idx], [sizes[i] for i in idx],
@@ -244,7 +246,9 @@ def replay_v3(
             return fit([idx[i] for i in local])
 
         return v3.calibrate_v3(slate_xy=dots[idx], dive_line=dive_line, other_xy=others,
-                               camera_matrix=payload.camera_matrix, fit=sub_fit)  # fmt: skip
+                               camera_matrix=payload.camera_matrix, fit=sub_fit,
+                               min_frames=(v3.MIN_FRAMES if points is None
+                                           else pose.MIN_POSE_FRAMES))  # fmt: skip
 
     main = run(range(len(kept)))
     f = main.fit

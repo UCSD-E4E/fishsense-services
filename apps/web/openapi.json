@@ -71,6 +71,17 @@
             ],
             "title": "Refusal Reason"
           },
+          "scale_sd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scale Sd"
+          },
           "se_px": {
             "anyOf": [
               {
@@ -296,6 +307,17 @@
               }
             ],
             "title": "Length M"
+          },
+          "length_sd_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Length Sd M"
           },
           "mask_bbox": {
             "anyOf": [
@@ -702,6 +724,17 @@
           "length_m": {
             "title": "Length M",
             "type": "number"
+          },
+          "length_sd_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Length Sd M"
           },
           "mission_human_measured": {
             "title": "Mission Human Measured",

@@ -528,18 +528,32 @@ class _Pose:  # pylint: disable=too-few-public-methods
                 for n, f in enumerate(payload["frames"])]  # fmt: skip
 
 
+def _pose_fit(payload: dict, scale_sd) -> dict:
+    assert payload["size_source"] == "pose"
+    fitted = [k for k, v in payload["pose_points"].items() if v is not None]
+    return CalibrationV3Report(
+        mission_id=payload["payload"]["dive_id"], size_source="pose",
+        outcome="accepted", laser_position=[0.1, 0, 0], laser_axis=[0, 0, 1],
+        frames_used=len(fitted), scale_sd=scale_sd,
+    ).model_dump(mode="json")  # fmt: skip
+
+
 @workflow.defn(name="ReplayAutomaticCalibrationV3Workflow")
 class _PoseFit:  # pylint: disable=too-few-public-methods
     @workflow.run
     async def run(self, payload: dict) -> dict:
         await _record_child()
-        assert payload["size_source"] == "pose"
-        fitted = [k for k, v in payload["pose_points"].items() if v is not None]
-        return CalibrationV3Report(
-            mission_id=payload["payload"]["dive_id"], size_source="pose",
-            outcome="accepted", laser_position=[0.1, 0, 0], laser_axis=[0, 0, 1],
-            frames_used=len(fitted),
-        ).model_dump(mode="json")  # fmt: skip
+        return _pose_fit(payload, 0.02)
+
+
+@workflow.defn(name="ReplayAutomaticCalibrationV3Workflow")
+class _PoseFitWithoutErrorBars:  # pylint: disable=too-few-public-methods
+    """A processor from before 0079: its answers carry no error bar."""
+
+    @workflow.run
+    async def run(self, payload: dict) -> dict:
+        await _record_child()
+        return _pose_fit(payload, None)
 
 
 @workflow.defn(name="MeasureAutomaticWorkflow")
@@ -553,7 +567,7 @@ class _Measure:  # pylint: disable=too-few-public-methods
 async def _run(
     workflow_cls=AutomaticResultsForMissionWorkflow, *args, species_fails=False,
     frames_fail=False, frames_partial=False, frames_refuse=False,
-    species_refuse=False, runner=None, history=None, **stubs,
+    species_refuse=False, runner=None, history=None, old_pose_fit=False, **stubs,
 ):  # fmt: skip
     EVENTS.clear()
     SELECTS.clear()
@@ -576,7 +590,8 @@ async def _run(
                               else _FailingSpecies if species_fails else _Species,
                               _Keypoints, _Pose]),
             Worker(env.client, task_queue=PROCESSOR_TASK_QUEUE, activities=[_record],
-                   workflows=[_Calibration, _Render, _PoseFit]),
+                   workflows=[_Calibration, _Render,
+                              _PoseFitWithoutErrorBars if old_pose_fit else _PoseFit]),
             Worker(env.client, task_queue=PROCESSOR_LIGHT_TASK_QUEUE,
                    activities=[_record],
                    workflows=[_Measure]),
@@ -632,6 +647,18 @@ async def test_an_owed_slate_pose_is_fitted_after_size_constancy():
         ("persist slate pose", "accepted", None, TEMPLATE, 2),
         ("wake light",),
     ]
+
+
+async def test_an_answer_from_a_processor_without_error_bars_is_not_written():
+    """Every slate-pose answer carries its error bar (0079; the owner,
+    2026-10-26: always with its error). A processor from before answers
+    without one, from gates that were since relaxed: nothing is written, so
+    the pose stays owed until an upgraded worker fits it."""
+    await _run(AutomaticResultsForMissionWorkflow, TARGET, pose=True, slate=3,
+               old_pose_fit=True)  # fmt: skip
+
+    assert ("child", f"automatic-slate-pose-fit-{MISSION}") in EVENTS
+    assert not [e for e in EVENTS if e[0] == "persist slate pose"]
 
 
 async def test_a_slate_pose_not_owed_is_not_run():

@@ -27,6 +27,29 @@ reference points; this finds them instead:
 5. **Beam** (`fit_pose_points`): a line through the points, trimming one at a
    time the point furthest off it (relative to its range) beyond
    `TRIM_MADS` robust SDs; production's lever-arm gate (0.6 m).
+6. **Error bar** (`scale_sd`, 2026-10-27): the length scale's SD, carried
+   into every length instead of refusing a weak fit.
+
+**Uncertainty, not refusal** (the owner, 2026-10-26). Of 32 missions with
+accepted human calibrations the automatic fits refused 24; a refusal is not
+evidence the fit is wrong, it throws the information away. So two posed
+slates are an answer (`MIN_POSE_FRAMES`; was 3) and how weak it is goes into
+its error bar. A fit still has no answer with one point, with its points too
+close in range to fix a direction (the lever arm: mission 107's span 0.01 m
+read -110%, 32's 0.32 m -31%), and where v3 can't tell the laser's line
+from its reflection's (77: -23%).
+
+The bar is ``hypot(max(frame bootstrap, pose noise), SCALE_SD_FLOOR)``:
+the bootstrap sees the frames disagreeing, the noise model what few or close
+frames cannot show (two points never disagree), the floor what neither
+sees. Measured on the replay of 2026-10-26 (calibration-v3-replay-
+20261026T162523Z, 301 missions) against the 16 production human
+calibrations it answers (436 excluded: mirrored labels): left out one at a
+time, 69% within one bar and 94% within two (68%/95% is honest). The pose
+noise (`POSE_RANGE_SD`) is the robust SD of the posed points' off-line
+scatter on missions with at least 6, read as a range error (619 points).
+What it cannot see: a bias shared by every frame of a mission (465: +20.9%,
+2.6 bars; its dots are wrong on the human pose too), and n = 16.
 
 On the 1600-px cache (local, 2026-10-23): pool beams within 1.7% of each
 frame's human-pose range (11 missions, median 0.8%); reef 341/349/436 4-8%,
@@ -58,6 +81,7 @@ from fishsense_services_processor.automatic_calibration.label_free import (
     accepted,
     refused,
 )
+from fishsense_services_processor.automatic_calibration.v3 import _ranges_on
 
 #: As production's slate fit (`laser_calibration.activities`).
 INCH_TO_M = 0.0254
@@ -69,7 +93,11 @@ __all__ = [
     "align_template",
     "dot_point",
     "fit_board",
+    "MIN_POSE_FRAMES",
+    "POSE_RANGE_SD",
+    "SCALE_SD_FLOOR",
     "fit_pose_points",
+    "scale_against",
     "slate_plane",
     "tilt_deg",
 ]
@@ -454,17 +482,11 @@ def _line_through(points: np.ndarray):
     return c, (d if d[2] > 0 else -d)
 
 
-def fit_pose_points(points, *, min_frames: int = 3) -> LabelFreeFit:
-    """The beam through the slate points (camera space, metres): trimmed one
-    at a time, the lever-arm gate, the origin where the beam crosses the
-    camera's plane (z = 0), as the label-free fits report it."""
-    pts = np.asarray([p for p in points if p is not None], float).reshape(-1, 3)
-    idx = [i for i, p in enumerate(points) if p is not None]
+def _trimmed(pts: np.ndarray, min_frames: int) -> np.ndarray:
+    """Indices of `pts` kept by the trim: one at a time, the point furthest
+    off the line (relative to its range) beyond `TRIM_MADS` robust SDs; never
+    below `min_frames` or 3 (with 3 nothing says which one is wrong)."""
     keep = np.arange(len(pts))
-    seen = dict(used=[idx[i] for i in keep], frames_used=len(keep), pairs=0,
-                pair_residual_sd=None)  # fmt: skip
-    if len(pts) < min_frames:
-        return refused("too_few_frames", **seen)
     while len(keep) > max(min_frames, 3):
         c, d = _line_through(pts[keep])
         r = np.linalg.norm(np.cross(pts[keep] - c, d), axis=1) / pts[keep][:, 2]
@@ -473,14 +495,90 @@ def fit_pose_points(points, *, min_frames: int = 3) -> LabelFreeFit:
         if r[worst] <= max(np.median(r) + TRIM_MADS * mad, _TRIM_FLOOR):
             break
         keep = np.delete(keep, worst)
+    return keep
+
+
+def _beam(pts: np.ndarray):
+    """``(origin, axis)``: the line through `pts`, its origin where it
+    crosses the camera's plane (z = 0)."""
+    c, d = _line_through(pts)
+    return c - (c[2] / d[2]) * d, d
+
+
+#: Fewest posed points that are an answer (2026-10-26; was 3).
+MIN_POSE_FRAMES = 2
+#: A posed point's range error, relative (robust SD; see the module).
+POSE_RANGE_SD = 0.0173
+#: The error every answer carries beyond its own frames' (see the module).
+SCALE_SD_FLOOR = 0.015
+_BOOTSTRAPS = 400
+_NOISE_DRAWS = 300
+#: Ranges the scale is read over: the fish's, as v3's `scale_sd`.
+_SCALE_RANGES_M = np.linspace(0.5, 5.0, 20)
+
+
+def scale_against(camera_matrix, reference, beam) -> float:
+    """How much longer lengths come out on `beam` than on `reference` (each
+    ``(origin, axis)``): the median ratio of the ranges each gives the
+    reference's pixels at 0.5-5 m, less one. Lengths scale with range."""
+    k = np.asarray(camera_matrix, float)
+    o, a = (np.asarray(v, float) for v in reference)
+    pixels = []
+    for z in _SCALE_RANGES_M:
+        p = k @ (o + ((z - o[2]) / a[2]) * a)
+        pixels.append(p[:2] / p[2])
+    ranges = _ranges_on(k, beam[0], beam[1], pixels)
+    return float(np.median(ranges / _SCALE_RANGES_M) - 1.0)
+
+
+def scale_sd(pts: np.ndarray, camera_matrix, *, min_frames: int = MIN_POSE_FRAMES,
+             rng: np.random.Generator | None = None) -> float:  # fmt: skip
+    """The length scale's SD for the beam through `pts` (the points the fit
+    kept): ``hypot(max(bootstrap, noise), SCALE_SD_FLOOR)``. The bootstrap
+    refits (with the trim) on the frames resampled; the noise model refits
+    with each point moved along its own ray by N(0, `POSE_RANGE_SD`)."""
+    rng = rng if rng is not None else np.random.default_rng(0)
+    pts = np.asarray(pts, float)
+    nominal = _beam(pts)
+    boot = []
+    for _ in range(_BOOTSTRAPS):
+        s = pts[rng.integers(0, len(pts), len(pts))]
+        if len(np.unique(s, axis=0)) < 2:
+            continue
+        boot.append(
+            scale_against(camera_matrix, nominal, _beam(s[_trimmed(s, min_frames)]))
+        )
+    noise = [
+        scale_against(camera_matrix, nominal,
+                      _beam(pts * (1 + rng.normal(0.0, POSE_RANGE_SD, (len(pts), 1)))))
+        for _ in range(_NOISE_DRAWS)
+    ]  # fmt: skip
+    spread = max(float(np.std(boot)) if len(boot) > 20 else 0.0, float(np.std(noise)))
+    return float(np.hypot(spread, SCALE_SD_FLOOR))
+
+
+def fit_pose_points(points, *, min_frames: int = MIN_POSE_FRAMES,
+                    camera_matrix=None) -> LabelFreeFit:  # fmt: skip
+    """The beam through the slate points (camera space, metres): trimmed one
+    at a time, the lever-arm gate, the origin where the beam crosses the
+    camera's plane (z = 0), as the label-free fits report it. With
+    `camera_matrix`, its error bar (`scale_sd`)."""
+    pts = np.asarray([p for p in points if p is not None], float).reshape(-1, 3)
+    idx = [i for i, p in enumerate(points) if p is not None]
+    seen = dict(used=list(idx), frames_used=len(pts), pairs=0,
+                pair_residual_sd=None)  # fmt: skip
+    if len(pts) < max(min_frames, 2):
+        return refused("too_few_frames", **seen)
+    keep = _trimmed(pts, min_frames)
     seen.update(used=[idx[i] for i in keep], frames_used=len(keep))
     try:
         check_observation_geometry(pts[keep])
     except CalibrationUnderdeterminedError:
         return refused("lever_arm_below_0.6m", **seen)
-    c, d = _line_through(pts[keep])
-    origin = c - (c[2] / d[2]) * d
+    origin, d = _beam(pts[keep])
+    sd = None if camera_matrix is None else scale_sd(pts[keep], camera_matrix,
+                                                     min_frames=min_frames)  # fmt: skip
     return accepted(
         laser_position=[float(v) for v in origin], laser_axis=[float(v) for v in d],
-        o_mag_m=float(np.linalg.norm(origin)), **seen,
+        o_mag_m=float(np.linalg.norm(origin)), scale_sd=sd, **seen,
     )  # fmt: skip
