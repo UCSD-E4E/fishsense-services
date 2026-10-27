@@ -1,16 +1,16 @@
-"""Turn a stored species judgement into a Label Studio pre-annotation.
+"""Turn a stored species judgment into a Label Studio pre-annotation.
 
 Ported verbatim from fishsense-lite@77e8f8e5 services/fishsense-api-workflow-
 worker/src/fishsense_api_workflow_worker/activities/species_preannotation.py.
 v2: its inverse is `species.parsing.parse_results`, and the row it reads is
 `fishsense_services_api.species_store.SpeciesLabelRow`.
 
-A batch of hand-labelled species judgements arrived as a spreadsheet — 3,000
+A batch of hand-labeled species judgments arrived as a spreadsheet — 3,000
 FSL-01 frames spanning 2023-08 to 2024-06, keyed by image checksum. They are
 loaded as **sentinel** species rows (no Label Studio project), which every
 preprocess cohort reads as "no label for this image", so the dives they belong
-to stay in the normal labelling flow. This module renders such a row as an LS
-prediction, so the labeler is shown the judgement pre-filled and confirms it
+to stay in the normal labeling flow. This module renders such a row as an LS
+prediction, so the labeler is shown the judgment pre-filled and confirms it
 instead of retyping it.
 
 **It is the exact inverse of `parse_results` in the species sync**, and that
@@ -23,7 +23,7 @@ accepted it, with nothing raising.
 Three fields are deliberately **not** pre-annotated, and this is the important
 part of the design:
 
-* `grouping` — a judgement about the frame *before* this one. The spreadsheet
+* `grouping` — a judgment about the frame *before* this one. The spreadsheet
   has no column for it and it is not inferable from one frame.
 * `exclude` / `top_three_photos_of_group` — selects which frames of an
   individual get measured, and stage 14 keys measurability on it. A fabricated
@@ -102,7 +102,7 @@ def build_prediction(label: _HasJudgement) -> Optional[Dict[str, Any]]:
     `content_of_image` is a ", "-joined taxonomy path, so it splits back into
     the nested path LS wants -- but only if it reaches a leaf; see
     `_species_path`. A malformed species value drops that one result and keeps
-    the rest, because a usable measurable or angle judgement arriving beside a
+    the rest, because a usable measurable or angle judgment arriving beside a
     bad species value is still worth showing. The three attribute taxonomies
     are flat, and the parser reads them with `taxonomy[0][0]` — the first
     element of the first path — so each must be emitted as a

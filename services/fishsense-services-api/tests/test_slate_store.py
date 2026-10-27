@@ -337,7 +337,7 @@ async def test_an_unresolvable_mission_does_not_hold_up_another_tenants(
 
 
 async def _labelled_mission(owner_engine, lab, *, flagged, canonical=True):
-    """A dive whose slate frame is fully labelled, optionally flagged."""
+    """A dive whose slate frame is fully labeled, optionally flagged."""
     only = await _slate_mission(owner_engine, lab)
     frame = await capture(owner_engine, lab, only, canonical=canonical)
     await species(owner_engine, lab, frame)
@@ -345,7 +345,7 @@ async def _labelled_mission(owner_engine, lab, *, flagged, canonical=True):
     return only, frame
 
 
-async def test_fully_labelled_mission_is_not_selected_without_a_flag(
+async def test_fully_labeled_mission_is_not_selected_without_a_flag(
     owner_engine, app_engine
 ):
     """The control. If this ever fails the test below proves nothing."""
@@ -712,7 +712,7 @@ async def test_an_incomplete_slate_label_keeps_its_frame_a_target(
 async def test_a_retired_label_keeps_its_frame_out_of_populate(
     owner_engine, app_engine
 ):
-    """Retired on purpose (0077): not drawn again for a labeller."""
+    """Retired on purpose (0077): not drawn again for a labeler."""
     lab = await tenant(owner_engine)
     only = await _slate_mission(owner_engine, lab)
     frame = await capture(owner_engine, lab, only)

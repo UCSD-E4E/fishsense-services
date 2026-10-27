@@ -3,7 +3,7 @@
 Ported from fishsense-lite@77e8f8e5 services/fishsense-api-workflow-worker/src/
 fishsense_api_workflow_worker/activities/update_dive_image_groups_activity.py
 (`select_species_label_per_image`, `regroup_by_species_labels`), itself the
-port of scripts/stage6.1_update_dive_image_groups.ipynb. Behaviour is v1's:
+port of scripts/stage6.1_update_dive_image_groups.ipynb. Behavior is v1's:
 
 * `grouping == "Part of previous group"` keeps appending to the current
   group, even across prediction-cluster boundaries;

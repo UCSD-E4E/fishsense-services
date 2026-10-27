@@ -328,7 +328,7 @@ async def test_refuses_when_a_frame_was_rejected():
 
 async def test_refuses_when_the_counts_do_not_add_up():
     """registered + skipped must equal total. A gap means a frame was neither
-    written nor recognised as already present -- silence rather than a
+    written nor recognized as already present -- silence rather than a
     rejection, which is worse."""
     catalog = RecordingCatalog()
 

@@ -138,7 +138,7 @@ class ObjectStoreConnection(BaseSettings):
     @classmethod
     def _http_url(cls, value: str) -> str:
         # Not a strict URL type: v1 learnt that compose hostnames (`garage`)
-        # have no TLD, and a URL type that normalises adds a trailing slash.
+        # have no TLD, and a URL type that normalizes adds a trailing slash.
         parts = urlsplit(value)
         if parts.scheme not in ("http", "https") or not parts.hostname:
             raise ValueError(f"endpoint_url must be an http(s) URL, got {value!r}")

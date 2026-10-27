@@ -8,7 +8,7 @@ orchestrator reads and the supersedes it writes back -- the store serves the
 full population (the orchestrator's read includes superseded rows, in no
 particular order unless asked) and a supersede persists across runs.
 
-The validator runs hourly on every dive whose laser labelling is complete, and
+The validator runs hourly on every dive whose laser labeling is complete, and
 superseding is a dead letter. It used to fetch only the still-live labels, fit
 a line through them and supersede what `flag_outliers` flagged -- so each run
 re-fitted the previous run's survivors, and more labels crossed the cut, pass
@@ -100,7 +100,7 @@ async def test_a_second_run_supersedes_nothing_new(seed):
 
 async def test_a_drifting_line_does_not_erode_run_after_run():
     """Dive 223's shape: the line walks from -6.7 to +4.4 px across the dive.
-    The first run's judgement must be the ONLY judgement."""
+    The first run's judgment must be the ONLY judgment."""
     n = 120
     store = _FakeStore(_prod_like_mission(11, n=n, offsets=np.linspace(-6.7, 4.4, n)))
 

@@ -32,8 +32,8 @@ from fishsense_services_contracts.task_queues import (
     PROCESSOR_TASK_QUEUE,
 )
 
-#: v25 (2026-10-26): the laser-colour backfill (`laser_colour_backfill`:
-#: `ColourFramesInput`, `ColourReading`), each pre-v22 automatic dot's colour
+#: v25 (2026-10-26): the laser-color backfill (`laser_colour_backfill`:
+#: `ColourFramesInput`, `ColourReading`), each pre-v22 automatic dot's color
 #: read off its render. New models only; v24 parses.
 #: v24 (2026-10-26): calibration v4's slate pose records the dot on the rigid
 #: board's own plane too (`SlatePose.board_point`), a range no orientation of
@@ -42,9 +42,9 @@ from fishsense_services_contracts.task_queues import (
 #: v23 (2026-10-25): calibration v4's slate pose scores the template both
 #: ways up and keeps the loser's correlation and the page's up in the image
 #: (`SlatePose.ecc_other`, `SlatePose.page_up_deg`): on 17 of 445
-#: human-labelled frames v4 chose the wrong way up and nothing it recorded
+#: human-labeled frames v4 chose the wrong way up and nothing it recorded
 #: told them apart (436). Optional, so v22 payloads still parse.
-#: v22 (2026-10-25): an automatic frame's dot carries its colour
+#: v22 (2026-10-25): an automatic frame's dot carries its color
 #: (`AutomaticFrameResult.laser_color`/`laser_color_margin`), which the laser
 #: kernel always read and the frames stage dropped. Optional; v21 parses.
 #: v21 (2026-10-23): a laser dot is refused unless fishsense-core's
@@ -75,7 +75,7 @@ from fishsense_services_contracts.task_queues import (
 #: (`shadow_calibration`): SAM 3.1 slate segmentation of each slate frame's
 #: render (`SegmentSlateFramesInput`, `SlateSegment`) and the fit's payloads
 #: (`FitShadowCalibrationInput`, `ShadowFitResult`). New models only.
-#: v12 (2026-10-21): SAM masks stored as 8-bit greyscale PNGs in the tenant's
+#: v12 (2026-10-21): SAM masks stored as 8-bit grayscale PNGs in the tenant's
 #: bucket, as the app's ``mask_png`` (`masks`):
 #: a frame to predict may carry a mask's key and PUT (`AutomaticFrame.mask`,
 #: `PredictHeadtailImage.mask`), and a result that kept a mask names it as

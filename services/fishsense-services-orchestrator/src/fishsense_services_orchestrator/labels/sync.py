@@ -3,7 +3,7 @@
 Ported from fishsense-lite@a8b2c3bc services/fishsense-api-workflow-worker/src/
 fishsense_api_workflow_worker/activities/utils.py (`sync_label_studio_project`)
 and sync_laser_labels_for_label_studio_project_activity.py
-(`__update_laser_label`). Behaviour is v1's:
+(`__update_laser_label`). Behavior is v1's:
 
 * the cursor (per kind and project) skips tasks whose `updated_at` is at or
   before it; a task with no readable timestamp is always processed;

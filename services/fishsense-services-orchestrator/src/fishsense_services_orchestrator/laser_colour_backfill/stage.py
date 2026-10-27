@@ -1,4 +1,4 @@
-"""The laser-colour backfill as an orchestrator stage: no schedule (run by
+"""The laser-color backfill as an orchestrator stage: no schedule (run by
 hand, `laser_colour_backfill.run`). Writes only with ``--apply``."""
 
 from __future__ import annotations

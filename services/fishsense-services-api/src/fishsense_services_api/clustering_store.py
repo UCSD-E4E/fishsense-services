@@ -11,7 +11,7 @@ v2 changes:
 
 * per tenant, ordered by `created_at` (v1: `id`, first in first out) so the
   orchestrator can take the oldest candidate across the tenants it serves;
-* **persisting is all-or-nothing** and serialised per dive. v1 posted clusters
+* **persisting is all-or-nothing** and serialized per dive. v1 posted clusters
   one at a time, so a failure mid-persist left a partial set its own cohort
   gate then skipped forever, until an operator deleted the rows by hand;
 * **the processor's output is checked** (PLAN.md §9.11): every capture must be
@@ -127,7 +127,7 @@ async def persist_prediction_clusters(
     transaction. Returns how many were written; 0 if the dive already has
     prediction clusters (a retry after a lost acknowledgement). Empty groups
     are skipped, as in v1."""
-    # Serialise persists of one dive, so two can't both find "none yet".
+    # Serialize persists of one dive, so two can't both find "none yet".
     await conn.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": f"prediction-clusters:{mission_id}"},

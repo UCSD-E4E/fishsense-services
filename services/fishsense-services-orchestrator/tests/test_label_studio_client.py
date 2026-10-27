@@ -48,7 +48,7 @@ def _throttle(seconds: int = 48) -> ApiError:
     )
 
 
-def test_throttle_wait_honours_the_hint():
+def test_throttle_wait_honors_the_hint():
     assert sut.throttle_wait_seconds(_throttle(48)) == 50.0  # hint + margin
 
 

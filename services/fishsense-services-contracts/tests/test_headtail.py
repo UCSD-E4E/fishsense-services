@@ -49,7 +49,7 @@ D = [-0.05, 0.01, 0.0, 0.0, 0.0]
 
 class TestModelVersionTagIsAnIdempotencyKey:
     """The backfill keys on `(task_id, model_version)`, so the tag has to be a
-    pure function of the stage's behaviour.
+    pure function of the stage's behavior.
 
     It used to interpolate the checkpoint's pod-local filesystem path, so
     moving the cache directory produced a different key for byte-identical
@@ -64,7 +64,7 @@ class TestModelVersionTagIsAnIdempotencyKey:
         assert "/" not in tag
         assert "checkpoint=" not in tag
 
-    def test_names_the_behaviour_version_and_crop(self):
+    def test_names_the_behavior_version_and_crop(self):
         tag = headtail_model_version_tag()
         assert f"v{HEADTAIL_PREDICTOR_VERSION}" in tag
         assert f"{HEADTAIL_CROP_WIDTH}x{HEADTAIL_CROP_HEIGHT}" in tag

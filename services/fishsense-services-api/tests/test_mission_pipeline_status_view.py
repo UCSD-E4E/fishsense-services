@@ -506,7 +506,7 @@ def test_0063_adds_the_review_terms_todays_stores_use():
 
 def test_0067_moves_only_the_laser_stale_term_to_v3():
     """0067 recreates 0063's function with the laser stage's version bumped
-    (2 -> 3, the colour from fishsense-core 4.3.0) and nothing else: the
+    (2 -> 3, the color from fishsense-core 4.3.0) and nothing else: the
     head/tail stale term keeps its own version."""
     migration = _latest_versions_migration()
     previous = importlib.import_module(

@@ -4,7 +4,7 @@ Every stage that rectifies a raw frame -- laser 0.1 and prediction, species 2,
 head/tail 5.1, slate presence, the automatic track -- does it with pinhole
 maths, and selects its missions through `camera_sql.RECTIFIABLE_MISSION`. The
 owner's decision (2026-10-20): that holds only behind the corrective optic. A
-flat port is axial; a dome is pinhole-like only when centred, which nothing
+flat port is axial; a dome is pinhole-like only when centered, which nothing
 checks; an unknown port is not yet any of them. So the one predicate admits a
 mission only when its port is the corrective optic, and every one of those
 stages inherits it.

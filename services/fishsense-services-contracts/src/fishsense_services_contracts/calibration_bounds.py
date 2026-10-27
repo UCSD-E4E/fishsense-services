@@ -17,9 +17,9 @@ two services need the identical number and neither owns it:
   measured against a fit we know is wrong.
 
 The baseline is `norm(laser_position[:2])` — the offset between the camera
-centre and the laser on one rig. It is hardware, not a property of a dive, and
+center and the laser on one rig. It is hardware, not a property of a dive, and
 measurement says so loudly: over all 35 stored calibrations its interquartile
-range is **9.99-10.45 cm**, half a centimetre across both producers, every
+range is **9.99-10.45 cm**, half a centimeter across both producers, every
 camera and two years.
 
 A copy in each would be the drift this repo keeps rediscovering, and here the
@@ -61,7 +61,7 @@ __all__ = [
 #: spell it in SQL and a test pins the two.
 MIN_LASER_POINTS = 2
 
-#: Bounds on the baseline, in metres.
+#: Bounds on the baseline, in meters.
 #:
 #: **Placed midway between the populations, not hard against the healthy one.**
 #: The floor moved from 7.8 to 9.7 cm on 2026-09-12. Two fits inside the old
@@ -84,7 +84,7 @@ MAX_BASELINE_M = 0.145
 
 
 def baseline_m(laser_position) -> float:
-    """The in-plane offset of `laser_position`, in metres.
+    """The in-plane offset of `laser_position`, in meters.
 
     Only x and y are read. Both producers return the fit's origin as the point
     where the laser ray crosses the camera's z=0 plane and pad z to zero, so a

@@ -36,7 +36,7 @@ def _mask(rv, tv):
 
 
 def _page():
-    """A page with bold, asymmetric marks; their centres are the reference
+    """A page with bold, asymmetric marks; their centers are the reference
     points (template px at DPI)."""
     w, h = int(PAGE_IN[0] * DPI), int(PAGE_IN[1] * DPI)
     page = np.full((h, w), 255, np.uint8)
@@ -52,11 +52,11 @@ def _page():
 
 
 def _template_to_body(page_shape):
-    """Template px -> board metres: the page's long side along the board's,
-    centred (as the slates are printed and mounted)."""
+    """Template px -> board meters: the page's long side along the board's,
+    centered (as the slates are printed and mounted)."""
     ph, pw = page_shape
     s = 0.0254 / DPI
-    # rotate 90 deg clockwise: (x, y) -> (ph - 1 - y, x), then centre
+    # rotate 90 deg clockwise: (x, y) -> (ph - 1 - y, x), then center
     rot = np.array([[0, -1, ph - 1], [1, 0, 0], [0, 0, 1]], float)
     off = np.array([(BOARD_M - ph * s) / 2, (BOARD_M * pose.ASPECT - pw * s) / 2])
     return np.array([[s, 0, off[0]], [0, s, off[1]], [0, 0, 1]]) @ rot
@@ -128,7 +128,7 @@ def _aligned(spin, turn):
 @pytest.mark.parametrize("turn", [0, 1, 2, 3])
 def test_both_orientations_are_scored_and_the_page_s_up_is_recorded(turn):
     """The 436 failure (2026-10-25): on a near-symmetric pattern v4 chose the
-    wrong way up on 17 of 445 human-labelled frames, and nothing it recorded
+    wrong way up on 17 of 445 human-labeled frames, and nothing it recorded
     told them apart. The losing orientation's correlation is the margin a
     check needs; the page's up, in the image, is the orientation in the
     world -- whichever corner the board fit starts from (`turn`), and half a
@@ -262,7 +262,7 @@ def test_three_points_are_never_trimmed():
 # -- a scan larger than the board (the V-Slates, 2026-10-23) -----------------------------
 
 #: The V-Slate templates are 8.5 x 14 in scans of the physical slate, with the
-#: 12 in board starting ~1.9 in from the page's left edge: centring the page on
+#: 12 in board starting ~1.9 in from the page's left edge: centering the page on
 #: the board starts the alignment ~1 in off, and a near-symmetric V then lets
 #: it settle the wrong way round (mission 436).
 SCAN_IN = (14.0, 8.5)

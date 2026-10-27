@@ -14,7 +14,7 @@ here:
   status, a choice outside the candidates, a missing provenance, or a store
   refusal;
 * **the backfill attaches only when enabled**, onto incomplete tasks without a
-  human's imported judgement, deduped on (task, tag), and points each dive-owned
+  human's imported judgment, deduped on (task, tag), and points each dive-owned
   project's `model_version` at the tag most of its tasks carry;
 * **pre-annotation only**: a suggestion is attached as a prediction, never an
   annotation (the store's test pins that persisting writes no label).
@@ -376,9 +376,9 @@ async def test_is_idempotent_on_task_and_tag():
     assert not sdk.updates, "already showing it"
 
 
-async def test_a_human_judgement_keeps_its_task_and_its_projects_majority():
-    """A sentinel's imported judgement is the task's prediction already: the
-    model's is not attached over it, and a project mostly showing judgements
+async def test_a_human_judgment_keeps_its_task_and_its_projects_majority():
+    """A sentinel's imported judgment is the task's prediction already: the
+    model's is not attached over it, and a project mostly showing judgments
     keeps showing them."""
     judged = [species(n, project=None, content_of_image=HOGFISH) for n in (1, 2)]
     catalog = FakeCatalog(

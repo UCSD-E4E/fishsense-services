@@ -115,7 +115,7 @@ def test_reads_the_om_system_makernote_serial():
     longer, which moves the block's IFD from +12 to +16. A reader that knows
     only the old one finds no serial at all, and `preflight_ingest_activity`
     then refuses the dive with "No camera serial found in any frame's Olympus
-    MakerNote" — correct behaviour, wrong premise, and unfixable from the
+    MakerNote" — correct behavior, wrong premise, and unfixable from the
     operator's side because the serial *is* in the file.
 
     Prod already has TG-7 `Camera` rows (FSL-09/10/11, serials `BJPA7562x`),
@@ -128,7 +128,7 @@ def test_reads_the_om_system_makernote_serial():
     assert _read(data).serial_number == "BJPA75627"
 
 
-def test_an_unrecognised_makernote_signature_yields_no_serial():
+def test_an_unrecognized_makernote_signature_yields_no_serial():
     """The guard that keeps the two known layouts from becoming "any twelve
     bytes then an IFD". Guessing here would bind a frame to the wrong `Camera`
     and hand stage 14 the wrong intrinsics, which is exactly the failure the
@@ -150,7 +150,7 @@ def test_serial_is_none_when_there_is_no_makernote():
 
 def test_reads_artist_make_and_model():
     """`Artist` is the rig name and is used only as a cross-check against the
-    camera the serial resolved to — a disagreement means a mislabelled
+    camera the serial resolved to — a disagreement means a mislabeled
     `Camera` row, which nothing else would catch."""
     result = _read(build_orf())
 

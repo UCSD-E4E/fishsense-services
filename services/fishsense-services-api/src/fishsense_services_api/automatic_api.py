@@ -83,7 +83,7 @@ class AutomaticFrameView(BaseModel):
     render_id: uuid.UUID | None
     render_width: int | None
     render_height: int | None
-    #: A frame-sized greyscale PNG, 255 on the fish (0059).
+    #: A frame-sized grayscale PNG, 255 on the fish (0059).
     mask_url: str | None
     mask_width: int | None
     mask_height: int | None
@@ -165,7 +165,7 @@ class AutomaticLengthView(BaseModel):
     #: calibration has none.
     length_sd_m: float | None = None
     laser_confidence: float | None
-    #: The automatic dot's colour (0072); None when unread or from before.
+    #: The automatic dot's color (0072); None when unread or from before.
     laser_color: str | None
     laser_color_margin: float | None
     #: ``dot``, ``render`` (backfilled off the render, 0076), or None.

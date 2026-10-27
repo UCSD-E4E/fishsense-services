@@ -260,7 +260,7 @@ def test_laser_point_skips_when_reference_count_mismatches_template():
     Returning None keeps the pairing guarantee (nothing mis-paired) and routes
     the starved case into the existing `MIN_LASER_POINTS` refusal, which is
     recorded. See `test_mismatched_labels_are_skipped_not_fatal` for the
-    dive-level behaviour.
+    dive-level behavior.
     """
     # 6 template - 1 skipped = 5 expected, but only 4 provided
     observation = _observation(

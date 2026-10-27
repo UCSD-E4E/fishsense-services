@@ -5,7 +5,7 @@ cscw-fishsense2027@96a8da07 validated (PAPER.md §6; e2e_measurement/run_e2e.py
 runs it in research code):
 
 1. the production laser detector's dot (`laser.LASER_PREDICTOR_VERSION`'s
-   behaviour: the raw frame, rectified output, the expected-laser region);
+   behavior: the raw frame, rectified output, the expected-laser region);
 2. a SAM 3.1 fish mask in the head/tail stage's crop around that dot, kept
    only if the dot is on it and SAM scores it at least `AUTOMATIC_SAM_SCORE_GATE`
    (§6.3: SAM's own confidence is the best mask gate);
@@ -21,7 +21,7 @@ box; the head/tail id it echoes is the automatic one.
 **A separate track**: the processor's answers are stored as automatic rows,
 never as labels or human-path predictions (decided 2026-10-06).
 
-**Version the behaviour** (head/tail's rule). Bump
+**Version the behavior** (head/tail's rule). Bump
 `AUTOMATIC_HEADTAIL_PREDICTOR_VERSION` when a frame's dot or head/tail would
 differ for the same raw frame (detector, SAM checkpoint, gate, crop, prompt,
 keypointer); `AUTOMATIC_CALIBRATION_VERSION` when the fit would; and
@@ -233,7 +233,7 @@ class AutomaticFrameResult(BaseModel):
     laser_confidence: Optional[float] = None
     laser_predictor_version: Optional[int] = None
     laser_checkpoint: Optional[str] = None
-    #: The dot's colour, read off its pixels by the laser stage's kernel
+    #: The dot's color, read off its pixels by the laser stage's kernel
     #: (`laser.LaserPrediction.color`), and how clearly (v22, 2026-10-25).
     #: None when the dot gave no reading, or from a v21 processor.
     laser_color: Optional[Literal["red", "green"]] = None

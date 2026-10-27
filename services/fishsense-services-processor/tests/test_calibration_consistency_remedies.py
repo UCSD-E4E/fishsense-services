@@ -40,7 +40,7 @@ def test_the_message_does_not_claim_an_hourly_re_selection():
 
 def test_the_message_says_the_refusal_is_recorded_and_self_clearing():
     """An operator has to know two things the old text omitted: nothing is
-    churning, and relabelling is enough — there is no flag to clear by hand."""
+    churning, and relabeling is enough — there is no flag to clear by hand."""
     lowered = REFUSAL_REMEDIES.lower()
     assert "recorded" in lowered
     assert "relabel" in lowered or "label" in lowered

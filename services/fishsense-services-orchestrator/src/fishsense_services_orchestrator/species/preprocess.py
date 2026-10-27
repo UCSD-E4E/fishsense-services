@@ -2,7 +2,7 @@
 
 Ported from fishsense-lite@77e8f8e5 services/fishsense-api-workflow-worker/src/
 fishsense_api_workflow_worker/activities/resolve_species_preprocess_inputs_activity.py
-(`_build_clusters`, `eligible`, the orphan block). Behaviour is v1's, and it
+(`_build_clusters`, `eligible`, the orphan block). Behavior is v1's, and it
 mirrors the stage-2 cohort exactly (a resolver that finds less than its
 selector promised re-stages a dive hourly forever):
 

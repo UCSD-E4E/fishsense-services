@@ -1,8 +1,8 @@
 """docs/design/tokens.json keeps the promises docs/design/README.md makes.
 
 The README says the two themes share token names, that every text token passes
-WCAG AA (4.5:1) on its theme's ground, surface and raised colours, and that the
-snout and fork overlay colours differ in lightness as well as hue (review of
+WCAG AA (4.5:1) on its theme's ground, surface and raised colors, and that the
+snout and fork overlay colors differ in lightness as well as hue (review of
 #170: dark text3 measured 3.97:1 on raised, light warn 2.62:1, and snout/fork
 only 1.3:1 apart). These pin each promise to the values.
 """
@@ -17,12 +17,12 @@ TOKENS = json.loads(
 )
 THEMES = ("dark", "light")
 SURFACES = ("ground", "surface", "raised")
-#: Colours set as text (or as a state shown in text), never only as a fill.
+#: Colors set as text (or as a state shown in text), never only as a fill.
 TEXT = ("text", "text2", "text3", "tealText", "warn", "error")
 
 
 def luminance(hex_colour: str) -> float:
-    """WCAG 2 relative luminance of a #RRGGBB colour."""
+    """WCAG 2 relative luminance of a #RRGGBB color."""
     channels = [int(hex_colour.lstrip("#")[i : i + 2], 16) / 255 for i in (0, 2, 4)]
     linear = [
         c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels
@@ -62,5 +62,5 @@ def test_text_on_a_teal_fill_passes_aa(theme):
 def test_snout_and_fork_differ_in_lightness_not_hue_alone():
     overlay = TOKENS["color"]["overlay"]
 
-    # Distinguishable in greyscale: at least the 3:1 WCAG asks of graphics.
+    # Distinguishable in grayscale: at least the 3:1 WCAG asks of graphics.
     assert contrast(overlay["snout"], overlay["fork"]) >= 2.5

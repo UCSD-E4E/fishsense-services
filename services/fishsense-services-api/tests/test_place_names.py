@@ -60,7 +60,7 @@ async def test_a_part_named_twice_is_named_once(photon):
 
 
 async def test_a_feature_far_from_the_capture_is_named_as_near(photon):
-    """At sea, the nearest named place can be kilometres away."""
+    """At sea, the nearest named place can be kilometers away."""
     photon.features = [
         feature(
             32.70, -117.16, name="Coronado", state="California", country="United States"

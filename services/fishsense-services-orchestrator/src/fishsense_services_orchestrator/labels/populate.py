@@ -6,10 +6,10 @@ step the create_{laser,species,headtail,dive_slate,checkerboard_lattice}_
 label_studio_project activities shared. Each populate stage creates LS tasks
 pointing at the processed JPEGs, imports them in one batch, then records a
 per-image label row anchoring the (image, LS task, LS project) triple. Each
-create stage idempotently materialises a per-dive project from a stored
+create stage idempotently materializes a per-dive project from a stored
 labeling-config XML; populate calls create first to get the target project.
-Behaviour is v1's. The kinds' own populate activities belong to their slices;
-this is the part they share, parameterised by kind.
+Behavior is v1's. The kinds' own populate activities belong to their slices;
+this is the part they share, parameterized by kind.
 
 v2 changes:
 
@@ -565,7 +565,7 @@ def _tasks_needing_import(
       alone could not catch that, so a caller whose item query returned an
       image twice imported it twice in one call;
     * an earlier attempt of *this* activity already issued an import. What it
-      created may still be materialising, so importing again is precisely the
+      created may still be materializing, so importing again is precisely the
       duplicate-making move. Reconcile instead.
     """
     to_import: List[dict] = []
@@ -665,7 +665,7 @@ async def import_tasks_and_record_labels(
 
     **An import that has not become visible is not an error.** v1 used to
     raise, saying "retrying (dedupe prevents dupes)" -- which holds only once
-    the previous import has materialised, exactly the condition that just
+    the previous import has materialized, exactly the condition that just
     failed. Temporal retried, the retry's dedup listing still could not see the
     in-flight import, and it imported the whole set again: ten projects came to
     hold two tasks per image, one held 23 copies of three images (found
@@ -673,7 +673,7 @@ async def import_tasks_and_record_labels(
 
     A duplicate is not merely wasted queue: it splits a row from its own
     annotation (seven dive-437 head/tail labels were invisible to the pipeline
-    because the row tracked the empty twin), and it hands a labeller a second,
+    because the row tracked the empty twin), and it hands a labeler a second,
     *ungated* copy of a frame the laser auto-accept gate had already judged.
 
     So rows are written for whatever is visible and the shortfall is logged at
@@ -725,7 +725,7 @@ async def import_tasks_and_record_labels(
         if duplicates:
             # Loud, because nothing else notices: duplicates are invisible to
             # the database (the label tables are unique on (capture, project)),
-            # they split a row from its annotation, and they hand a labeller
+            # they split a row from its annotation, and they hand a labeler
             # an ungated copy of a frame the auto-accept gate already judged.
             activity.logger.error(
                 "populate: project %d already holds %d duplicate task(s) -- "
@@ -832,7 +832,7 @@ async def ensure_project_shows_predictions(
     **The tag with the most predictions wins**, ties broken toward
     `current_tag`. Not "prefer the newest tier": a project already showing 40
     fallback predictions must not be switched to a tier holding 2, which would
-    blank 38 tasks to reveal 2. Maximising what a labeler can see is the
+    blank 38 tasks to reveal 2. Maximizing what a labeler can see is the
     objective, and it converges on its own: once an upgrade pass overtakes the
     old tier, the newer tag becomes the majority and the project flips.
 

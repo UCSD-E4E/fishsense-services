@@ -10,7 +10,7 @@ app layer's own line of defence (as every store does).
   the same with how many there are in all, for pages by number.
 * :func:`observation` -- one fish in one capture, with the evidence its
   method rests on: for ``laser``, the laser depth, the calibration's producer
-  and the labelled dot, head and tail; for ``lidar``, the phone's snout and
+  and the labeled dot, head and tail; for ``lidar``, the phone's snout and
   fork and who placed them.
 
 **The photo** (Phase 4 of §9.26). A mobile capture's is its own image; a Lite
@@ -97,11 +97,11 @@ class LaserEvidence:
     depth_m: float | None
     range_m: float | None
     calibration_producer: str | None
-    #: In the labelled frame's pixels, like the head and tail.
+    #: In the labeled frame's pixels, like the head and tail.
     dot: Point | None
     head: Point | None
     tail: Point | None
-    #: The colour the labeller chose for the dot, ``red`` or ``green``; None
+    #: The color the labeler chose for the dot, ``red`` or ``green``; None
     #: when the label names none (2026-10-24).
     color: str | None = None
 
@@ -125,7 +125,7 @@ class ObservationDetail:
     laser: LaserEvidence | None
     device_points: DevicePoints | None
     #: The render's size in pixels, when the photo is the frame's render (a
-    #: Lite fish): its labelled points are drawn on it at their own pixels,
+    #: Lite fish): its labeled points are drawn on it at their own pixels,
     #: since a render is the whole frame, never cropped (2026-10-22).
     photo_size: tuple[int, int] | None = None
 

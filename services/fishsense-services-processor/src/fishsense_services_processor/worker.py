@@ -66,7 +66,7 @@ log = logging.getLogger(__name__)
 
 #: How long in-flight activities get to finish when the pod is told to stop
 #: (v1's 30 s). Every manifest's ``terminationGracePeriodSeconds`` is longer.
-#: Without it the work in progress is cancelled at once and re-run -- safe,
+#: Without it the work in progress is canceled at once and re-run -- safe,
 #: since activities are idempotent, but it throws away a nearly done image.
 GRACEFUL_SHUTDOWN_TIMEOUT = timedelta(seconds=30)
 

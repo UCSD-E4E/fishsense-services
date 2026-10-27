@@ -316,7 +316,7 @@ SEARCH_IN = 3.0
 
 def _page_at(board_blur: np.ndarray, page_blur: np.ndarray, reach: int):
     """``(dx, dy, score)``: where the page's top-left sits on the board (board
-    px, may be negative) by normalised cross-correlation, the board padded by
+    px, may be negative) by normalized cross-correlation, the board padded by
     `reach` px of its mean so the page may overhang it."""
     pad = cv2.copyMakeBorder(board_blur, reach, reach, reach, reach,
                              cv2.BORDER_CONSTANT, value=float(board_blur.mean()))  # fmt: skip
@@ -355,7 +355,7 @@ def align_template_both(
 
     Both orientations' correlations are kept (2026-10-25): on a
     near-symmetric pattern v4 chose the wrong way up on 17 of 445
-    human-labelled frames (436's 11 of 12), and nothing else it recorded
+    human-labeled frames (436's 11 of 12), and nothing else it recorded
     told them apart; the losing one's correlation is the margin a check
     needs.
 
@@ -365,7 +365,7 @@ def align_template_both(
     (the V-Slates: 14 in, the board ~1.9 in from the edge), so the page is
     first found on the board by cross-correlation (`_page_at`, within
     `SEARCH_IN` beyond any overhang), both ways up, then refined by ECC.
-    (Until 2026-10-23 it was centred on the board, ~1 in off for a V-Slate:
+    (Until 2026-10-23 it was centered on the board, ~1 in off for a V-Slate:
     mission 436's poses settled the wrong way round.)"""
     corners = np.asarray(corners, np.float32)
     s01 = np.linalg.norm(corners[1] - corners[0])
@@ -432,7 +432,7 @@ def align_template_both(
 def slate_plane(reference_points, dpi: int, h_template_to_image, camera_matrix):
     """``(plane, image points, rms px)``, or None: the template's reference
     points as the alignment places them, through production's
-    `pose_from_correspondences` (template px / dpi, in metres). The rms is
+    `pose_from_correspondences` (template px / dpi, in meters). The rms is
     how far a rigid board's pose misses those points: the alignment is a free
     homography, so this is how much of it no real pose explains."""
     tpl = np.asarray(reference_points, np.float32).reshape(-1, 1, 2)
@@ -454,7 +454,7 @@ def slate_plane(reference_points, dpi: int, h_template_to_image, camera_matrix):
 
 
 def board_plane(fit: BoardFit) -> Plane:
-    """The board's plane, in metres. The fit's model is the board with its
+    """The board's plane, in meters. The fit's model is the board with its
     long side 1 (`_outline`), so its translation is in board lengths (12 in);
     the rotation is the same at any scale."""
     tvec = np.asarray(fit.tvec, float).reshape(3) * _BOARD_LONG_IN * INCH_TO_M
@@ -559,7 +559,7 @@ def scale_sd(pts: np.ndarray, camera_matrix, *, min_frames: int = MIN_POSE_FRAME
 
 def fit_pose_points(points, *, min_frames: int = MIN_POSE_FRAMES,
                     camera_matrix=None) -> LabelFreeFit:  # fmt: skip
-    """The beam through the slate points (camera space, metres): trimmed one
+    """The beam through the slate points (camera space, meters): trimmed one
     at a time, the lever-arm gate, the origin where the beam crosses the
     camera's plane (z = 0), as the label-free fits report it. With
     `camera_matrix`, its error bar (`scale_sd`)."""

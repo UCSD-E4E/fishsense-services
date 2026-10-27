@@ -1,9 +1,9 @@
-"""A mission's laser colours, counted by source (the owner, 2026-10-24).
+"""A mission's laser colors, counted by source (the owner, 2026-10-24).
 
-New in v2. One rig shoots one colour for a whole dive, and three things say
+New in v2. One rig shoots one color for a whole dive, and three things say
 which, frame by frame:
 
-* **labels**: the colour a labeller chose for the dot (``laser_labels.label``,
+* **labels**: the color a labeler chose for the dot (``laser_labels.label``,
   "Red Laser" / "Green Laser"); live labels with a dot only;
 * **predictions**: the human path's laser stage, read off the dot's pixels
   (``current_laser_predictions.color``; 98% per frame on 332 dots);
@@ -13,7 +13,7 @@ which, frame by frame:
 Counts, never a verdict: a mission whose sources disagree is worth seeing, and
 a majority would hide it (the orchestrator's `mission_laser_label` takes one,
 for Label Studio's pre-annotation, and keeps none). ``unread`` is a dot with
-no colour: a label without one, or a prediction that abstained.
+no color: a label without one, or a prediction that abstained.
 
 The current views narrow by capture id, not by mission (`automatic_lengths_
 store` measured why), so they are handed the mission's capture ids.
@@ -38,7 +38,7 @@ __all__ = [
     "tenant_laser_colors",
 ]
 
-#: How a label names each colour.
+#: How a label names each color.
 LABEL_COLOURS = {"Red Laser": "red", "Green Laser": "green"}
 
 
@@ -57,7 +57,7 @@ def dot_colour_join(h: str) -> str:
 def dot_colour_columns(h: str) -> str:
     """``laser_color``, ``laser_color_margin`` and ``laser_color_source`` of
     the automatic prediction ``h`` (with `dot_colour_join`'s ``rc``): the
-    dot's own colour (0072), else its backfilled reading (``render``), else
+    dot's own color (0072), else its backfilled reading (``render``), else
     what the dot read when too close to call."""
     source = f"""CASE WHEN {h}.laser_color IS NOT NULL THEN 'dot'
                      WHEN rc.seq IS NOT NULL THEN 'render'
@@ -99,7 +99,7 @@ _COUNTS_SQL = f"""
 class ColourCounts:
     red: int = 0
     green: int = 0
-    #: A dot with no colour: a label without one, or an abstaining reading.
+    #: A dot with no color: a label without one, or an abstaining reading.
     unread: int = 0
 
 

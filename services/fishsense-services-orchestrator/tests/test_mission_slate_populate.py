@@ -253,7 +253,7 @@ async def test_publishes_a_project_that_already_holds_the_missions_rows():
 
 async def test_an_import_not_yet_listable_leaves_the_project_a_draft():
     """Hosted Label Studio imports asynchronously; a project must not be shown
-    half-populated while tasks are still materialising."""
+    half-populated while tasks are still materializing."""
     import fishsense_services_orchestrator.labels.populate as pu
 
     ls = FakeLabelStudio(visible=False)

@@ -2,7 +2,7 @@
 and a purpose for what was ingested before migration 0047, tenant-scoped.
 
 **Ports.** The owner's rules (2026-10-16): every mission already ingested is
-the corrective optic, and so is any device labelled with the ``D`` suffix.
+the corrective optic, and so is any device labeled with the ``D`` suffix.
 Nothing else is known, so a mission ingested after the rule with no ``D``
 stays ``unknown``. A ``D`` on the mission's path is the stronger evidence and
 is recorded as the source (``device_suffix``) whenever it is there; the rest

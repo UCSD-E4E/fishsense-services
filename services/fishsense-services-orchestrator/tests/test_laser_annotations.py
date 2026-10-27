@@ -1,8 +1,8 @@
-"""What a laser task carries: its colour, its pre-annotation, its annotation.
+"""What a laser task carries: its color, its pre-annotation, its annotation.
 
 Ported from fishsense-lite@77e8f8e5 services/fishsense-api-workflow-worker/
 tests/test_populate_laser_label_studio_project_activity.py (the pure half:
-the dive-majority colour, the keypoint, the prediction and the auto-accepted
+the dive-majority color, the keypoint, the prediction and the auto-accepted
 annotation, the task). Names and reasons are v1's. v2 adaptations: a task's
 image is the located JPEG (`TaskImage`), never a URL built from settings; the
 service account comes from ``FISHSENSE_LABEL_STUDIO_BOT_USER_ID``.
@@ -33,10 +33,10 @@ IMAGE = TaskImage(
 )
 
 
-# -- the dive's colour -------------------------------------------------------------
+# -- the dive's color -------------------------------------------------------------
 
 
-def test_unanimous_green_mission_is_labelled_green():
+def test_unanimous_green_mission_is_labeled_green():
     assert mission_laser_label(["green"] * 5) == "Green Laser"
 
 
@@ -48,7 +48,7 @@ def test_abstentions_do_not_count_as_votes():
     assert mission_laser_label([None, None, None, "green"]) == "Green Laser"
 
 
-def test_no_votes_falls_back_to_the_more_common_colour():
+def test_no_votes_falls_back_to_the_more_common_color():
     assert mission_laser_label([]) == "Red Laser"
     assert mission_laser_label([None]) == "Red Laser"
 

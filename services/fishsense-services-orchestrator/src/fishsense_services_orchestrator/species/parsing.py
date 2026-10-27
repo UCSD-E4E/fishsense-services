@@ -6,7 +6,7 @@ fishsense_api_workflow_worker/activities/
 sync_species_labels_for_label_studio_project_activity.py (`_first_choice`,
 `_first_taxonomy_leaf`, `_content_of_image`, `_parse_results`,
 `_slate_type_choice`, `_calibration_target_choice`, `_slate_not_in_list`,
-`_reduce_winners`). Behaviour is v1's, the parser's shape especially: it is
+`_reduce_winners`). Behavior is v1's, the parser's shape especially: it is
 the definition of record for what a result means, and
 `species.preannotation.build_prediction` is its exact inverse.
 

@@ -1,9 +1,9 @@
-"""The laser-label validator's processor activity: one judgement of a dive's
+"""The laser-label validator's processor activity: one judgment of a dive's
 full population, returned as what to write.
 
 Ported from fishsense-lite@77e8f8e5 services/fishsense-data-processing-
 workflow-worker/tests/test_validate_laser_labels_for_dive_activity.py. Names,
-bodies and reasons are v1's where the behaviour is the processor's. v2
+bodies and reasons are v1's where the behavior is the processor's. v2
 changes, pinned here:
 
 * **the activity writes nothing.** v1's PUT each supersede and the dive line

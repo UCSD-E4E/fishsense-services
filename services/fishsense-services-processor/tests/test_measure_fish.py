@@ -172,7 +172,7 @@ async def test_a_non_finite_depth_is_refused_not_dropped():
     nothing, so the image stayed unmeasured and the dive in its cohort. v2
     refused it as `non_finite_length`; since algorithm version 2 the depth is
     gated first, so it is refused as what it is, `non_finite_depth`."""
-    # A laser through the camera centre along the optical axis, and a dot on
+    # A laser through the camera center along the optical axis, and a dot on
     # the principal point: the two rays are the same line, and have no
     # closest point.
     le = LaserCalibrationGeometry(

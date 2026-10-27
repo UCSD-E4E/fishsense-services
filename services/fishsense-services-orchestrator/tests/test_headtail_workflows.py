@@ -667,7 +667,7 @@ async def test_workflow_invokes_one_sync_per_project():
 
 
 async def test_one_projects_failure_does_not_stop_the_others():
-    """v2 (the laser port's rule): v1's TaskGroup cancelled every project on
+    """v2 (the laser port's rule): v1's TaskGroup canceled every project on
     the first failure; here each finishes, and the run then fails naming it."""
     synced, failure = await _run_sync(fail_projects={11})
     assert synced == [22]

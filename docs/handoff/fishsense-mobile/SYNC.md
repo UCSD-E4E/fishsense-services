@@ -56,7 +56,7 @@ Each file is uploaded as one object under a **role**:
 |---|---|---|
 | `rgb_jpeg` | the JPEG the app saves today | yes |
 | `rgb_lossless` | PNG of the RGBA frame `compute_length` ran on | **yes, from v8 on.** The server accepts captures without it, so older builds still sync |
-| `depth_f32` | `depth_bytes` exactly as stored: float32 little-endian metres, `depth_row_bytes × depth_height` bytes, padding included | yes |
+| `depth_f32` | `depth_bytes` exactly as stored: float32 little-endian meters, `depth_row_bytes × depth_height` bytes, padding included | yes |
 | `confidence_u8` | `confidence_bytes` as stored, `confidence_row_bytes × confidence_height` | yes |
 | `mask_u8` | `mask_bytes` as stored: uint8, `mask_width × mask_height`, nonzero = fish | when the phone found a fish |
 

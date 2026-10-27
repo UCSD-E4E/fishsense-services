@@ -31,7 +31,7 @@ bottom tab bar all stay. These are the changes.
   mission. The grouping is the server's (see "What depends on the server" above),
   so the app shows what it is given. For now, group by day on the phone.
 
-## 2. Colour
+## 2. Color
 
 - Keep `#00AAA5` for one filled action per screen (Save, Measure). Text on it is
   `#001A19`, not black.
@@ -46,9 +46,9 @@ bottom tab bar all stay. These are the changes.
 
 - Snout `#2563EB`, fork `#FFB547`, mask teal at 35% with a `#00AAA5` edge.
 - These replace `#4CAF50`, `#FF5252` and `#00C8FF`. Green and red are the pair
-  colour-blind users confuse most. Blue and orange differ in hue and in lightness
-  (luminance 0.15 against 0.55), so they stay apart in greyscale too.
-- Draw each point with a 3 px ring in the ground colour, so it stands out on any
+  color-blind users confuse most. Blue and orange differ in hue and in lightness
+  (luminance 0.15 against 0.55), so they stay apart in grayscale too.
+- Draw each point with a 3 px ring in the ground color, so it stands out on any
   photo.
 
 ## 4. Type and the length
@@ -57,8 +57,8 @@ bottom tab bar all stay. These are the changes.
 - On the result screen, the length is 44 px semibold, with its unit at 20 px in
   `#9AA8B1`. The method and distance go one line below it, as chips
   ("LiDAR · 0.8 m away").
-- The length is in whole millimetres (`424 mm`), as on the web (2026-10-21).
-  The sync payload stays in metres; only what a person reads changes.
+- The length is in whole millimeters (`424 mm`), as on the web (2026-10-21).
+  The sync payload stays in meters; only what a person reads changes.
 - Scale: title 28, heading 20, body 16, label 13.
 
 ## 5. Small things

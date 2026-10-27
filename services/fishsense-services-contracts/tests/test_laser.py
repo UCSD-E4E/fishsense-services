@@ -192,7 +192,7 @@ def test_a_prediction_result_has_both_coordinates_or_neither():
         )
 
 
-def test_a_colour_is_red_or_green():
+def test_a_color_is_red_or_green():
     with pytest.raises(ValidationError):
         sut.LaserPredictionResult(
             capture_id=uuid.uuid4(),

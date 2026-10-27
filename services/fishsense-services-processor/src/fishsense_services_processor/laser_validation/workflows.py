@@ -71,7 +71,7 @@ class EvaluateLaserAutoAcceptWorkflow:
 @workflow.defn(name="ValidateLaserLabelsForDiveWorkflow")
 class ValidateLaserLabelsForMissionWorkflow:
     # pylint: disable=too-few-public-methods
-    """One judgement of a dive's laser labels; returns what to write."""
+    """One judgment of a dive's laser labels; returns what to write."""
 
     @workflow.run
     async def run(self, payload: ValidateLaserLabelsInput) -> LaserValidationResult:

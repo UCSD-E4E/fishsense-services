@@ -2,7 +2,7 @@
 
 Ported from fishsense-lite@77e8f8e5 services/fishsense-data-processing-
 workflow-worker/src/fishsense_data_processing_workflow_worker/workflows/
-preprocess_headtail_images_workflow.py. Behaviour is v1's: one activity per
+preprocess_headtail_images_workflow.py. Behavior is v1's: one activity per
 frame, all at once, each with a 5-minute *start-to-close* budget (execution,
 not queue wait: the dive-76 run expired on schedule-to-close while activities
 waited for a slot).

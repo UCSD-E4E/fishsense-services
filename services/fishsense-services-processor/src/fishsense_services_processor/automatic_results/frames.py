@@ -64,7 +64,7 @@ class LaserDot:
     confidence: float
     predictor_version: int
     checkpoint: Optional[str]
-    #: The colour the laser kernel read off the dot, and how clearly
+    #: The color the laser kernel read off the dot, and how clearly
     #: (contract v22, 2026-10-25); None when it gave no reading.
     color: Optional[str] = None
     color_margin: Optional[float] = None

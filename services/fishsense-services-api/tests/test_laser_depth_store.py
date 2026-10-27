@@ -228,7 +228,7 @@ async def test_selector_ignores_images_after_the_laser_moved(owner_engine, app_e
     capture_id = await capture(owner_engine, lab, mission_id)
     await laser_label(owner_engine, lab, capture_id)
     earlier = await capture(owner_engine, lab, mission_id)
-    async with owner_engine.begin() as conn:  # a frame before it, unlabelled
+    async with owner_engine.begin() as conn:  # a frame before it, unlabeled
         await conn.execute(
             text("UPDATE captures SET captured_at = captured_at - interval '1 hour' "
                  "WHERE id = :c"), {"c": earlier})  # fmt: skip

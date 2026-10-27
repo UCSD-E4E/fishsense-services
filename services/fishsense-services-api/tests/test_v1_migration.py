@@ -436,7 +436,7 @@ def test_a_label_names_its_source_only_when_certain(v1, v2):
         (2, "auto_accept"),  # the gate auto-accepted this frame's prediction
     ]
     assert _rows(v2, "SELECT source, ls_project_id FROM species_labels") == [
-        ("import", None)  # a sentinel carries an imported judgement
+        ("import", None)  # a sentinel carries an imported judgment
     ]
     assert _rows(v2, "SELECT source FROM head_tail_labels") == [(None,)]
 
@@ -1003,7 +1003,7 @@ def _parity(v1: Engine, v2: Engine):
 
 
 def test_a_binding_the_label_no_longer_names_is_stale_on_both_sides(v1, v2):
-    """Frame 103 is labelled Grouper but measured as the Snook (a relabel
+    """Frame 103 is labeled Grouper but measured as the Snook (a relabel
     after the measurement): v1 would delete it on its next run."""
     _seed_everything(v1)
     with v1.begin() as conn:

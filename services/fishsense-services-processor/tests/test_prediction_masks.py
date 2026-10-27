@@ -2,7 +2,7 @@
 
 New in v2 (2026-10-21). The mask SAM kept was dropped once its head/tail, box
 and area were taken. Both stages now place it in a frame-sized array -- the
-app's ``mask_png`` (#230): 8-bit greyscale PNG, width x height, 255 on the
+app's ``mask_png`` (#230): 8-bit grayscale PNG, width x height, 255 on the
 fish -- and PUT it to the key the orchestrator presigned, reporting its size
 and SHA-256. A frame with no upload slot, or no kept mask, stores nothing.
 """
@@ -41,7 +41,7 @@ def test_a_mask_is_the_apps_png_at_the_frame():
     expected = np.zeros((30, 40), np.uint8)
     expected[21:23, 12:15] = 255
     assert data[:8] == b"\x89PNG\r\n\x1a\n"
-    # IHDR: 8-bit (byte 24), greyscale (colour type 0, byte 25).
+    # IHDR: 8-bit (byte 24), grayscale (color type 0, byte 25).
     assert (data[24], data[25]) == (8, 0)
     assert pixels.dtype == np.uint8 and pixels.shape == (30, 40)
     assert (pixels == expected).all()

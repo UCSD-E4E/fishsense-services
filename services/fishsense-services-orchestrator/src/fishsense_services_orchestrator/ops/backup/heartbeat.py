@@ -28,7 +28,7 @@ async def heartbeat_pump(
     interval_seconds: float = DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
 ) -> AsyncIterator[None]:
     """Heartbeat on a ticker for the duration of the block. The pump is
-    cancelled on exit, can't outlive the block, and suppresses nothing raised
+    canceled on exit, can't outlive the block, and suppresses nothing raised
     inside it."""
 
     async def _pump() -> None:

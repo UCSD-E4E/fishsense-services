@@ -110,7 +110,7 @@ class UnmaskedPrediction:
     capture_id: uuid.UUID
     #: The dot the prediction was made from, rectified px.
     dot: tuple[float, float]
-    #: The head/tail stage's: the labelled dot's label.
+    #: The head/tail stage's: the labeled dot's label.
     laser_label_id: uuid.UUID | None
     mask_area_px: int
     crop_x: int

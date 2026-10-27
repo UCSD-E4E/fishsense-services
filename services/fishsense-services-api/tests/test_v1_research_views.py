@@ -18,8 +18,8 @@ The parity tests seed a small v1 corpus into v1's real schema
 (``fixtures/v1_schema.sql``, which also carries v1's own fish views), run every
 extract and view there, migrate it with migrate-v1, run the same SQL as a
 research login against v2, and compare row by row. JSON is compared parsed:
-v1 stored ``json``, v2 stores ``jsonb``, whose text is normalised (see
-`test_json_text_is_normalised_but_equal`).
+v1 stored ``json``, v2 stores ``jsonb``, whose text is normalized (see
+`test_json_text_is_normalized_but_equal`).
 """
 
 from __future__ import annotations
@@ -496,7 +496,7 @@ def test_every_v1_table_view_returns_v1s_rows(migrated):
 # --- the differences, each for a reason --------------------------------------------
 
 
-def test_json_text_is_normalised_but_equal(migrated):
+def test_json_text_is_normalized_but_equal(migrated):
     """v1 stored `json` verbatim; v2 stores `jsonb`, whose text has its own
     spacing and key order. Research exports that pin `::text` byte for byte
     (imwut's pos/ax/km/dist columns) change text, not value."""

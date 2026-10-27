@@ -6,7 +6,7 @@ adaptations are marked: the activities' v2 names and arguments (the tenant and
 device preflight resolved ride along), UUID ids, and the pydantic converter.
 
 In-process Temporal worker with every activity stubbed. What is pinned here is
-the *protocol*, not the activities' behaviour:
+the *protocol*, not the activities' behavior:
 
   * a dry run and a failed preflight both leave without writing anything;
   * the dive is created before any frame is registered, and promoted only after;

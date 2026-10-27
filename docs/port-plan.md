@@ -8,7 +8,7 @@ known gotcha, with file:line references into fishsense-lite (read it at
 
 ## How a slice is ported (§6.3; same pattern as ingest, clustering, laser sync)
 
-- **v1's tests first**, adapted only where v2 changes behaviour; each module
+- **v1's tests first**, adapted only where v2 changes behavior; each module
   names the fishsense-lite commit it came from. Every v2 change is pinned by a
   test that says why. Mutation-check anything that looks too easy.
 - **The database side** is a tenant-scoped store in the API package (functions

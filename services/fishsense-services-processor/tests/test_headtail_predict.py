@@ -225,7 +225,7 @@ def test_the_kernel_is_cores():
         assert not hasattr(sut, gone), gone
 
 
-def test_crop_is_centred_on_the_first_laser_point_only():
+def test_crop_is_centered_on_the_first_laser_point_only():
     """A second dot outside that window cannot be gated on; in the corpus that
     never happens, which is why cropping on the first point is safe."""
     far = (200.0, 200.0)
@@ -288,7 +288,7 @@ class TestAnAbstentionNamesItsDot:
     correction never made one stale: the frame kept its "no fish" forever
     (the cohort and the GPU-less skip both judge staleness by that dot). A
     kept mask names the dot on it, as a prediction does; with no mask kept,
-    the dot the crop was centred on -- the first -- is the one the answer
+    the dot the crop was centered on -- the first -- is the one the answer
     came from."""
 
     LASER = (2000.0, 1500.0)
@@ -296,14 +296,14 @@ class TestAnAbstentionNamesItsDot:
     def _ids(self):
         return [uuid.uuid4(), uuid.uuid4()]
 
-    def test_no_detections_names_the_crop_centre(self):
+    def test_no_detections_names_the_crop_center(self):
         ids = self._ids()
         result = _predict(
             _jpeg(), [self.LASER, (2100.0, 1500.0)], _Stub([]), laser_label_ids=ids
         )
         assert (result.status, result.laser_label_id) == ("no_detections", ids[0])
 
-    def test_laser_off_all_fish_names_the_crop_centre(self):
+    def test_laser_off_all_fish_names_the_crop_center(self):
         ids = self._ids()
         result = _predict(
             _jpeg(),

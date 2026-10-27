@@ -454,7 +454,7 @@ LABEL_TABLES = {
 
 
 async def _labelled_mission(owner_engine, tenant, number, table):
-    """Dive `number` with two canonical frames labelled in `table`: one
+    """Dive `number` with two canonical frames labeled in `table`: one
     answered, one not."""
     mission = await _dive(owner_engine, tenant, number)
     async with owner_engine.begin() as conn:

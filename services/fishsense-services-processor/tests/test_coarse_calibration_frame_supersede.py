@@ -27,7 +27,7 @@ so it cannot pull the fit toward itself.
 
 The asymmetry is what sets the tolerance. Superseding a genuine slate dot
 removes the dive's only route to a calibration and cannot be undone by
-relabelling (`get_laser_label_by_label_studio_id` filters superseded rows),
+relabeling (`get_laser_label_by_label_studio_id` filters superseded rows),
 while a 10 px error in one calibration dot is diluted by the others and
 caught downstream by the four calibration gates. A 45+ px dot is a different
 population -- a specular reflection or another object -- and must still go.
@@ -99,7 +99,7 @@ def test_measurement_frames_are_still_judged_at_three_sigma():
 
 
 def test_without_a_mask_every_dot_is_judged_at_three_sigma():
-    """The old behaviour, unchanged, so a caller that knows nothing about
+    """The old behavior, unchanged, so a caller that knows nothing about
     calibration frames cannot silently get the loose rule."""
     xy, mask = _dive(slate_offsets=(4.0, 8.5))
     fit = fit_dive_line(xy)

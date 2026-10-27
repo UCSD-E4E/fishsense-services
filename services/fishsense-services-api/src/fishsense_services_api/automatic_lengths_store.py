@@ -177,7 +177,7 @@ class AutomaticLength:
     #: calibration has none.
     length_sd_m: float | None
     laser_confidence: float | None
-    #: The dot's colour as the laser kernel read it (0072); None when it gave
+    #: The dot's color as the laser kernel read it (0072); None when it gave
     #: no reading, and on rows from before.
     laser_color: str | None
     laser_color_margin: float | None

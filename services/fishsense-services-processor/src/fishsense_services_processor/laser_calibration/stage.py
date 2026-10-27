@@ -1,7 +1,7 @@
 """Stage 13, slate laser calibration, as a processor stage.
 
 On the light role, as in v1 (fishsense-lite@77e8f8e5 roles.py
-`LIGHT_WORKFLOWS`): the fit reads already-labelled points and holds no image
+`LIGHT_WORKFLOWS`): the fit reads already-labeled points and holds no image
 bytes, so it must not wait behind the per-image role's memory cap -- on
 2026-09-04 two consecutive v1 calibrations expired on ScheduleToStart behind
 one preprocess.

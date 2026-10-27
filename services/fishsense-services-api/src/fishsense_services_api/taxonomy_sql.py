@@ -102,7 +102,7 @@ def calibration_target_name_sql(col: str) -> str:
     candidate species labels — nobody mislabels a grouper as a ruler — so
     offering one as the better fit produces a relabel prompt no labeler can act
     on. The box at 0.150 m sits squarely in the band foreshortened frames of
-    the ~0.195 m models land in, so without this a correctly-labelled Gray
+    the ~0.195 m models land in, so without this a correctly-labeled Gray
     Anthias measuring 0.160 m is flagged against the box.
 
     Deliberately NOT `is_provisional`: that flag means the length is an

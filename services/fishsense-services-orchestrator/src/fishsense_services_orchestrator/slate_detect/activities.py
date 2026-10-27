@@ -6,7 +6,7 @@ laser and species prediction's are, and keep their rules:
 
 * the target is (tenant, dive), and the selector takes the oldest candidate
   across every tenant the orchestrator serves. The cohort is every canonical
-  frame not yet scored by the current model, labelled or not, at any
+  frame not yet scored by the current model, labeled or not, at any
   priority (`fishsense_services_api.slate_presence_store`; the owner's
   decision, so the model can be evaluated for publication);
 * each result is persisted with everything that made it -- model, weights,
@@ -19,7 +19,7 @@ laser and species prediction's are, and keep their rules:
   rows to the same answer.
 
 The predictions feed two readers: stage 9 queues a dive's slate frames for
-labelling when it has no slate labels (`slate_store`), and the automatic chain
+labeling when it has no slate labels (`slate_store`), and the automatic chain
 reads `slate_frames`.
 """
 

@@ -37,7 +37,7 @@ Segmenter = Callable[[np.ndarray, str], List[Tuple[np.ndarray, float]]]
 
 
 def render_page(pdf_bytes: bytes, dpi: int) -> np.ndarray:
-    """Page 0 of the template at `dpi`, grey (the reference points' pixels)."""
+    """Page 0 of the template at `dpi`, gray (the reference points' pixels)."""
     import pymupdf  # pylint: disable=import-outside-toplevel
 
     with pymupdf.open(stream=pdf_bytes, filetype="pdf") as document:

@@ -13,7 +13,7 @@ get_dives_with_complete_laser_labeling_activity.py; and the reads and writes
 the v1 data-worker's gate, validator and remediation activities made through
 the API (evaluate_laser_auto_accept_activity.py,
 validate_laser_labels_for_dive_activity.py, laser_supersede_remediation.py).
-Behaviour is v1's; the database side is `fishsense_services_api.laser_store`.
+Behavior is v1's; the database side is `fishsense_services_api.laser_store`.
 
 v2 changes:
 
@@ -311,7 +311,7 @@ class LaserActivities:
             images=images,
             camera_matrix=camera.camera_matrix,
             distortion_coefficients=camera.distortion_coefficients,
-            # Colour isn't known before prediction: the model's unknown channel.
+            # Color isn't known before prediction: the model's unknown channel.
             wavelength=None,
             laser_region=[list(v) for v in LASER_REGION_POLYGON],
         )
@@ -653,7 +653,7 @@ class LaserActivities:
     async def apply_laser_validation(
         self, target: LaserTarget, result: LaserValidationResult
     ) -> int:
-        """Write one judgement: supersede its flagged live rows with their
+        """Write one judgment: supersede its flagged live rows with their
         reasons, append the line if it changed. Returns rows superseded."""
         line = None
         if result.line is not None:

@@ -86,7 +86,7 @@ RIVAL_SHARE = 0.25
 #: The check decides only with this many non-slate dots.
 CHECK_MIN_DOTS = 10
 CHECK_MEDIAN_PX = 10.0
-#: The known-sizes fit's noise model (2026-10-23, 356 labelled slate frames):
+#: The known-sizes fit's noise model (2026-10-23, 356 labeled slate frames):
 #: automatic slate dots sit a median 0.72 px from human ones along the beam,
 #: a normal sigma of ~1.1 px; SAM's slate size scatters 0.3% about the human
 #: scale (rounded up).

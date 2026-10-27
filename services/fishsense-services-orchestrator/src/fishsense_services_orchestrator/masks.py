@@ -4,10 +4,10 @@ recorded, and deleting those that never are (contract 12, migration 0059).
 New in v2 (2026-10-21). Both stages that segment -- the automatic track and
 the human-path head/tail predictor -- PUT each kept mask to a key the
 orchestrator presigned (`mask_upload`), as the app's ``mask_png`` (#230): an
-8-bit greyscale PNG at the frame. The processor runs on machines we don't own,
+8-bit grayscale PNG at the frame. The processor runs on machines we don't own,
 so `checked_masks` reads each back before it is named against its prediction:
 the key one of this stage's for the result's own capture, the bytes the ones
-reported, the PNG 8-bit greyscale at the frame (from its header: nothing is
+reported, the PNG 8-bit grayscale at the frame (from its header: nothing is
 decompressed). A mask that fails is logged, left unrecorded, and deleted
 (`discard`) -- its prediction still stands. Reads run `READS_AT_ONCE` at a
 time, heartbeating (review of #232: one at a time, a page took minutes).

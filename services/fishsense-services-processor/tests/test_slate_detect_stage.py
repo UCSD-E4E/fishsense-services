@@ -110,7 +110,7 @@ class TestTheSettings:
         with pytest.raises(ValidationError):
             sut.SlateDetectorSettings()
 
-    def test_the_hash_is_normalised(self, pinned, monkeypatch):
+    def test_the_hash_is_normalized(self, pinned, monkeypatch):
         monkeypatch.setenv("FISHSENSE_SLATE_DETECTOR_SHA256", f" {SHA.upper()} ")
         assert sut.SlateDetectorSettings().sha256 == SHA
 

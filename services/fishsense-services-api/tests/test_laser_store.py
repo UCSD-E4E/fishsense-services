@@ -298,7 +298,7 @@ async def test_laser_preprocessing_ignores_non_canonical_copies(lab, app_engine)
     assert await _next(app_engine, lab, next_mission_for_laser_preprocessing) is None
 
 
-async def test_flagged_mission_is_selected_though_fully_labelled(lab, app_engine):
+async def test_flagged_mission_is_selected_though_fully_labeled(lab, app_engine):
     mission = await lab.mission()
     await lab.label(await lab.capture(mission), needs_reprocess=True)
 
@@ -980,7 +980,7 @@ async def test_populate_items_are_predicted_canonical_captures_without_a_live_la
         (i.capture.capture_id, i.capture.number, i.x, i.y) for i in population.items
     ]
     assert (capture_id, number, x, y) == (item, 5_000_700, 5.0, 6.0)
-    # Colour votes come from every prediction of the dive (v1's majority input).
+    # Color votes come from every prediction of the dive (v1's majority input).
     assert sorted(population.colors, key=str) == ["green", "green", "red"]
 
 
@@ -1144,7 +1144,7 @@ async def test_mission_with_zero_or_only_superseded_labels_excluded(lab, app_eng
 
 async def test_the_population_is_the_full_mission_superseded_included(lab, app_engine):
     """fishsense-lite #927: the validator judges every positive, superseded
-    included; the order is imposed by the judgement, not trusted from here."""
+    included; the order is imposed by the judgment, not trusted from here."""
     mission = await lab.mission()
     a = await lab.capture(mission, number=2_000_020)
     b = await lab.capture(mission, number=2_000_010)

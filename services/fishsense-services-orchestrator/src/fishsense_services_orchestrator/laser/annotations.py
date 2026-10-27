@@ -1,4 +1,4 @@
-"""What a laser Label Studio task carries: the dive's colour, the model's
+"""What a laser Label Studio task carries: the dive's color, the model's
 pre-annotation, or -- for a frame the gate cleared -- a finished annotation.
 
 Ported from fishsense-lite@77e8f8e5 services/fishsense-api-workflow-worker/
@@ -6,7 +6,7 @@ src/fishsense_api_workflow_worker/activities/
 populate_laser_label_studio_project_activity.py (`mission_laser_label`,
 `_keypoint_result`, `_prediction_annotations`, `_auto_accepted_annotations`,
 `_build_task`) and create_laser_label_studio_project_activity.py (the title
-suffix and the labeling config). The single definition of dot, colour and
+suffix and the labeling config). The single definition of dot, color and
 annotation shape, shared by populate, the prediction backfill and the
 auto-accept apply, so they can never disagree about where the dot is.
 
@@ -52,9 +52,9 @@ LASER_LABELING_CONFIG_XML = """\
 _KEYPOINT_FROM_NAME = "laser"
 _KEYPOINT_TO_NAME = "img"
 
-# Colour is a property of the rig for a whole dive, so the per-frame colours
+# Color is a property of the rig for a whole dive, so the per-frame colors
 # the detector reads are votes and the majority labels every pre-annotation.
-# Measured over 332 human-labelled dots: 98.48% per frame, 4 of 4 dives by
+# Measured over 332 human-labeled dots: 98.48% per frame, 4 of 4 dives by
 # majority. "Red Laser" -- the more common -- when there are no votes or a tie.
 DEFAULT_LASER_LABEL = "Red Laser"
 _LASER_LABEL_BY_COLOR = {"red": "Red Laser", "green": "Green Laser"}
@@ -72,7 +72,7 @@ class Dot:
 
 def mission_laser_label(colors: Iterable[str | None]) -> str:
     """The keypoint label for every task of the dive: the majority of the
-    per-frame colours, computed over all the dive's predictions so a top-up
+    per-frame colors, computed over all the dive's predictions so a top-up
     run agrees with the first."""
     votes = Counter(c for c in colors if c in _LASER_LABEL_BY_COLOR)
     if not votes or votes.get("red", 0) == votes.get("green", 0):

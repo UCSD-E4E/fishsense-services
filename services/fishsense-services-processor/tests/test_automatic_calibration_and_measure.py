@@ -67,7 +67,7 @@ def _texture():
 
 
 def _frame(texture, dot, scale):
-    """The object, scaled by `scale` about its own centre, which lands on the dot."""
+    """The object, scaled by `scale` about its own center, which lands on the dot."""
     m = cv2.getRotationMatrix2D((W / 2, H / 2), 0.0, scale)
     m[:, 2] += np.asarray(dot) - (W / 2, H / 2)
     img = cv2.warpAffine(texture, m, (W, H))

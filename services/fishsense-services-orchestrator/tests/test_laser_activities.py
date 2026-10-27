@@ -11,7 +11,7 @@ test_populate_laser_label_studio_project_activity.py (the activity half),
 test_backfill_laser_predictions_activity.py,
 test_apply_laser_auto_accept_activity.py) and, for the writes the v1
 data-worker made itself, the data-worker's gate, validator and remediation
-activity tests. Names and reasons are v1's where the behaviour is.
+activity tests. Names and reasons are v1's where the behavior is.
 
 v2 changes, pinned here:
 
@@ -477,7 +477,7 @@ async def test_does_not_publish_an_empty_project():
     assert ls.updates == []
 
 
-async def test_the_whole_mission_gets_one_colour():
+async def test_the_whole_mission_gets_one_color():
     items = [_item(1), _item(2)]
     catalog = FakeCatalog(
         tenants=[LAB], population=_population(*items, colors=["green"] * 9 + ["red"])
@@ -646,7 +646,7 @@ async def test_the_validation_input_is_the_full_population_and_the_slate_frames(
     assert payload.calibration_capture_numbers == [20]
 
 
-async def test_applying_a_judgement_writes_its_supersedes_and_line():
+async def test_applying_a_judgment_writes_its_supersedes_and_line():
     catalog = FakeCatalog(tenants=[LAB])
     label = uuid.uuid4()
     line = LaserLineFit(a=0.0, b=1.0, c=-5.0, n_points=10, inlier_count=9,

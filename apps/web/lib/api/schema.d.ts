@@ -1327,7 +1327,7 @@ export interface components {
         };
         /**
          * LaserColoursView
-         * @description Frames by laser colour, per source; counts, never a verdict, so a
+         * @description Frames by laser color, per source; counts, never a verdict, so a
          *     mission whose sources disagree shows it (`laser_colour_store`).
          */
         LaserColoursView: {

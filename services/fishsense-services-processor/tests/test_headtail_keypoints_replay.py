@@ -34,7 +34,7 @@ from fishsense_services_processor.headtail_keypoints.workflow import (
 
 
 class _Detector:
-    """Snout at the crop's centre-left, fork at centre-right (crop pixels);
+    """Snout at the crop's center-left, fork at center-right (crop pixels);
     records what it was given."""
 
     def __init__(self):

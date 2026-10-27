@@ -2,7 +2,7 @@
 
 Ported from fishsense-lite@77e8f8e5 services/fishsense-data-processing-
 workflow-worker/src/fishsense_data_processing_workflow_worker/activities/
-preprocess_headtail_image.py. Behaviour is v1's: download the staged raw
+preprocess_headtail_image.py. Behavior is v1's: download the staged raw
 frame, `RectifiedImage(RawImage(raw_bytes), intrinsics)`, encode with
 `cv2.imencode(".jpg")` at the default quality, **no overlay** (head/tail
 labeling wants the bare rectified frame), upload. The output must stay

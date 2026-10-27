@@ -4,7 +4,7 @@ New in v2 (2026-10-21). The kernel (`headtail_predict.predict`) segments a crop
 around the laser dot and used to drop the mask it kept once its head/tail,
 box and area were taken. A `MaskSink` now holds it; the stage places it in a
 frame-sized array and encodes it as the app's ``mask_png`` (#230): an 8-bit
-greyscale PNG, width x height, 255 on the fish, lossless (the same mask is
+grayscale PNG, width x height, 255 on the fish, lossless (the same mask is
 the same bytes). It PUTs it to the key the orchestrator presigned
 (`store_mask`) and names what it stored; the orchestrator reads it back and
 checks it before recording it. A mask that can't be stored costs only itself
@@ -46,7 +46,7 @@ class FrameMask:
     height: int
 
     def encode(self) -> bytes:
-        """The app's ``mask_png`` at the frame: 8-bit greyscale, lossless."""
+        """The app's ``mask_png`` at the frame: 8-bit grayscale, lossless."""
         # pylint: disable-next=import-outside-toplevel
         import cv2
 

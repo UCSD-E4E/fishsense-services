@@ -566,7 +566,7 @@ expected them removed) and still serve analytics.fishsense; the web's first requ
   switch first stops v1's stack unit, which runs v1's `docker compose down`
   and removes them (krg-infra's cutover review, 2026-10-01). Analytics stays
   dark unless step 5c turns v2's Superset on; the owner leans toward
-  sunsetting it in favour of per-tenant pages in the portal.
+  sunsetting it in favor of per-tenant pages in the portal.
   *Note:* v1's compose runs Superset unconditionally (since 2026-07-15), although
   v1's README still says "off by default"; v2 gates it for real.
 - **v1's Superset connection** is repointed (same uuid) at v2 by the first

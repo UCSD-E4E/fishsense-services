@@ -193,7 +193,7 @@ class TestSeed:
     async def test_every_lite_frame_is_an_observation_of_the_decoy_or_a_species(
         self, dev_engine, stores
     ):
-        """The frames are Ginny, the decoy: the first ones are labelled as the
+        """The frames are Ginny, the decoy: the first ones are labeled as the
         model they are, with its known length; the rest carry a species, so
         the UI shows both kinds of fish."""
         await _seed(dev_engine, stores)
@@ -227,7 +227,7 @@ class TestSeed:
         self, dev_engine, stores
     ):
         """0047, for the mission pages: the decoy dive is on a deployment, its
-        D-labelled device makes its port known, and a pool session beside it
+        D-labeled device makes its port known, and a pool session beside it
         has no port anyone has stated."""
         await _seed(dev_engine, stores)
 

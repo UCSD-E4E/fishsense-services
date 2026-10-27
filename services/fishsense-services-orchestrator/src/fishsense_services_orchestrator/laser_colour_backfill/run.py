@@ -1,4 +1,4 @@
-"""Operator CLI: the laser-colour backfill (2026-10-26). A dry run unless
+"""Operator CLI: the laser-color backfill (2026-10-26). A dry run unless
 ``--apply``. Run where the orchestrator's Temporal settings are::
 
     python -m fishsense_services_orchestrator.laser_colour_backfill.run start \\
@@ -8,8 +8,8 @@
         --workflow-id laser-colour-backfill-dry-...
 
 `start` prints the run's id; `report` waits for it and prints its counts as
-JSON: each mission's, and the totals -- readings by colour, the frames left
-without one by why, the comparisons with the labellers' colours
+JSON: each mission's, and the totals -- readings by color, the frames left
+without one by why, the comparisons with the labelers' colors
 (``vs_label``) and the live kernel's (``vs_kernel``) as
 ``"<reading>/<theirs>"``, and how many readings were written.
 """

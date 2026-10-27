@@ -11,7 +11,7 @@ tag live here because both sides read them: the processor stamps the version,
 the orchestrator's cohort selects on a mismatch with it and tags Label Studio
 predictions with it.
 
-**Version the behaviour, not the model** (v1's rule). Bump
+**Version the behavior, not the model** (v1's rule). Bump
 `HEADTAIL_PREDICTOR_VERSION` by hand whenever the stage's output would differ
 for an unchanged image -- a different backend, crop, prompt, confidence band,
 or *checkpoint release*. The cohort keys on a mismatch, so a bump drains as an
@@ -74,7 +74,7 @@ HEADTAIL_PREDICTOR_VERSION = 2
 #: either way; the number tells the two apart (review of #349).
 HEADTAIL_FALLBACK_PREDICTOR_VERSION = -2
 
-#: The laser-centred crop, in rectified-frame pixels. Tuned on held-out frames
+#: The laser-centered crop, in rectified-frame pixels. Tuned on held-out frames
 #: (v1's sweep); 1400-2200 is a plateau. Moving it bumps the version.
 HEADTAIL_CROP_WIDTH = 1800
 HEADTAIL_CROP_HEIGHT = 1350
@@ -102,7 +102,7 @@ def headtail_model_version_tag(predictor_version: int | None = None) -> str:
     **Pass the row's own `predictor_version`**: the backfill dedupes on
     `(task_id, model_version)`, so tagging a fallback row as the current tier
     would make the later upgrade look already attached. It is an idempotency
-    key, so it names the behaviour and nothing else -- never the checkpoint's
+    key, so it names the behavior and nothing else -- never the checkpoint's
     path or the core version, which moved the key for identical output in v1.
     """
     version = (
@@ -147,7 +147,7 @@ class PreprocessHeadtailImageInput(BaseModel):
 class PredictHeadtailImage(BaseModel):
     """One image to predict: its stage-5.1 JPEG (the exact frame the labeler
     sees) and its live laser dots, which are both the gate and the crop
-    centre. An image may carry more than one dot; first hit wins."""
+    center. An image may carry more than one dot; first hit wins."""
 
     capture_id: UUID
     jpeg: ObjectRef
@@ -207,7 +207,7 @@ class HeadtailPredictionResult(BaseModel):
     crop_x: Optional[int] = None
     crop_y: Optional[int] = None
     #: The dot the answer came from: the one on the kept mask, or, with no
-    #: mask kept, the first (the crop's centre). None only with no dot or no
+    #: mask kept, the first (the crop's center). None only with no dot or no
     #: decodable frame. v1 set it on a prediction only.
     laser_label_id: Optional[UUID] = None
     predictor_version: Optional[int] = None

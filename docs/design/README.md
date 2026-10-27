@@ -1,7 +1,7 @@
 # FishSense design: Deep water
 
 One design language for the web portal (`apps/web`) and FishSense Mobile, agreed
-with the owner on 2026-10-20. The colour, type and shape values are in
+with the owner on 2026-10-20. The color, type and shape values are in
 [`tokens.json`](tokens.json). The mobile team's part is
 [`docs/handoff/fishsense-mobile/DESIGN.md`](../handoff/fishsense-mobile/DESIGN.md).
 The owner keeps a canvas with every screen drawn; ask them for access. Every
@@ -9,7 +9,7 @@ decision on it is written down here, so this page stands on its own.
 
 Nothing here is built yet. The portal still uses its own Tailwind look, and these
 docs describe where it is going. PLAN.md stays the design of record for the system.
-This page covers how the apps look and are organised.
+This page covers how the apps look and are organized.
 
 ## The structure: Fish and Data
 
@@ -42,8 +42,8 @@ inferred one.
 
 ## Navigation
 
-- **Web:** Today · Fish · Data · Map · Labelling, with Settings in the nav.
-  Labelling is the triage and calibration tools, shown to staff. Missions and
+- **Web:** Today · Fish · Data · Map · Labeling, with Settings in the nav.
+  Labeling is the triage and calibration tools, shown to staff. Missions and
   Deployments live under Data.
 - **Phone:** Camera · Fish · Data · Settings. Photos becomes Fish, and Map becomes
   a list-or-map switch on Fish and Data, as on the web.
@@ -71,7 +71,7 @@ inferred one.
 - **Signed in, "Today":**
   - the tenant's numbers (lengths, missions, frames, latest activity);
   - recent fish and recent deployments;
-  - "Needs you": for staff, labelling waiting, unknown ports and groupings to
+  - "Needs you": for staff, labeling waiting, unknown ports and groupings to
     review; for members, their unsynced and unmeasured captures.
 - **Signed out, the public page:**
   - what FishSense does;
@@ -91,16 +91,16 @@ inferred one.
 - **Dark is the field theme, light the desk theme.** The phone is always dark. The
   web follows the system setting. Both themes have the same token names in
   `tokens.json`, so a theme switch only changes values.
-- **Contrast:** every text token, the state colours included, passes 4.5:1 on its
-  theme's ground, surface and raised colours. The worst cases, checked 2026-10-20:
+- **Contrast:** every text token, the state colors included, passes 4.5:1 on its
+  theme's ground, surface and raised colors. The worst cases, checked 2026-10-20:
   dark `text3` 4.97, light `text3` 5.41, light `warn` 5.44, light `tealText` 5.27.
-  Check again before adding a surface or a text colour.
+  Check again before adding a surface or a text color.
 - **The length is the hero.** It is set at 56 px on the web and 44 px on the phone,
   with tabular figures and a smaller, quieter unit. Its method (laser or LiDAR)
   always sits one line below it.
-- **Lengths are in millimetres,** whole numbers with thousands grouped
+- **Lengths are in millimeters,** whole numbers with thousands grouped
   (`424 mm`, `1,235 mm`; the owner, 2026-10-21). Data is stored and served in
-  metres, and distances (laser range, how far away) stay in metres.
+  meters, and distances (laser range, how far away) stay in meters.
 - **Type:** Inter for everything a person reads. JetBrains Mono only for what a
   person copies: object keys, checksums, paths, ids.
 - **Shape:** cards 12 px, sheets 16, controls 10, chips round. Touch targets are
@@ -108,16 +108,16 @@ inferred one.
 - **Icons:** a heavy monoline with round caps and joins, taken loosely from the
   current logo. The mark on the canvas is a stand-in, because the logo may be
   replaced.
-- **Colour use:** one filled teal action per screen. Facts are neutral chips, and
-  only a state that needs a person is coloured (`warn` for a look, `error` for a
+- **Color use:** one filled teal action per screen. Facts are neutral chips, and
+  only a state that needs a person is colored (`warn` for a look, `error` for a
   refusal, an outline for waiting).
 - **Measurement overlays:**
   - snout `#2563EB` (blue), fork `#FFB547` (orange), mask teal at 35%, and the
     laser dot `#E51717`, after the logo's red;
   - snout and fork differ in hue **and** lightness: relative luminance 0.15 against
-    0.55, a ratio of 2.9:1. So they stay apart for colour-blind viewers and in
-    greyscale;
-  - each point is drawn with a 3 px ring in the ground colour;
+    0.55, a ratio of 2.9:1. So they stay apart for color-blind viewers and in
+    grayscale;
+  - each point is drawn with a 3 px ring in the ground color;
   - these replace the app's green, red and cyan.
 - **Photos:** edge to edge, never cropped on the fish. A missing image is a
-  labelled outline, never a blank space.
+  labeled outline, never a blank space.

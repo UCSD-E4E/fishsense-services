@@ -12,7 +12,7 @@ v2 changes:
 * no user-sync step: v2 records Label Studio user ids directly, and mapping
   them to people is PLAN.md §9.14;
 * **one project's failure doesn't cancel the others.** v1 ran them in a
-  TaskGroup, so the first failure cancelled every other project mid-sync. Here
+  TaskGroup, so the first failure canceled every other project mid-sync. Here
   each finishes on its own, and the workflow then fails naming the ones that
   didn't -- loud, without holding anyone else's labels back.
 

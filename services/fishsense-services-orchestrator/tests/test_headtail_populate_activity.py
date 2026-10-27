@@ -310,7 +310,7 @@ async def test_a_project_whose_import_is_not_listable_yet_stays_a_draft(monkeypa
     monkeypatch.setattr(populate_utils, "_IMPORT_VISIBILITY_ATTEMPTS", 1)
     catalog = FakeCatalog(candidates=[_candidate(1)], labels=[_row(2, completed=True)])
     sdk = FakeLabelStudioSdk(task_ids=[3001])
-    sdk.tasks = SimpleNamespace(list=lambda project=None: [])  # still materialising
+    sdk.tasks = SimpleNamespace(list=lambda project=None: [])  # still materializing
 
     assert await _populate(catalog, sdk) == 0
     assert len(sdk.imports) == 1

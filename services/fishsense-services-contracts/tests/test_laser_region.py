@@ -167,7 +167,7 @@ def _centre():
     )
 
 
-def test_centre_of_the_region_is_inside():
+def test_center_of_the_region_is_inside():
     assert point_in_laser_region(*_centre())
 
 

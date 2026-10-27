@@ -5,7 +5,7 @@ fishsense_api_workflow_worker/activities/:
 select_dives_needing_headtail_population_activity.py,
 create_headtail_label_studio_project_activity.py,
 populate_headtail_label_studio_project_activity.py and
-backfill_headtail_predictions_activity.py. Behaviour is v1's:
+backfill_headtail_predictions_activity.py. Behavior is v1's:
 
 * **populate is prediction-gated** and **JPEG-gated**: an image is imported
   only once the detector has visited it (an abstention counts) and its

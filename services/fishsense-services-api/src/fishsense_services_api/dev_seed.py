@@ -10,7 +10,7 @@ show:
   and ``web-service``, the landing page's service account (member);
 * a measured Lite dive: one frame per :class:`Frame`, each with a laser dot,
   head/tail and species label, a laser depth and a current server
-  measurement. The first :data:`DECOY_FRAMES` are labelled as what they
+  measurement. The first :data:`DECOY_FRAMES` are labeled as what they
   are, the fish model Ginny with her known length (most of production's
   fish are models); the rest carry a species, so the UI shows both. The frames are real (Ginny, the known-length decoy, from
   ``2025.01.17.FishSense.San Diego``), but **every label and number here is
@@ -91,7 +91,7 @@ __all__ = [
 DEV_DATABASE_SETTING = "fishsense.dev_database"
 TENANT = "lab"
 USERS = {"dev-admin": "admin", "dev-member": "member", "web-service": "member"}
-#: (scientific, common): the species the seed's Lite fish are labelled with.
+#: (scientific, common): the species the seed's Lite fish are labeled with.
 LITE_SPECIES = ("Lachnolaimus maximus", "Hogfish")
 LITE_LABEL = f"Fish, {LITE_SPECIES[1]} ({LITE_SPECIES[0]})"
 MOBILE_CAPTURES = 3
@@ -99,7 +99,7 @@ MOBILE_CAPTURES = 3
 DECOY_LENGTH_M = 0.3127
 DECOY_MODEL = "Ginny"
 DECOY_LABEL = f"Fish Model, {DECOY_MODEL}"
-#: How many of the frames are labelled as the decoy (the rest, a species).
+#: How many of the frames are labeled as the decoy (the rest, a species).
 DECOY_FRAMES = 3
 #: Every seeded dive's path starts here, which is how a rerun finds the seed.
 MISSION_PREFIX = "dev-seed/"
@@ -768,7 +768,7 @@ def _fish_mask(
 
 
 def _png_gray(width: int, height: int) -> bytes:
-    """A small grey PNG: the lossless frame's stand-in (nothing decodes it)."""
+    """A small gray PNG: the lossless frame's stand-in (nothing decodes it)."""
 
     def chunk(kind: bytes, data: bytes) -> bytes:
         body = kind + data

@@ -3,7 +3,7 @@
 The automatic track's predictions came from `automatic_frame_result` (SAM 3.1
 behind its score gate, on the frame's render, seeded by the automatic dot);
 the human path's from `predict_from_jpeg` (SAM 3.1 on the stage-5.1 JPEG,
-seeded by the labelled dots). Each is re-run here with the prediction's own
+seeded by the labeled dots). Each is re-run here with the prediction's own
 dot(s) on the same image, a `MaskSink` catching the kept mask, and the result
 judged against what the prediction recorded (`contracts.mask_backfill.
 reproduces`). Nothing else is taken from the re-run: the prediction stands.

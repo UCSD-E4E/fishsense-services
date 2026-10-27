@@ -42,7 +42,7 @@ def test_a_missing_d_says_nothing(label):
         ("/d/2023.08.18.FishSense.Nathans Pool/04", None),
     ],
 )
-def test_a_d_labelled_device_is_found_in_a_missions_path(path, label):
+def test_a_d_labeled_device_is_found_in_a_missions_path(path, label):
     assert device_label_in_path(path) == label
 
 
@@ -83,7 +83,7 @@ def test_a_dataset_folder_names_the_deployment(path, name, prefix):
 @pytest.mark.parametrize(
     "path",
     [
-        # Date and project only: a reorganised dump, not an e4edm dataset.
+        # Date and project only: a reorganized dump, not an e4edm dataset.
         "2024.06.20.REEF/08_2023/080123_FSL-01 Photos",
         "2023-09-07 REEF Data Dump/080123_FSL-01 Photos",
         "2025-02-10 REEF Data Dump SMILE 6/062524_Alligator_FSL04/x",
