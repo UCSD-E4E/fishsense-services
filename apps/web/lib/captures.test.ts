@@ -14,7 +14,7 @@ import {
   placeName,
   formatLength,
   formatLengthWithError,
-  millimetres,
+  millimeters,
   getCapture,
   fishOfCapture,
   measurementOverlay,
@@ -110,7 +110,7 @@ describe("getCapture", () => {
 });
 
 describe("formatLengthWithError", () => {
-  it("shows the calibration's error bar, 1 SD, in whole millimetres (the owner, 2026-10-26: always with its error)", () => {
+  it("shows the calibration's error bar, 1 SD, in whole millimeters (the owner, 2026-10-26: always with its error)", () => {
     expect(formatLengthWithError(0.4237, 0.0089)).toBe("424 ± 9 mm");
   });
 
@@ -125,16 +125,16 @@ describe("formatLengthWithError", () => {
 });
 
 describe("formatLength", () => {
-  it("shows whole millimetres (the owner, 2026-10-21)", () => {
+  it("shows whole millimeters (the owner, 2026-10-21)", () => {
     expect(formatLength(0.4237)).toBe("424 mm");
   });
 
-  it("rounds to the nearest millimetre", () => {
+  it("rounds to the nearest millimeter", () => {
     expect(formatLength(0.3125)).toBe("313 mm");
     expect(formatLength(0.31249)).toBe("312 mm");
   });
 
-  it("groups the thousands of a fish over a metre", () => {
+  it("groups the thousands of a fish over a meter", () => {
     expect(formatLength(1.2346)).toBe("1,235 mm");
   });
 
@@ -143,14 +143,14 @@ describe("formatLength", () => {
   });
 });
 
-describe("millimetres", () => {
+describe("millimeters", () => {
   it("is the number alone, for a display that sets its unit apart", () => {
-    expect(millimetres(0.4237)).toBe("424");
+    expect(millimeters(0.4237)).toBe("424");
   });
 
   it("is a dash when there is no length", () => {
-    expect(millimetres(null)).toBe("—");
-    expect(millimetres(undefined)).toBe("—");
+    expect(millimeters(null)).toBe("—");
+    expect(millimeters(undefined)).toBe("—");
   });
 });
 

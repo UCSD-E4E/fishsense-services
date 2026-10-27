@@ -33,8 +33,8 @@ export function clampScale(k: number): number {
 /**
  * The view a frame opens at.
  *
- * With no retained scale this is the familiar fit-and-centre. With one, the
- * magnification is kept and the view is re-centred on **this** frame's
+ * With no retained scale this is the familiar fit-and-center. With one, the
+ * magnification is kept and the view is re-centered on **this** frame's
  * prediction.
  *
  * Carrying the previous frame's pan across as well would be the more literal
@@ -42,7 +42,7 @@ export function clampScale(k: number): number {
  * are unrelated frames whose dots are in unrelated places, so at 120x the
  * labeler would open every frame looking at whatever water the *previous* dot
  * happened to sit in, and have to hunt for the real one at maximum
- * magnification. Re-centring is what makes retained zoom worth having — the
+ * magnification. Re-centering is what makes retained zoom worth having — the
  * frame opens already looking at the thing being judged.
  */
 export function initialView({
@@ -58,7 +58,7 @@ export function initialView({
 }): View {
   const fit = fitScale(stage, image);
   // At or below fit scale the whole frame is on screen, so there is nothing to
-  // centre on and re-centring would only push part of it off the stage.
+  // center on and re-centering would only push part of it off the stage.
   // Zooming out is how a labeler asks for context; it must not be sticky.
   if (retainedScale === null || retainedScale <= fit) {
     const k = fit;

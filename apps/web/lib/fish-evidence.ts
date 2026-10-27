@@ -45,7 +45,7 @@ export type FishEvidence = { overlay: Overlay | null; history: HistoryRow[]; fil
 const FILES: Record<string, string> = {
   rgb_jpeg: "Photo (JPEG)",
   rgb_lossless: "Frame the phone measured on (lossless)",
-  depth_f32: "LiDAR depth (float32, metres)",
+  depth_f32: "LiDAR depth (float32, meters)",
   confidence_u8: "Depth confidence (uint8)",
   mask_u8: "Fish mask (uint8)",
 };

@@ -26,7 +26,7 @@
  */
 
 /**
- * Bounded, not serialised. One at a time would make a 60-project landing page
+ * Bounded, not serialized. One at a time would make a 60-project landing page
  * unusable; the goal is to stop the thundering herd, not the parallelism.
  */
 export const MAX_CONCURRENT = 4;

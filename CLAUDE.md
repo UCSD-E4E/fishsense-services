@@ -55,6 +55,14 @@ Integration tests need Docker. The host has no `python3`; use `uv run python`.
 
 ## Conventions
 
+- **American spelling, everywhere.** The owner is American: write color, center,
+  meter, labeled, canceled, gray, behavior, analyze, organize; not colour,
+  centre, metre, labelled, cancelled, grey, behaviour, analyse, organise. This
+  covers the website's text, API messages, docs, comments, identifiers and file
+  names. Keep a name someone else spells (Label Studio's `was_cancelled`, HTML's
+  `aria-labelledby`) as they spell it. `apps/web/lib/american-spelling.test.ts`
+  fails on British spellings in the web's source; add a word to it when one gets
+  through.
 - **Conventional commits.** release-please derives the version from them: a
   `feat:` bumps the minor version, a `fix:` the patch. Commit messages and PR
   descriptions explain *why*, with the incident or the numbers.

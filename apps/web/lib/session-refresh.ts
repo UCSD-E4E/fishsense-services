@@ -5,7 +5,7 @@
  * never refreshed it). A page render can't write the session cookie, so the
  * refresh happens in `/api/session/refresh`, a route handler, which then
  * sends the browser back. Its `callbackUrl` comes from the query string, so
- * only a local path is honoured -- anything else would be an open redirect.
+ * only a local path is honored -- anything else would be an open redirect.
  */
 
 export const REFRESH_ROUTE = "/api/session/refresh";

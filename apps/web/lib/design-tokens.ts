@@ -1,6 +1,6 @@
 /**
  * The Deep water design tokens (docs/design/README.md, agreed 2026-10-20) as
- * CSS variables: `--fs-<name>` per colour, light by default and dark when the
+ * CSS variables: `--fs-<name>` per color, light by default and dark when the
  * system is dark, unless the user picked a theme in the header (`data-theme`
  * on <html>, lib/theme.ts): then their pick. globals.css maps them onto
  * Tailwind's theme (`bg-surface`, `text-fg-2`, …), and keys its `dark:`

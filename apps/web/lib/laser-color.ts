@@ -1,19 +1,19 @@
 /**
- * The laser's colour, as the web shows it (0072; the owner, 2026-10-24).
+ * The laser's color, as the web shows it (0072; the owner, 2026-10-24).
  *
- * One rig shoots one colour for a whole dive. A dot's colour is what the laser
+ * One rig shoots one color for a whole dive. A dot's color is what the laser
  * kernel read off its pixels (the automatic dot, the human path's laser
- * stage) or what a labeller chose. A mission's colours come as counts from
- * each source; when sources mostly read different colours the page says so,
+ * stage) or what a labeler chose. A mission's colors come as counts from
+ * each source; when sources mostly read different colors the page says so,
  * because a majority across them would hide exactly the case worth looking at.
  */
 import type { Schemas } from "./api/client";
 
-export type LaserColours = Schemas["LaserColoursView"];
+export type LaserColors = Schemas["LaserColoursView"];
 type Counts = Schemas["ColourCountsView"];
 
-const SOURCES: { key: keyof LaserColours; label: string }[] = [
-  { key: "labels", label: "Labellers" },
+const SOURCES: { key: keyof LaserColors; label: string }[] = [
+  { key: "labels", label: "Labelers" },
   { key: "predictions", label: "Laser stage" },
   { key: "automatic", label: "Automatic dot" },
 ];
@@ -25,12 +25,12 @@ function apart(margin: number): string {
 }
 
 /**
- * A dot's colour in words (the owner, 2026-10-26: the margin as a size, not a
+ * A dot's color in words (the owner, 2026-10-26: the margin as a size, not a
  * signed number). A reading too close to call says so; "Not read" is for a
  * dot that gave no reading at all. ``source`` ``render``: read off the render
  * later by the backfill (0076), not with the dot.
  */
-export function colourLabel(
+export function colorLabel(
   color: string | null | undefined,
   margin?: number | null,
   source?: string | null,
@@ -43,12 +43,12 @@ export function colourLabel(
   return source === "render" ? `${said} (read from the render)` : said;
 }
 
-/** One row per source, labellers first. */
-export function colourRows(
-  colours: LaserColours,
+/** One row per source, labelers first. */
+export function colorRows(
+  colors: LaserColors,
 ): { source: string; red: number; green: number; unread: number; total: number }[] {
   return SOURCES.map(({ key, label }) => {
-    const c: Counts = colours[key];
+    const c: Counts = colors[key];
     return { source: label, red: c.red, green: c.green, unread: c.unread, total: c.red + c.green + c.unread };
   });
 }
@@ -58,8 +58,8 @@ function mostly(c: Counts): "red" | "green" | null {
   return c.red > c.green ? "red" : "green";
 }
 
-/** Two sources that read a colour mostly read different ones. */
-export function sourcesDisagree(colours: LaserColours): boolean {
-  const read = new Set(SOURCES.map(({ key }) => mostly(colours[key])).filter((c) => c !== null));
+/** Two sources that read a color mostly read different ones. */
+export function sourcesDisagree(colors: LaserColors): boolean {
+  const read = new Set(SOURCES.map(({ key }) => mostly(colors[key])).filter((c) => c !== null));
   return read.size > 1;
 }

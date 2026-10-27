@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireSignedIn } from "@/app/_shell/guard";
 import { getAutomaticFrame } from "@/lib/automatic";
-import { describeOrigin, formatLength, getCapture, millimetres, osmLink } from "@/lib/captures";
+import { describeOrigin, formatLength, getCapture, millimeters, osmLink } from "@/lib/captures";
 import { fishEvidence, type Overlay } from "@/lib/fish-evidence";
 import { isSlug, isUuid } from "@/lib/ids";
 import {
@@ -15,7 +15,7 @@ import {
 } from "@/lib/observations";
 import { paths } from "@/lib/tenant-paths";
 import { AutomaticSection } from "./automatic-section";
-import { colourLabel } from "@/lib/laser-colour";
+import { colorLabel } from "@/lib/laser-color";
 
 export const dynamic = "force-dynamic";
 
@@ -97,7 +97,7 @@ export default async function FishDetailPage({ params }: Props) {
               Fork length
             </span>
             <span className="text-[56px] font-semibold leading-none tracking-tight tabular-nums">
-              <Length metres={o.length_m} />
+              <Length meters={o.length_m} />
             </span>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
               <Chip>{methodLabel(o.method)}</Chip>
@@ -150,11 +150,11 @@ export default async function FishDetailPage({ params }: Props) {
           <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-5 gap-y-2.5">
             {detail.laser && (
               <>
-                <Row label="Laser depth">{metres(detail.laser.depth_m)}</Row>
-                <Row label="Laser range">{metres(detail.laser.range_m)}</Row>
+                <Row label="Laser depth">{meters(detail.laser.depth_m)}</Row>
+                <Row label="Laser range">{meters(detail.laser.range_m)}</Row>
                 <Row label="Calibration">{detail.laser.calibration_producer ?? "—"}</Row>
                 <Row label="Laser dot">{pixels(detail.laser.dot)}</Row>
-                {detail.laser.dot && <Row label="Laser colour">{colourLabel(detail.laser.color)}</Row>}
+                {detail.laser.dot && <Row label="Laser color">{colorLabel(detail.laser.color)}</Row>}
                 <Row label="Head">{pixels(detail.laser.head)}</Row>
                 <Row label="Tail">{pixels(detail.laser.tail)}</Row>
               </>
@@ -292,7 +292,7 @@ export default async function FishDetailPage({ params }: Props) {
 }
 
 /** Snout and fork (a Lite fish's head and tail) in the design's overlay
- *  colours, each ringed so it stands out on any photo, joined by a dashed
+ *  colors, each ringed so it stands out on any photo, joined by a dashed
  *  line; and a Lite fish's laser dot, in red. */
 function MeasurementOverlay({ overlay }: { overlay: Overlay }) {
   const r = overlay.width / 110;
@@ -340,11 +340,11 @@ function MeasurementOverlay({ overlay }: { overlay: Overlay }) {
   );
 }
 
-function Length({ metres }: { metres: number | null | undefined }) {
-  if (metres == null) return <>—</>;
+function Length({ meters }: { meters: number | null | undefined }) {
+  if (meters == null) return <>—</>;
   return (
     <>
-      {millimetres(metres)}
+      {millimeters(meters)}
       <span className="text-2xl font-medium text-fg-2"> mm</span>
     </>
   );
@@ -376,7 +376,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-function metres(value: number | null | undefined): string {
+function meters(value: number | null | undefined): string {
   return value == null ? "—" : `${value.toFixed(2)} m`;
 }
 

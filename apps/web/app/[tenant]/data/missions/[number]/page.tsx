@@ -18,7 +18,7 @@ import { AutomaticRun, hasRun } from "@/app/[tenant]/data/missions/automatic-run
 import { FactsForms } from "@/app/[tenant]/data/missions/facts-forms";
 import { deploymentHref, PortBadge } from "@/app/[tenant]/data/missions/mission-table";
 import { paths } from "@/lib/tenant-paths";
-import { colourRows, sourcesDisagree, type LaserColours } from "@/lib/laser-colour";
+import { colorRows, sourcesDisagree, type LaserColors } from "@/lib/laser-color";
 
 export const dynamic = "force-dynamic";
 
@@ -135,7 +135,7 @@ export default async function MissionPage({ params, searchParams }: Props) {
         </p>
       )}
 
-      <LaserColourSection colours={mission.laser_colors} />
+      <LaserColorSection colors={mission.laser_colors} />
 
       {hasRun(run) && <AutomaticRun run={run} />}
 
@@ -183,19 +183,19 @@ export default async function MissionPage({ params, searchParams }: Props) {
   );
 }
 
-/** The mission's frames by laser colour, per source (0072): counts, so a
+/** The mission's frames by laser color, per source (0072): counts, so a
  *  mission whose sources disagree shows it. Hidden when no source read a dot. */
-function LaserColourSection({ colours }: { colours: LaserColours }) {
-  const rows = colourRows(colours);
+function LaserColorSection({ colors }: { colors: LaserColors }) {
+  const rows = colorRows(colors);
   if (rows.every((r) => r.total === 0)) return null;
   return (
-    <section className="mb-8" aria-labelledby="laser-colour">
-      <h2 id="laser-colour" className="mb-3 text-lg font-semibold">
-        Laser colour
+    <section className="mb-8" aria-labelledby="laser-color">
+      <h2 id="laser-color" className="mb-3 text-lg font-semibold">
+        Laser color
       </h2>
-      {sourcesDisagree(colours) && (
+      {sourcesDisagree(colors) && (
         <p role="note" className="mb-3 text-sm text-warn">
-          The sources mostly read different colours: check this mission&apos;s laser.
+          The sources mostly read different colors: check this mission&apos;s laser.
         </p>
       )}
       <table className="w-full max-w-xl text-sm">
@@ -219,7 +219,7 @@ function LaserColourSection({ colours }: { colours: LaserColours }) {
         </tbody>
       </table>
       <p className="mt-2 text-xs text-fg-2">
-        Frames with a laser dot. Labellers choose a colour; the laser stage and the automatic dot read
+        Frames with a laser dot. Labelers choose a color; the laser stage and the automatic dot read
         it off the dot&apos;s pixels.
       </p>
     </section>
