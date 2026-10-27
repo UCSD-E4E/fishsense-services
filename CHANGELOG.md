@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.69.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.68.0...v0.69.0) (2026-10-27)
+
+
+### Features
+
+* **api:** assign-slate-templates records missions' slate templates ([3f2ad2f](https://github.com/UCSD-E4E/fishsense-services/commit/3f2ad2f8224b82076781149e7c359c6bdeb454d4))
+
 ## [0.68.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.67.0...v0.68.0) (2026-10-27)
 
 
