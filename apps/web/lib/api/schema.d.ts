@@ -272,6 +272,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{slug}/laser-colors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Laser Colours
+         * @description Every mission's frames by laser colour, per source, in one read: the
+         *     missions with a dot from any source, by number (the owner, 2026-10-26).
+         */
+        get: operations["list_mission_laser_colors"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{slug}/me/skills": {
         parameters: {
             query?: never;
@@ -844,6 +865,8 @@ export interface components {
             created_at: string;
             /** Frames Used */
             frames_used: number | null;
+            /** Method */
+            method: string;
             /** Outcome */
             outcome: string;
             /** Pair Count */
@@ -1572,6 +1595,14 @@ export interface components {
              * Format: date-time
              */
             started_at: string;
+        };
+        /** MissionLaserColoursView */
+        MissionLaserColoursView: {
+            automatic: components["schemas"]["ColourCountsView"];
+            labels: components["schemas"]["ColourCountsView"];
+            /** Mission Number */
+            mission_number: number;
+            predictions: components["schemas"]["ColourCountsView"];
         };
         /** MissionView */
         MissionView: {
@@ -2573,6 +2604,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": number[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_mission_laser_colors: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionLaserColoursView"][];
                 };
             };
             /** @description Validation Error */

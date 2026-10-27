@@ -1629,7 +1629,15 @@ async def test_the_cohort_reads_each_frames_latest_rows_by_index(
                     f"WHERE d.tenant_id = :t AND {automatic_results_cohort()} "
                     "ORDER BY d.created_at, d.id LIMIT 1"
                 ),
-                {"t": lab, "hv": 1, "sv": 1, "cv": "1", "mv": "1"},
+                # The slate pose switched on (0078): its term too.
+                {
+                    "t": lab,
+                    "hv": 1,
+                    "sv": 1,
+                    "cv": "1",
+                    "mv": "1",
+                    "pv": "slate-pose-4",
+                },
             )
         ).scalar_one()
     nodes = list(_plan_nodes(plan["Plan"]))

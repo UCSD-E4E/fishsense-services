@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.68.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.67.0...v0.68.0) (2026-10-27)
+
+
+### Features
+
+* **api:** every mission's laser colours in one read (list_mission_laser_colors) ([7743b85](https://github.com/UCSD-E4E/fishsense-services/commit/7743b8566fcbdb9a966c61e1fd1aa80632719a0e))
+* automatic slate-pose calibration behind a switch (calibration v4, 0078) ([bb2b8d5](https://github.com/UCSD-E4E/fishsense-services/commit/bb2b8d5ea1d9666dfc38c96c64430504a7e04e9b))
+* automatic slate-pose calibration behind a switch (calibration v4, 0078) ([cf5e428](https://github.com/UCSD-E4E/fishsense-services/commit/cf5e428c3b00ce37966c3397b32a0515b81a8fc1))
+
 ## [0.67.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.66.0...v0.67.0) (2026-10-26)
 
 

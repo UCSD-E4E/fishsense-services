@@ -35,6 +35,7 @@ __all__ = [
     "dot_colour_columns",
     "dot_colour_join",
     "mission_laser_colours",
+    "tenant_laser_colours",
 ]
 
 #: How a label names each colour.
@@ -135,3 +136,54 @@ async def mission_laser_colours(
     return MissionLaserColours(
         **{source: ColourCounts(**found) for source, found in counts.items()}
     )
+
+
+#: Every mission's counts at once: the same three sources, grouped by mission,
+#: each current view read once for the tenant (1.6 s for the lab in prod,
+#: 2026-10-26, against ~60 ms a mission one at a time).
+_TENANT_SQL = f"""
+    SELECT 'labels' AS source, d.number,
+           CASE l.label WHEN 'Red Laser' THEN 'red' WHEN 'Green Laser' THEN 'green'
+           END AS colour,
+           count(DISTINCT l.capture_id) AS n
+    FROM laser_labels l
+    JOIN captures c ON c.tenant_id = l.tenant_id AND c.id = l.capture_id
+    JOIN missions d ON d.tenant_id = c.tenant_id AND d.id = c.mission_id
+    WHERE l.tenant_id = :t AND l.completed AND NOT l.superseded AND l.x IS NOT NULL
+    GROUP BY 2, 3
+    UNION ALL
+    SELECT 'predictions', d.number, p.color, count(*)
+    FROM current_laser_predictions p
+    JOIN captures c ON c.tenant_id = p.tenant_id AND c.id = p.capture_id
+    JOIN missions d ON d.tenant_id = c.tenant_id AND d.id = c.mission_id
+    WHERE p.tenant_id = :t AND p.x IS NOT NULL
+    GROUP BY 2, 3
+    UNION ALL
+    SELECT 'automatic', d.number, coalesce(h.laser_color, rc.color), count(*)
+    FROM current_automatic_head_tail_predictions h
+    {dot_colour_join("h")}
+    JOIN captures c ON c.tenant_id = h.tenant_id AND c.id = h.capture_id
+    JOIN missions d ON d.tenant_id = c.tenant_id AND d.id = c.mission_id
+    WHERE h.tenant_id = :t AND h.laser_x IS NOT NULL
+    GROUP BY 2, 3
+"""
+
+
+async def tenant_laser_colours(
+    conn: AsyncConnection, tenant_id: uuid.UUID
+) -> dict[int, MissionLaserColours]:
+    """Every mission with a dot from any source, by number: what
+    `mission_laser_colours` gives each, in one read (the owner, 2026-10-26)."""
+    found: dict[int, dict[str, dict[str, int]]] = {}
+    for row in await conn.execute(text(_TENANT_SQL), {"t": tenant_id}):
+        counts = found.setdefault(
+            row.number, {"labels": {}, "predictions": {}, "automatic": {}}
+        )
+        key = row.colour if row.colour in ("red", "green") else "unread"
+        counts[row.source][key] = counts[row.source].get(key, 0) + row.n
+    return {
+        number: MissionLaserColours(
+            **{source: ColourCounts(**c) for source, c in counts.items()}
+        )
+        for number, counts in sorted(found.items())
+    }

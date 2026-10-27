@@ -69,7 +69,9 @@ from fishsense_services_contracts.automatic_results import (
     MeasureAutomaticInput,
     MeasureAutomaticResult,
     PredictAutomaticFramesInput,
+    SLATE_POSE_CALIBRATION_VERSION,
 )
+from fishsense_services_contracts.calibration_v3 import CalibrationV3Report
 from fishsense_services_contracts.headtail_keypoints import (
     KeypointFrame,
     KeypointFramesInput,
@@ -199,6 +201,10 @@ class AutomaticResultsCatalog(Protocol):
         self, tenant_id, mission_id, row: AutomaticCalibrationRow
     ) -> uuid.UUID: ...
 
+    async def automatic_slate_pose_owed(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, version: str
+    ) -> bool: ...
+
     async def automatic_measure_inputs(
         self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, algorithm_version: str
     ) -> AutomaticMeasureInputs: ...
@@ -224,6 +230,7 @@ class AutomaticResultsActivities:
         store: Any,
         renders: Any,
         species_enabled: bool = True,
+        slate_pose_enabled: bool = False,
     ) -> None:
         self._catalog = catalog
         self._store = store
@@ -232,6 +239,9 @@ class AutomaticResultsActivities:
         #: Species' own switch (2026-10-15): off, no species images, and the
         #: cohort holds no dive for species work.
         self._species_enabled = species_enabled
+        #: The slate-pose calibration's switch (0078; the owner, 2026-10-26:
+        #: off until its read-only validation is reviewed).
+        self._slate_pose_enabled = slate_pose_enabled
 
     async def _recorded_renders(self, target: AutomaticTarget, rows) -> list[str]:
         """Presigned GETs of the render each of `rows` records -- its version,
@@ -288,6 +298,9 @@ class AutomaticResultsActivities:
                 tenant_id,
                 species=self._species_enabled,
                 exclude=exclude or [],
+                slate_pose_version=(
+                    SLATE_POSE_CALIBRATION_VERSION if self._slate_pose_enabled else None
+                ),
                 **VERSIONS,
             )
             if candidate is None:
@@ -646,6 +659,53 @@ class AutomaticResultsActivities:
         )
 
     # -- lengths (light) -----------------------------------------------------------
+
+    @activity.defn(name="automatic_slate_pose_owed")
+    async def automatic_slate_pose_owed(self, target: AutomaticTarget) -> bool:
+        """Whether the mission's slate pose is owed: never with its switch
+        off, else the store's answer at the current version."""
+        if not self._slate_pose_enabled:
+            return False
+        return await self._catalog.automatic_slate_pose_owed(
+            target.tenant_id, target.mission_id, version=SLATE_POSE_CALIBRATION_VERSION
+        )
+
+    @activity.defn(name="persist_automatic_slate_pose")
+    async def persist_automatic_slate_pose(
+        self,
+        target: AutomaticTarget,
+        plan: AutomaticCalibrationPlan,
+        report: CalibrationV3Report,
+        slate_template_id: uuid.UUID,
+        posed: List[uuid.UUID],
+    ) -> uuid.UUID:
+        """The slate-pose fit as the mission's slate-pose calibration, naming
+        its template and the frames it posed (the zoom gate's staleness reads
+        them as it reads the size-constancy fit's)."""
+        if report.mission_id != target.mission_id:
+            raise _refuse(target, f"a slate pose for dive {report.mission_id}")
+        row = AutomaticCalibrationRow(
+            method="slate_pose",
+            slate_template_id=slate_template_id,
+            algorithm_version=SLATE_POSE_CALIBRATION_VERSION,
+            camera_calibration_id=plan.camera_calibration_id,
+            outcome=report.outcome,
+            refusal_reason=report.refusal_reason,
+            laser_position=report.laser_position,
+            laser_axis=report.laser_axis,
+            vanishing_px=report.vanishing_px,
+            line_direction=report.line_direction,
+            line_offset_px=report.line_offset_px,
+            frames_used=report.frames_used,
+            candidate_count=report.candidate_count,
+            pair_count=report.pair_count,
+            size_ratio=report.size_ratio,
+            se_px=report.se_px,
+            capture_ids=list(posed),
+        )
+        return await self._write(
+            target, self._catalog.persist_automatic_calibration, row
+        )
 
     @activity.defn(name="resolve_automatic_measure_inputs")
     async def resolve_automatic_measure_inputs(

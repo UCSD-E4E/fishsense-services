@@ -862,3 +862,73 @@ async def test_a_length_records_the_keypoints_it_was_measured_from_and_a_review_
         None,
     )
     assert refusal.automatic_keypoint_prediction_id == kp_review
+
+
+# -- the slate pose (calibration v4, 0078) ------------------------------------------
+
+
+async def test_the_slate_pose_is_never_owed_with_its_switch_off():
+    catalog = _Catalog(automatic_slate_pose_owed=True)
+
+    assert await _run(_acts(catalog).automatic_slate_pose_owed, TARGET) is False
+    assert catalog.calls == []  # not even asked
+
+
+async def test_with_its_switch_on_the_store_says_whether_it_is_owed():
+    from fishsense_services_contracts.automatic_results import (
+        SLATE_POSE_CALIBRATION_VERSION,
+    )
+
+    catalog = _Catalog(automatic_slate_pose_owed=True)
+
+    acts = _acts(catalog, slate_pose_enabled=True)
+    assert await _run(acts.automatic_slate_pose_owed, TARGET) is True
+    assert catalog.calls[-1] == ("automatic_slate_pose_owed", (TENANT_A, MISSION),
+                                 {"version": SLATE_POSE_CALIBRATION_VERSION})  # fmt: skip
+
+
+async def test_the_cohort_owes_the_slate_pose_only_with_its_switch_on():
+    from fishsense_services_contracts.automatic_results import (
+        SLATE_POSE_CALIBRATION_VERSION,
+    )
+
+    for enabled, version in ((False, None), (True, SLATE_POSE_CALIBRATION_VERSION)):
+        catalog = _Catalog(next_mission_for_automatic_results=None)
+        await _run(_acts(catalog, slate_pose_enabled=enabled)
+                   .select_next_mission_for_automatic_results, [])  # fmt: skip
+        assert {c[2]["slate_pose_version"] for c in catalog.calls} == {version}
+
+
+async def test_a_slate_pose_is_written_with_its_template_and_the_frames_it_posed():
+    from fishsense_services_contracts.automatic_results import (
+        SLATE_POSE_CALIBRATION_VERSION,
+    )
+    from fishsense_services_contracts.calibration_v3 import CalibrationV3Report
+
+    camera, template, a, b = (uuid.uuid4() for _ in range(4))
+    catalog = _Catalog(
+        automatic_calibration_inputs=AutomaticCalibrationInputs(camera, K, [], []),
+        persist_automatic_calibration=lambda t, d, row: uuid.uuid4(),
+    )
+    report = CalibrationV3Report(
+        mission_id=MISSION, size_source="pose", outcome="accepted",
+        laser_position=[0.1, 0, 0], laser_axis=[0, 0, 1], frames_used=2,
+        candidate_count=3, pair_count=1, se_px=0.4,
+    )  # fmt: skip
+
+    acts = _acts(catalog, slate_pose_enabled=True)
+    plan = await _run(acts.resolve_automatic_calibration_inputs, TARGET)
+    await _run(
+        acts.persist_automatic_slate_pose, TARGET, plan, report, template, [a, b]
+    )
+
+    row = catalog.calls[-1][1][2]
+    assert (row.method, row.slate_template_id, row.algorithm_version) == (
+        "slate_pose", template, SLATE_POSE_CALIBRATION_VERSION)  # fmt: skip
+    assert (row.outcome, row.camera_calibration_id, row.capture_ids) == (
+        "accepted", camera, [a, b])  # fmt: skip
+    assert (row.frames_used, row.candidate_count, row.se_px) == (2, 3, 0.4)
+
+    other = report.model_copy(update={"mission_id": uuid.uuid4()})
+    with pytest.raises(ApplicationError):
+        await _run(acts.persist_automatic_slate_pose, TARGET, plan, other, template, [])

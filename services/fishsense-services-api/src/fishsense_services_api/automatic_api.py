@@ -108,6 +108,8 @@ class AutomaticCalibrationView(BaseModel):
     size_ratio: float | None
     se_px: float | None
     created_at: datetime
+    #: ``size_constancy`` or ``slate_pose`` (0078).
+    method: str
 
 
 class AutomaticFailureView(BaseModel):
