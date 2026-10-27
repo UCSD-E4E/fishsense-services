@@ -56,13 +56,18 @@ Integration tests need Docker. The host has no `python3`; use `uv run python`.
 ## Conventions
 
 - **American spelling, everywhere.** The owner is American: write color, center,
-  meter, labeled, canceled, gray, behavior, analyze, organize; not colour,
-  centre, metre, labelled, cancelled, grey, behaviour, analyse, organise. This
-  covers the website's text, API messages, docs, comments, identifiers and file
-  names. Keep a name someone else spells (Label Studio's `was_cancelled`, HTML's
-  `aria-labelledby`) as they spell it. `apps/web/lib/american-spelling.test.ts`
-  fails on British spellings in the web's source; add a word to it when one gets
-  through.
+  meter, labeled, canceled, gray, behavior, analyze, organize; not `colour`,
+  `centre`, `metre`, `labelled`, `cancelled`, `grey`, `behaviour`, `analyse`,
+  `organise`. This covers the website's text, API messages, docs, comments,
+  identifiers and file names. Keep a name someone else spells (Label Studio's
+  `was_cancelled`, HTML's `aria-labelledby`) as they spell it, and keep our own
+  names that are stored or on the wire (Temporal workflow classes and ids,
+  tables, columns, API schemas, contract fields: `ReadLaserColoursWorkflow`,
+  `LaserColoursView`); renaming one is a migration or a contract change. Two
+  tests fail on British spellings: `apps/web/lib/american-spelling.test.ts` in
+  the web's source, and `tests/test_american_spelling.py` in Python comments,
+  docstrings, test names and the markdown docs. Add a word to them when one
+  gets through.
 - **Conventional commits.** release-please derives the version from them: a
   `feat:` bumps the minor version, a `fix:` the patch. Commit messages and PR
   descriptions explain *why*, with the incident or the numbers.
