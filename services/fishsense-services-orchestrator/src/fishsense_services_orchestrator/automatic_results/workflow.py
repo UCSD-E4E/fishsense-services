@@ -93,6 +93,10 @@ with workflow.unsafe.imports_passed_through():
         MeasureAutomaticResult,
         PredictAutomaticFramesInput,
     )
+    from fishsense_services_contracts.calibration_v3 import (
+        CalibrationV3Report,
+        ReplayCalibrationInput,
+    )
     from fishsense_services_contracts.headtail_keypoints import (
         KeypointFramesInput,
         KeypointResult,
@@ -106,6 +110,15 @@ with workflow.unsafe.imports_passed_through():
         AutomaticCalibrationPlan,
         AutomaticMeasurePlan,
         AutomaticTarget,
+    )
+    from fishsense_services_orchestrator.calibration_v3.workflow import (
+        pose_slate_frames,
+    )
+
+    # The slate pose's PDF staging argument, built here as in the replay's
+    # sandbox (a dataclass the sandbox re-imports is not fully defined).
+    from fishsense_services_orchestrator.slates.contracts import (  # noqa: F401
+        SlatePdfTarget,
     )
     from fishsense_services_orchestrator.nrp.gpu_fallback import MODE_GPU
     from fishsense_services_orchestrator.nrp.workflow import (
@@ -531,6 +544,65 @@ async def _calibration(target: AutomaticTarget) -> None:
         if not ran:
             return
     await _db("persist_automatic_calibration", target, plan, result)
+    if workflow.patched(SLATE_POSE_PATCH):
+        await _slate_pose(target, plan)
+
+
+#: The slate-pose calibration (calibration v4, 0078; the owner, 2026-10-26),
+#: after the size-constancy fit on the same slate frames: only where it is
+#: owed (its switch on, a template, not current). A run started before it
+#: replays without it.
+SLATE_POSE_PATCH = "automatic-slate-pose-calibration"
+
+
+async def _slate_pose(target: AutomaticTarget, plan: AutomaticCalibrationPlan) -> None:
+    """Each slate frame posed from the mission's template on a real GPU, the
+    beam fitted through the posed dots (the replay's fit, on the per-image
+    role), written as the slate pose. Without a real GPU nothing is written:
+    it is owed still."""
+    if not await _db("automatic_slate_pose_owed", target, result_type=bool):
+        return
+    template: Optional[dict] = await _db(
+        "resolve_mission_slate_template", target, result_type=Optional[dict]
+    )
+    if template is None:
+        return
+    slate_template_id = uuid.UUID(template["slate_template_id"])
+    if not plan.payload.frames:
+        report = CalibrationV3Report(mission_id=target.mission_id, size_source="pose",
+                                     outcome="refused",
+                                     refusal_reason="no_candidates")  # fmt: skip
+        await _db("persist_automatic_slate_pose", target, plan, report,
+                  slate_template_id, [])  # fmt: skip
+        return
+    poses = await pose_slate_frames(
+        target.tenant_id, target.mission_id, plan, template,
+        child_prefix=f"automatic-slate-pose-{target.mission_id}",
+    )  # fmt: skip
+    if poses is None:
+        workflow.logger.warning(
+            "dive=%s: the slate pose needs a real GPU; owed still",
+            target.mission_id,
+        )
+        return
+    # Every pose is kept; only a strong one is fitted (its status says so).
+    points = {str(p.capture_id): p.point if p.status == "posed" else None
+              for p in poses}  # fmt: skip
+    await wake_per_image_processor()
+    ran, report = await _child(
+        "ReplayAutomaticCalibrationV3Workflow",
+        ReplayCalibrationInput(payload=plan.payload, size_source="pose",
+                               pose_points=points),
+        child_id=f"automatic-slate-pose-fit-{target.mission_id}",
+        task_queue=PROCESSOR_TASK_QUEUE,
+        timeout=CALIBRATION_CHILD_TIMEOUT,
+        result_type=CalibrationV3Report,
+    )  # fmt: skip
+    if not ran:
+        return
+    posed = [p.capture_id for p in poses if p.status == "posed"]
+    await _db("persist_automatic_slate_pose", target, plan, report,
+              slate_template_id, posed)  # fmt: skip
 
 
 async def _lengths(target: AutomaticTarget) -> None:

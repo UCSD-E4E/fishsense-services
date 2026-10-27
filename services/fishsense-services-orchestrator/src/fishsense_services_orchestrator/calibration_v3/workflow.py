@@ -60,6 +60,7 @@ with workflow.unsafe.imports_passed_through():
 
 __all__ = [
     "AT_ONCE",
+    "pose_slate_frames",
     "ReplayCalibrationV3ForMissionWorkflow",
     "ReplayCalibrationV3Workflow",
     "ReplayRequest",
@@ -107,6 +108,51 @@ SEGMENT_CHUNK = 400
 
 def replay_child_id(run_id: str, mission_id: str) -> str:
     return f"calibration-v3-replay-{run_id}-{mission_id}"
+
+
+async def pose_slate_frames(
+    tenant_id: uuid.UUID,
+    mission_id: uuid.UUID,
+    plan: AutomaticCalibrationPlan,
+    template: dict,
+    *,
+    child_prefix: str,
+) -> Optional[List[SlatePose]]:
+    """Each of the plan's slate frames posed on a real GPU from `template`
+    (calibration v4), a child per `SEGMENT_CHUNK` named `child_prefix`-n; None
+    without a real GPU. The replay's, and the automatic chain's (0078)."""
+    if await wake_gpu_processor() != MODE_GPU:
+        return None
+    await workflow.execute_activity(
+        "stage_slate_pdf",
+        SlatePdfTarget(tenant_id=tenant_id,
+                       slate_template_id=uuid.UUID(template["slate_template_id"])),
+        schedule_to_close_timeout=timedelta(minutes=5),
+        retry_policy=RetryPolicy(non_retryable_error_types=["NotAMember"]),
+        result_type=bool,
+    )  # fmt: skip
+    frames = [SlatePoseFrame(capture_id=f.capture_id, render_url=f.jpeg_url,
+                             dot=[f.x, f.y])
+              for f in plan.payload.frames if f.jpeg_url]  # fmt: skip
+    chunks = await asyncio.gather(*[
+        workflow.execute_child_workflow(
+            "SlatePoseFramesWorkflow",
+            SlatePoseFramesInput(
+                tenant_id=tenant_id, mission_id=mission_id,
+                camera_matrix=plan.payload.camera_matrix,
+                slate_pdf=ObjectRef.model_validate(template["slate_pdf"]),
+                slate_dpi=template["dpi"],
+                reference_points=template["reference_points"],
+                frames=frames[at : at + SEGMENT_CHUNK]),
+            id=f"{child_prefix}-{n}",
+            task_queue=PROCESSOR_GPU_TASK_QUEUE,
+            execution_timeout=timedelta(hours=3),
+            id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
+            result_type=List[SlatePose],
+        )
+        for n, at in enumerate(range(0, len(frames), SEGMENT_CHUNK))
+    ])  # fmt: skip
+    return [p for chunk in chunks for p in chunk]
 
 
 @workflow.defn(name="ReplayCalibrationV3ForMissionWorkflow")
@@ -197,39 +243,14 @@ class ReplayCalibrationV3ForMissionWorkflow:
             return CalibrationV3Report(mission_id=target.mission_id, size_source="pose",
                                        outcome="refused",
                                        refusal_reason="no_slate_template")  # fmt: skip
-        if await wake_gpu_processor() != MODE_GPU:
+        posed = await pose_slate_frames(
+            target.tenant_id, target.mission_id, plan, template,
+            child_prefix=f"{workflow.info().workflow_id}-pose",
+        )  # fmt: skip
+        if posed is None:
             return CalibrationV3Report(mission_id=target.mission_id, size_source="pose",
                                        outcome="refused", refusal_reason="no_gpu")  # fmt: skip
-        await workflow.execute_activity(
-            "stage_slate_pdf",
-            SlatePdfTarget(tenant_id=target.tenant_id,
-                           slate_template_id=uuid.UUID(template["slate_template_id"])),
-            schedule_to_close_timeout=timedelta(minutes=5),
-            retry_policy=RetryPolicy(non_retryable_error_types=["NotAMember"]),
-            result_type=bool,
-        )  # fmt: skip
-        frames = [SlatePoseFrame(capture_id=f.capture_id, render_url=f.jpeg_url,
-                                 dot=[f.x, f.y])
-                  for f in plan.payload.frames if f.jpeg_url]  # fmt: skip
-        chunks = await asyncio.gather(*[
-            workflow.execute_child_workflow(
-                "SlatePoseFramesWorkflow",
-                SlatePoseFramesInput(
-                    tenant_id=target.tenant_id, mission_id=target.mission_id,
-                    camera_matrix=plan.payload.camera_matrix,
-                    slate_pdf=ObjectRef.model_validate(template["slate_pdf"]),
-                    slate_dpi=template["dpi"],
-                    reference_points=template["reference_points"],
-                    frames=frames[at : at + SEGMENT_CHUNK]),
-                id=f"{workflow.info().workflow_id}-pose-{n}",
-                task_queue=PROCESSOR_GPU_TASK_QUEUE,
-                execution_timeout=timedelta(hours=3),
-                id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
-                result_type=List[SlatePose],
-            )
-            for n, at in enumerate(range(0, len(frames), SEGMENT_CHUNK))
-        ])  # fmt: skip
-        return [p for chunk in chunks for p in chunk]
+        return posed
 
 
 @workflow.defn(name="ReplayCalibrationV3Workflow")

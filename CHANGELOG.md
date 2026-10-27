@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.69.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.68.0...v0.69.0) (2026-10-27)
+
+
+### Features
+
+* **api:** assign-slate-templates records missions' slate templates ([3f2ad2f](https://github.com/UCSD-E4E/fishsense-services/commit/3f2ad2f8224b82076781149e7c359c6bdeb454d4))
+
+## [0.68.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.67.0...v0.68.0) (2026-10-27)
+
+
+### Features
+
+* **api:** every mission's laser colours in one read (list_mission_laser_colors) ([7743b85](https://github.com/UCSD-E4E/fishsense-services/commit/7743b8566fcbdb9a966c61e1fd1aa80632719a0e))
+* automatic slate-pose calibration behind a switch (calibration v4, 0078) ([bb2b8d5](https://github.com/UCSD-E4E/fishsense-services/commit/bb2b8d5ea1d9666dfc38c96c64430504a7e04e9b))
+* automatic slate-pose calibration behind a switch (calibration v4, 0078) ([cf5e428](https://github.com/UCSD-E4E/fishsense-services/commit/cf5e428c3b00ce37966c3397b32a0515b81a8fc1))
+
+## [0.67.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.66.0...v0.67.0) (2026-10-26)
+
+
+### Features
+
+* **api:** retire mission 436's mirrored slate labels and withdraw their calibration ([b4823d0](https://github.com/UCSD-E4E/fishsense-services/commit/b4823d09cadad34d0633f5a5f462ac47de747bb5))
+* **api:** retire mission 436's mirrored slate labels and withdraw their calibration ([52d9609](https://github.com/UCSD-E4E/fishsense-services/commit/52d9609d53a90d4bd8f1e8534b93554d3c800e93))
+
+## [0.66.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.65.0...v0.66.0) (2026-10-26)
+
+
+### Features
+
+* backfill laser colours for older automatic dots, read off their renders ([c8ed174](https://github.com/UCSD-E4E/fishsense-services/commit/c8ed174b5fc6d217778e431fab65d96b36d460ec))
+
+## [0.65.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.64.0...v0.65.0) (2026-10-26)
+
+
+### Features
+
+* **review:** show SimCC's head and tail on the review page (head/tail v5) ([9c68c92](https://github.com/UCSD-E4E/fishsense-services/commit/9c68c92b3330019eeb8522a09961402560440a6f))
+
 ## [0.64.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.63.1...v0.64.0) (2026-10-26)
 
 

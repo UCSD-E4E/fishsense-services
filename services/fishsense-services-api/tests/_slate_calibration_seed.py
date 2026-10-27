@@ -213,15 +213,18 @@ async def slate_label(
     ls_updated_at: datetime | None = None,
     source: str = "human",
     detected_by: uuid.UUID | None = None,
+    superseded_reason: str | None = None,
 ) -> uuid.UUID:
-    """`detected_by`: the slate presence prediction that queued the frame."""
+    """`detected_by`: the slate presence prediction that queued the frame;
+    `superseded_reason`: why it was retired on purpose (0077), which
+    supersedes it."""
     return await _one(
         engine,
         "INSERT INTO slate_labels (tenant_id, capture_id, source, ls_project_id, "
-        "ls_task_id, completed, superseded, needs_reprocess, reference_points, "
-        "skipped_points, ls_updated_at, slate_presence_prediction_id) VALUES (:t, "
-        ":c, :src, :p, :k, :done, :gone, :flag, :refs, :skip, :at, :detected) "
-        "RETURNING id",
+        "ls_task_id, completed, superseded, superseded_reason, needs_reprocess, "
+        "reference_points, skipped_points, ls_updated_at, "
+        "slate_presence_prediction_id) VALUES (:t, :c, :src, :p, :k, :done, "
+        ":gone, :why, :flag, :refs, :skip, :at, :detected) RETURNING id",
         detected=detected_by,
         t=tenant_id,
         c=capture_id,
@@ -229,7 +232,8 @@ async def slate_label(
         p=project,
         k=(task or next_task()) if project is not None else None,
         done=completed,
-        gone=superseded,
+        gone=superseded or superseded_reason is not None,
+        why=superseded_reason,
         flag=needs_reprocess,
         refs=None if reference_points is None else json.dumps(reference_points),
         skip=None if skipped_points is None else json.dumps(skipped_points),

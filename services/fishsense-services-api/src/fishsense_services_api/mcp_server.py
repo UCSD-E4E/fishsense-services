@@ -73,7 +73,9 @@ INSTRUCTIONS = (
     "is null (a page may be short and still have a next). A mission's "
     "`laser_colors` counts its frames by laser colour from three sources "
     "(labellers, the human path's predictions, the automatic dot): say which "
-    "you use, and say so when they disagree. When you report "
+    "you use, and say so when they disagree. An automatic dot's "
+    "`laser_color_source` is `dot` (read with the dot) or `render` (read off "
+    "its render later, by a backfill). When you report "
     "numbers, give how many fish or frames they rest on. These tools only "
     "read; changes are made in the web app."
 )
@@ -339,6 +341,14 @@ def _server(get) -> MCPServer:
         """A tenant's missions (dives), with their device, port, calibration
         and capture counts."""
         return {"missions": await get(ctx, _path("tenants", slug, "missions"))}
+
+    @tool
+    async def list_mission_laser_colors(ctx: Context, slug: Slug) -> dict:
+        """Every mission's frames by laser color, in one call: for each mission
+        with a dot, counts of red, green and unread from the labellers, the
+        human path's laser stage and the automatic dot -- as get_mission's
+        `laser_colors`, for the whole tenant."""
+        return {"missions": await get(ctx, _path("tenants", slug, "laser-colors"))}
 
     @tool
     async def get_mission(ctx: Context, slug: Slug, number: Number) -> dict:

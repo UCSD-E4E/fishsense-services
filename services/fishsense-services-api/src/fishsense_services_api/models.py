@@ -722,10 +722,17 @@ class SlateLabel(_LabelCore, Base):
     #: The slate detector's prediction that queued this frame (migration
     #: 0035); NULL for a frame a person marked, and every v1 row.
     slate_presence_prediction_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    #: Why it was retired on purpose (0077), e.g. ``mirrored``; only on a
+    #: superseded label. NULL: live, or dead-lettered.
+    superseded_reason: Mapped[str | None] = mapped_column(Text)
 
     @classmethod
     def _extra_table_args(cls) -> tuple:
         return (
+            CheckConstraint(
+                "superseded_reason IS NULL OR superseded",
+                name="slate_labels_superseded_reason_check",
+            ),
             ForeignKeyConstraint(
                 ["tenant_id", "slate_presence_prediction_id"],
                 [
@@ -1371,7 +1378,8 @@ class AutomaticHeadTailPrediction(Base):
 
 
 class AutomaticLaserCalibration(Base):
-    """A dive's label-free size-constancy calibration, accepted or refused."""
+    """A dive's automatic calibration, accepted or refused: label-free size
+    constancy, or the slate pose (0078)."""
 
     __tablename__ = "automatic_laser_calibrations"
     __table_args__ = (
@@ -1409,6 +1417,10 @@ class AutomaticLaserCalibration(Base):
     )
     core_version: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
+    #: The template a ``slate_pose`` calibration posed with (0078).
+    slate_template_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("slate_templates.id")
+    )
 
 
 class AutomaticSpeciesPrediction(Base):
@@ -1524,6 +1536,37 @@ class AutomaticKeypointPrediction(Base):
     disagreement: Mapped[float | None] = mapped_column(Double)
     predictor_version: Mapped[int] = mapped_column(Integer)
     checkpoint: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class AutomaticLaserColourReading(Base):
+    """An automatic dot's colour read off its render after the fact (0076):
+    the backfill of dots predicted before contract v22; append-only, and
+    never over the dot's own colour."""
+
+    __tablename__ = "automatic_laser_colour_readings"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        _fk(("tenant_id", "capture_id"), "captures"),
+        _fk(
+            ("tenant_id", "automatic_head_tail_prediction_id"),
+            "automatic_head_tail_predictions",
+        ),
+        Index("automatic_laser_colour_readings_tenant_prediction_idx", "tenant_id",
+              "automatic_head_tail_prediction_id", "seq"),  # fmt: skip
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    automatic_head_tail_prediction_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    #: ``red``/``green``; NULL when too close to call or not readable.
+    color: Mapped[str | None] = mapped_column(Text)
+    color_margin: Mapped[float | None] = mapped_column(Double)
+    #: ``render``: read off the prediction's render, not the raw.
+    source: Mapped[str] = mapped_column(Text)
+    reading_version: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = _created_at()
 
 

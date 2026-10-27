@@ -41,6 +41,10 @@
             ],
             "title": "Frames Used"
           },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
           "outcome": {
             "title": "Outcome",
             "type": "string"
@@ -98,7 +102,8 @@
           "pair_count",
           "size_ratio",
           "se_px",
-          "created_at"
+          "created_at",
+          "method"
         ],
         "title": "AutomaticCalibrationView",
         "type": "object"
@@ -258,6 +263,17 @@
               }
             ],
             "title": "Laser Color Margin"
+          },
+          "laser_color_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Laser Color Source"
           },
           "laser_confidence": {
             "anyOf": [
@@ -526,6 +542,7 @@
           "laser_confidence",
           "laser_color",
           "laser_color_margin",
+          "laser_color_source",
           "head",
           "tail",
           "head_tail_source",
@@ -649,6 +666,28 @@
             ],
             "title": "Laser Color"
           },
+          "laser_color_margin": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Laser Color Margin"
+          },
+          "laser_color_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Laser Color Source"
+          },
           "laser_confidence": {
             "anyOf": [
               {
@@ -745,6 +784,8 @@
           "calibration_source",
           "laser_confidence",
           "laser_color",
+          "laser_color_margin",
+          "laser_color_source",
           "sam_score",
           "species",
           "scientific_name",
@@ -2795,6 +2836,31 @@
           "laser_colors"
         ],
         "title": "MissionDetail",
+        "type": "object"
+      },
+      "MissionLaserColorsView": {
+        "properties": {
+          "automatic": {
+            "$ref": "#/components/schemas/ColourCountsView"
+          },
+          "labels": {
+            "$ref": "#/components/schemas/ColourCountsView"
+          },
+          "mission_number": {
+            "title": "Mission Number",
+            "type": "integer"
+          },
+          "predictions": {
+            "$ref": "#/components/schemas/ColourCountsView"
+          }
+        },
+        "required": [
+          "labels",
+          "predictions",
+          "automatic",
+          "mission_number"
+        ],
+        "title": "MissionLaserColorsView",
         "type": "object"
       },
       "MissionView": {
@@ -5124,6 +5190,55 @@
           }
         ],
         "summary": "List Label Studio Project Ids"
+      }
+    },
+    "/tenants/{slug}/laser-colors": {
+      "get": {
+        "description": "Every mission's frames by laser color, per source, in one read: the\nmissions with a dot from any source, by number (the owner, 2026-10-26).",
+        "operationId": "list_mission_laser_colors",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MissionLaserColorsView"
+                  },
+                  "title": "Response List Mission Laser Colors",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Laser Colors"
       }
     },
     "/tenants/{slug}/me/skills": {

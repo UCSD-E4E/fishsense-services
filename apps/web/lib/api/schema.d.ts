@@ -272,6 +272,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{slug}/laser-colors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Laser Colors
+         * @description Every mission's frames by laser color, per source, in one read: the
+         *     missions with a dot from any source, by number (the owner, 2026-10-26).
+         */
+        get: operations["list_mission_laser_colors"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{slug}/me/skills": {
         parameters: {
             query?: never;
@@ -844,6 +865,8 @@ export interface components {
             created_at: string;
             /** Frames Used */
             frames_used: number | null;
+            /** Method */
+            method: string;
             /** Outcome */
             outcome: string;
             /** Pair Count */
@@ -891,6 +914,8 @@ export interface components {
             laser_color: string | null;
             /** Laser Color Margin */
             laser_color_margin: number | null;
+            /** Laser Color Source */
+            laser_color_source: string | null;
             /** Laser Confidence */
             laser_confidence: number | null;
             /** Length M */
@@ -975,6 +1000,10 @@ export interface components {
             human_length_m: number | null;
             /** Laser Color */
             laser_color: string | null;
+            /** Laser Color Margin */
+            laser_color_margin: number | null;
+            /** Laser Color Source */
+            laser_color_source: string | null;
             /** Laser Confidence */
             laser_confidence: number | null;
             /** Length M */
@@ -1566,6 +1595,14 @@ export interface components {
              * Format: date-time
              */
             started_at: string;
+        };
+        /** MissionLaserColorsView */
+        MissionLaserColorsView: {
+            automatic: components["schemas"]["ColourCountsView"];
+            labels: components["schemas"]["ColourCountsView"];
+            /** Mission Number */
+            mission_number: number;
+            predictions: components["schemas"]["ColourCountsView"];
         };
         /** MissionView */
         MissionView: {
@@ -2567,6 +2604,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": number[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_mission_laser_colors: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionLaserColorsView"][];
                 };
             };
             /** @description Validation Error */

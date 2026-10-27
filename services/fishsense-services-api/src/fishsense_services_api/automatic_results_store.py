@@ -97,6 +97,7 @@ __all__ = [
     "automatic_frames_inputs",
     "automatic_measure_inputs",
     "automatic_species_captures",
+    "automatic_slate_pose_owed",
     "next_mission_for_automatic_results",
     "no_slate_frames",
     "persist_automatic_calibration",
@@ -326,10 +327,12 @@ _SPECIES_WORK = f"""NOT {_SESSION} AND EXISTS (
           )
     )"""
 
-#: No current automatic calibration at the current version, or one older than
-#: the dive's newest frame or slate score, or one fitted through a frame the
-#: zoom gate (0070) now leaves out.
-_CALIBRATION_WORK = """(
+
+def _calibration_work(current: str) -> str:
+    """No current automatic calibration `current` accepts (SQL over `a`), or
+    one older than the dive's newest frame or slate score, or one fitted
+    through a frame the zoom gate (0070) now leaves out."""
+    return f"""(
         EXISTS (
             SELECT 1 FROM captures c
             WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id AND c.is_canonical
@@ -337,7 +340,7 @@ _CALIBRATION_WORK = """(
         AND NOT EXISTS (
             SELECT 1 FROM current_automatic_laser_calibrations a
             WHERE a.tenant_id = d.tenant_id AND a.mission_id = d.id
-              AND a.algorithm_version = :cv
+              AND {current}
               -- Stale against new frames, and against a slate score written
               -- after it: the detector's slate frames are the candidates. A
               -- capture's newest row is its current one (append-only), so
@@ -367,6 +370,25 @@ _CALIBRATION_WORK = """(
                          AND before_beam_move(c.tenant_id, c.mission_id, c.captured_at))
               )
         )
+    )"""
+
+
+#: The size-constancy fit at the current version (`:cv`).
+_CALIBRATION_WORK = _calibration_work(
+    "a.method = 'size_constancy' AND a.algorithm_version = :cv"
+)
+
+#: The slate-pose fit (calibration v4, 0078; the owner, 2026-10-26), only
+#: with its switch on (`:pv`, its version; NULL: off) and for a mission with
+#: a slate template: at that version, posed with the mission's template.
+_SLATE_POSE_WORK = f"""(
+        CAST(:pv AS text) IS NOT NULL AND d.slate_template_id IS NOT NULL
+        AND {_calibration_work(
+            "a.method = 'slate_pose' AND a.algorithm_version = :pv "
+            # The current view keeps 0036's columns (0078): the template
+            # is read off the row itself, by its primary key.
+            "AND (SELECT p.slate_template_id FROM automatic_laser_calibrations p "
+            "WHERE p.id = a.id) = d.slate_template_id")}
     )"""
 
 #: Automatic head/tail v5 (owner, 2026-10-24/25): fishsense-core's SimCC
@@ -452,10 +474,12 @@ _LENGTHS_WORK = f"""NOT {_SESSION} AND EXISTS (
 
 def automatic_results_cohort(*, species: bool = True) -> str:
     """The backlog cohort over dive `d`, but for the tenant term the selector
-    adds. Any priority. `:hv`, `:sv`, `:cv`, `:mv` are the stages' current
-    versions (`:sv` unused with `species` off). Species has its own switch
-    (2026-10-15): off, a dive whose only work is species is not in it."""
-    work = [_FRAMES_WORK, _KEYPOINTS_WORK, _CALIBRATION_WORK, _LENGTHS_WORK]
+    adds. Any priority. `:hv`, `:sv`, `:cv`, `:pv`, `:mv` are the stages'
+    current versions (`:sv` unused with `species` off; `:pv` NULL with the
+    slate pose off). Species has its own switch (2026-10-15): off, a dive
+    whose only work is species is not in it."""
+    work = [_FRAMES_WORK, _KEYPOINTS_WORK, _CALIBRATION_WORK, _SLATE_POSE_WORK,
+            _LENGTHS_WORK]  # fmt: skip
     if species:
         work.insert(1, _SPECIES_WORK)
     return f"""{RECTIFIABLE_MISSION}
@@ -564,10 +588,12 @@ async def next_mission_for_automatic_results(
     measurement_version: str,
     species: bool = True,
     exclude: Sequence[uuid.UUID] = (),
+    slate_pose_version: str | None = None,
 ) -> AutomaticCandidate | None:
     """The tenant's next dive in the backlog cohort, other than `exclude`
     (the dives the run already took): one nobody has measured first, then the
-    oldest."""
+    oldest. `slate_pose_version`: the slate-pose fit's, with it switched on
+    (0078); None, off."""
     row = (
         await conn.execute(
             text(f"""
@@ -579,10 +605,26 @@ async def next_mission_for_automatic_results(
                 """),
             {"t": tenant_id, "hv": headtail_version, "sv": species_version,
              "cv": calibration_version, "mv": measurement_version,
-             "exclude": list(exclude)},
+             "pv": slate_pose_version, "exclude": list(exclude)},
         )
     ).one_or_none()  # fmt: skip
     return None if row is None else AutomaticCandidate(row.id, row.created_at)
+
+
+async def automatic_slate_pose_owed(
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, version: str
+) -> bool:
+    """Whether the mission's slate-pose fit is owed at `version` (0078): the
+    cohort's term, for one mission, so the chain poses only when it is."""
+    return (
+        await conn.execute(
+            text(f"""
+                SELECT {_SLATE_POSE_WORK} FROM missions d
+                WHERE d.tenant_id = :t AND d.id = :m
+                """),
+            {"t": tenant_id, "m": mission_id, "pv": version},
+        )
+    ).scalar_one()
 
 
 async def record_automatic_results_failure(
@@ -1243,6 +1285,10 @@ class AutomaticCalibrationRow:
     pair_residual_sd: float | None = None
     capture_ids: list[uuid.UUID] = field(default_factory=list)
     core_version: str | None = None
+    #: ``size_constancy``, or ``slate_pose`` (calibration v4, 0078), which
+    #: names the template it posed with.
+    method: str = "size_constancy"
+    slate_template_id: uuid.UUID | None = None
 
 
 async def persist_automatic_calibration(
@@ -1266,13 +1312,15 @@ async def persist_automatic_calibration(
                     camera_calibration_id, laser_position, laser_axis, vanishing_px,
                     line_direction, line_offset_px, o_mag_m, frames_used,
                     candidate_count, pair_count, size_ratio, se_px,
-                    pair_residual_sd, capture_ids, core_version)
+                    pair_residual_sd, capture_ids, core_version, method,
+                    slate_template_id)
                 VALUES (:t, :d, :outcome, :algorithm_version, :refusal_reason,
                         :camera_calibration_id, CAST(:laser_position AS jsonb),
                         CAST(:laser_axis AS jsonb), :vanishing_px,
                         CAST(:line_direction AS jsonb), :line_offset_px, :o_mag_m,
                         :frames_used, :candidate_count, :pair_count, :size_ratio,
-                        :se_px, :pair_residual_sd, :capture_ids, :core_version)
+                        :se_px, :pair_residual_sd, :capture_ids, :core_version,
+                        :method, :slate_template_id)
                 RETURNING id
                 """),
             {"t": tenant_id, "d": mission_id, **values},
@@ -1550,6 +1598,14 @@ class AutomaticResultsCatalog(ServicePrincipal):
         async with self._tenant(tenant_id) as conn:
             return await automatic_calibration_inputs(
                 conn, tenant_id, mission_id, slate_frames=self._slate_frames
+            )
+
+    async def automatic_slate_pose_owed(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, version: str
+    ) -> bool:
+        async with self._tenant(tenant_id) as conn:
+            return await automatic_slate_pose_owed(
+                conn, tenant_id, mission_id, version=version
             )
 
     async def persist_automatic_calibration(

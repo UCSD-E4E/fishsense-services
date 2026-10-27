@@ -155,3 +155,55 @@ async def test_an_observation_shows_its_labels_colour(
     ).json()
 
     assert body["laser"]["color"] == "green"
+
+
+# -- every mission's colors in one read (the owner, 2026-10-26) --------------------
+
+
+async def test_every_missions_colors_in_one_read_match_each_missions_own(
+    client, seed_memberships, owner_engine, app_engine
+):
+    lab = await _lab(seed_memberships)
+    red_mission, red = await _measured(owner_engine, app_engine, lab, laser_color="red")
+    green_mission, green = await _measured(owner_engine, app_engine, lab)
+    await _label(owner_engine, lab, green, "Green Laser")
+    # A superseded label counts in neither read.
+    await _label(owner_engine, lab, green, "Red Laser", superseded=True)
+    numbers = {m: await _number(owner_engine, m) for m in (red_mission, green_mission)}
+
+    listed = (await _get(client, "/tenants/lab/laser-colors")).json()
+
+    by_number = {r["mission_number"]: r for r in listed}
+    assert set(by_number) == set(numbers.values())
+    for mission_id, number in numbers.items():
+        own = (await _get(client, f"/tenants/lab/missions/{number}")).json()
+        row = by_number[number]
+        assert {k: row[k] for k in ("labels", "predictions", "automatic")} == own[
+            "laser_colors"
+        ]
+    assert by_number[numbers[red_mission]]["automatic"]["red"] == 1
+    assert by_number[numbers[green_mission]]["labels"]["green"] == 1
+
+
+async def test_a_mission_with_no_dot_is_left_out(
+    client, seed_memberships, owner_engine
+):
+    from depth_measure_seed import mission
+
+    lab = await _lab(seed_memberships)
+    await mission(owner_engine, lab)
+
+    assert (await _get(client, "/tenants/lab/laser-colors")).json() == []
+
+
+async def test_another_tenants_colors_are_not_there(
+    client, seed_memberships, owner_engine, app_engine
+):
+    from test_observations_api import OUTSIDER
+
+    lab = await _lab(seed_memberships)
+    await _measured(owner_engine, app_engine, lab, laser_color="red")
+
+    response = await _get(client, "/tenants/lab/laser-colors", sub=OUTSIDER)
+
+    assert response.status_code == 404
