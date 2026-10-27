@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from fishsense_services_api.db import tenant_transaction
 from fishsense_services_api.laser_colour_store import (
     mission_laser_colours,
-    tenant_laser_colours,
+    tenant_laser_colors,
 )
 from fishsense_services_api.memberships import Membership
 from fishsense_services_api.mission_facts import Port, Purpose
@@ -69,7 +69,7 @@ class LaserColoursView(BaseModel):
     automatic: ColourCountsView
 
 
-class MissionLaserColoursView(LaserColoursView):
+class MissionLaserColorsView(LaserColoursView):
     mission_number: int
 
 
@@ -157,15 +157,15 @@ def add_mission_routes(app: FastAPI, *, engine: AsyncEngine, membership) -> None
     @app.get(
         "/tenants/{slug}/laser-colors",
         operation_id="list_mission_laser_colors",
-        response_model=list[MissionLaserColoursView],
+        response_model=list[MissionLaserColorsView],
     )
-    async def list_laser_colours(member: Member) -> list[MissionLaserColoursView]:
-        """Every mission's frames by laser colour, per source, in one read: the
+    async def list_laser_colors(member: Member) -> list[MissionLaserColorsView]:
+        """Every mission's frames by laser color, per source, in one read: the
         missions with a dot from any source, by number (the owner, 2026-10-26)."""
         async with tenant_transaction(engine, member.tenant_id) as conn:
-            found = await tenant_laser_colours(conn, member.tenant_id)
+            found = await tenant_laser_colors(conn, member.tenant_id)
         return [
-            MissionLaserColoursView(
+            MissionLaserColorsView(
                 mission_number=number,
                 labels=ColourCountsView(**vars(c.labels)),
                 predictions=ColourCountsView(**vars(c.predictions)),

@@ -2871,7 +2871,7 @@
         "title": "MissionDetail",
         "type": "object"
       },
-      "MissionLaserColoursView": {
+      "MissionLaserColorsView": {
         "properties": {
           "automatic": {
             "$ref": "#/components/schemas/ColourCountsView"
@@ -2893,7 +2893,7 @@
           "automatic",
           "mission_number"
         ],
-        "title": "MissionLaserColoursView",
+        "title": "MissionLaserColorsView",
         "type": "object"
       },
       "MissionView": {
@@ -5227,7 +5227,7 @@
     },
     "/tenants/{slug}/laser-colors": {
       "get": {
-        "description": "Every mission's frames by laser colour, per source, in one read: the\nmissions with a dot from any source, by number (the owner, 2026-10-26).",
+        "description": "Every mission's frames by laser color, per source, in one read: the\nmissions with a dot from any source, by number (the owner, 2026-10-26).",
         "operationId": "list_mission_laser_colors",
         "parameters": [
           {
@@ -5246,7 +5246,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/MissionLaserColoursView"
+                    "$ref": "#/components/schemas/MissionLaserColorsView"
                   },
                   "title": "Response List Mission Laser Colors",
                   "type": "array"
@@ -5271,7 +5271,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "List Laser Colours"
+        "summary": "List Laser Colors"
       }
     },
     "/tenants/{slug}/me/skills": {

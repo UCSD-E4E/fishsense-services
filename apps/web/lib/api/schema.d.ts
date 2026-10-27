@@ -280,8 +280,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List Laser Colours
-         * @description Every mission's frames by laser colour, per source, in one read: the
+         * List Laser Colors
+         * @description Every mission's frames by laser color, per source, in one read: the
          *     missions with a dot from any source, by number (the owner, 2026-10-26).
          */
         get: operations["list_mission_laser_colors"];
@@ -1602,8 +1602,8 @@ export interface components {
              */
             started_at: string;
         };
-        /** MissionLaserColoursView */
-        MissionLaserColoursView: {
+        /** MissionLaserColorsView */
+        MissionLaserColorsView: {
             automatic: components["schemas"]["ColourCountsView"];
             labels: components["schemas"]["ColourCountsView"];
             /** Mission Number */
@@ -2640,7 +2640,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MissionLaserColoursView"][];
+                    "application/json": components["schemas"]["MissionLaserColorsView"][];
                 };
             };
             /** @description Validation Error */

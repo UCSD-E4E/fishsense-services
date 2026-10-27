@@ -278,3 +278,14 @@ async def test_every_operation_has_an_explicit_operation_id(offline_client):
         "set_mission_purpose",
         "unlock_tenant",
     ]
+
+
+async def test_the_laser_colors_list_is_spelled_american(offline_client):
+    """The owner, 2026-10-26: American spelling, names included. The list
+    shipped (#419) as `MissionLaserColoursView`, "List Laser Colours"."""
+    spec = (await offline_client.get("/openapi.json")).json()
+    operation = spec["paths"]["/tenants/{slug}/laser-colors"]["get"]
+    response = operation["responses"]["200"]["content"]["application/json"]
+
+    assert operation["summary"] == "List Laser Colors"
+    assert response["schema"]["items"]["$ref"].endswith("/MissionLaserColorsView")
