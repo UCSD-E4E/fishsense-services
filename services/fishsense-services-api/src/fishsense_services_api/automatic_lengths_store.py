@@ -108,6 +108,7 @@ _ROWS_SQL = f"""
     SELECT d.number AS mission_number, c.id AS capture_id,
            c.number AS capture_number, c.captured_at,
            m.length_m, m.depth_m, m.calibration_source,
+           m.length_m * alc.scale_sd AS length_sd_m,
            h.laser_confidence, {dot_colour_columns("h")}, h.sam_score,
            s.predicted_choice AS species, {_SCIENTIFIC} AS scientific_name,
            s.top1_probability AS species_probability, s.margin AS species_margin,
@@ -121,6 +122,8 @@ _ROWS_SQL = f"""
     JOIN missions d ON d.tenant_id = c.tenant_id AND d.id = c.mission_id
     JOIN automatic_head_tail_predictions h
       ON h.tenant_id = m.tenant_id AND h.id = m.automatic_head_tail_prediction_id
+    LEFT JOIN automatic_laser_calibrations alc
+      ON alc.tenant_id = m.tenant_id AND alc.id = m.automatic_laser_calibration_id
     {dot_colour_join("h")}
     LEFT JOIN s ON s.capture_id = m.capture_id
      AND s.automatic_head_tail_prediction_id = m.automatic_head_tail_prediction_id
@@ -170,6 +173,9 @@ class AutomaticLength:
     length_m: float
     depth_m: float | None
     calibration_source: str
+    #: The length's calibration error, 1 SD (0079); None where its
+    #: calibration has none.
+    length_sd_m: float | None
     laser_confidence: float | None
     #: The dot's colour as the laser kernel read it (0072); None when it gave
     #: no reading, and on rows from before.

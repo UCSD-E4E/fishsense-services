@@ -13,6 +13,7 @@ import {
   describeOrigin,
   placeName,
   formatLength,
+  formatLengthWithError,
   millimeters,
   getCapture,
   fishOfCapture,
@@ -105,6 +106,21 @@ describe("getCapture", () => {
     await expect(getCapture("t", "lab", "x/../../dives")).rejects.toThrow(
       /capture/,
     );
+  });
+});
+
+describe("formatLengthWithError", () => {
+  it("shows the calibration's error bar, 1 SD, in whole millimeters (the owner, 2026-10-26: always with its error)", () => {
+    expect(formatLengthWithError(0.4237, 0.0089)).toBe("424 ± 9 mm");
+  });
+
+  it("never rounds an error bar to nothing", () => {
+    expect(formatLengthWithError(0.0312, 0.0004)).toBe("31 ± 1 mm");
+  });
+
+  it("is the plain length where no error bar was measured", () => {
+    expect(formatLengthWithError(0.4237, null)).toBe("424 mm");
+    expect(formatLengthWithError(0.4237, undefined)).toBe("424 mm");
   });
 });
 

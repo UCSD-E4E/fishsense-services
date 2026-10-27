@@ -69,6 +69,20 @@ export function formatLength(lengthM: number | null | undefined): string {
   return lengthM == null ? "not measured" : `${millimeters(lengthM)} mm`;
 }
 
+/**
+ * A length with its calibration's error bar, 1 SD (0079; the owner,
+ * 2026-10-26: a weak calibration answers with its error rather than refusing,
+ * and the length is always shown with it). Whole millimeters, never under 1;
+ * the plain length where no error bar was measured.
+ */
+export function formatLengthWithError(
+  lengthM: number | null | undefined,
+  sdM: number | null | undefined,
+): string {
+  if (lengthM == null || sdM == null) return formatLength(lengthM);
+  return `${millimeters(lengthM)} ± ${Math.max(1, Math.round(sdM * 1000)).toLocaleString("en-US")} mm`;
+}
+
 export function osmLink(latitude: number, longitude: number): string {
   return `https://www.openstreetmap.org/?mlat=${latitude}&mlon=${longitude}#map=17/${latitude}/${longitude}`;
 }

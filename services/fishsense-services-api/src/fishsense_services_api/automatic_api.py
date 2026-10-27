@@ -91,6 +91,9 @@ class AutomaticFrameView(BaseModel):
     depth_m: float | None
     refusal: str | None
     calibration_source: str | None
+    #: The length's calibration error, 1 SD: the length times its
+    #: calibration's scale SD (0079). None where the calibration has none.
+    length_sd_m: float | None = None
     measurement_algorithm: str | None
     measurement_algorithm_version: str | None
     species: str | None
@@ -110,6 +113,9 @@ class AutomaticCalibrationView(BaseModel):
     created_at: datetime
     #: ``size_constancy`` or ``slate_pose`` (0078).
     method: str
+    #: The lengths' scale SD on it, 1 SD (0.02 = 2%; 0079); None where none
+    #: was measured.
+    scale_sd: float | None = None
 
 
 class AutomaticFailureView(BaseModel):
@@ -155,6 +161,9 @@ class AutomaticLengthView(BaseModel):
     depth_m: float | None
     #: Always ``label_free`` (0064): the automatic stack alone.
     calibration_source: str
+    #: The length's calibration error, 1 SD (0079); None where its
+    #: calibration has none.
+    length_sd_m: float | None = None
     laser_confidence: float | None
     #: The automatic dot's colour (0072); None when unread or from before.
     laser_color: str | None
@@ -270,6 +279,7 @@ def add_automatic_routes(
             depth_m=found.depth_m,
             refusal=found.refusal,
             calibration_source=found.calibration_source,
+            length_sd_m=found.length_sd_m,
             measurement_algorithm=found.measurement_algorithm,
             measurement_algorithm_version=found.measurement_algorithm_version,
             species=found.species,

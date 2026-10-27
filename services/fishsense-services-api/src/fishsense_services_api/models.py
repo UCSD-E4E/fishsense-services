@@ -1421,6 +1421,8 @@ class AutomaticLaserCalibration(Base):
     slate_template_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("slate_templates.id")
     )
+    #: The lengths' scale SD on an accepted fit (0.02 = 2%; 0079).
+    scale_sd: Mapped[float | None] = mapped_column(Double)
 
 
 class AutomaticSpeciesPrediction(Base):

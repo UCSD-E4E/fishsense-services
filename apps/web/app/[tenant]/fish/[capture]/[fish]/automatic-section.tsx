@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { formatLength } from "@/lib/captures";
+import { formatLength, formatLengthWithError } from "@/lib/captures";
 import { automaticOverlay, statusLabel, type AutomaticFrame } from "@/lib/automatic";
 import { colorLabel } from "@/lib/laser-color";
 
@@ -99,7 +99,9 @@ export function AutomaticSection({
         <dl className="grid min-w-0 flex-[1_1_260px] grid-cols-[max-content_minmax(0,1fr)] gap-x-5 gap-y-2.5 text-sm">
           <Row label="Result">{statusLabel(frame.status)}</Row>
           <Row label="Length">
-            {frame.length_m != null ? formatLength(frame.length_m) : frame.refusal ?? "—"}
+            {frame.length_m != null
+              ? formatLengthWithError(frame.length_m, frame.length_sd_m)
+              : frame.refusal ?? "—"}
           </Row>
           {difference != null && (
             <Row label="Against the human">
@@ -113,7 +115,9 @@ export function AutomaticSection({
           )}
           <Row label="Calibration">
             {frame.calibration_source === "label_free"
-              ? "Label-free fit"
+              ? frame.length_sd_m != null
+                ? "Label-free fit (± is the calibration's error, 1 SD)"
+                : "Label-free fit"
               : frame.calibration_source === "stored"
                 ? "The mission's stored calibration"
                 : "—"}
