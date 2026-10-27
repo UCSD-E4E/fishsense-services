@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.69.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.69.0...v0.69.1) (2026-10-27)
+
+
+### Bug Fixes
+
+* **api:** American spelling for the tenant laser-colors list ([eed4964](https://github.com/UCSD-E4E/fishsense-services/commit/eed4964521af8e802a86a1b8e0572f079fbedb68))
+* **api:** American spelling for the tenant laser-colors list ([eb5afd4](https://github.com/UCSD-E4E/fishsense-services/commit/eb5afd4b7e6ce87f4ed05d3737efe218d325eaaf))
+
 ## [0.69.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.68.0...v0.69.0) (2026-10-27)
 
 
