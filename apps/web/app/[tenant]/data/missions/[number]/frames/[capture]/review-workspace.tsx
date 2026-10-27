@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { ZoomFrame, type Marker } from "@/app/_review/zoom-frame";
 import type { AutomaticFrame } from "@/lib/automatic";
 import { headTailNote } from "@/lib/head-tail-source";
-import { colourLabel } from "@/lib/laser-colour";
+import { colorLabel } from "@/lib/laser-color";
 import { maskFromRgba, snapToMask, type Pixel } from "@/lib/mask-snap";
 import {
   KINDS,
@@ -27,7 +27,7 @@ import { recordReviewAction } from "./actions";
 
 /**
  * Reviewing a frame's automatic result (the owner, 2026-10-21; the API is
- * 0063). The frame page is review's home: the Labelling tab is to go away,
+ * 0063). The frame page is review's home: the Labeling tab is to go away,
  * and its viewer is reused here (app/_review/zoom-frame.tsx).
  *
  * One kind at a time — the laser dot, the head and tail, or the species:
@@ -47,7 +47,7 @@ import { recordReviewAction } from "./actions";
  * review; N goes to the next frame.
  */
 
-const COLOUR = { laser: "#E51717", head: "#2563EB", tail: "#FFB547" };
+const COLOR = { laser: "#E51717", head: "#2563EB", tail: "#FFB547" };
 const button =
   "inline-flex h-9 items-center rounded-control bg-teal px-3.5 text-sm font-semibold text-on-teal disabled:opacity-50";
 const quiet =
@@ -285,15 +285,15 @@ export function ReviewWorkspace({
   // --- drawing ---------------------------------------------------------------
   const markers: Marker[] = [];
   if (kind !== "species" || mode !== "fix") {
-    if (shown.point) markers.push({ ...shown.point, colour: COLOUR.laser });
-    if (shown.head) markers.push({ ...shown.head, colour: COLOUR.head });
-    if (shown.tail) markers.push({ ...shown.tail, colour: COLOUR.tail });
+    if (shown.point) markers.push({ ...shown.point, color: COLOR.laser });
+    if (shown.head) markers.push({ ...shown.head, color: COLOR.head });
+    if (shown.tail) markers.push({ ...shown.tail, color: COLOR.tail });
   }
   if (mode === "fix" && draft) {
     for (const [which, p] of Object.entries(draft.raw)) {
       const at = draft[which as keyof Points];
       if (p && at && (p.x !== at.x || p.y !== at.y)) {
-        markers.push({ ...p, colour: COLOUR[which === "point" ? "laser" : (which as "head" | "tail")], faint: true });
+        markers.push({ ...p, color: COLOR[which === "point" ? "laser" : (which as "head" | "tail")], faint: true });
       }
     }
   }
@@ -302,7 +302,7 @@ export function ReviewWorkspace({
   const layers = (
     <>
       <defs>
-        {/* The mask is greyscale, 255 on the fish: its brightness becomes teal's opacity. */}
+        {/* The mask is grayscale, 255 on the fish: its brightness becomes teal's opacity. */}
         <filter id="review-mask" colorInterpolationFilters="sRGB">
           <feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1 0 0 0 0" result="alpha" />
           <feFlood floodColor="#00AAA5" />
@@ -350,10 +350,10 @@ export function ReviewWorkspace({
       )}
       <p className="mt-2 flex flex-wrap items-center gap-4 text-sm text-fg-2">
         <span className="font-medium text-fg">{caption}</span>
-        <Key colour={COLOUR.head}>Head</Key>
-        <Key colour={COLOUR.tail}>Tail</Key>
-        <Key colour={COLOUR.laser}>Laser dot</Key>
-        {maskSrc && <Key colour="#00AAA5">Fish mask</Key>}
+        <Key color={COLOR.head}>Head</Key>
+        <Key color={COLOR.tail}>Tail</Key>
+        <Key color={COLOR.laser}>Laser dot</Key>
+        {maskSrc && <Key color="#00AAA5">Fish mask</Key>}
         <span className="text-xs">Scroll or pinch to zoom; drag to pan</span>
       </p>
 
@@ -378,8 +378,8 @@ export function ReviewWorkspace({
 
         {kind === "laser" && frame.laser && (
           <p className="mb-3 text-sm text-fg-2">
-            The model read this dot&apos;s colour as{" "}
-            <strong className="text-fg">{colourLabel(frame.laser_color, frame.laser_color_margin, frame.laser_color_source)}</strong>.
+            The model read this dot&apos;s color as{" "}
+            <strong className="text-fg">{colorLabel(frame.laser_color, frame.laser_color_margin, frame.laser_color_source)}</strong>.
           </p>
         )}
 
@@ -418,7 +418,7 @@ export function ReviewWorkspace({
             ) : kind === "head_tail" ? (
               <span className="text-sm">
                 Click to place the{" "}
-                <strong style={{ color: COLOUR[draft.active === "tail" ? "tail" : "head"] }}>
+                <strong style={{ color: COLOR[draft.active === "tail" ? "tail" : "head"] }}>
                   {draft.active === "tail" ? "tail" : "head"}
                 </strong>
                 ; it snaps to the fish. Tab switches.
@@ -539,10 +539,10 @@ function ReviewRow({
   );
 }
 
-function Key({ colour, children }: { colour: string; children: React.ReactNode }) {
+function Key({ color, children }: { color: string; children: React.ReactNode }) {
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span className="size-2.5 rounded-full" style={{ background: colour }} aria-hidden />
+      <span className="size-2.5 rounded-full" style={{ background: color }} aria-hidden />
       {children}
     </span>
   );
@@ -566,7 +566,7 @@ function outcome(r: Recorded): string {
   return "Saved. It waits for a Trusted reviewer's confirm, or another learner who agrees.";
 }
 
-/** The mask's pixels, decoded in the browser as they were stored: one grey
+/** The mask's pixels, decoded in the browser as they were stored: one gray
  *  byte per pixel, nonzero is fish. */
 async function decodeMask(src: string): Promise<LoadedMask | null> {
   try {

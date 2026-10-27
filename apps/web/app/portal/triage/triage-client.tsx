@@ -28,7 +28,7 @@ export function TriageClient({ items, kindLabel, scanned, projects, notWalked }:
    *
    * Accept advances optimistically so the labeler is never waiting on the
    * network — but a failure then dropped the frame entirely, and the
-   * judgement they had already made was lost with no way to retry it. Putting
+   * judgment they had already made was lost with no way to retry it. Putting
    * it back is the difference between a retryable hiccup and silently
    * discarded work.
    */
@@ -40,7 +40,7 @@ export function TriageClient({ items, kindLabel, scanned, projects, notWalked }:
    * It lives here rather than in the viewer because the viewer is remounted
    * per task (`key`), which is what resets the loaded-image state — so
    * anything it holds is gone by the next frame. Deep zoom is most of the work
-   * at 120x, and re-pinching it for every judgement was the difference the
+   * at 120x, and re-pinching it for every judgment was the difference the
    * labeler noticed against the Android app.
    */
   const retainedScaleRef = useRef<number | null>(null);
@@ -83,7 +83,7 @@ export function TriageClient({ items, kindLabel, scanned, projects, notWalked }:
 
   function onSkip() {
     if (!item) return;
-    // Client-side only. A Label Studio "skip" writes a cancelled annotation
+    // Client-side only. A Label Studio "skip" writes a canceled annotation
     // with an empty result, which flips `completed` with no coordinates and
     // makes the populate step exclude the image forever.
     setSkipped((n) => n + 1);
@@ -234,13 +234,13 @@ function Viewer({
       markers={item.keypoints.map((kp) => ({
         x: (kp.xPercent / 100) * W,
         y: (kp.yPercent / 100) * H,
-        colour: colourFor(kp.label),
+        color: colorFor(kp.label),
       }))}
     />
   );
 }
 
-function colourFor(label: string): string {
+function colorFor(label: string): string {
   const l = label.toLowerCase();
   if (l.includes("green")) return "#41e06a";
   if (l.includes("red")) return "#ff5252";

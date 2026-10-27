@@ -27,7 +27,7 @@ describe("the web's theme is docs/design/tokens.json", () => {
     expect([...generated].filter((v) => !mapped.has(v))).toEqual([]);
   });
 
-  it("switches every colour with the system theme, unless the user picked one", () => {
+  it("switches every color with the system theme, unless the user picked one", () => {
     const css = tokensToCss(tokens);
     const [light, rest] = css.split("@media (prefers-color-scheme: dark)");
     const [system, pinned] = rest.split(':root[data-theme="dark"]');

@@ -119,7 +119,7 @@ describe("rate limiting", () => {
 });
 
 describe("retryAfterMs", () => {
-  it("honours a numeric Retry-After in seconds", () => {
+  it("honors a numeric Retry-After in seconds", () => {
     expect(retryAfterMs(rateLimited("2"), 0)).toBe(2000);
   });
 

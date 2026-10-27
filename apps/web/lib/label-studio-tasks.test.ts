@@ -66,7 +66,7 @@ describe("listTasks", () => {
     let calls = 0;
     const fetchMock = mockFetch(async () => {
       calls += 1;
-      return calls === 1 ? json({ detail: "unauthorised" }, 401) : json({ tasks: [{ id: 3 }] });
+      return calls === 1 ? json({ detail: "unauthorized" }, 401) : json({ tasks: [{ id: 3 }] });
     });
     const page = await listTasks(9, 1);
     expect(page.tasks.map((t) => t.id)).toEqual([3]);
@@ -112,7 +112,7 @@ describe("acceptPrediction", () => {
     // Byte-for-byte: this equality IS the safety argument for accepting.
     expect(body.result).toEqual(result);
     expect(body.lead_time).toBe(3200);
-    // A cancelled annotation would flip `completed` with no coordinates.
+    // A canceled annotation would flip `completed` with no coordinates.
     expect(body.was_cancelled).toBeFalsy();
   });
 
@@ -126,7 +126,7 @@ describe("fetchTaskImage", () => {
   // The previous test asserted that a hand-built
   // `/tasks/{id}/resolve/?fileuri={base64}` URL was constructed correctly. It
   // passed for weeks and the fetch 502'd every time in production, because it
-  // verified our assumption rather than Label Studio's behaviour. Ask Label
+  // verified our assumption rather than Label Studio's behavior. Ask Label
   // Studio where the frame is; handle each shape it can answer with.
 
   function taskWith(image: string) {

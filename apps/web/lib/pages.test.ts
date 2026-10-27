@@ -43,7 +43,7 @@ describe("pageLinks", () => {
     expect(pageLinks(3, 5)).toEqual([1, 2, 3, 4, 5]);
   });
 
-  it("keeps the ends and the neighbours, with gaps between", () => {
+  it("keeps the ends and the neighbors, with gaps between", () => {
     expect(pageLinks(1, 67)).toEqual([1, 2, "gap", 67]);
     expect(pageLinks(30, 67)).toEqual([1, "gap", 29, 30, 31, "gap", 67]);
     expect(pageLinks(67, 67)).toEqual([1, "gap", 66, 67]);

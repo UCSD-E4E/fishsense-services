@@ -2,7 +2,7 @@
 
 // Moved out of app/portal/triage/triage-client.tsx (ported there from
 // fishsense-lite@77e8f8e5 apps/fishsense-lite-web/app/portal/triage/
-// triage-client.tsx) on 2026-10-22, so a frame's review uses the Labelling
+// triage-client.tsx) on 2026-10-22, so a frame's review uses the Labeling
 // tab's viewer: the owner, "its code can and should be reused". Kept: the deep
 // zoom, the markers that stay one size on screen, the pinch and double-tap,
 // and the zoom carried between frames. Added for review: a tap or click that
@@ -16,7 +16,7 @@ export type Marker = {
   /** Image pixels. */
   x: number;
   y: number;
-  colour: string;
+  color: string;
   /** A smaller, hollow mark: where a point was dropped before its snap. */
   faint?: boolean;
 };
@@ -46,7 +46,7 @@ export function ZoomFrame({
   src: string;
   width: number;
   height: number;
-  /** Where a retained zoom re-centres: the thing being judged. */
+  /** Where a retained zoom re-centers: the thing being judged. */
   focus: ViewPoint | null;
   markers: Marker[];
   retainedScaleRef: React.MutableRefObject<number | null>;
@@ -271,13 +271,13 @@ export function ZoomFrame({
               }}
             >
               {m.faint ? (
-                <circle r="5" fill="none" stroke={m.colour} strokeWidth="1.2" strokeDasharray="2 2" />
+                <circle r="5" fill="none" stroke={m.color} strokeWidth="1.2" strokeDasharray="2 2" />
               ) : (
                 <>
                   <circle r="11" fill="none" stroke="#000" strokeOpacity="0.55" strokeWidth="3.5" />
-                  <circle r="11" fill="none" stroke={m.colour} strokeWidth="1.5" />
-                  <path d="M-9 0H-4M4 0H9M0 -9V-4M0 4V9" stroke={m.colour} strokeWidth="1.2" />
-                  <circle r="1" fill={m.colour} />
+                  <circle r="11" fill="none" stroke={m.color} strokeWidth="1.5" />
+                  <path d="M-9 0H-4M4 0H9M0 -9V-4M0 4V9" stroke={m.color} strokeWidth="1.2" />
+                  <circle r="1" fill={m.color} />
                 </>
               )}
             </svg>

@@ -1,7 +1,7 @@
 /**
  * The FishSense mark: a stand-in monoline fish with a teal dot, loosely after
  * the current logo, which may be replaced (docs/design/README.md). It draws in
- * the current text colour, so it follows the theme.
+ * the current text color, so it follows the theme.
  */
 export function Mark({ className = "h-7 w-auto" }: { className?: string }) {
   return (
