@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.70.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.70.0...v0.70.1) (2026-10-27)
+
+
+### Bug Fixes
+
+* American spelling across the website ([11ea1a6](https://github.com/UCSD-E4E/fishsense-services/commit/11ea1a6909d4895de6487300cb22af5d1d3960ad))
+
 ## [0.70.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.69.1...v0.70.0) (2026-10-27)
 
 
