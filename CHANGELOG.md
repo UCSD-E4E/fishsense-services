@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.70.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.69.1...v0.70.0) (2026-10-27)
+
+
+### Features
+
+* relaxed slate-pose calibration that answers with its error bar ([41cd538](https://github.com/UCSD-E4E/fishsense-services/commit/41cd53854334a8b579003637b7904af6f1381068))
+
 ## [0.69.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.69.0...v0.69.1) (2026-10-27)
 
 
