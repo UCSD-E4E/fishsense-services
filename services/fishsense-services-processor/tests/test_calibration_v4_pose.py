@@ -232,9 +232,22 @@ def test_points_too_close_in_range_are_refused():
     assert (fit.outcome, fit.refusal_reason) == ("refused", "lever_arm_below_0.6m")
 
 
-def test_fewer_than_three_points_are_refused():
-    fit = pose.fit_pose_points(_beam_points([0.6, 1.8]) + [None])
+def test_one_point_is_no_answer():
+    fit = pose.fit_pose_points(_beam_points([1.2]) + [None])
     assert (fit.outcome, fit.refusal_reason) == ("refused", "too_few_frames")
+
+
+def test_two_points_are_an_answer():
+    """Relaxed (the owner, 2026-10-26): two posed slates fix a beam; that
+    they are few widens the error bar rather than refusing. Mission 471: two
+    posed frames, +0.3% against its human calibration."""
+    fit = pose.fit_pose_points(_beam_points([0.6, 1.8]) + [None])
+    assert fit.outcome == "accepted" and fit.used == [0, 1]
+    assert np.allclose(fit.laser_axis, AXIS, atol=1e-6)
+
+
+def test_a_fit_without_a_camera_has_no_error_bar():
+    assert pose.fit_pose_points(_beam_points([0.6, 1.2, 1.8])).scale_sd is None
 
 
 def test_three_points_are_never_trimmed():
@@ -293,3 +306,66 @@ def test_a_scan_larger_than_the_board_is_found_where_it_sits(spin, turn):
     assert h is not None
     got = cv2.perspectiveTransform(refs.reshape(-1, 1, 2), h).reshape(-1, 2)
     assert np.max(np.linalg.norm(got - truth, axis=1)) < 1.5
+
+
+# -- the error bar (the owner, 2026-10-26: uncertainty, not refusal) ---------------------
+
+CAM = np.array([[2850.0, 0, 2007.0], [0, 2850.0, 1508.0], [0, 0, 1.0]])
+
+
+def _scale(fit):
+    """The fit's length scale against the true beam's (+0.01 = 1% long)."""
+    return pose.scale_against(CAM, (ORIGIN, AXIS), (fit.laser_position, fit.laser_axis))
+
+
+def test_the_scale_of_a_beam_against_itself_is_zero():
+    assert abs(pose.scale_against(CAM, (ORIGIN, AXIS), (ORIGIN, AXIS))) < 1e-12
+
+
+def test_every_answer_carries_at_least_the_floor():
+    """Exact points still carry the floor: the error every pose fit showed
+    against the human calibrations beyond what its own frames explain."""
+    fit = pose.fit_pose_points(
+        _beam_points(np.linspace(0.6, 3.0, 12)), camera_matrix=CAM
+    )
+    assert fit.scale_sd >= pose.SCALE_SD_FLOOR
+    assert fit.scale_sd < 2 * pose.SCALE_SD_FLOOR
+
+
+def test_fewer_and_closer_slates_carry_a_wider_bar():
+    wide = pose.fit_pose_points(
+        _beam_points(np.linspace(0.6, 3.0, 12)), camera_matrix=CAM
+    )
+    few = pose.fit_pose_points(_beam_points([1.0, 1.7]), camera_matrix=CAM)
+    assert few.scale_sd > wide.scale_sd
+
+
+def test_scatter_among_the_frames_widens_the_bar():
+    """Frames that disagree (5% range errors, three times the pose noise)
+    widen the bar well past what the noise model gives the same geometry:
+    the bootstrap sees them."""
+    zs = np.linspace(0.7, 2.8, 8)
+    clean = pose.fit_pose_points(_beam_points(zs), camera_matrix=CAM)
+    rng = np.random.default_rng(3)
+    noisy = [p * (1 + rng.normal(0, 0.05)) for p in _beam_points(zs)]
+    rough = pose.fit_pose_points(noisy, camera_matrix=CAM)
+    assert rough.outcome == "accepted" and rough.scale_sd > 1.5 * clean.scale_sd
+
+
+def test_the_bar_covers_the_error_its_noise_model_makes():
+    """Control with a known answer: points read at their ranges with the
+    model's own noise; the true scale falls within one bar at least 68% of
+    the time and within two at least 95%."""
+    rng = np.random.default_rng(7)
+    z1 = z2 = n = 0
+    for _ in range(60):
+        zs = np.sort(rng.uniform(0.8, 3.2, rng.integers(2, 9)))
+        pts = [p * (1 + rng.normal(0, pose.POSE_RANGE_SD)) for p in _beam_points(zs)]
+        fit = pose.fit_pose_points(pts, camera_matrix=CAM)
+        if fit.outcome != "accepted":
+            continue
+        n += 1
+        z = abs(_scale(fit)) / fit.scale_sd
+        z1 += z <= 1
+        z2 += z <= 2
+    assert n >= 50 and z1 / n >= 0.68 and z2 / n >= 0.95

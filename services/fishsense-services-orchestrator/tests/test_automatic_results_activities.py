@@ -932,3 +932,39 @@ async def test_a_slate_pose_is_written_with_its_template_and_the_frames_it_posed
     other = report.model_copy(update={"mission_id": uuid.uuid4()})
     with pytest.raises(ApplicationError):
         await _run(acts.persist_automatic_slate_pose, TARGET, plan, other, template, [])
+
+
+async def _persisted_pose(report):
+    camera, template = uuid.uuid4(), uuid.uuid4()
+    catalog = _Catalog(
+        automatic_calibration_inputs=AutomaticCalibrationInputs(camera, K, [], []),
+        persist_automatic_calibration=lambda t, d, row: uuid.uuid4(),
+    )
+    acts = _acts(catalog, slate_pose_enabled=True)
+    plan = await _run(acts.resolve_automatic_calibration_inputs, TARGET)
+    await _run(acts.persist_automatic_slate_pose, TARGET, plan, report, template, [])
+    return catalog.calls[-1][1][2]
+
+
+async def test_a_slate_pose_is_written_with_its_error_bar():
+    from fishsense_services_contracts.calibration_v3 import CalibrationV3Report
+
+    row = await _persisted_pose(CalibrationV3Report(
+        mission_id=MISSION, size_source="pose", outcome="accepted",
+        laser_position=[0.1, 0, 0], laser_axis=[0, 0, 1], frames_used=2,
+        scale_sd=0.021,
+    ))  # fmt: skip
+    assert row.scale_sd == 0.021
+
+
+async def test_a_refused_slate_pose_carries_no_error_bar():
+    """v3's check refuses a fit it disagrees with; the report keeps the
+    fit's SD, which a refusal does not carry (0079's check)."""
+    from fishsense_services_contracts.calibration_v3 import CalibrationV3Report
+
+    row = await _persisted_pose(CalibrationV3Report(
+        mission_id=MISSION, size_source="pose", outcome="refused",
+        refusal_reason="fit_disagrees_with_mission", frames_used=5,
+        scale_sd=0.03,
+    ))  # fmt: skip
+    assert (row.outcome, row.scale_sd) == ("refused", None)

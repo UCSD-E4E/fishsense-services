@@ -873,6 +873,8 @@ export interface components {
             pair_count: number | null;
             /** Refusal Reason */
             refusal_reason: string | null;
+            /** Scale Sd */
+            scale_sd?: number | null;
             /** Se Px */
             se_px: number | null;
             /** Size Ratio */
@@ -920,6 +922,8 @@ export interface components {
             laser_confidence: number | null;
             /** Length M */
             length_m: number | null;
+            /** Length Sd M */
+            length_sd_m?: number | null;
             /** Mask Bbox */
             mask_bbox: number[] | null;
             /** Mask Height */
@@ -1008,6 +1012,8 @@ export interface components {
             laser_confidence: number | null;
             /** Length M */
             length_m: number;
+            /** Length Sd M */
+            length_sd_m?: number | null;
             /** Mission Human Measured */
             mission_human_measured: boolean;
             /** Mission Number */

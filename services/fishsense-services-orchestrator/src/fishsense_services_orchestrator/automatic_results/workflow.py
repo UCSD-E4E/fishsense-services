@@ -553,6 +553,9 @@ async def _calibration(target: AutomaticTarget) -> None:
 #: owed (its switch on, a template, not current). A run started before it
 #: replays without it.
 SLATE_POSE_PATCH = "automatic-slate-pose-calibration"
+#: Every slate-pose answer carries its error bar (0079; 2026-10-27): one
+#: without, from a processor before the relaxed fit, is not written.
+SLATE_POSE_ERROR_BAR_PATCH = "automatic-slate-pose-error-bar"
 
 
 async def _slate_pose(target: AutomaticTarget, plan: AutomaticCalibrationPlan) -> None:
@@ -599,6 +602,13 @@ async def _slate_pose(target: AutomaticTarget, plan: AutomaticCalibrationPlan) -
         result_type=CalibrationV3Report,
     )  # fmt: skip
     if not ran:
+        return
+    if (report.outcome == "accepted" and report.scale_sd is None
+            and workflow.patched(SLATE_POSE_ERROR_BAR_PATCH)):  # fmt: skip
+        workflow.logger.warning(
+            "dive=%s: the slate pose came back without an error bar (a processor "
+            "from before the relaxed fit); owed still", target.mission_id,
+        )  # fmt: skip
         return
     posed = [p.capture_id for p in poses if p.status == "posed"]
     await _db("persist_automatic_slate_pose", target, plan, report,

@@ -135,7 +135,9 @@ AUTOMATIC_CALIBRATION_VERSION = "size-constancy-3"
 #: The slate-pose fit (calibration v4; 0078, the owner 2026-10-26): each slate
 #: frame posed from its printed template, the beam through the posed dots.
 #: Behind `FISHSENSE_AUTOMATIC_RESULTS_SLATE_POSE_ENABLED`, off by default.
-SLATE_POSE_CALIBRATION_VERSION = "slate-pose-4"
+#: 5 (2026-10-27): two posed slates are an answer, and every answer carries
+#: its error bar (`CalibrationV3Report.scale_sd`, 0079).
+SLATE_POSE_CALIBRATION_VERSION = "slate-pose-5"
 AUTOMATIC_MEASUREMENT_VERSION = "2"
 
 #: Stage 14's single-depth fronto-parallel projection (processor

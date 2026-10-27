@@ -1289,6 +1289,9 @@ class AutomaticCalibrationRow:
     #: names the template it posed with.
     method: str = "size_constancy"
     slate_template_id: uuid.UUID | None = None
+    #: The lengths' scale SD on this fit (0.02 = 2%; 0079): the slate pose
+    #: records it, accepted only; None where none was measured.
+    scale_sd: float | None = None
 
 
 async def persist_automatic_calibration(
@@ -1313,14 +1316,14 @@ async def persist_automatic_calibration(
                     line_direction, line_offset_px, o_mag_m, frames_used,
                     candidate_count, pair_count, size_ratio, se_px,
                     pair_residual_sd, capture_ids, core_version, method,
-                    slate_template_id)
+                    slate_template_id, scale_sd)
                 VALUES (:t, :d, :outcome, :algorithm_version, :refusal_reason,
                         :camera_calibration_id, CAST(:laser_position AS jsonb),
                         CAST(:laser_axis AS jsonb), :vanishing_px,
                         CAST(:line_direction AS jsonb), :line_offset_px, :o_mag_m,
                         :frames_used, :candidate_count, :pair_count, :size_ratio,
                         :se_px, :pair_residual_sd, :capture_ids, :core_version,
-                        :method, :slate_template_id)
+                        :method, :slate_template_id, :scale_sd)
                 RETURNING id
                 """),
             {"t": tenant_id, "d": mission_id, **values},

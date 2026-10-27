@@ -117,6 +117,9 @@ class AutomaticFrame:
     depth_m: float | None
     refusal: str | None
     calibration_source: str | None
+    #: The length's calibration error, 1 SD: the length times its
+    #: calibration's scale SD (0079); None where the calibration has none.
+    length_sd_m: float | None
     measurement_algorithm: str | None
     measurement_algorithm_version: str | None
     species: str | None
@@ -138,6 +141,7 @@ async def automatic_frame(
                        pm.bucket AS mask_bucket, pm.object_key AS mask_key,
                        pm.width AS mask_width, pm.height AS mask_height,
                        m.length_m, m.depth_m, m.refusal, m.calibration_source,
+                       m.length_m * alc.scale_sd AS length_sd_m,
                        m.algorithm AS m_algorithm,
                        m.algorithm_version AS m_algorithm_version,
                        s.predicted_choice, s.top1_probability, s.margin, s.top5,
@@ -168,6 +172,9 @@ async def automatic_frame(
                 LEFT JOIN current_automatic_measurements m
                   ON m.tenant_id = h.tenant_id AND m.capture_id = h.capture_id
                  AND m.automatic_head_tail_prediction_id = h.id
+                LEFT JOIN automatic_laser_calibrations alc
+                  ON alc.tenant_id = m.tenant_id
+                 AND alc.id = m.automatic_laser_calibration_id
                 LEFT JOIN current_automatic_species_predictions s
                   ON s.tenant_id = h.tenant_id AND s.capture_id = h.capture_id
                  AND s.automatic_head_tail_prediction_id = h.id
@@ -219,6 +226,7 @@ async def automatic_frame(
         depth_m=row.depth_m,
         refusal=row.refusal,
         calibration_source=row.calibration_source,
+        length_sd_m=row.length_sd_m,
         measurement_algorithm=row.m_algorithm,
         measurement_algorithm_version=row.m_algorithm_version,
         species=row.predicted_choice,
@@ -240,6 +248,8 @@ class AutomaticCalibration:
     created_at: datetime
     #: ``size_constancy`` or ``slate_pose`` (0078).
     method: str = "size_constancy"
+    #: The lengths' scale SD on it (0079); None where none was measured.
+    scale_sd: float | None = None
 
 
 @dataclass(frozen=True)
@@ -308,12 +318,15 @@ async def mission_automatic(
     calibration = (
         await conn.execute(
             text("""
-                SELECT outcome, refusal_reason, algorithm_version, frames_used,
-                       pair_count, size_ratio, se_px, created_at, method
-                FROM current_automatic_laser_calibrations
-                WHERE tenant_id = :t AND mission_id = :m
+                SELECT a.outcome, a.refusal_reason, a.algorithm_version,
+                       a.frames_used, a.pair_count, a.size_ratio, a.se_px,
+                       a.created_at, a.method,
+                       (SELECT x.scale_sd FROM automatic_laser_calibrations x
+                        WHERE x.tenant_id = a.tenant_id AND x.id = a.id) AS scale_sd
+                FROM current_automatic_laser_calibrations a
+                WHERE a.tenant_id = :t AND a.mission_id = :m
                 -- One per method (0078): the one the lengths would use.
-                ORDER BY outcome = 'accepted' DESC, method = 'slate_pose' DESC
+                ORDER BY a.outcome = 'accepted' DESC, a.method = 'slate_pose' DESC
                 LIMIT 1
                 """),
             params,

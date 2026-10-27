@@ -195,10 +195,14 @@ def calibrate_v3(
     other_xy,
     camera_matrix,
     fit: Callable[[Sequence[int]], LabelFreeFit],
+    min_frames: int = MIN_FRAMES,
 ) -> V3Fit:
     """Steps 1-3 for one dive. `fit(indices)` runs the size-constancy fit on
     those slate frames (direction through their own dots, at least
-    `MIN_FRAMES`): the activity's, over features it extracted once."""
+    `min_frames`): the activity's, over features it extracted once. The
+    slate-pose fit passes its own minimum (`pose.MIN_POSE_FRAMES`, 2): two
+    posed slates fix a beam; size constancy needs three to see a spread. The
+    rival line still needs `MIN_FRAMES` to be a line."""
     xy = _xy(slate_xy)
     screened = gross_screen(xy, dive_line)
     gross_dropped = len(xy) - len(screened)
@@ -208,7 +212,7 @@ def calibrate_v3(
     rival = len(slate_consensus(xy[off])[0]) if len(off) >= 2 else len(off)
     base = dict(kept=kept, gross_dropped=gross_dropped,
                 consensus_dropped=len(screened) - len(kept), rival=rival)  # fmt: skip
-    if len(kept) < MIN_FRAMES:
+    if len(kept) < min_frames:
         return V3Fit("refused", "too_few_frames", None, **base)
     if rival >= max(MIN_FRAMES, RIVAL_SHARE * len(kept)):
         return V3Fit("refused", "ambiguous_line", None, **base)
