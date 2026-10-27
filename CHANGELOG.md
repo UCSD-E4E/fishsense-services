@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.71.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.70.1...v0.71.0) (2026-10-27)
+
+
+### Features
+
+* **deploy:** turn on the slate-pose calibration ([741bf38](https://github.com/UCSD-E4E/fishsense-services/commit/741bf3854afd65fdbff9b990ba5551cc2ced7f85))
+* **deploy:** turn on the slate-pose calibration ([8adb936](https://github.com/UCSD-E4E/fishsense-services/commit/8adb936a5e6db1a98bd761269b36c0742c066e67))
+
 ## [0.70.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.70.0...v0.70.1) (2026-10-27)
 
 
