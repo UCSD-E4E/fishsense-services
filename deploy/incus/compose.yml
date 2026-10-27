@@ -272,6 +272,10 @@ services:
       # stored apart, read by nothing in production. Enabling it, and the
       # backfill, is the author's call.
       FISHSENSE_SHADOW_CALIBRATION_ENABLED: "false"
+      # The slate-pose calibration (calibration v4) for missions with a slate
+      # template, with its error bar (0079). On since its read-only
+      # validation on every templated mission (the owner, 2026-10-27).
+      FISHSENSE_AUTOMATIC_RESULTS_SLATE_POSE_ENABLED: "true"
     # FISHSENSE_DATABASE_URL (app role), the NAS, Label Studio and Garage keys.
     env_file:
       - /run/tenant/secrets/orchestrator.env

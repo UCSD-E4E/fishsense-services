@@ -450,6 +450,16 @@ def test_the_shadow_calibration_ships_off():
     assert env["FISHSENSE_SHADOW_CALIBRATION_ENABLED"] == "false"
 
 
+def test_the_slate_pose_calibration_is_on():
+    """The slate-pose calibration (0078/0079) answers with its error bar for
+    every mission with a slate template. Its read-only validation on all 143
+    of them (2026-10-27: 102 answers, 16 of the 17 with a human calibration
+    within two bars) was reviewed and the owner turned it on: explicit here,
+    so turning it off again is a reviewed diff."""
+    env = service_env(services()["orchestrator"])
+    assert env["FISHSENSE_AUTOMATIC_RESULTS_SLATE_POSE_ENABLED"] == "true"
+
+
 def test_the_api_reads_each_tenants_own_store():
     """Bucket-per-tenant (PLAN.md §9.11): the API presigns each tenant's
     uploads with that tenant's key, from the stores krg-infra provisions. The
