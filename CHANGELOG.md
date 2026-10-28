@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.72.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.71.0...v0.72.0) (2026-10-28)
+
+
+### Features
+
+* cast the slate-pose beam from the housing's laser, with its error bar at each range ([4518f42](https://github.com/UCSD-E4E/fishsense-services/commit/4518f425e4887022d67f1e6ce8e1782ac800b6df))
+* cast the slate-pose beam from the housing's laser, with its error bar at each range ([e9d5ec2](https://github.com/UCSD-E4E/fishsense-services/commit/e9d5ec26eb4e00718be77c2acce7ba9db657a370))
+
 ## [0.71.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.70.1...v0.71.0) (2026-10-27)
 
 
