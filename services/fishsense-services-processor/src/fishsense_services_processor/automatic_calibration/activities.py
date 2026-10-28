@@ -218,7 +218,8 @@ def replay_v3(
     camera-space m; None: not posed) the beam is fitted through them
     (calibration v4, `pose.fit_pose_points`): v3's screen, consensus and
     check are kept, two posed slates are an answer, and the fit carries its
-    error bar (`scale_sd`; 2026-10-27)."""
+    error bar (`scale_sd`; 2026-10-27), at each range from the housing's laser
+    (`scale_sd_by_range`, contract v26)."""
     pairs_of = pairs_of or sc.pair_scales
     dots = np.array([[f.x, f.y] for f in kept], float).reshape(-1, 2)
     dive_line = mission_line(payload.line_dots) if payload.line_dots else None
@@ -267,6 +268,7 @@ def replay_v3(
         size_ratio=None if f is None else f.size_ratio,
         se_px=None if f is None else f.se_px,
         scale_sd=None if f is None else f.scale_sd,
+        scale_sd_by_range=f.scale_sd_by_range if accepted else None,
         gross_dropped=main.gross_dropped, consensus_dropped=main.consensus_dropped,
         rival=main.rival, check_dots=main.check.dots,
         check_median_px=main.check.median_px,

@@ -82,6 +82,23 @@
             ],
             "title": "Scale Sd"
           },
+          "scale_sd_by_range": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scale Sd By Range"
+          },
           "se_px": {
             "anyOf": [
               {

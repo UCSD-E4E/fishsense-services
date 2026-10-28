@@ -14,7 +14,8 @@ from fishsense_core.line_fit import fit_line_pca
 from fishsense_services_processor.automatic_calibration import pose, v3
 
 K = np.array([[2850.0, 0, 2007.0], [0, 2850.0, 1508.0], [0, 0, 1.0]])
-O = np.array([-0.031, -0.099, 0.0])
+#: The housing's laser (calibration v4 casts its beam from it, 2026-10-27).
+O = np.asarray(pose.HOUSING_ORIGIN_M, float)
 A = np.array([0.0135, 0.0249, 0.9996]) / np.linalg.norm([0.0135, 0.0249, 0.9996])
 
 
@@ -319,20 +320,25 @@ def test_the_replay_fits_a_beam_through_pose_points():
                        draws_per_size=10, pairs_of=no_pairs)  # fmt: skip
     assert report.size_source == "pose" and report.outcome == "accepted"
     assert report.frames_used == 4 and _angle(report.laser_axis, A) < 0.01
-    assert np.allclose(report.laser_position, O, atol=1e-6)
+    # cast from the housing's laser (2026-10-27), 1.5 mm from this beam's
+    assert np.allclose(report.laser_position, pose.HOUSING_ORIGIN_M, atol=1e-9)
     assert report.check_dots == 20 and report.check_median_px < 0.5
     # each draw fits its own frames' points (a draw without frame 0 has 3)
     assert len(report.draws) == 10
     assert any(d.outcome == "accepted" and d.frames_used == 3 for d in report.draws)
 
 
-def test_pose_points_too_close_in_range_are_refused_by_the_lever_arm():
+def test_pose_points_close_in_range_are_an_answer_with_their_bar_at_each_range():
+    """From the housing's laser the beam needs no lever arm (2026-10-27: the
+    free line refused 13 missions under 0.6 m); the report gives the bar at
+    each range, which a length takes at its own depth."""
     ranges = [1.0, 1.1, 1.2, 1.3]
     payload = _payload(ranges, [])
     report = replay_v3(payload, [], payload.frames, points=_points(ranges))
-    assert (report.outcome, report.refusal_reason) == (
-        "refused",
-        "lever_arm_below_0.6m",
+    assert report.outcome == "accepted"
+    assert [z for z, _ in report.scale_sd_by_range] == list(pose.SD_RANGES_M)
+    assert report.scale_sd == max(
+        sd for z, sd in report.scale_sd_by_range if 0.75 <= z <= 3.0
     )
 
 
@@ -365,7 +371,7 @@ def test_one_posed_slate_is_no_answer():
     points[0] = points[2] = None
     report = replay_v3(payload, [], payload.frames, points=points)
     assert (report.outcome, report.refusal_reason) == ("refused", "too_few_frames")
-    assert report.scale_sd is None
+    assert report.scale_sd is None and report.scale_sd_by_range is None
 
 
 async def test_the_activity_maps_pose_points_by_capture_and_reads_no_image():

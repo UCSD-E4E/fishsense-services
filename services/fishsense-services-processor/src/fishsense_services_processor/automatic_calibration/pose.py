@@ -24,25 +24,43 @@ reference points; this finds them instead:
    them.
 4. **Point** (`dot_point`: production's `laser_point_on_plane`): the
    automatic dot's ray meeting that plane.
-5. **Beam** (`fit_pose_points`): a line through the points, trimming one at a
-   time the point furthest off it (relative to its range) beyond
-   `TRIM_MADS` robust SDs; production's lever-arm gate (0.6 m).
-6. **Error bar** (`scale_sd`, 2026-10-27): the length scale's SD, carried
-   into every length instead of refusing a weak fit.
+5. **Beam** (`fit_pose_points`, 2026-10-27): cast from the housing's laser
+   (`HOUSING_ORIGIN_M`), its direction the one most slate holds agree with.
+   Until 2026-10-27 a free line through the points, trimmed one at a time,
+   behind production's lever-arm gate (0.6 m): 279's two wrong dots (where
+   the beam is at ~0.45 m, on slates posed at ~1 m) agreed with each other
+   and masked the trim, and the line read +63% at 0.75 m, -26% at 4 m. A
+   pairwise 3D consensus did not fix it alone: a hold of near-identical
+   frames voted twice. The origin is a constant of the housing: the free
+   lines' median, from no human input, is within 2 mm of the 32 human
+   calibrations'. 279 then reads +1.7% at 0.75 m, 83 +0.7% (was +6.7%), 465
+   +2.2% at 3 m (was +10.1%); the median against the humans is unchanged
+   (n=17, replayed offline on the recorded points, the origin left out
+   one mission at a time). The cost: the bar must carry the origin's spread,
+   and the fit can no longer tell a moved laser from a tilted one.
+6. **Error bar** (`scale_sd_by_range`, 2026-10-27): the depth error's SD at
+   each range, which a length takes at its own depth, and its widest over
+   the fish's ranges (`scale_sd`). One summary (the median over 0.5-5 m,
+   0079) read 279's line, right at 2.5 m, as -6.4% +-22%.
 
 **Uncertainty, not refusal** (the owner, 2026-10-26). Of 32 missions with
 accepted human calibrations the automatic fits refused 24; a refusal is not
 evidence the fit is wrong, it throws the information away. So two posed
 slates are an answer (`MIN_POSE_FRAMES`; was 3) and how weak it is goes into
-its error bar. A fit still has no answer with one point, with its points too
-close in range to fix a direction (the lever arm: mission 107's span 0.01 m
-read -110%, 32's 0.32 m -31%), and where v3 can't tell the laser's line
-from its reflection's (77: -23%).
+its error bar. A fit still has no answer with one point, with no two slate
+holds agreeing, with two directions as well supported, and where v3 can't
+tell the laser's line from its reflection's (77: -23%). The lever arm no
+longer refuses (107's span 0.01 m read -110% as a free line): the housing
+fixes the origin, and few or close slates widen the bar instead.
 
-The bar is ``hypot(max(frame bootstrap, pose noise), SCALE_SD_FLOOR)``:
-the bootstrap sees the frames disagreeing, the noise model what few or close
-frames cannot show (two points never disagree), the floor what neither
-sees. Measured on the replay of 2026-10-26 (calibration-v3-replay-
+The bar is ``hypot(max(hold bootstrap, pose noise), SCALE_SD_FLOOR)`` at
+each range, both drawing the housing's laser from its spread; the bootstrap
+resamples slate holds, not frames (2026-10-27), and sees them disagreeing,
+the noise model what few or close frames cannot show (two points never
+disagree), the floor what neither sees. From the housing (2026-10-27,
+offline on the replay of calibration-v3-replay-20261027T201001Z, n=17
+human calibrations): 76% within one bar and 94% within two at 0.75-2 m.
+Free-line bar, measured on the replay of 2026-10-26 (calibration-v3-replay-
 20261026T162523Z, 301 missions) against the 16 production human
 calibrations it answers (436 excluded: mirrored labels): left out one at a
 time, 69% within one bar and 94% within two (68%/95% is honest). The pose
@@ -65,10 +83,6 @@ from typing import Optional, Sequence
 
 import cv2
 import numpy as np
-from fishsense_core.calibration_checks import (
-    CalibrationUnderdeterminedError,
-    check_observation_geometry,
-)
 from fishsense_core.plane import (
     Plane,
     laser_point_on_plane,
@@ -96,8 +110,12 @@ __all__ = [
     "MIN_POSE_FRAMES",
     "POSE_RANGE_SD",
     "SCALE_SD_FLOOR",
+    "SD_RANGES_M",
+    "HOUSING_ORIGIN_M",
+    "HOUSING_ORIGIN_SD_M",
+    "depth_error",
     "fit_pose_points",
-    "scale_against",
+    "scale_sd_by_range",
     "slate_plane",
     "tilt_deg",
 ]
@@ -470,40 +488,62 @@ def dot_point(plane: Plane, dot, camera_matrix) -> Optional[np.ndarray]:
 
 # -- 5. the beam ------------------------------------------------------------------------
 
-#: A point is trimmed while it is this many robust SDs off the line (distance
-#: relative to its range: a pose error scales with range), with a 1% floor.
-TRIM_MADS = 3.0
-_TRIM_FLOOR = 0.01
+#: Where the laser leaves the housing, camera space, metres (z = 0): the
+#: median of the 102 accepted slate-pose fits of 2026-10-27 (replay
+#: calibration-v3-replay-20261027T201001Z), each a free line through its own
+#: points, no human input. The 32 human calibrations put it at (-30.9,
+#: -99.4) mm; fishsense-core's `O_DESIGN_M` (104 mm) is their median too, not
+#: the mount's CAD value, which would replace this.
+HOUSING_ORIGIN_M = (-0.0325, -0.0997, 0.0)
+#: Its robust SD across those fits, per axis: fit error and housing
+#: differences together, so it overstates the housings' own (the human
+#: calibrations' 95th percentile is 11 mm from their median).
+HOUSING_ORIGIN_SD_M = 0.003
+#: Points closer than this are one slate hold, one vote (half of all posed
+#: points have another within 10 mm; 279's 1.35 m pair is 2.8 mm apart).
+BURST_M = 0.02
+#: A point agrees with a direction from the housing while it is this far off
+#: it, relative to its range (2026-10-27: 2-5% gave the same answers but 279,
+#: refused as ambiguous at 5%).
+AGREE = 0.03
 
 
-def _line_through(points: np.ndarray):
-    c = points.mean(0)
-    d = np.linalg.svd(points - c)[2][0]
-    return c, (d if d[2] > 0 else -d)
+def _bursts(pts: np.ndarray) -> np.ndarray:
+    """Each point's slate hold: points within `BURST_M` of the nearest one
+    not yet in a hold join it."""
+    hold = -np.ones(len(pts), int)
+    for n, i in enumerate(i for i in np.argsort(pts[:, 2]) if hold[i] < 0):
+        hold[(np.linalg.norm(pts - pts[i], axis=1) < BURST_M) & (hold < 0)] = n
+    return hold
 
 
-def _trimmed(pts: np.ndarray, min_frames: int) -> np.ndarray:
-    """Indices of `pts` kept by the trim: one at a time, the point furthest
-    off the line (relative to its range) beyond `TRIM_MADS` robust SDs; never
-    below `min_frames` or 3 (with 3 nothing says which one is wrong)."""
-    keep = np.arange(len(pts))
-    while len(keep) > max(min_frames, 3):
-        c, d = _line_through(pts[keep])
-        r = np.linalg.norm(np.cross(pts[keep] - c, d), axis=1) / pts[keep][:, 2]
-        mad = 1.4826 * np.median(np.abs(r - np.median(r))) + 1e-4
-        worst = int(np.argmax(r))
-        if r[worst] <= max(np.median(r) + TRIM_MADS * mad, _TRIM_FLOOR):
-            break
-        keep = np.delete(keep, worst)
-    return keep
+def _direction(pts: np.ndarray, origin) -> np.ndarray:
+    """The beam's direction from `origin`: the mean of the points' unit
+    directions from it, one weight per frame."""
+    u = pts - np.asarray(origin, float)
+    d = (u / np.linalg.norm(u, axis=1)[:, None]).mean(0)
+    return d / np.linalg.norm(d)
 
 
-def _beam(pts: np.ndarray):
-    """``(origin, axis)``: the line through `pts`, its origin where it
-    crosses the camera's plane (z = 0)."""
-    c, d = _line_through(pts)
-    return c - (c[2] / d[2]) * d, d
+def _agreeing(pts: np.ndarray, origin, holds: np.ndarray):
+    """``(indices, votes, rival)``: the points that agree with the direction
+    from `origin` most slate holds agree with (ties: the smaller summed
+    distance), how many holds, and the most holds any direction sharing no
+    point with it has."""
+    o = np.asarray(origin, float)
+    scored = []
+    for p in pts:
+        u = (p - o) / np.linalg.norm(p - o)
+        off = np.linalg.norm(np.cross(pts - o, u), axis=1) / pts[:, 2]
+        inl = np.flatnonzero(off <= AGREE)
+        scored.append((len(set(holds[inl])), -float(off[inl].sum()), tuple(inl)))
+    scored.sort(reverse=True)
+    votes, _, best = scored[0]
+    rival = max((v for v, _, i in scored if not set(i) & set(best)), default=0)
+    return np.array(best), votes, rival
 
+
+# -- 6. the error bar -------------------------------------------------------------------
 
 #: Fewest posed points that are an answer (2026-10-26; was 3).
 MIN_POSE_FRAMES = 2
@@ -511,74 +551,100 @@ MIN_POSE_FRAMES = 2
 POSE_RANGE_SD = 0.0173
 #: The error every answer carries beyond its own frames' (see the module).
 SCALE_SD_FLOOR = 0.015
+#: The ranges the bar is given at, metres; a length takes it at its own depth.
+SD_RANGES_M = (0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0)
+#: The fish's ranges, over which `scale_sd` is the widest of the bar.
+_FISH_RANGES_M = (0.75, 3.0)
 _BOOTSTRAPS = 400
 _NOISE_DRAWS = 300
-#: Ranges the scale is read over: the fish's, as v3's `scale_sd`.
-_SCALE_RANGES_M = np.linspace(0.5, 5.0, 20)
 
 
-def scale_against(camera_matrix, reference, beam) -> float:
-    """How much longer lengths come out on `beam` than on `reference` (each
-    ``(origin, axis)``): the median ratio of the ranges each gives the
-    reference's pixels at 0.5-5 m, less one. Lengths scale with range."""
+def depth_error(camera_matrix, reference, beam) -> np.ndarray:
+    """How much deeper `beam` reads each dot than `reference` (each
+    ``(origin, axis)``), at the dots `reference` casts at `SD_RANGES_M`:
+    +0.01 is 1% deep, so lengths come out 1% long."""
     k = np.asarray(camera_matrix, float)
     o, a = (np.asarray(v, float) for v in reference)
+    zs = np.asarray(SD_RANGES_M)
     pixels = []
-    for z in _SCALE_RANGES_M:
+    for z in zs:
         p = k @ (o + ((z - o[2]) / a[2]) * a)
         pixels.append(p[:2] / p[2])
-    ranges = _ranges_on(k, beam[0], beam[1], pixels)
-    return float(np.median(ranges / _SCALE_RANGES_M) - 1.0)
+    return _ranges_on(k, beam[0], beam[1], pixels) / zs - 1.0
 
 
-def scale_sd(pts: np.ndarray, camera_matrix, *, min_frames: int = MIN_POSE_FRAMES,
-             rng: np.random.Generator | None = None) -> float:  # fmt: skip
-    """The length scale's SD for the beam through `pts` (the points the fit
-    kept): ``hypot(max(bootstrap, noise), SCALE_SD_FLOOR)``. The bootstrap
-    refits (with the trim) on the frames resampled; the noise model refits
-    with each point moved along its own ray by N(0, `POSE_RANGE_SD`)."""
+def _origin_draw(rng: np.random.Generator) -> np.ndarray:
+    return (
+        np.asarray(HOUSING_ORIGIN_M, float)
+        + np.r_[rng.normal(0.0, HOUSING_ORIGIN_SD_M, 2), 0.0]
+    )
+
+
+def scale_sd_by_range(pts: np.ndarray, holds: np.ndarray, camera_matrix, *,
+                      rng: np.random.Generator | None = None) -> list:  # fmt: skip
+    """``[[range m, SD], ...]`` at `SD_RANGES_M`: the depth error's SD for the
+    beam through `pts` (the points the fit kept, `holds` their slate holds),
+    ``hypot(max(bootstrap, noise), SCALE_SD_FLOOR)`` at each range. Both draw
+    the housing's laser from its spread (`HOUSING_ORIGIN_SD_M`); the
+    bootstrap resamples slate holds (three or more), the noise model moves
+    each hold along its rays by N(0, `POSE_RANGE_SD`): a hold's frames share
+    their pose's error, so repeating them is no more evidence."""
     rng = rng if rng is not None else np.random.default_rng(0)
     pts = np.asarray(pts, float)
-    nominal = _beam(pts)
-    boot = []
-    for _ in range(_BOOTSTRAPS):
-        s = pts[rng.integers(0, len(pts), len(pts))]
-        if len(np.unique(s, axis=0)) < 2:
-            continue
-        boot.append(
-            scale_against(camera_matrix, nominal, _beam(s[_trimmed(s, min_frames)]))
-        )
-    noise = [
-        scale_against(camera_matrix, nominal,
-                      _beam(pts * (1 + rng.normal(0.0, POSE_RANGE_SD, (len(pts), 1)))))
-        for _ in range(_NOISE_DRAWS)
-    ]  # fmt: skip
-    spread = max(float(np.std(boot)) if len(boot) > 20 else 0.0, float(np.std(noise)))
-    return float(np.hypot(spread, SCALE_SD_FLOOR))
+    origin = np.asarray(HOUSING_ORIGIN_M, float)
+    nominal = (origin, _direction(pts, origin))
+    ids = np.unique(holds)
+    boot = np.zeros(len(SD_RANGES_M))
+    if len(ids) >= 3:
+        draws = []
+        for _ in range(_BOOTSTRAPS):
+            s = np.concatenate([pts[holds == h] for h in rng.choice(ids, len(ids))])
+            o = _origin_draw(rng)
+            draws.append(depth_error(camera_matrix, nominal, (o, _direction(s, o))))
+        boot = np.std(draws, axis=0)
+    noise = []
+    for _ in range(_NOISE_DRAWS):
+        o = _origin_draw(rng)
+        shift = rng.normal(0.0, POSE_RANGE_SD, len(ids))[np.searchsorted(ids, holds)]
+        moved = pts * (1 + shift[:, None])
+        noise.append(depth_error(camera_matrix, nominal, (o, _direction(moved, o))))
+    sd = np.hypot(np.maximum(boot, np.std(noise, axis=0)), SCALE_SD_FLOOR)
+    return [[float(z), float(v)] for z, v in zip(SD_RANGES_M, sd)]
 
 
 def fit_pose_points(points, *, min_frames: int = MIN_POSE_FRAMES,
                     camera_matrix=None) -> LabelFreeFit:  # fmt: skip
-    """The beam through the slate points (camera space, metres): trimmed one
-    at a time, the lever-arm gate, the origin where the beam crosses the
-    camera's plane (z = 0), as the label-free fits report it. With
-    `camera_matrix`, its error bar (`scale_sd`)."""
+    """The beam from the housing's laser (`HOUSING_ORIGIN_M`) through the
+    slate points (camera space, metres): its direction the one most slate
+    holds agree with (`AGREE`), the mean of theirs. No answer with under
+    `min_frames` points (or 2), with no two holds agreeing
+    (``slates_disagree``), or with another direction as well supported
+    (``ambiguous_line``). With `camera_matrix`, its error bar at each range
+    (`scale_sd_by_range`) and the widest of it over the fish's ranges
+    (`scale_sd`)."""
     pts = np.asarray([p for p in points if p is not None], float).reshape(-1, 3)
     idx = [i for i, p in enumerate(points) if p is not None]
     seen = dict(used=list(idx), frames_used=len(pts), pairs=0,
                 pair_residual_sd=None)  # fmt: skip
     if len(pts) < max(min_frames, 2):
         return refused("too_few_frames", **seen)
-    keep = _trimmed(pts, min_frames)
+    holds = _bursts(pts)
+    keep, votes, rival = _agreeing(pts, HOUSING_ORIGIN_M, holds)
+    if votes < 2:
+        return refused("slates_disagree", **seen)
+    if rival >= votes:
+        return refused("ambiguous_line", **seen)
+    keep = np.sort(keep)
     seen.update(used=[idx[i] for i in keep], frames_used=len(keep))
-    try:
-        check_observation_geometry(pts[keep])
-    except CalibrationUnderdeterminedError:
-        return refused("lever_arm_below_0.6m", **seen)
-    origin, d = _beam(pts[keep])
-    sd = None if camera_matrix is None else scale_sd(pts[keep], camera_matrix,
-                                                     min_frames=min_frames)  # fmt: skip
+    origin = np.asarray(HOUSING_ORIGIN_M, float)
+    d = _direction(pts[keep], origin)
+    by_range = sd = None
+    if camera_matrix is not None:
+        by_range = scale_sd_by_range(pts[keep], holds[keep], camera_matrix)
+        lo, hi = _FISH_RANGES_M
+        sd = max(v for z, v in by_range if lo <= z <= hi)
     return accepted(
         laser_position=[float(v) for v in origin], laser_axis=[float(v) for v in d],
-        o_mag_m=float(np.linalg.norm(origin)), scale_sd=sd, **seen,
+        o_mag_m=float(np.linalg.norm(origin)), scale_sd=sd,
+        scale_sd_by_range=by_range, **seen,
     )  # fmt: skip

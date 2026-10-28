@@ -1423,6 +1423,8 @@ class AutomaticLaserCalibration(Base):
     )
     #: The lengths' scale SD on an accepted fit (0.02 = 2%; 0079).
     scale_sd: Mapped[float | None] = mapped_column(Double)
+    #: That SD at each range, ``[[range m, SD], ...]`` (0080).
+    scale_sd_by_range: Mapped[list | None] = mapped_column(JSONB)
 
 
 class AutomaticSpeciesPrediction(Base):

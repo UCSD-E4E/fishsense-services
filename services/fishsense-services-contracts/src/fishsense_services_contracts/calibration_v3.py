@@ -54,6 +54,10 @@ class CalibrationV3Report(BaseModel):
     se_px: Optional[float] = None
     #: v17: the fit's predicted length-scale SD (SAM sizes).
     scale_sd: Optional[float] = None
+    #: v26: the error bar at each range, ``[[range m, SD], ...]`` (the
+    #: slate-pose fit from the housing's laser); a length takes it at its
+    #: own depth.
+    scale_sd_by_range: Optional[List[List[float]]] = None
     gross_dropped: int = 0
     consensus_dropped: int = 0
     rival: int = 0

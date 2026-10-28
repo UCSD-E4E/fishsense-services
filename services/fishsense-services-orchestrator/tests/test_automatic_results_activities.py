@@ -952,9 +952,10 @@ async def test_a_slate_pose_is_written_with_its_error_bar():
     row = await _persisted_pose(CalibrationV3Report(
         mission_id=MISSION, size_source="pose", outcome="accepted",
         laser_position=[0.1, 0, 0], laser_axis=[0, 0, 1], frames_used=2,
-        scale_sd=0.021,
+        scale_sd=0.021, scale_sd_by_range=[[1.0, 0.018], [2.0, 0.021]],
     ))  # fmt: skip
     assert row.scale_sd == 0.021
+    assert row.scale_sd_by_range == [[1.0, 0.018], [2.0, 0.021]]
 
 
 async def test_a_refused_slate_pose_carries_no_error_bar():
@@ -965,6 +966,6 @@ async def test_a_refused_slate_pose_carries_no_error_bar():
     row = await _persisted_pose(CalibrationV3Report(
         mission_id=MISSION, size_source="pose", outcome="refused",
         refusal_reason="fit_disagrees_with_mission", frames_used=5,
-        scale_sd=0.03,
+        scale_sd=0.03, scale_sd_by_range=[[1.0, 0.03]],
     ))  # fmt: skip
-    assert (row.outcome, row.scale_sd) == ("refused", None)
+    assert (row.outcome, row.scale_sd, row.scale_sd_by_range) == ("refused", None, None)

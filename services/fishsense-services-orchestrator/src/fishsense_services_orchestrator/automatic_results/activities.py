@@ -682,8 +682,8 @@ class AutomaticResultsActivities:
         """The slate-pose fit as the mission's slate-pose calibration, naming
         its template and the frames it posed (the zoom gate's staleness reads
         them as it reads the size-constancy fit's), and an answer's error bar
-        (0079): a refusal carries none, though v3's check keeps the SD of the
-        fit it refused."""
+        (0079), at each range too (0080): a refusal carries none, though v3's
+        check keeps the SD of the fit it refused."""
         if report.mission_id != target.mission_id:
             raise _refuse(target, f"a slate pose for dive {report.mission_id}")
         row = AutomaticCalibrationRow(
@@ -705,6 +705,9 @@ class AutomaticResultsActivities:
             se_px=report.se_px,
             capture_ids=list(posed),
             scale_sd=report.scale_sd if report.outcome == "accepted" else None,
+            scale_sd_by_range=(
+                report.scale_sd_by_range if report.outcome == "accepted" else None
+            ),
         )
         return await self._write(
             target, self._catalog.persist_automatic_calibration, row

@@ -13,9 +13,11 @@ head/tail's. Pinned here:
   than a made-up zero.
 """
 
+import json
 import math
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from depth_measure_seed import capture, forget_identities, tenant  # noqa: F401
@@ -134,5 +136,68 @@ async def test_only_an_answer_carries_a_positive_error_bar(
     mission_id = await _backlog_mission(owner_engine, lab)
     template = await _with_template(owner_engine, mission_id)
     with pytest.raises(IntegrityError, match="scale_sd_check"):
+        await _in(app_engine, lab, persist_automatic_calibration, mission_id,
+                  _posed(template, **row))  # fmt: skip
+
+
+# -- at each range (0080, 2026-10-27) ------------------------------------------------------
+
+#: The bar at 1 m and 3 m; `_measured`'s fish is at 2 m, halfway.
+BY_RANGE = [[1.0, 0.02], [3.0, 0.04]]
+
+
+@pytest.mark.parametrize(
+    "by_range,depth,want",
+    [
+        (BY_RANGE, 2.0, 0.03),
+        (BY_RANGE, 1.0, 0.02),
+        (BY_RANGE, 0.5, 0.02),
+        (BY_RANGE, 4.0, 0.04),
+        (None, 2.0, 0.05),
+        (BY_RANGE, None, 0.05),
+    ],
+    ids=["between", "at_a_range", "nearer", "further", "no_ranges", "no_depth"],
+)
+async def test_the_bar_is_read_at_a_depth(owner_engine, by_range, depth, want):
+    """Linear between the ranges given, the nearest one's beyond them, and
+    the calibration's one SD where it gives none or the length has no
+    depth."""
+    async with owner_engine.connect() as conn:
+        got = (await conn.execute(
+            text("SELECT calibration_sd_at(CAST(:r AS jsonb), 0.05, :d)"),
+            {"r": None if by_range is None else json.dumps(by_range), "d": depth},
+        )).scalar_one()  # fmt: skip
+    assert math.isclose(got, want)
+
+
+async def test_a_length_takes_the_bar_at_its_own_depth(owner_engine, app_engine):
+    """279 (2026-10-27): its beam was right at 2.5 m and +63% at 0.75 m, so
+    one SD for every length was the wrong bar for most of them."""
+    lab, mission_id, c = await _measured(
+        owner_engine, app_engine,
+        calibration=lambda t: _posed(t, scale_sd=0.04, scale_sd_by_range=BY_RANGE),
+    )  # fmt: skip
+    frame = await _in(app_engine, lab, automatic_frame, c)
+    assert math.isclose(frame.length_sd_m, LENGTH_M * 0.03)
+    (length,) = (await _in(app_engine, lab, automatic_lengths)).lengths
+    assert math.isclose(length.length_sd_m, LENGTH_M * 0.03)
+    mission = await _in(app_engine, lab, mission_automatic, mission_id)
+    assert mission.calibration.scale_sd_by_range == BY_RANGE
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        dict(scale_sd=0.02, scale_sd_by_range={"1.0": 0.02}),
+        dict(scale_sd=0.02, scale_sd_by_range=BY_RANGE, outcome="refused",
+             refusal_reason="too_few_frames", laser_position=None, laser_axis=None),
+    ],
+    ids=["not_an_array", "on_a_refusal"],
+)  # fmt: skip
+async def test_only_an_answer_carries_a_bar_by_range(owner_engine, app_engine, row):
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    template = await _with_template(owner_engine, mission_id)
+    with pytest.raises(IntegrityError, match="scale_sd_by_range_check"):
         await _in(app_engine, lab, persist_automatic_calibration, mission_id,
                   _posed(template, **row))  # fmt: skip

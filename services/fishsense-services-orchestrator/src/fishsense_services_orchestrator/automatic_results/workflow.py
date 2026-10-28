@@ -556,6 +556,10 @@ SLATE_POSE_PATCH = "automatic-slate-pose-calibration"
 #: Every slate-pose answer carries its error bar (0079; 2026-10-27): one
 #: without, from a processor before the relaxed fit, is not written.
 SLATE_POSE_ERROR_BAR_PATCH = "automatic-slate-pose-error-bar"
+#: ... and at each range, from the housing's laser (slate-pose-6, 0080;
+#: 2026-10-27): one with a single SD, from a processor's free line, is not
+#: written either.
+SLATE_POSE_BY_RANGE_PATCH = "automatic-slate-pose-bar-by-range"
 
 
 async def _slate_pose(target: AutomaticTarget, plan: AutomaticCalibrationPlan) -> None:
@@ -608,6 +612,13 @@ async def _slate_pose(target: AutomaticTarget, plan: AutomaticCalibrationPlan) -
         workflow.logger.warning(
             "dive=%s: the slate pose came back without an error bar (a processor "
             "from before the relaxed fit); owed still", target.mission_id,
+        )  # fmt: skip
+        return
+    if (report.outcome == "accepted" and report.scale_sd_by_range is None
+            and workflow.patched(SLATE_POSE_BY_RANGE_PATCH)):  # fmt: skip
+        workflow.logger.warning(
+            "dive=%s: the slate pose came back without its bar at each range (a "
+            "processor from before slate-pose-6); owed still", target.mission_id,
         )  # fmt: skip
         return
     posed = [p.capture_id for p in poses if p.status == "posed"]
