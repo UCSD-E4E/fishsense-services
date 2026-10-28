@@ -528,13 +528,13 @@ class _Pose:  # pylint: disable=too-few-public-methods
                 for n, f in enumerate(payload["frames"])]  # fmt: skip
 
 
-def _pose_fit(payload: dict, scale_sd) -> dict:
+def _pose_fit(payload: dict, scale_sd, by_range=None) -> dict:
     assert payload["size_source"] == "pose"
     fitted = [k for k, v in payload["pose_points"].items() if v is not None]
     return CalibrationV3Report(
         mission_id=payload["payload"]["dive_id"], size_source="pose",
         outcome="accepted", laser_position=[0.1, 0, 0], laser_axis=[0, 0, 1],
-        frames_used=len(fitted), scale_sd=scale_sd,
+        frames_used=len(fitted), scale_sd=scale_sd, scale_sd_by_range=by_range,
     ).model_dump(mode="json")  # fmt: skip
 
 
@@ -543,7 +543,7 @@ class _PoseFit:  # pylint: disable=too-few-public-methods
     @workflow.run
     async def run(self, payload: dict) -> dict:
         await _record_child()
-        return _pose_fit(payload, 0.02)
+        return _pose_fit(payload, 0.02, [[1.0, 0.02]])
 
 
 @workflow.defn(name="ReplayAutomaticCalibrationV3Workflow")
@@ -554,6 +554,16 @@ class _PoseFitWithoutErrorBars:  # pylint: disable=too-few-public-methods
     async def run(self, payload: dict) -> dict:
         await _record_child()
         return _pose_fit(payload, None)
+
+
+@workflow.defn(name="ReplayAutomaticCalibrationV3Workflow")
+class _PoseFitWithoutBarsByRange:  # pylint: disable=too-few-public-methods
+    """A processor from before slate-pose-6: one SD, not one per range."""
+
+    @workflow.run
+    async def run(self, payload: dict) -> dict:
+        await _record_child()
+        return _pose_fit(payload, 0.02)
 
 
 @workflow.defn(name="MeasureAutomaticWorkflow")
@@ -567,7 +577,8 @@ class _Measure:  # pylint: disable=too-few-public-methods
 async def _run(
     workflow_cls=AutomaticResultsForMissionWorkflow, *args, species_fails=False,
     frames_fail=False, frames_partial=False, frames_refuse=False,
-    species_refuse=False, runner=None, history=None, old_pose_fit=False, **stubs,
+    species_refuse=False, runner=None, history=None, old_pose_fit=False,
+    pose_fit_v5=False, **stubs,
 ):  # fmt: skip
     EVENTS.clear()
     SELECTS.clear()
@@ -591,7 +602,9 @@ async def _run(
                               _Keypoints, _Pose]),
             Worker(env.client, task_queue=PROCESSOR_TASK_QUEUE, activities=[_record],
                    workflows=[_Calibration, _Render,
-                              _PoseFitWithoutErrorBars if old_pose_fit else _PoseFit]),
+                              _PoseFitWithoutErrorBars if old_pose_fit
+                              else _PoseFitWithoutBarsByRange if pose_fit_v5
+                              else _PoseFit]),
             Worker(env.client, task_queue=PROCESSOR_LIGHT_TASK_QUEUE,
                    activities=[_record],
                    workflows=[_Measure]),
@@ -656,6 +669,18 @@ async def test_an_answer_from_a_processor_without_error_bars_is_not_written():
     the pose stays owed until an upgraded worker fits it."""
     await _run(AutomaticResultsForMissionWorkflow, TARGET, pose=True, slate=3,
                old_pose_fit=True)  # fmt: skip
+
+    assert ("child", f"automatic-slate-pose-fit-{MISSION}") in EVENTS
+    assert not [e for e in EVENTS if e[0] == "persist slate pose"]
+
+
+async def test_an_answer_without_its_bar_at_each_range_is_not_written():
+    """slate-pose-6 (2026-10-27) casts the beam from the housing's laser and
+    gives its bar at each range; a processor from before answers with a free
+    line and one SD (279: +63% at 0.75 m behind +-22%). Nothing is written,
+    so the pose stays owed until an upgraded worker fits it."""
+    await _run(AutomaticResultsForMissionWorkflow, TARGET, pose=True, slate=3,
+               pose_fit_v5=True)  # fmt: skip
 
     assert ("child", f"automatic-slate-pose-fit-{MISSION}") in EVENTS
     assert not [e for e in EVENTS if e[0] == "persist slate pose"]

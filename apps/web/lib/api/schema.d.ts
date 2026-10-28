@@ -875,6 +875,8 @@ export interface components {
             refusal_reason: string | null;
             /** Scale Sd */
             scale_sd?: number | null;
+            /** Scale Sd By Range */
+            scale_sd_by_range?: number[][] | null;
             /** Se Px */
             se_px: number | null;
             /** Size Ratio */

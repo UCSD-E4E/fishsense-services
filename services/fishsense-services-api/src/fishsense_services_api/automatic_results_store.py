@@ -1292,6 +1292,9 @@ class AutomaticCalibrationRow:
     #: The lengths' scale SD on this fit (0.02 = 2%; 0079): the slate pose
     #: records it, accepted only; None where none was measured.
     scale_sd: float | None = None
+    #: The scale SD at each range, ``[[range m, SD], ...]`` (0080): a length
+    #: takes it at its own depth (`calibration_sd_at`); accepted only.
+    scale_sd_by_range: list | None = None
 
 
 async def persist_automatic_calibration(
@@ -1305,7 +1308,7 @@ async def persist_automatic_calibration(
     if row.capture_ids:
         await _check_captures(conn, tenant_id, mission_id, row.capture_ids)
     values = asdict(row)
-    for key in ("laser_position", "laser_axis", "line_direction"):
+    for key in ("laser_position", "laser_axis", "line_direction", "scale_sd_by_range"):
         values[key] = None if values[key] is None else json.dumps(values[key])
     return (
         await conn.execute(
@@ -1316,14 +1319,15 @@ async def persist_automatic_calibration(
                     line_direction, line_offset_px, o_mag_m, frames_used,
                     candidate_count, pair_count, size_ratio, se_px,
                     pair_residual_sd, capture_ids, core_version, method,
-                    slate_template_id, scale_sd)
+                    slate_template_id, scale_sd, scale_sd_by_range)
                 VALUES (:t, :d, :outcome, :algorithm_version, :refusal_reason,
                         :camera_calibration_id, CAST(:laser_position AS jsonb),
                         CAST(:laser_axis AS jsonb), :vanishing_px,
                         CAST(:line_direction AS jsonb), :line_offset_px, :o_mag_m,
                         :frames_used, :candidate_count, :pair_count, :size_ratio,
                         :se_px, :pair_residual_sd, :capture_ids, :core_version,
-                        :method, :slate_template_id, :scale_sd)
+                        :method, :slate_template_id, :scale_sd,
+                        CAST(:scale_sd_by_range AS jsonb))
                 RETURNING id
                 """),
             {"t": tenant_id, "d": mission_id, **values},

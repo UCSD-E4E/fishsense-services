@@ -137,7 +137,11 @@ AUTOMATIC_CALIBRATION_VERSION = "size-constancy-3"
 #: Behind `FISHSENSE_AUTOMATIC_RESULTS_SLATE_POSE_ENABLED`, off by default.
 #: 5 (2026-10-27): two posed slates are an answer, and every answer carries
 #: its error bar (`CalibrationV3Report.scale_sd`, 0079).
-SLATE_POSE_CALIBRATION_VERSION = "slate-pose-5"
+#: 6 (2026-10-27): the beam is cast from the housing's laser, the slates
+#: voting by hold for its direction, and the bar is given at each range
+#: (`scale_sd_by_range`, 0080): a free line through 279's two wrong dots read
+#: +63% at 0.75 m.
+SLATE_POSE_CALIBRATION_VERSION = "slate-pose-6"
 AUTOMATIC_MEASUREMENT_VERSION = "2"
 
 #: Stage 14's single-depth fronto-parallel projection (processor
