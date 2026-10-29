@@ -884,7 +884,8 @@ async def test_with_its_switch_on_the_store_says_whether_it_is_owed():
     acts = _acts(catalog, slate_pose_enabled=True)
     assert await _run(acts.automatic_slate_pose_owed, TARGET) is True
     assert catalog.calls[-1] == ("automatic_slate_pose_owed", (TENANT_A, MISSION),
-                                 {"version": SLATE_POSE_CALIBRATION_VERSION})  # fmt: skip
+                                 {"version": SLATE_POSE_CALIBRATION_VERSION,
+                                  "aim": 0})  # fmt: skip
 
 
 async def test_the_cohort_owes_the_slate_pose_only_with_its_switch_on():

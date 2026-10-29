@@ -986,11 +986,13 @@ async def test_a_calibration_fitted_through_a_zoomed_frame_is_owed_again(
     assert await _next(app_engine, lab) == mission_id
 
 
-async def test_a_frame_after_the_laser_moved_is_not_measured_nor_owed(
+async def test_a_frame_after_the_laser_moved_waits_for_its_own_aims_calibration(
     owner_engine, app_engine
 ):
-    """The partial run (owner, 2026-10-25): the part of the dive before the
-    move is measured; the rest is refused, and never holds the mission."""
+    """The partial run (owner, 2026-10-25) measured the part of the dive
+    before the move and refused the rest. Each aim is calibrated now (0081):
+    the frame after it is not measured with the first aim's beam, and holds
+    the mission only until its own aim's fit is tried."""
     from _slate_calibration_seed import beam_moved_after
 
     lab = await tenant(owner_engine)
@@ -1016,9 +1018,11 @@ async def test_a_frame_after_the_laser_moved_is_not_measured_nor_owed(
             algorithm_version="1", core_version="4.1.0",
         )
     ])  # fmt: skip
-    assert (
-        await _next_without_species(app_engine, lab) is None
-    )  # the moved frame owes nothing
+    assert await _next_without_species(app_engine, lab) == mission_id  # aim 1's fit
+    await _in(app_engine, lab, persist_automatic_calibration, mission_id,
+              _label_free(aim=1, outcome="refused", refusal_reason="too_few_frames",
+                          laser_position=None, laser_axis=None))  # fmt: skip
+    assert await _next_without_species(app_engine, lab) is None
 
 
 async def test_a_frame_after_the_laser_moved_is_no_calibration_dot(
@@ -2021,7 +2025,7 @@ async def test_a_missions_inputs_read_each_frames_current_rows_by_its_index(
         (plan,) = (
             await conn.execute(
                 text(f"EXPLAIN (FORMAT JSON) {sql}"),
-                {"t": lab, "d": mission_id, "mv": "1", "sv": 1},
+                {"t": lab, "d": mission_id, "mv": "1", "sv": 1, "aim": 0},
             )
         ).scalar_one()
     reads = [n for n in _plan_nodes(plan["Plan"]) if n.get("Relation Name") in _LATEST]

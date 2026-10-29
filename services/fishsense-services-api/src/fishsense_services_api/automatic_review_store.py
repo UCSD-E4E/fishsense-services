@@ -329,8 +329,10 @@ async def mission_automatic(
                 JOIN automatic_laser_calibrations x
                   ON x.tenant_id = a.tenant_id AND x.id = a.id
                 WHERE a.tenant_id = :t AND a.mission_id = :m
-                -- One per method (0078): the one the lengths would use.
-                ORDER BY a.outcome = 'accepted' DESC, a.method = 'slate_pose' DESC
+                -- One per method (0078) and aim (0081): the one the first
+                -- aim's lengths would use.
+                ORDER BY x.aim, a.outcome = 'accepted' DESC,
+                         a.method = 'slate_pose' DESC
                 LIMIT 1
                 """),
             params,
@@ -339,8 +341,12 @@ async def mission_automatic(
     lengths_use = (
         await conn.execute(
             text("""
-                SELECT calibration_source FROM automatic_measurement_calibrations
-                WHERE tenant_id = :t AND mission_id = :m
+                SELECT mc.calibration_source FROM automatic_measurement_calibrations mc
+                JOIN automatic_laser_calibrations x
+                  ON x.tenant_id = mc.tenant_id AND x.id = mc.automatic_laser_calibration_id
+                WHERE mc.tenant_id = :t AND mc.mission_id = :m
+                -- One per aim (0081): the first's.
+                ORDER BY x.aim LIMIT 1
                 """),
             params,
         )

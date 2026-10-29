@@ -61,6 +61,7 @@ not in the backlog; it records a failure too, and then fails, so a dive run
 by hand never reads as done when it isn't.
 """
 
+import dataclasses
 import uuid
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -518,12 +519,49 @@ async def _species_step(
         await _db("persist_automatic_species", target, persistable, result_type=int)
 
 
+#: Each laser aim is its own calibration and its own lengths (0081; the
+#: owner, 2026-10-29): after a recorded beam move the second aim is fitted,
+#: and measured, its children named for it; a
+#: size-constancy fit not owed is not refitted. A run started before it
+#: replays as it ran: one fit, one measure, the first aim.
+AIMS_PATCH = "automatic-calibration-per-aim"
+
+
+def _aimed(name: str, target: AutomaticTarget) -> str:
+    """A child's id for the target's aim: the first's as it always was."""
+    return name if target.aim == 0 else f"{name}-aim{target.aim}"
+
+
+async def _aims(target: AutomaticTarget) -> list[AutomaticTarget]:
+    if not workflow.patched(AIMS_PATCH):
+        return [target]
+    aims = await _db("automatic_mission_aims", target, result_type=List[int])
+    return [dataclasses.replace(target, aim=aim) for aim in aims]
+
+
 async def _calibration(target: AutomaticTarget) -> None:
+    for aimed in await _aims(target):
+        await _calibrate_aim(aimed)
+
+
+async def _calibrate_aim(target: AutomaticTarget) -> None:
+    per_aim = workflow.patched(AIMS_PATCH)
     plan: AutomaticCalibrationPlan = await _db(
         "resolve_automatic_calibration_inputs",
         target,
         result_type=AutomaticCalibrationPlan,
     )
+    owed = not per_aim or await _db(
+        "automatic_calibration_owed", target, result_type=bool
+    )
+    if owed and not await _size_constancy(target, plan):
+        return
+    if workflow.patched(SLATE_POSE_PATCH):
+        await _slate_pose(target, plan)
+
+
+async def _size_constancy(target: AutomaticTarget, plan) -> bool:
+    """The size-constancy fit, written; False when its child did not run."""
     if not plan.payload.frames:
         result = AutomaticCalibrationResult(
             mission_id=target.mission_id,
@@ -536,16 +574,15 @@ async def _calibration(target: AutomaticTarget) -> None:
         ran, result = await _child(
             "FitAutomaticCalibrationWorkflow",
             plan.payload,
-            child_id=f"automatic-calibration-{target.mission_id}",
+            child_id=_aimed(f"automatic-calibration-{target.mission_id}", target),
             task_queue=PROCESSOR_TASK_QUEUE,
             timeout=CALIBRATION_CHILD_TIMEOUT,
             result_type=AutomaticCalibrationResult,
         )
         if not ran:
-            return
+            return False
     await _db("persist_automatic_calibration", target, plan, result)
-    if workflow.patched(SLATE_POSE_PATCH):
-        await _slate_pose(target, plan)
+    return True
 
 
 #: The slate-pose calibration (calibration v4, 0078; the owner, 2026-10-26),
@@ -584,7 +621,7 @@ async def _slate_pose(target: AutomaticTarget, plan: AutomaticCalibrationPlan) -
         return
     poses = await pose_slate_frames(
         target.tenant_id, target.mission_id, plan, template,
-        child_prefix=f"automatic-slate-pose-{target.mission_id}",
+        child_prefix=_aimed(f"automatic-slate-pose-{target.mission_id}", target),
     )  # fmt: skip
     if poses is None:
         workflow.logger.warning(
@@ -600,7 +637,7 @@ async def _slate_pose(target: AutomaticTarget, plan: AutomaticCalibrationPlan) -
         "ReplayAutomaticCalibrationV3Workflow",
         ReplayCalibrationInput(payload=plan.payload, size_source="pose",
                                pose_points=points),
-        child_id=f"automatic-slate-pose-fit-{target.mission_id}",
+        child_id=_aimed(f"automatic-slate-pose-fit-{target.mission_id}", target),
         task_queue=PROCESSOR_TASK_QUEUE,
         timeout=CALIBRATION_CHILD_TIMEOUT,
         result_type=CalibrationV3Report,
@@ -627,6 +664,11 @@ async def _slate_pose(target: AutomaticTarget, plan: AutomaticCalibrationPlan) -
 
 
 async def _lengths(target: AutomaticTarget) -> None:
+    for aimed in await _aims(target):
+        await _measure_aim(aimed)
+
+
+async def _measure_aim(target: AutomaticTarget) -> None:
     plan: Optional[AutomaticMeasurePlan] = await _db(
         "resolve_automatic_measure_inputs",
         target,
@@ -642,7 +684,7 @@ async def _lengths(target: AutomaticTarget) -> None:
     ran, result = await _child(
         "MeasureAutomaticWorkflow",
         plan.payload,
-        child_id=f"automatic-measure-{target.mission_id}",
+        child_id=_aimed(f"automatic-measure-{target.mission_id}", target),
         task_queue=PROCESSOR_LIGHT_TASK_QUEUE,
         timeout=CPU_CHILD_TIMEOUT,
         result_type=MeasureAutomaticResult,
