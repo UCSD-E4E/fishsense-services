@@ -6,10 +6,15 @@
 //    null, not an error page; ids from the URL are checked before a request;
 //  * every status reads as words a reviewer understands;
 //  * the overlay is drawn only on the render the points belong to, at its size;
-//  * agreement with the human lengths reads as agreement, with its n.
+//  * agreement with the human lengths reads as agreement, with its n;
+//  * one frame's automatic length is said to agree with the human one when
+//    the human length is inside its error bar (± 1 SD), as the page draws it
+//    (the owner, 2026-10-30: fish 0dd398f5, 694 ± 16 mm against 686 mm, was
+//    told the result "isn't the measurement above").
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   agreement,
+  againstHuman,
   automaticOverlay,
   getAutomaticMask,
   getAutomaticFrame,
@@ -151,5 +156,28 @@ describe("getAutomaticMask", () => {
     vi.stubGlobal("fetch", vi.fn<FetchSig>(async () => jsonResponse({ detail: "no mask" }, 404)));
 
     expect(await getAutomaticMask("t", "lab", CAPTURE)).toBeNull();
+  });
+});
+
+
+describe("againstHuman", () => {
+  it("agrees when the human length is inside the error bar", () => {
+    // Mission 383, capture 0dd398f5: 694 ± 16 mm against 686 mm.
+    expect(againstHuman(0.694141, 0.015831, 0.686386)).toEqual({
+      kind: "agrees",
+      percent: expect.closeTo(1.13, 2),
+    });
+  });
+
+  it("agrees at the edge of the bar, and differs just past it", () => {
+    expect(againstHuman(0.71, 0.01, 0.7)?.kind).toBe("agrees");
+    expect(againstHuman(0.7101, 0.01, 0.7)?.kind).toBe("differs");
+    expect(againstHuman(0.6899, 0.01, 0.7)?.kind).toBe("differs");
+  });
+
+  it("says nothing it cannot judge", () => {
+    expect(againstHuman(0.7, null, 0.69)?.kind).toBe("unjudged");
+    expect(againstHuman(0.7, 0.01, null)).toBeNull();
+    expect(againstHuman(null, 0.01, 0.7)).toBeNull();
   });
 });
