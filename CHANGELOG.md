@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.74.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.73.0...v0.74.0) (2026-10-30)
+
+
+### Features
+
+* borrow a neighbor's beam for an uncalibrated aim, checked on its own slates ([d5aa52d](https://github.com/UCSD-E4E/fishsense-services/commit/d5aa52d4ccdc5b23e552b991ff29027ec1f72536))
+* borrow a neighbor's beam for an uncalibrated aim, checked on its own slates ([9f43cb0](https://github.com/UCSD-E4E/fishsense-services/commit/9f43cb0ea226ebd6ce2dd0bc9f53f4ed27d0e626))
+
 ## [0.73.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.72.0...v0.73.0) (2026-10-30)
 
 
