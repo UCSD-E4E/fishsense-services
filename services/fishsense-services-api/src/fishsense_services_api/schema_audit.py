@@ -48,6 +48,7 @@ GLOBAL_REFERENCE_TABLES = frozenset(
         "fish_models",
         "fish_model_references",
         "slate_templates",
+        "species_length_references",
     }
 )
 
