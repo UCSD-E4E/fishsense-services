@@ -123,3 +123,24 @@ export async function getAutomaticMask(
   if (data !== undefined && response.ok) return data as ArrayBuffer;
   throw failure("fishsense-api automatic mask failed", response, error);
 }
+
+/**
+ * One frame's automatic length against its human one. They *agree* when the
+ * human length is inside the automatic result's error bar (± 1 SD, the bar
+ * the page draws): the run measured the same fish the same length, within
+ * what its calibration can tell (the owner, 2026-10-30: 694 ± 16 mm against
+ * 686 mm was told it "isn't the measurement above"). With no error bar (a
+ * stored calibration) nothing is judged. Null without both lengths.
+ */
+export function againstHuman(
+  lengthM: number | null | undefined,
+  sdM: number | null | undefined,
+  humanM: number | null | undefined,
+): { kind: "agrees" | "differs" | "unjudged"; percent: number } | null {
+  if (lengthM == null || !humanM) return null;
+  const percent = ((lengthM - humanM) / humanM) * 100;
+  if (sdM == null) return { kind: "unjudged", percent };
+  // A hair of tolerance, so a length exactly at the bar's edge agrees.
+  const within = Math.abs(lengthM - humanM) <= sdM + 1e-9;
+  return { kind: within ? "agrees" : "differs", percent };
+}
