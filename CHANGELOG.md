@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.75.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.75.0...v0.75.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **nrp:** count only workers of this release toward a wake ([3917310](https://github.com/UCSD-E4E/fishsense-services/commit/3917310ed7dc86ba3f1b285233a0338b45045186))
+* **nrp:** count only workers of this release toward a wake ([0b09506](https://github.com/UCSD-E4E/fishsense-services/commit/0b095069cd0d871e0ee50040073c07d5a2890d3a))
+* **web:** the automatic section says it agrees with the human length when it does ([39f8233](https://github.com/UCSD-E4E/fishsense-services/commit/39f823342049f214823dc75ceeb44a223f3c4bb5))
+* **web:** the automatic section says it agrees with the human length when it does ([4dec682](https://github.com/UCSD-E4E/fishsense-services/commit/4dec68251deabe78d28ddbdaf197f9c86645cb45))
+
 ## [0.75.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.74.0...v0.75.0) (2026-10-30)
 
 
