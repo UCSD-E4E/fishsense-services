@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.75.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.74.0...v0.75.0) (2026-10-30)
+
+
+### Features
+
+* **api:** borrow on the line alone, with a wider bar, when there are no slates to check ([e6d31ee](https://github.com/UCSD-E4E/fishsense-services/commit/e6d31ee4d271163c9f1a4a2556b3563d07fb4cf2))
+* **api:** borrow on the line alone, with a wider bar, when there are no slates to check ([bf9050d](https://github.com/UCSD-E4E/fishsense-services/commit/bf9050dd11ece35e1041769d2c3dcc45cf5c504b))
+
+## [0.74.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.73.0...v0.74.0) (2026-10-30)
+
+
+### Features
+
+* borrow a neighbor's beam for an uncalibrated aim, checked on its own slates ([d5aa52d](https://github.com/UCSD-E4E/fishsense-services/commit/d5aa52d4ccdc5b23e552b991ff29027ec1f72536))
+* borrow a neighbor's beam for an uncalibrated aim, checked on its own slates ([9f43cb0](https://github.com/UCSD-E4E/fishsense-services/commit/9f43cb0ea226ebd6ce2dd0bc9f53f4ed27d0e626))
+
+## [0.73.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.72.0...v0.73.0) (2026-10-30)
+
+
+### Features
+
+* calibrate and measure each laser aim on its own ([77e3105](https://github.com/UCSD-E4E/fishsense-services/commit/77e31059d726cd540123fe2f515d0b4290f6c96b))
+* calibrate and measure each laser aim on its own ([d931e40](https://github.com/UCSD-E4E/fishsense-services/commit/d931e4069a2fc4d52ea0240480cb355b2b336645))
+
+## [0.72.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.71.0...v0.72.0) (2026-10-28)
+
+
+### Features
+
+* cast the slate-pose beam from the housing's laser, with its error bar at each range ([4518f42](https://github.com/UCSD-E4E/fishsense-services/commit/4518f425e4887022d67f1e6ce8e1782ac800b6df))
+* cast the slate-pose beam from the housing's laser, with its error bar at each range ([e9d5ec2](https://github.com/UCSD-E4E/fishsense-services/commit/e9d5ec26eb4e00718be77c2acce7ba9db657a370))
+
 ## [0.71.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.70.1...v0.71.0) (2026-10-27)
 
 

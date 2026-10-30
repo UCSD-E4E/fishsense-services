@@ -35,6 +35,7 @@ def test_a_dataclass_is_written_under_its_old_names():
     assert _wire(AutomaticTarget(tenant_id=TENANT, mission_id=MISSION)) == {
         "tenant_id": str(TENANT),
         "dive_id": str(MISSION),
+        "aim": 0,
     }
 
 
@@ -54,7 +55,7 @@ def test_either_name_reads():
 def test_a_list_of_dataclasses_too():
     wire = _wire([AutomaticTarget(tenant_id=TENANT, mission_id=MISSION)])
 
-    assert wire == [{"tenant_id": str(TENANT), "dive_id": str(MISSION)}]
+    assert wire == [{"tenant_id": str(TENANT), "dive_id": str(MISSION), "aim": 0}]
 
 
 def test_the_report_dataclass_is_importable():

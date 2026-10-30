@@ -93,7 +93,10 @@ __all__ = [
     "InvalidAutomaticResults",
     "MeasurementCalibration",
     "SlateFrames",
+    "OtherAimCapture",
     "automatic_calibration_inputs",
+    "automatic_calibration_owed",
+    "automatic_mission_aims",
     "automatic_frames_inputs",
     "automatic_measure_inputs",
     "automatic_species_captures",
@@ -328,18 +331,37 @@ _SPECIES_WORK = f"""NOT {_SESSION} AND EXISTS (
     )"""
 
 
-def _calibration_work(current: str) -> str:
-    """No current automatic calibration `current` accepts (SQL over `a`), or
-    one older than the dive's newest frame or slate score, or one fitted
-    through a frame the zoom gate (0070) now leaves out."""
+def _aims(where: str = "true") -> str:
+    """Mission `d`'s laser aims (0081), as `aims`: 0, and 1 once a move is
+    recorded (0073); `where` (over `x.aim`) keeps some."""
+    return f"""(
+        SELECT x.aim FROM (VALUES (0::smallint), (1::smallint)) x (aim)
+        WHERE ({where}) AND (x.aim = 0 OR EXISTS (
+            SELECT 1 FROM current_mission_beam_moves b
+            WHERE b.tenant_id = d.tenant_id AND b.mission_id = d.id
+              AND b.moved_after IS NOT NULL))
+    ) aims"""
+
+
+#: Calibration `a`'s aim, off its row by its key: the current view keeps
+#: 0036's columns (0081, as 0078 did the template).
+_AIM_OF_A = "(SELECT p.aim FROM automatic_laser_calibrations p WHERE p.id = a.id)"
+
+
+def _calibration_work(current: str, aims: str | None = None) -> str:
+    """An aim (`aims`: each of the mission's) with no current automatic
+    calibration `current` accepts (SQL over `a`), or one older than the dive's
+    newest frame or slate score, or one fitted through a frame the zoom gate
+    (0070) now leaves out or of another aim (0073, 0081)."""
     return f"""(
         EXISTS (
             SELECT 1 FROM captures c
             WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id AND c.is_canonical
         )
-        AND NOT EXISTS (
+        AND EXISTS (SELECT 1 FROM {aims or _aims()} WHERE NOT EXISTS (
             SELECT 1 FROM current_automatic_laser_calibrations a
             WHERE a.tenant_id = d.tenant_id AND a.mission_id = d.id
+              AND {_AIM_OF_A} = aims.aim
               AND {current}
               -- Stale against new frames, and against a slate score written
               -- after it: the detector's slate frames are the candidates. A
@@ -362,14 +384,16 @@ def _calibration_work(current: str) -> str:
                     )
               )
               -- Fitted before the zoom gate, through a frame it now leaves
-              -- out (2026-10-25: mission 237, 2 of 18): refitting drops it.
+              -- out (2026-10-25: mission 237, 2 of 18), or through a frame a
+              -- move recorded since puts on another aim: refitting drops it.
               AND NOT EXISTS (
                   SELECT 1 FROM captures c
                   WHERE c.tenant_id = a.tenant_id AND c.id = ANY(a.capture_ids)
                     AND NOT (focal_length_calibrated(c.focal_length_mm)
-                         AND before_beam_move(c.tenant_id, c.mission_id, c.captured_at))
+                         AND beam_aim(c.tenant_id, c.mission_id, c.captured_at)
+                             IS NOT DISTINCT FROM aims.aim)
               )
-        )
+        ))
     )"""
 
 
@@ -378,18 +402,82 @@ _CALIBRATION_WORK = _calibration_work(
     "a.method = 'size_constancy' AND a.algorithm_version = :cv"
 )
 
+
 #: The slate-pose fit (calibration v4, 0078; the owner, 2026-10-26), only
 #: with its switch on (`:pv`, its version; NULL: off) and for a mission with
 #: a slate template: at that version, posed with the mission's template.
-_SLATE_POSE_WORK = f"""(
+def _slate_pose_work(aims: str | None = None) -> str:
+    return f"""(
         CAST(:pv AS text) IS NOT NULL AND d.slate_template_id IS NOT NULL
         AND {_calibration_work(
             "a.method = 'slate_pose' AND a.algorithm_version = :pv "
             # The current view keeps 0036's columns (0078): the template
             # is read off the row itself, by its primary key.
             "AND (SELECT p.slate_template_id FROM automatic_laser_calibrations p "
-            "WHERE p.id = a.id) = d.slate_template_id")}
+            "WHERE p.id = a.id) = d.slate_template_id", aims)}
     )"""
+
+
+_SLATE_POSE_WORK = _slate_pose_work()
+
+#: The borrow's version (0082, `calibration_borrow`): borrow-2 (0083) accepts
+#: on the line alone what had no slates to check it, so borrow-1's tries are
+#: owed again.
+BORROW_VERSION = "borrow-2"
+
+
+def _lenders(m: str) -> str:
+    """The calibrations that may lend to mission `m` (an alias over
+    `missions`), as `l`: the current accepted fits of another mission on its
+    device that started within a day of it with an error bar at each range
+    (a borrow widens it: the slate pose's; size constancy has none), each
+    fitted under its current pinhole camera. Never a borrow: no chains."""
+    return f"""(
+        SELECT l.* FROM missions lm
+        JOIN current_automatic_laser_calibrations l
+          ON l.tenant_id = lm.tenant_id AND l.mission_id = lm.id
+        WHERE lm.tenant_id = {m}.tenant_id AND lm.device_id = {m}.device_id
+          AND lm.id <> {m}.id
+          AND lm.started_at BETWEEN {m}.started_at - interval '1 day'
+                                AND {m}.started_at + interval '1 day'
+          AND l.outcome = 'accepted' AND l.method <> 'borrowed'
+          AND (SELECT p.scale_sd_by_range FROM automatic_laser_calibrations p
+               WHERE p.id = l.id) IS NOT NULL
+          AND l.camera_calibration_id IN (
+              SELECT cc.id FROM current_camera_calibrations cc
+              WHERE cc.tenant_id = {m}.tenant_id AND cc.device_id = {m}.device_id
+                AND cc.camera_model = 'pinhole')
+    ) l"""
+
+
+def _borrow_work(aims: str | None = None) -> str:
+    """An aim (`aims`: each of mission `d`'s) no calibration serves (0082),
+    with a lender it has not tried at this version -- none tried, or one
+    current since: the borrow is owed. With no lender there is nothing to
+    try, so a mission alone on its device that day is never held for one."""
+    return f"""(
+        EXISTS (
+            SELECT 1 FROM captures c
+            WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id AND c.is_canonical
+        )
+        AND EXISTS (SELECT 1 FROM {aims or _aims()} WHERE NOT EXISTS (
+            SELECT 1 FROM automatic_measurement_calibrations mc
+            JOIN automatic_laser_calibrations x
+              ON x.tenant_id = mc.tenant_id AND x.id = mc.automatic_laser_calibration_id
+            WHERE mc.tenant_id = d.tenant_id AND mc.mission_id = d.id
+              AND x.aim = aims.aim
+        ) AND EXISTS (
+            SELECT 1 FROM {_lenders("d")} WHERE NOT EXISTS (
+                SELECT 1 FROM current_automatic_laser_calibrations a
+                WHERE a.tenant_id = d.tenant_id AND a.mission_id = d.id
+                  AND a.method = 'borrowed' AND {_AIM_OF_A} = aims.aim
+                  AND a.algorithm_version = '{BORROW_VERSION}'
+                  AND a.created_at >= l.created_at)
+        ))
+    )"""
+
+
+_BORROW_WORK = _borrow_work()
 
 #: Automatic head/tail v5 (owner, 2026-10-24/25): fishsense-core's SimCC
 #: keypoints on the frame's SAM box replace the SAM rule's extreme points for
@@ -451,7 +539,11 @@ _LENGTHS_WORK = f"""NOT {_SESSION} AND EXISTS (
           AND ({_MODEL_FRAME} OR {_KEYPOINTS_CURRENT})
           -- A zoomed frame is never measured (the zoom gate, 0070).
           AND focal_length_calibrated(c.focal_length_mm)
-          AND before_beam_move(c.tenant_id, c.mission_id, c.captured_at)
+          -- Measured only with its own aim's calibration (0081).
+          AND beam_aim(c.tenant_id, c.mission_id, c.captured_at) = (
+              SELECT x.aim FROM automatic_laser_calibrations x
+              WHERE x.tenant_id = mc.tenant_id
+                AND x.id = mc.automatic_laser_calibration_id)
           -- A frame the detector now calls a slate is never measured
           -- (automatic_measure_inputs), so it is no length outstanding.
           AND NOT {_DETECTOR_SLATE}
@@ -479,7 +571,7 @@ def automatic_results_cohort(*, species: bool = True) -> str:
     slate pose off). Species has its own switch (2026-10-15): off, a dive
     whose only work is species is not in it."""
     work = [_FRAMES_WORK, _KEYPOINTS_WORK, _CALIBRATION_WORK, _SLATE_POSE_WORK,
-            _LENGTHS_WORK]  # fmt: skip
+            _BORROW_WORK, _LENGTHS_WORK]  # fmt: skip
     if species:
         work.insert(1, _SPECIES_WORK)
     return f"""{RECTIFIABLE_MISSION}
@@ -541,7 +633,8 @@ AUTOMATIC_MEASURE_CAPTURES = f"""
       AND ({_MODEL_FRAME} OR {_KEYPOINTS_CURRENT})
       -- the zoom gate (0070): its depth assumes intrinsics it was not shot at
       AND focal_length_calibrated(c.focal_length_mm)
-      AND before_beam_move(c.tenant_id, c.mission_id, c.captured_at)
+      -- the aim being measured (0081): never a frame inside a move's window
+      AND beam_aim(c.tenant_id, c.mission_id, c.captured_at) = CAST(:aim AS smallint)
       AND NOT {_calibration_session(":t", ":d")}
     ORDER BY c.number
     """
@@ -573,7 +666,8 @@ AUTOMATIC_CALIBRATION_CAPTURES = f"""
       AND h.laser_x IS NOT NULL
       -- the zoom gate (0070): a zoomed frame's dot sits on another line
       AND focal_length_calibrated(c.focal_length_mm)
-      AND before_beam_move(c.tenant_id, c.mission_id, c.captured_at)
+      -- ...and so does another aim's (0073, 0081)
+      AND beam_aim(c.tenant_id, c.mission_id, c.captured_at) = CAST(:aim AS smallint)
     ORDER BY c.number
     """
 
@@ -612,19 +706,65 @@ async def next_mission_for_automatic_results(
 
 
 async def automatic_slate_pose_owed(
-    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, version: str
+    conn: AsyncConnection,
+    tenant_id: uuid.UUID,
+    mission_id: uuid.UUID,
+    *,
+    version: str,
+    aim: int = 0,
 ) -> bool:
-    """Whether the mission's slate-pose fit is owed at `version` (0078): the
-    cohort's term, for one mission, so the chain poses only when it is."""
+    """Whether the mission's slate-pose fit is owed at `version` (0078) for
+    `aim` (0081): the cohort's term, for one mission and aim, so the chain
+    poses only when it is."""
     return (
         await conn.execute(
             text(f"""
-                SELECT {_SLATE_POSE_WORK} FROM missions d
-                WHERE d.tenant_id = :t AND d.id = :m
+                SELECT {_slate_pose_work(_aims("x.aim = CAST(:aim AS smallint)"))}
+                FROM missions d WHERE d.tenant_id = :t AND d.id = :m
                 """),
-            {"t": tenant_id, "m": mission_id, "pv": version},
+            {"t": tenant_id, "m": mission_id, "pv": version, "aim": aim},
         )
     ).scalar_one()
+
+
+async def automatic_calibration_owed(
+    conn: AsyncConnection,
+    tenant_id: uuid.UUID,
+    mission_id: uuid.UUID,
+    *,
+    version: str,
+    aim: int = 0,
+) -> bool:
+    """Whether the mission's size-constancy fit is owed at `version` for
+    `aim` (0081): the cohort's term, for one mission and aim."""
+    work = _calibration_work(
+        "a.method = 'size_constancy' AND a.algorithm_version = :cv",
+        _aims("x.aim = CAST(:aim AS smallint)"),
+    )
+    return (
+        await conn.execute(
+            text(f"SELECT {work} FROM missions d WHERE d.tenant_id = :t AND d.id = :m"),
+            {"t": tenant_id, "m": mission_id, "cv": version, "aim": aim},
+        )
+    ).scalar_one()
+
+
+async def automatic_mission_aims(
+    conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
+) -> list[int]:
+    """The mission's laser aims (0081): ``[0]``, or ``[0, 1]`` after a
+    recorded move."""
+    return list(
+        (
+            await conn.execute(
+                text(f"""
+                    SELECT aims.aim FROM missions d CROSS JOIN LATERAL {_aims()}
+                    WHERE d.tenant_id = :t AND d.id = :m ORDER BY aims.aim
+                    """),
+                {"t": tenant_id, "m": mission_id},
+            )
+        ).scalars()
+    )
 
 
 async def record_automatic_results_failure(
@@ -1220,15 +1360,17 @@ async def automatic_calibration_inputs(
     mission_id: uuid.UUID,
     *,
     slate_frames: SlateFrames = no_slate_frames,
+    aim: int = 0,
 ) -> AutomaticCalibrationInputs:
-    """What the label-free fit reads: the dive's slate frames (p >= 0.5) with
-    a current automatic dot, in capture order, and every automatic dot."""
+    """What the label-free fit reads for `aim` (0081): the dive's slate frames
+    (p >= 0.5) at that aim with a current automatic dot, in capture order, and
+    every automatic dot at it."""
     camera = await _pinhole_camera(conn, tenant_id, mission_id)
     slate = await _slate_probabilities(slate_frames, conn, tenant_id, mission_id)
     rows = (
         await conn.execute(
             text(AUTOMATIC_CALIBRATION_CAPTURES),
-            {"t": tenant_id, "d": mission_id},
+            {"t": tenant_id, "d": mission_id, "aim": aim},
         )
     ).all()
     return AutomaticCalibrationInputs(
@@ -1292,6 +1434,40 @@ class AutomaticCalibrationRow:
     #: The lengths' scale SD on this fit (0.02 = 2%; 0079): the slate pose
     #: records it, accepted only; None where none was measured.
     scale_sd: float | None = None
+    #: The scale SD at each range, ``[[range m, SD], ...]`` (0080): a length
+    #: takes it at its own depth (`calibration_sd_at`); accepted only.
+    scale_sd_by_range: list | None = None
+    #: The laser aim it calibrates (0081): 0, or 1 after a recorded move.
+    aim: int = 0
+    #: A ``borrowed`` row (0082, `calibration_borrow`): the lender's row it
+    #: tried, how far that beam runs off the aim's dot line, and the check on
+    #: the aim's posed slates -- the median over holds of beam depth / pose
+    #: depth - 1, and on how many holds. An accepted borrow has the first
+    #: two, and the check's two unless it had no slates to check (0083).
+    borrowed_from: uuid.UUID | None = None
+    borrow_line_px: float | None = None
+    borrow_depth_ratio: float | None = None
+    borrow_holds: int | None = None
+
+
+class OtherAimCapture(InvalidAutomaticResults):
+    """A calibration naming a frame of another laser aim (0081)."""
+
+
+async def _check_aim(conn, tenant_id, aim: int, captures) -> None:
+    other = (
+        await conn.execute(
+            text("""
+                SELECT id FROM captures
+                WHERE tenant_id = :t AND id = ANY(:ids)
+                  AND beam_aim(tenant_id, mission_id, captured_at)
+                      IS DISTINCT FROM CAST(:aim AS smallint)
+                """),
+            {"t": tenant_id, "ids": list(captures), "aim": aim},
+        )
+    ).scalars()
+    if other := sorted(map(str, other)):
+        raise OtherAimCapture(f"frames of another aim than {aim}: {other}")
 
 
 async def persist_automatic_calibration(
@@ -1301,11 +1477,12 @@ async def persist_automatic_calibration(
     row: AutomaticCalibrationRow,
 ) -> uuid.UUID:
     """Append the dive's label-free calibration (or its refusal); the frames
-    it names must be the dive's. Returns its id."""
+    it names must be the dive's, at its aim. Returns its id."""
     if row.capture_ids:
         await _check_captures(conn, tenant_id, mission_id, row.capture_ids)
+        await _check_aim(conn, tenant_id, row.aim, row.capture_ids)
     values = asdict(row)
-    for key in ("laser_position", "laser_axis", "line_direction"):
+    for key in ("laser_position", "laser_axis", "line_direction", "scale_sd_by_range"):
         values[key] = None if values[key] is None else json.dumps(values[key])
     return (
         await conn.execute(
@@ -1316,14 +1493,17 @@ async def persist_automatic_calibration(
                     line_direction, line_offset_px, o_mag_m, frames_used,
                     candidate_count, pair_count, size_ratio, se_px,
                     pair_residual_sd, capture_ids, core_version, method,
-                    slate_template_id, scale_sd)
+                    slate_template_id, scale_sd, scale_sd_by_range, aim,
+                    borrowed_from, borrow_line_px, borrow_depth_ratio, borrow_holds)
                 VALUES (:t, :d, :outcome, :algorithm_version, :refusal_reason,
                         :camera_calibration_id, CAST(:laser_position AS jsonb),
                         CAST(:laser_axis AS jsonb), :vanishing_px,
                         CAST(:line_direction AS jsonb), :line_offset_px, :o_mag_m,
                         :frames_used, :candidate_count, :pair_count, :size_ratio,
                         :se_px, :pair_residual_sd, :capture_ids, :core_version,
-                        :method, :slate_template_id, :scale_sd)
+                        :method, :slate_template_id, :scale_sd,
+                        CAST(:scale_sd_by_range AS jsonb), :aim, :borrowed_from,
+                        :borrow_line_px, :borrow_depth_ratio, :borrow_holds)
                 RETURNING id
                 """),
             {"t": tenant_id, "d": mission_id, **values},
@@ -1385,24 +1565,29 @@ async def automatic_measure_inputs(
     *,
     algorithm_version: str,
     slate_frames: SlateFrames = no_slate_frames,
+    aim: int = 0,
 ) -> AutomaticMeasureInputs:
-    """The dive's predicted fish (never a slate frame, by its row or by the
-    detector now) with no current automatic length at the current version,
-    and the calibration to measure them with; nothing to measure without one."""
+    """The dive's predicted fish at `aim` (0081; never a slate frame, by its
+    row or by the detector now) with no current automatic length at the
+    current version, and that aim's calibration to measure them with; nothing
+    to measure without one."""
     cal = (
         await conn.execute(
             text("""
-                SELECT * FROM automatic_measurement_calibrations
-                WHERE tenant_id = :t AND mission_id = :d
+                SELECT mc.* FROM automatic_measurement_calibrations mc
+                JOIN automatic_laser_calibrations x
+                  ON x.tenant_id = mc.tenant_id AND x.id = mc.automatic_laser_calibration_id
+                WHERE mc.tenant_id = :t AND mc.mission_id = :d
+                  AND x.aim = CAST(:aim AS smallint)
                 """),
-            {"t": tenant_id, "d": mission_id},
+            {"t": tenant_id, "d": mission_id, "aim": aim},
         )
     ).one_or_none()
     if cal is None:
         return AutomaticMeasureInputs(None, None, None, [])
     rows = await conn.execute(
         text(AUTOMATIC_MEASURE_CAPTURES),
-        {"t": tenant_id, "d": mission_id, "mv": algorithm_version},
+        {"t": tenant_id, "d": mission_id, "mv": algorithm_version, "aim": aim},
     )
     slate = await _slate_probabilities(slate_frames, conn, tenant_id, mission_id)
     rows = [r for r in rows if slate.get(r.capture_id, 0.0) < SLATE_FRAME_THRESHOLD]
@@ -1596,19 +1781,62 @@ class AutomaticResultsCatalog(ServicePrincipal):
             return await missions_with_automatic_dots(conn, tenant_id)
 
     async def automatic_calibration_inputs(
-        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, aim: int = 0
     ) -> AutomaticCalibrationInputs:
         async with self._tenant(tenant_id) as conn:
             return await automatic_calibration_inputs(
-                conn, tenant_id, mission_id, slate_frames=self._slate_frames
+                conn, tenant_id, mission_id, slate_frames=self._slate_frames, aim=aim
             )
 
     async def automatic_slate_pose_owed(
-        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, version: str
-    ) -> bool:
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, version: str,
+        aim: int = 0,
+    ) -> bool:  # fmt: skip
         async with self._tenant(tenant_id) as conn:
             return await automatic_slate_pose_owed(
-                conn, tenant_id, mission_id, version=version
+                conn, tenant_id, mission_id, version=version, aim=aim
+            )
+
+    async def automatic_calibration_owed(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, version: str,
+        aim: int = 0,
+    ) -> bool:  # fmt: skip
+        async with self._tenant(tenant_id) as conn:
+            return await automatic_calibration_owed(
+                conn, tenant_id, mission_id, version=version, aim=aim
+            )
+
+    async def automatic_mission_aims(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
+    ) -> list[int]:
+        async with self._tenant(tenant_id) as conn:
+            return await automatic_mission_aims(conn, tenant_id, mission_id)
+
+    async def automatic_borrow_candidate(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, aim: int
+    ):
+        """`calibration_borrow.automatic_borrow_candidate`."""
+        from fishsense_services_api.calibration_borrow import (
+            automatic_borrow_candidate,
+        )
+
+        async with self._tenant(tenant_id) as conn:
+            return await automatic_borrow_candidate(
+                conn, tenant_id, mission_id, aim=aim
+            )
+
+    async def persist_automatic_borrow(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, candidate, check, *,
+        aim: int,
+    ) -> uuid.UUID:  # fmt: skip
+        """`calibration_borrow.persist_automatic_borrow`."""
+        from fishsense_services_api.calibration_borrow import (
+            persist_automatic_borrow,
+        )
+
+        async with self._tenant(tenant_id) as conn:
+            return await persist_automatic_borrow(
+                conn, tenant_id, mission_id, candidate, check, aim=aim
             )
 
     async def persist_automatic_calibration(
@@ -1618,12 +1846,13 @@ class AutomaticResultsCatalog(ServicePrincipal):
             return await persist_automatic_calibration(conn, tenant_id, mission_id, row)
 
     async def automatic_measure_inputs(
-        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, algorithm_version: str
-    ) -> AutomaticMeasureInputs:
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, algorithm_version: str,
+        aim: int = 0,
+    ) -> AutomaticMeasureInputs:  # fmt: skip
         async with self._tenant(tenant_id) as conn:
             return await automatic_measure_inputs(
                 conn, tenant_id, mission_id, algorithm_version=algorithm_version,
-                slate_frames=self._slate_frames,
+                slate_frames=self._slate_frames, aim=aim,
             )  # fmt: skip
 
     async def persist_automatic_measurements(

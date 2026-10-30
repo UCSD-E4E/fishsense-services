@@ -64,12 +64,19 @@ from fishsense_services_contracts.automatic_results import (
     AutomaticCalibrationResult,
     FitAutomaticCalibrationInput,
 )
+from fishsense_services_contracts.calibration_borrow import (
+    BorrowCheckInput,
+    BorrowCheckReport,
+)
 from fishsense_services_contracts.calibration_v3 import (
     CalibrationDraw,
     CalibrationV3Report,
     ReplayCalibrationInput,
 )
 from fishsense_services_processor.automatic_calibration import pose, v3
+from fishsense_services_processor.automatic_calibration.borrow import (
+    check_borrowed_beam,
+)
 
 __all__ = [
     "AutomaticCalibrationActivities",
@@ -218,7 +225,8 @@ def replay_v3(
     camera-space m; None: not posed) the beam is fitted through them
     (calibration v4, `pose.fit_pose_points`): v3's screen, consensus and
     check are kept, two posed slates are an answer, and the fit carries its
-    error bar (`scale_sd`; 2026-10-27)."""
+    error bar (`scale_sd`; 2026-10-27), at each range from the housing's laser
+    (`scale_sd_by_range`, contract v26)."""
     pairs_of = pairs_of or sc.pair_scales
     dots = np.array([[f.x, f.y] for f in kept], float).reshape(-1, 2)
     dive_line = mission_line(payload.line_dots) if payload.line_dots else None
@@ -267,6 +275,7 @@ def replay_v3(
         size_ratio=None if f is None else f.size_ratio,
         se_px=None if f is None else f.se_px,
         scale_sd=None if f is None else f.scale_sd,
+        scale_sd_by_range=f.scale_sd_by_range if accepted else None,
         gross_dropped=main.gross_dropped, consensus_dropped=main.consensus_dropped,
         rival=main.rival, check_dots=main.check.dots,
         check_median_px=main.check.median_px,
@@ -451,5 +460,17 @@ class AutomaticCalibrationActivities:  # pylint: disable=too-few-public-methods
             payload.mission_id, report.outcome, report.refusal_reason,
             report.frames_used, report.check_median_px, report.check_within_share,
             len(report.draws),
+        )  # fmt: skip
+        return report
+
+    @activity.defn(name="check_borrowed_beam")
+    async def check_borrowed_beam(self, request: BorrowCheckInput) -> BorrowCheckReport:
+        """The checked borrow's check (`borrow`): the lender's beam against
+        the borrower's posed slate points. No image is read."""
+        report = check_borrowed_beam(request)
+        activity.logger.info(
+            "dive=%s borrow check of %s: %s (%s) ratio=%s holds=%d points=%d",
+            request.mission_id, request.lender_id, report.outcome,
+            report.refusal_reason, report.depth_ratio, report.holds, report.points,
         )  # fmt: skip
         return report

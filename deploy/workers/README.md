@@ -43,7 +43,7 @@ To check it: `(in <DATA>) docker compose logs gpu-0 | grep "GPU memory"` shows t
 ## Keep it up
 
 - **The Temporal leaf is a 7-day cert.** After it rotates on the slot, re-run step 1, then `docker compose restart`. A worker reads its cert once, when it connects.
-- **On a new release**, re-render at the new version (step 2), then run `docker compose up -d`.
+- **On a new release**, re-render at the new version (step 2), then run `docker compose up -d`. A worker names its release (`…/per_image/cpu/0.75.0`), and the orchestrator's wakes count only workers of their own release: a machine left behind no longer keeps NRP down, but it still polls and takes work, and fails what its release does not have (a new workflow or activity). Upgrade it with every release.
 
 ## Take it down
 

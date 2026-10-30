@@ -24,6 +24,7 @@ from sqlalchemy import (
     Identity,
     Integer,
     MetaData,
+    SmallInteger,
     Text,
     UniqueConstraint,
     Uuid,
@@ -1386,6 +1387,7 @@ class AutomaticLaserCalibration(Base):
         UniqueConstraint("tenant_id", "id"),
         _fk(("tenant_id", "mission_id"), "missions"),
         _fk(("tenant_id", "camera_calibration_id"), "camera_calibrations"),
+        _fk(("tenant_id", "borrowed_from"), "automatic_laser_calibrations"),
     )
 
     id: Mapped[uuid.UUID] = _id()
@@ -1423,6 +1425,16 @@ class AutomaticLaserCalibration(Base):
     )
     #: The lengths' scale SD on an accepted fit (0.02 = 2%; 0079).
     scale_sd: Mapped[float | None] = mapped_column(Double)
+    #: That SD at each range, ``[[range m, SD], ...]`` (0080).
+    scale_sd_by_range: Mapped[list | None] = mapped_column(JSONB)
+    #: The laser aim it calibrates: 0, or 1 after a recorded move (0081).
+    aim: Mapped[int] = mapped_column(SmallInteger, server_default=text("0"))
+    #: A ``borrowed`` row's lender row, how far its beam runs off the aim's
+    #: dot line, and the check on the aim's posed slates (0082).
+    borrowed_from: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    borrow_line_px: Mapped[float | None] = mapped_column(Double)
+    borrow_depth_ratio: Mapped[float | None] = mapped_column(Double)
+    borrow_holds: Mapped[int | None] = mapped_column(Integer)
 
 
 class AutomaticSpeciesPrediction(Base):

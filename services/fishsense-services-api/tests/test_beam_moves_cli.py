@@ -4,14 +4,16 @@
 ``detect-beam-moves`` runs the detector over every mission's wide automatic
 dots and, with ``--apply``, records each move it finds that is not already
 the mission's current one. ``withdraw-moved-lengths`` appends a
-``beam_moved`` refusal after each current automatic length on a frame after
-a recorded move (append-only: the length stays in the history). Both are dry
-runs unless told otherwise, as the owner. Pinned here:
+``beam_moved`` refusal after each current automatic length on a frame inside
+a recorded move's window (append-only: the length stays in the history).
+Since each aim is calibrated (0081), a length after the move measured with
+the first aim's beam is no longer current, so it has nothing to withdraw.
+Both are dry runs unless told otherwise, as the owner. Pinned here:
 
 * a mission whose dots switch to a parallel line is listed with its window;
   one on one line is not; a zoomed frame's dot is not read;
 * the apply records exactly the listed moves, and a re-run lists nothing new;
-* the withdrawal lists only a current length after a move, and writes it.
+* a length after a move is not current, so the withdrawal finds none.
 """
 
 import numpy as np
@@ -105,8 +107,9 @@ async def test_a_zoomed_frames_dot_is_not_read(owner_engine, app_engine, as_owne
     assert "no new move" in capsys.readouterr().out
 
 
-async def test_the_lengths_after_a_move_are_withdrawn(owner_engine, app_engine,
-                                                      as_owner, capsys):  # fmt: skip
+async def test_a_length_after_a_move_is_not_current_so_none_is_withdrawn(
+    owner_engine, app_engine, as_owner, capsys
+):
     from _slate_calibration_seed import beam_moved_after
 
     lab = await tenant(owner_engine)
@@ -120,9 +123,7 @@ async def test_the_lengths_after_a_move_are_withdrawn(owner_engine, app_engine,
     await beam_moved_after(owner_engine, earlier)
 
     assert await main(["withdraw-moved-lengths"]) == 0
-    assert "Would withdraw 1 automatic length" in capsys.readouterr().out
-
-    assert await main(["withdraw-moved-lengths", "--apply"]) == 0
+    assert "Would withdraw" not in capsys.readouterr().out
     async with owner_engine.connect() as conn:
         current = dict(
             (
@@ -133,4 +134,4 @@ async def test_the_lengths_after_a_move_are_withdrawn(owner_engine, app_engine,
                 )
             ).all()
         )
-    assert (current[after], current[before]) == ("beam_moved", None)
+    assert after not in current and current[before] is None

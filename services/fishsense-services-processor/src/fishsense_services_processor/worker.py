@@ -36,6 +36,7 @@ import logging
 import os
 import signal
 import socket
+from importlib.metadata import version
 from collections.abc import Iterable
 from datetime import timedelta
 from typing import Any, Literal
@@ -108,12 +109,14 @@ def _role_cap(role: str, default: int, total: int | None) -> int:
 
 
 def _identity(role: str, total: int | None) -> str:
-    """``pid@host/role/device`` (`contracts.workers`): the orchestrator's GPU
-    wake counts a CUDA worker on the GPU queue, wherever it runs."""
+    """``pid@host/role/device/release`` (`contracts.workers`): the
+    orchestrator's wakes count a worker of their release on the queue,
+    wherever it runs."""
     device = CUDA if role == ROLE_GPU and total is not None else CPU
     return worker_identity(
-        pid=os.getpid(), host=socket.gethostname(), role=role, device=device
-    )
+        pid=os.getpid(), host=socket.gethostname(), role=role, device=device,
+        release=version("fishsense-services-processor"),
+    )  # fmt: skip
 
 
 def build_worker(

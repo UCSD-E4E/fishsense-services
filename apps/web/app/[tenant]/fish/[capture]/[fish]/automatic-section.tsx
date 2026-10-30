@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { formatLength, formatLengthWithError } from "@/lib/captures";
-import { automaticOverlay, statusLabel, type AutomaticFrame } from "@/lib/automatic";
+import { againstHuman, automaticOverlay, statusLabel, type AutomaticFrame } from "@/lib/automatic";
 import { colorLabel } from "@/lib/laser-color";
 
 /**
@@ -24,10 +24,20 @@ export function AutomaticSection({
   reviewHref?: string | null;
 }) {
   const overlay = automaticOverlay(frame);
-  const difference =
-    frame.length_m != null && humanLengthM
-      ? ((frame.length_m - humanLengthM) / humanLengthM) * 100
-      : null;
+  const against = againstHuman(frame.length_m, frame.length_sd_m, humanLengthM);
+  const signed = against ? `${against.percent >= 0 ? "+" : ""}${against.percent.toFixed(1)}%` : "";
+  // How the run reads against the measurement above: agreeing within its error
+  // bar, differing outside it, or (no error bar) measured separately -- never
+  // that it "isn't the measurement above" when the two agree (the owner,
+  // 2026-10-30).
+  const summary =
+    against?.kind === "agrees"
+      ? "What the automatic run found on this frame. It agrees with the measurement above, within its error."
+      : against?.kind === "differs"
+        ? `What the automatic run found on this frame. It differs from the measurement above by ${signed}, outside its error.`
+        : against
+          ? "What the automatic run found on this frame, measured separately from the measurement above."
+          : "What the automatic run found on this frame.";
   return (
     <section className="mt-5 rounded-card border border-line bg-surface px-6 py-5">
       <div className="mb-3 flex flex-wrap items-baseline gap-3">
@@ -38,7 +48,7 @@ export function AutomaticSection({
         <span className="text-sm text-fg-2">
           {figure
             ? "What the automatic run found on this frame. Review it here."
-            : <>What the automatic run found on this frame. It isn&apos;t the measurement above.</>}
+            : summary}
         </span>
         {reviewHref && (
           <Link href={reviewHref} className="ml-auto text-sm font-medium text-teal-fg hover:underline">
@@ -103,10 +113,11 @@ export function AutomaticSection({
               ? formatLengthWithError(frame.length_m, frame.length_sd_m)
               : frame.refusal ?? "—"}
           </Row>
-          {difference != null && (
+          {against && (
             <Row label="Against the human">
-              {difference >= 0 ? "+" : ""}
-              {difference.toFixed(1)}% ({formatLength(humanLengthM)})
+              {signed} ({formatLength(humanLengthM)})
+              {against.kind === "agrees" && " · within the error"}
+              {against.kind === "differs" && " · outside the error"}
             </Row>
           )}
           <Row label="Laser depth">{frame.depth_m != null ? `${frame.depth_m.toFixed(2)} m` : "—"}</Row>

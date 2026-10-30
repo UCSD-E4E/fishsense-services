@@ -1,7 +1,7 @@
 """Calibration v4's pieces against synthetic slates with known answers: the
 board found from its mask, the printed pattern aligned either way up, the
-plane and the dot's point it gives, and the beam fitted through the points
-with an outlier trimmed and the lever-arm gate kept."""
+plane and the dot's point it gives, and the beam from the housing's laser
+through the points, with its error bar at each range."""
 
 from __future__ import annotations
 
@@ -199,25 +199,59 @@ def test_a_degenerate_alignment_gives_no_plane(h):
     assert pose.slate_plane(refs, DPI, h, K) is None
 
 
-# -- the beam ---------------------------------------------------------------------------
+# -- the beam (2026-10-27: from the housing's laser) ------------------------------------
 
-ORIGIN = np.array([0.104, 0.0, 0.0])
+ORIGIN = np.asarray(pose.HOUSING_ORIGIN_M, float)
 AXIS = np.array([-0.04, 0.01, 1.0]) / np.linalg.norm([-0.04, 0.01, 1.0])
+#: A beam the housing's laser does not cast: the line 279's two wrong dots made.
+STRAY = (ORIGIN + np.array([-0.08, -0.32, 0.0]), AXIS)
 
 
-def _beam_points(zs, outlier=None):
-    pts = [ORIGIN + (z / AXIS[2]) * AXIS for z in zs]
+def _beam_points(zs, outlier=None, beam=(ORIGIN, AXIS)):
+    o, a = beam
+    pts = [o + (z / a[2]) * a for z in zs]
     if outlier is not None:
-        pts[outlier] = pts[outlier] + np.array([0.03, 0.0, 0.0])
+        pts[outlier] = pts[outlier] + np.array([0.08, 0.0, 0.0])  # 5% at 1.5 m
     return pts
 
 
-def test_the_beam_is_fitted_and_an_outlier_trimmed():
-    fit = pose.fit_pose_points(_beam_points([0.6, 0.9, 1.2, 1.5, 1.8, 2.1], outlier=3))
-    assert fit.outcome == "accepted"
-    assert fit.used == [0, 1, 2, 4, 5]
-    assert np.allclose(fit.laser_position, ORIGIN, atol=1e-6)
+def _burst(point, n, spread=0.002):
+    """`n` frames of one slate hold: the same point, a few mm apart."""
+    rng = np.random.default_rng(n)
+    return [point + rng.normal(0, spread, 3) * [1, 1, 0] for _ in range(n)]
+
+
+def test_the_beam_is_cast_from_the_housing_s_laser():
+    fit = pose.fit_pose_points(_beam_points([0.6, 1.2, 1.8]))
+    assert fit.outcome == "accepted" and fit.used == [0, 1, 2]
+    assert np.allclose(fit.laser_position, ORIGIN, atol=1e-9)
     assert np.allclose(fit.laser_axis, AXIS, atol=1e-6)
+
+
+def test_an_outlier_is_left_out():
+    fit = pose.fit_pose_points(_beam_points([0.6, 0.9, 1.2, 1.5, 1.8, 2.1], outlier=3))
+    assert fit.outcome == "accepted" and fit.used == [0, 1, 2, 4, 5]
+    assert np.allclose(fit.laser_axis, AXIS, atol=1e-6)
+
+
+def test_wrong_dots_that_agree_with_each_other_do_not_tilt_the_beam():
+    """Mission 279 (2026-10-27): two of its five slates had a wrong dot, both
+    on one line the housing's laser cannot cast; a free line through all
+    five read +63% at 0.75 m. From the housing, they agree with no slate."""
+    pts = _beam_points([1.35, 2.85, 2.0]) + _beam_points([0.96, 1.02], beam=STRAY)
+    fit = pose.fit_pose_points(pts)
+    assert fit.outcome == "accepted" and fit.used == [0, 1, 2]
+    assert np.allclose(fit.laser_axis, AXIS, atol=1e-6)
+
+
+def test_a_burst_of_frames_is_one_vote():
+    """Frames of one slate hold are one observation (half of all posed points
+    have another within 10 mm, 2026-10-27): three wrong frames of one hold
+    lose to two right slates."""
+    wrong = STRAY[0] + (1.4 / STRAY[1][2]) * STRAY[1]
+    pts = _burst(wrong, 3) + _beam_points([1.2, 2.4])
+    fit = pose.fit_pose_points(pts)
+    assert fit.outcome == "accepted" and fit.used == [3, 4]
 
 
 def test_frames_without_a_point_are_skipped_but_keep_their_index():
@@ -227,14 +261,22 @@ def test_frames_without_a_point_are_skipped_but_keep_their_index():
     assert fit.outcome == "accepted" and fit.used == [0, 2, 3, 4]
 
 
-def test_points_too_close_in_range_are_refused():
+def test_points_close_in_range_are_an_answer():
+    """The housing fixes the beam's origin, so its direction needs no lever
+    arm (the free line refused under 0.6 m: 13 missions, 2026-10-27)."""
     fit = pose.fit_pose_points(_beam_points([1.0, 1.1, 1.2, 1.3]))
-    assert (fit.outcome, fit.refusal_reason) == ("refused", "lever_arm_below_0.6m")
+    assert fit.outcome == "accepted"
+    assert np.allclose(fit.laser_axis, AXIS, atol=1e-6)
 
 
 def test_one_point_is_no_answer():
     fit = pose.fit_pose_points(_beam_points([1.2]) + [None])
     assert (fit.outcome, fit.refusal_reason) == ("refused", "too_few_frames")
+
+
+def test_one_slate_hold_is_no_answer():
+    fit = pose.fit_pose_points(_burst(_beam_points([1.2])[0], 4))
+    assert (fit.outcome, fit.refusal_reason) == ("refused", "slates_disagree")
 
 
 def test_two_points_are_an_answer():
@@ -246,17 +288,22 @@ def test_two_points_are_an_answer():
     assert np.allclose(fit.laser_axis, AXIS, atol=1e-6)
 
 
-def test_a_fit_without_a_camera_has_no_error_bar():
-    assert pose.fit_pose_points(_beam_points([0.6, 1.2, 1.8])).scale_sd is None
-
-
-def test_three_points_are_never_trimmed():
-    """With 3 nothing can say which is wrong: none is dropped (owner, v3)."""
-    # one far enough off that a fourth point would see it trimmed
-    pts = _beam_points([0.94, 1.64, 2.02])
-    pts[1] = pts[1] + np.array([-0.086, 0.066, 0.0])
+def test_slates_that_agree_with_none_other_are_no_answer():
+    pts = _beam_points([1.0]) + _beam_points([2.0], beam=STRAY)
     fit = pose.fit_pose_points(pts)
-    assert fit.used == [0, 1, 2]
+    assert (fit.outcome, fit.refusal_reason) == ("refused", "slates_disagree")
+
+
+def test_two_lines_with_equal_support_are_no_answer():
+    tilted = (ORIGIN, np.array([0.2, 0.01, 1.0]) / np.linalg.norm([0.2, 0.01, 1.0]))
+    pts = _beam_points([1.0, 2.0]) + _beam_points([1.2, 2.2], beam=tilted)
+    fit = pose.fit_pose_points(pts)
+    assert (fit.outcome, fit.refusal_reason) == ("refused", "ambiguous_line")
+
+
+def test_a_fit_without_a_camera_has_no_error_bar():
+    fit = pose.fit_pose_points(_beam_points([0.6, 1.2, 1.8]))
+    assert fit.scale_sd is None and fit.scale_sd_by_range is None
 
 
 # -- a scan larger than the board (the V-Slates, 2026-10-23) -----------------------------
@@ -311,37 +358,40 @@ def test_a_scan_larger_than_the_board_is_found_where_it_sits(spin, turn):
 # -- the error bar (the owner, 2026-10-26: uncertainty, not refusal) ---------------------
 
 CAM = np.array([[2850.0, 0, 2007.0], [0, 2850.0, 1508.0], [0, 0, 1.0]])
+RANGES = np.asarray(pose.SD_RANGES_M)
 
 
-def _scale(fit):
-    """The fit's length scale against the true beam's (+0.01 = 1% long)."""
-    return pose.scale_against(CAM, (ORIGIN, AXIS), (fit.laser_position, fit.laser_axis))
+def _error(fit, beam=(ORIGIN, AXIS)):
+    """The fit's depth error at each of `SD_RANGES_M` where the true beam's
+    dot is seen (+0.01 = 1% far, so lengths 1% long)."""
+    return pose.depth_error(CAM, beam, (fit.laser_position, fit.laser_axis))
 
 
-def test_the_scale_of_a_beam_against_itself_is_zero():
-    assert abs(pose.scale_against(CAM, (ORIGIN, AXIS), (ORIGIN, AXIS))) < 1e-12
+def test_a_beam_against_itself_has_no_error():
+    assert np.max(np.abs(pose.depth_error(CAM, (ORIGIN, AXIS), (ORIGIN, AXIS)))) < 1e-12
 
 
-def test_every_answer_carries_at_least_the_floor():
-    """Exact points still carry the floor: the error every pose fit showed
-    against the human calibrations beyond what its own frames explain."""
+def test_the_bar_is_given_at_each_range():
     fit = pose.fit_pose_points(
         _beam_points(np.linspace(0.6, 3.0, 12)), camera_matrix=CAM
     )
-    assert fit.scale_sd >= pose.SCALE_SD_FLOOR
-    assert fit.scale_sd < 2 * pose.SCALE_SD_FLOOR
+    got = np.asarray(fit.scale_sd_by_range)
+    assert np.allclose(got[:, 0], RANGES)
+    assert np.all(got[:, 1] >= pose.SCALE_SD_FLOOR)
+    fish = (got[:, 0] >= 0.75) & (got[:, 0] <= 3.0)
+    assert fit.scale_sd == pytest.approx(got[fish, 1].max())
 
 
 def test_fewer_and_closer_slates_carry_a_wider_bar():
     wide = pose.fit_pose_points(
         _beam_points(np.linspace(0.6, 3.0, 12)), camera_matrix=CAM
     )
-    few = pose.fit_pose_points(_beam_points([1.0, 1.7]), camera_matrix=CAM)
+    few = pose.fit_pose_points(_beam_points([1.0, 1.1]), camera_matrix=CAM)
     assert few.scale_sd > wide.scale_sd
 
 
-def test_scatter_among_the_frames_widens_the_bar():
-    """Frames that disagree (5% range errors, three times the pose noise)
+def test_scatter_among_the_slates_widens_the_bar():
+    """Slates that disagree (5% range errors, three times the pose noise)
     widen the bar well past what the noise model gives the same geometry:
     the bootstrap sees them."""
     zs = np.linspace(0.7, 2.8, 8)
@@ -352,20 +402,54 @@ def test_scatter_among_the_frames_widens_the_bar():
     assert rough.outcome == "accepted" and rough.scale_sd > 1.5 * clean.scale_sd
 
 
+def test_repeating_each_frame_does_not_narrow_the_bar():
+    """The bootstrap resamples slate holds, not frames, and the noise moves a
+    hold as one: five frames of each hold are no more evidence than one
+    (frames resampled, 279's two holds read as five independent slates).
+    Slates 10% apart, so the bootstrap, not the floor, sets the bar."""
+    rng = np.random.default_rng(5)
+    pts = [
+        p * (1 + rng.normal(0, 0.10)) for p in _beam_points(np.linspace(0.8, 2.6, 5))
+    ]
+    once = pose.fit_pose_points(pts, camera_matrix=CAM)
+    five = pose.fit_pose_points(
+        [q for p in pts for q in _burst(p, 5, 0.0005)], camera_matrix=CAM
+    )
+    assert five.scale_sd >= 0.9 * once.scale_sd
+
+
+def test_repeating_a_hold_does_not_narrow_the_noise_model():
+    """With two holds the bootstrap has nothing to resample and the noise
+    model sets the bar: it moves a hold as one, so eight frames of each are
+    the bar of one."""
+    pts = _beam_points([1.0, 1.4])
+    one = pose.fit_pose_points(pts, camera_matrix=CAM)
+    eight = pose.fit_pose_points(
+        [q for p in pts for q in _burst(p, 8, 0.0005)], camera_matrix=CAM
+    )
+    got = np.asarray(eight.scale_sd_by_range)[:, 1]
+    assert np.all(got >= 0.9 * np.asarray(one.scale_sd_by_range)[:, 1])
+
+
 def test_the_bar_covers_the_error_its_noise_model_makes():
-    """Control with a known answer: points read at their ranges with the
-    model's own noise; the true scale falls within one bar at least 68% of
-    the time and within two at least 95%."""
+    """Control with a known answer: a housing whose laser sits off the
+    nominal by its spread, slates read at their ranges with the pose noise;
+    at every range the true depth falls within one bar at least 68% of the
+    time and within two at least 95%."""
     rng = np.random.default_rng(7)
     z1 = z2 = n = 0
-    for _ in range(60):
+    for _ in range(80):
+        true = (ORIGIN + np.r_[rng.normal(0, pose.HOUSING_ORIGIN_SD_M, 2), 0.0], AXIS)
         zs = np.sort(rng.uniform(0.8, 3.2, rng.integers(2, 9)))
-        pts = [p * (1 + rng.normal(0, pose.POSE_RANGE_SD)) for p in _beam_points(zs)]
+        pts = [
+            p * (1 + rng.normal(0, pose.POSE_RANGE_SD))
+            for p in _beam_points(zs, beam=true)
+        ]
         fit = pose.fit_pose_points(pts, camera_matrix=CAM)
         if fit.outcome != "accepted":
             continue
-        n += 1
-        z = abs(_scale(fit)) / fit.scale_sd
-        z1 += z <= 1
-        z2 += z <= 2
-    assert n >= 50 and z1 / n >= 0.68 and z2 / n >= 0.95
+        z = np.abs(_error(fit, true)) / np.asarray(fit.scale_sd_by_range)[:, 1]
+        n += len(z)
+        z1 += int(np.sum(z <= 1))
+        z2 += int(np.sum(z <= 2))
+    assert n >= 70 * len(RANGES) and z1 / n >= 0.68 and z2 / n >= 0.95

@@ -71,6 +71,7 @@ from fishsense_services_contracts.automatic_results import (
     PredictAutomaticFramesInput,
     SLATE_POSE_CALIBRATION_VERSION,
 )
+from fishsense_services_contracts.calibration_borrow import BorrowCheckReport
 from fishsense_services_contracts.calibration_v3 import CalibrationV3Report
 from fishsense_services_contracts.headtail_keypoints import (
     KeypointFrame,
@@ -94,6 +95,7 @@ from fishsense_services_orchestrator.species_predict.candidates import (
 from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = [
+    "AutomaticBorrowCandidate",
     "AutomaticCalibrationPlan",
     "AutomaticMeasurePlan",
     "AutomaticResultsActivities",
@@ -127,6 +129,9 @@ class AutomaticTarget:
 
     tenant_id: uuid.UUID
     mission_id: Annotated[uuid.UUID, renamed_from("dive_id", "mission_id")]
+    #: The laser aim a calibration or measure step is for (0081): 0, or 1
+    #: after a recorded beam move. Defaulted, so a target from before decodes.
+    aim: int = 0
 
 
 @dataclass(frozen=True)
@@ -135,6 +140,17 @@ class AutomaticCalibrationPlan:
 
     payload: FitAutomaticCalibrationInput
     camera_calibration_id: Optional[uuid.UUID]
+
+
+@dataclass(frozen=True)
+class AutomaticBorrowCandidate:
+    """The beam an aim would borrow, to be checked on its posed slates (0082,
+    ``fishsense_services_api.calibration_borrow.BorrowCandidate``)."""
+
+    lender_id: uuid.UUID
+    laser_position: List[float]
+    laser_axis: List[float]
+    line_px: float
 
 
 @dataclass(frozen=True)
@@ -194,20 +210,30 @@ class AutomaticResultsCatalog(Protocol):
     async def persist_automatic_species(self, tenant_id, mission_id, rows) -> int: ...
 
     async def automatic_calibration_inputs(
-        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, aim: int = 0
     ) -> AutomaticCalibrationInputs: ...
+
+    async def automatic_mission_aims(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
+    ) -> list[int]: ...
+
+    async def automatic_calibration_owed(self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, version: str, aim: int = 0,) -> bool: ...  # fmt: skip
 
     async def persist_automatic_calibration(
         self, tenant_id, mission_id, row: AutomaticCalibrationRow
     ) -> uuid.UUID: ...
 
-    async def automatic_slate_pose_owed(
-        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, version: str
-    ) -> bool: ...
+    # The borrow's types are `fishsense_services_api.calibration_borrow`'s,
+    # which needs numpy: imported where used, out of the workflow sandbox.
+    async def automatic_borrow_candidate(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, aim: int
+    ) -> Any: ...
 
-    async def automatic_measure_inputs(
-        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, algorithm_version: str
-    ) -> AutomaticMeasureInputs: ...
+    async def persist_automatic_borrow(self, tenant_id: uuid.UUID, mission_id: uuid.UUID, candidate: Any, check: Any, *, aim: int,) -> uuid.UUID: ...  # fmt: skip
+
+    async def automatic_slate_pose_owed(self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, version: str, aim: int = 0,) -> bool: ...  # fmt: skip
+
+    async def automatic_measure_inputs(self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, algorithm_version: str, aim: int = 0,) -> AutomaticMeasureInputs: ...  # fmt: skip
 
     async def persist_automatic_measurements(
         self, tenant_id, mission_id, rows
@@ -601,7 +627,7 @@ class AutomaticResultsActivities:
         self, target: AutomaticTarget
     ) -> AutomaticCalibrationPlan:
         inputs = await self._catalog.automatic_calibration_inputs(
-            target.tenant_id, target.mission_id
+            target.tenant_id, target.mission_id, aim=target.aim
         )
         frames = []
         unrendered = [c for c in inputs.candidates if c.jpeg_render_version is None]
@@ -652,11 +678,75 @@ class AutomaticResultsActivities:
             raise _refuse(target, f"a calibration for dive {result.mission_id}")
         fields = result.model_dump(exclude={"mission_id"})
         row = AutomaticCalibrationRow(
-            camera_calibration_id=plan.camera_calibration_id, **fields
-        )
+            camera_calibration_id=plan.camera_calibration_id, aim=target.aim,
+            **fields,
+        )  # fmt: skip
         return await self._write(
             target, self._catalog.persist_automatic_calibration, row
         )
+
+    @activity.defn(name="automatic_mission_aims")
+    async def automatic_mission_aims(self, target: AutomaticTarget) -> List[int]:
+        """The mission's laser aims (0081): ``[0]``, or ``[0, 1]`` after a
+        recorded beam move."""
+        return await self._catalog.automatic_mission_aims(
+            target.tenant_id, target.mission_id
+        )
+
+    @activity.defn(name="automatic_calibration_owed")
+    async def automatic_calibration_owed(self, target: AutomaticTarget) -> bool:
+        """Whether the target aim's size-constancy fit is owed at the current
+        version (0081): a mission in the cohort for other work keeps it."""
+        return await self._catalog.automatic_calibration_owed(
+            target.tenant_id, target.mission_id,
+            version=AUTOMATIC_CALIBRATION_VERSION, aim=target.aim,
+        )  # fmt: skip
+
+    @activity.defn(name="automatic_borrow_candidate")
+    async def automatic_borrow_candidate(
+        self, target: AutomaticTarget
+    ) -> Optional[AutomaticBorrowCandidate]:
+        """The beam the target aim would borrow (0082), or None: none owed, or
+        the line refused it (that refusal written by the API)."""
+        found = await self._write(
+            target, self._catalog.automatic_borrow_candidate, aim=target.aim
+        )
+        if found is None:
+            return None
+        return AutomaticBorrowCandidate(
+            lender_id=found.lender_id, laser_position=list(found.laser_position),
+            laser_axis=list(found.laser_axis), line_px=found.line_px,
+        )  # fmt: skip
+
+    @activity.defn(name="persist_automatic_borrow")
+    async def persist_automatic_borrow(
+        self, target: AutomaticTarget, candidate: AutomaticBorrowCandidate,
+        report: BorrowCheckReport,
+    ) -> uuid.UUID:  # fmt: skip
+        """The check's verdict on `candidate`, written as the aim's borrow."""
+        # pylint: disable-next=import-outside-toplevel
+        from fishsense_services_api.calibration_borrow import (
+            BorrowCandidate,
+            BorrowCheck,
+        )
+
+        if report.mission_id != target.mission_id:
+            raise _refuse(target, f"a borrow check for dive {report.mission_id}")
+        if report.lender_id != candidate.lender_id:
+            raise _refuse(
+                target, f"a borrow check of another lender, {report.lender_id}"
+            )
+        return await self._write(
+            target, self._catalog.persist_automatic_borrow,
+            BorrowCandidate(lender_id=candidate.lender_id,
+                            laser_position=list(candidate.laser_position),
+                            laser_axis=list(candidate.laser_axis),
+                            line_px=candidate.line_px),
+            BorrowCheck(outcome=report.outcome, refusal_reason=report.refusal_reason,
+                        depth_ratio=report.depth_ratio, holds=report.holds,
+                        capture_ids=list(report.capture_ids)),
+            aim=target.aim,
+        )  # fmt: skip
 
     # -- lengths (light) -----------------------------------------------------------
 
@@ -667,8 +757,9 @@ class AutomaticResultsActivities:
         if not self._slate_pose_enabled:
             return False
         return await self._catalog.automatic_slate_pose_owed(
-            target.tenant_id, target.mission_id, version=SLATE_POSE_CALIBRATION_VERSION
-        )
+            target.tenant_id, target.mission_id,
+            version=SLATE_POSE_CALIBRATION_VERSION, aim=target.aim,
+        )  # fmt: skip
 
     @activity.defn(name="persist_automatic_slate_pose")
     async def persist_automatic_slate_pose(
@@ -682,8 +773,8 @@ class AutomaticResultsActivities:
         """The slate-pose fit as the mission's slate-pose calibration, naming
         its template and the frames it posed (the zoom gate's staleness reads
         them as it reads the size-constancy fit's), and an answer's error bar
-        (0079): a refusal carries none, though v3's check keeps the SD of the
-        fit it refused."""
+        (0079), at each range too (0080): a refusal carries none, though v3's
+        check keeps the SD of the fit it refused."""
         if report.mission_id != target.mission_id:
             raise _refuse(target, f"a slate pose for dive {report.mission_id}")
         row = AutomaticCalibrationRow(
@@ -704,7 +795,11 @@ class AutomaticResultsActivities:
             size_ratio=report.size_ratio,
             se_px=report.se_px,
             capture_ids=list(posed),
+            aim=target.aim,
             scale_sd=report.scale_sd if report.outcome == "accepted" else None,
+            scale_sd_by_range=(
+                report.scale_sd_by_range if report.outcome == "accepted" else None
+            ),
         )
         return await self._write(
             target, self._catalog.persist_automatic_calibration, row
@@ -718,6 +813,7 @@ class AutomaticResultsActivities:
             target.tenant_id,
             target.mission_id,
             algorithm_version=AUTOMATIC_MEASUREMENT_VERSION,
+            aim=target.aim,
         )
         if inputs.calibration is None:
             return None

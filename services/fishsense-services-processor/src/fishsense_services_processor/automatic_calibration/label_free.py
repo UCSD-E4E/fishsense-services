@@ -29,6 +29,9 @@ class LabelFreeFit(sc.LabelFreeFit):
     (calibration v3 on SAM sizes, 2026-10-23); None where not predicted."""
 
     scale_sd: Optional[float] = None
+    #: ``[[range m, SD], ...]``: the error bar at each range, where it
+    #: depends on range (calibration v4 from the housing, 2026-10-27).
+    scale_sd_by_range: Optional[list] = None
 
     @classmethod
     def of(cls, fit: sc.LabelFreeFit) -> "LabelFreeFit":

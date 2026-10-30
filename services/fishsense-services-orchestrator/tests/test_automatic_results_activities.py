@@ -884,7 +884,8 @@ async def test_with_its_switch_on_the_store_says_whether_it_is_owed():
     acts = _acts(catalog, slate_pose_enabled=True)
     assert await _run(acts.automatic_slate_pose_owed, TARGET) is True
     assert catalog.calls[-1] == ("automatic_slate_pose_owed", (TENANT_A, MISSION),
-                                 {"version": SLATE_POSE_CALIBRATION_VERSION})  # fmt: skip
+                                 {"version": SLATE_POSE_CALIBRATION_VERSION,
+                                  "aim": 0})  # fmt: skip
 
 
 async def test_the_cohort_owes_the_slate_pose_only_with_its_switch_on():
@@ -952,9 +953,10 @@ async def test_a_slate_pose_is_written_with_its_error_bar():
     row = await _persisted_pose(CalibrationV3Report(
         mission_id=MISSION, size_source="pose", outcome="accepted",
         laser_position=[0.1, 0, 0], laser_axis=[0, 0, 1], frames_used=2,
-        scale_sd=0.021,
+        scale_sd=0.021, scale_sd_by_range=[[1.0, 0.018], [2.0, 0.021]],
     ))  # fmt: skip
     assert row.scale_sd == 0.021
+    assert row.scale_sd_by_range == [[1.0, 0.018], [2.0, 0.021]]
 
 
 async def test_a_refused_slate_pose_carries_no_error_bar():
@@ -965,6 +967,77 @@ async def test_a_refused_slate_pose_carries_no_error_bar():
     row = await _persisted_pose(CalibrationV3Report(
         mission_id=MISSION, size_source="pose", outcome="refused",
         refusal_reason="fit_disagrees_with_mission", frames_used=5,
-        scale_sd=0.03,
+        scale_sd=0.03, scale_sd_by_range=[[1.0, 0.03]],
     ))  # fmt: skip
-    assert (row.outcome, row.scale_sd) == ("refused", None)
+    assert (row.outcome, row.scale_sd, row.scale_sd_by_range) == ("refused", None, None)
+
+
+# -- the checked borrow (0082) ---------------------------------------------------------
+
+
+def _borrow_candidate():
+    from fishsense_services_api.calibration_borrow import BorrowCandidate
+
+    return BorrowCandidate(lender_id=uuid.uuid4(), laser_position=[0.0, -0.1, 0.0],
+                           laser_axis=[0.03, 0.03, 0.999], line_px=3.5)  # fmt: skip
+
+
+async def test_the_borrow_candidate_crosses_the_wire_as_the_api_gave_it():
+    from fishsense_services_orchestrator.automatic_results.activities import (
+        AutomaticBorrowCandidate,
+    )
+
+    found = _borrow_candidate()
+    catalog = _Catalog(automatic_borrow_candidate=found)
+
+    got = await _run(_acts(catalog).automatic_borrow_candidate, TARGET)
+
+    assert got == AutomaticBorrowCandidate(**vars(found))
+    assert catalog.calls[-1] == ("automatic_borrow_candidate", (TENANT_A, MISSION),
+                                 {"aim": 0})  # fmt: skip
+    assert await _run(_acts(_Catalog()).automatic_borrow_candidate, TARGET) is None
+
+
+async def test_the_checks_verdict_is_written_for_the_candidate_it_checked():
+    from fishsense_services_api.calibration_borrow import BorrowCheck
+    from fishsense_services_contracts.calibration_borrow import BorrowCheckReport
+    from fishsense_services_orchestrator.automatic_results.activities import (
+        AutomaticBorrowCandidate,
+    )
+
+    found = _borrow_candidate()
+    candidate = AutomaticBorrowCandidate(**vars(found))
+    posed = [uuid.uuid4()]
+    report = BorrowCheckReport(mission_id=MISSION, lender_id=found.lender_id,
+                               outcome="accepted", depth_ratio=-0.02, holds=1,
+                               points=1, capture_ids=posed)  # fmt: skip
+    catalog = _Catalog(persist_automatic_borrow=uuid.uuid4())
+
+    await _run(_acts(catalog).persist_automatic_borrow, TARGET, candidate, report)
+
+    name, args, kwargs = catalog.calls[-1]
+    assert (name, args[:2], kwargs) == ("persist_automatic_borrow",
+                                        (TENANT_A, MISSION), {"aim": 0})  # fmt: skip
+    assert args[2] == found
+    assert args[3] == BorrowCheck(outcome="accepted", depth_ratio=-0.02, holds=1,
+                                  capture_ids=posed)  # fmt: skip
+
+
+@pytest.mark.parametrize("wrong", ["mission", "lender"])
+async def test_a_check_of_another_mission_or_lender_is_refused(wrong):
+    from fishsense_services_contracts.calibration_borrow import BorrowCheckReport
+    from fishsense_services_orchestrator.automatic_results.activities import (
+        AutomaticBorrowCandidate,
+    )
+
+    candidate = AutomaticBorrowCandidate(**vars(_borrow_candidate()))
+    report = BorrowCheckReport(
+        mission_id=uuid.uuid4() if wrong == "mission" else MISSION,
+        lender_id=uuid.uuid4() if wrong == "lender" else candidate.lender_id,
+        outcome="accepted", depth_ratio=0.0, holds=1, points=1,
+    )  # fmt: skip
+    catalog = _Catalog()
+
+    with pytest.raises(ApplicationError, match="borrow check"):
+        await _run(_acts(catalog).persist_automatic_borrow, TARGET, candidate, report)
+    assert not catalog.calls

@@ -116,6 +116,9 @@ class AutomaticCalibrationView(BaseModel):
     #: The lengths' scale SD on it, 1 SD (0.02 = 2%; 0079); None where none
     #: was measured.
     scale_sd: float | None = None
+    #: That SD at each range, ``[[range m, SD], ...]`` (0080): a length's
+    #: ``length_sd_m`` is read off it at the length's depth.
+    scale_sd_by_range: list[list[float]] | None = None
 
 
 class AutomaticFailureView(BaseModel):

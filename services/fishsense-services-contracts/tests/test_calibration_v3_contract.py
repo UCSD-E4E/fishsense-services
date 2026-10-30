@@ -38,3 +38,19 @@ def test_a_replay_may_fit_on_sam_sizes():
                                sam_sizes={"a": 10.0, "b": None})  # fmt: skip
     assert r.sam_sizes == {"a": 10.0, "b": None}
     assert ReplayCalibrationInput(payload=payload).size_source == "sift"
+
+
+def test_a_report_carries_its_error_bar_at_each_range():
+    """v26 (2026-10-27): the slate-pose fit from the housing's laser gives
+    its bar at each range, as ``[range m, SD]`` pairs; a v25 report, without
+    one, still parses."""
+    m = uuid.uuid4()
+    r = CalibrationV3Report(mission_id=m, outcome="accepted", scale_sd=0.03,
+                            scale_sd_by_range=[[0.5, 0.04], [1.0, 0.02]])  # fmt: skip
+    wire = r.model_dump(mode="json", by_alias=True)
+    assert CalibrationV3Report.model_validate(wire).scale_sd_by_range == [
+        [0.5, 0.04],
+        [1.0, 0.02],
+    ]
+    del wire["scale_sd_by_range"]
+    assert CalibrationV3Report.model_validate(wire).scale_sd_by_range is None

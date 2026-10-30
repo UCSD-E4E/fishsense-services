@@ -61,6 +61,7 @@ not in the backlog; it records a failure too, and then fails, so a dive run
 by hand never reads as done when it isn't.
 """
 
+import dataclasses
 import uuid
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -93,6 +94,10 @@ with workflow.unsafe.imports_passed_through():
         MeasureAutomaticResult,
         PredictAutomaticFramesInput,
     )
+    from fishsense_services_contracts.calibration_borrow import (
+        BorrowCheckInput,
+        BorrowCheckReport,
+    )
     from fishsense_services_contracts.calibration_v3 import (
         CalibrationV3Report,
         ReplayCalibrationInput,
@@ -107,6 +112,7 @@ with workflow.unsafe.imports_passed_through():
         SpeciesPredictionResult,
     )
     from fishsense_services_orchestrator.automatic_results.activities import (
+        AutomaticBorrowCandidate,
         AutomaticCalibrationPlan,
         AutomaticMeasurePlan,
         AutomaticTarget,
@@ -518,12 +524,111 @@ async def _species_step(
         await _db("persist_automatic_species", target, persistable, result_type=int)
 
 
+#: Each laser aim is its own calibration and its own lengths (0081; the
+#: owner, 2026-10-29): after a recorded beam move the second aim is fitted,
+#: and measured, its children named for it; a
+#: size-constancy fit not owed is not refitted. A run started before it
+#: replays as it ran: one fit, one measure, the first aim.
+AIMS_PATCH = "automatic-calibration-per-aim"
+
+
+def _aimed(name: str, target: AutomaticTarget) -> str:
+    """A child's id for the target's aim: the first's as it always was."""
+    return name if target.aim == 0 else f"{name}-aim{target.aim}"
+
+
+async def _aims(target: AutomaticTarget) -> list[AutomaticTarget]:
+    if not workflow.patched(AIMS_PATCH):
+        return [target]
+    aims = await _db("automatic_mission_aims", target, result_type=List[int])
+    return [dataclasses.replace(target, aim=aim) for aim in aims]
+
+
 async def _calibration(target: AutomaticTarget) -> None:
+    for aimed in await _aims(target):
+        await _calibrate_aim(aimed)
+
+
+async def _calibrate_aim(target: AutomaticTarget) -> None:
+    per_aim = workflow.patched(AIMS_PATCH)
     plan: AutomaticCalibrationPlan = await _db(
         "resolve_automatic_calibration_inputs",
         target,
         result_type=AutomaticCalibrationPlan,
     )
+    owed = not per_aim or await _db(
+        "automatic_calibration_owed", target, result_type=bool
+    )
+    if owed and not await _size_constancy(target, plan):
+        return
+    if workflow.patched(SLATE_POSE_PATCH):
+        await _slate_pose(target, plan)
+    if per_aim and workflow.patched(BORROW_PATCH):
+        await _borrow(target, plan)
+
+
+#: The checked borrow (0082; the owner, 2026-10-29): once an aim's own fits
+#: are done, an aim nothing serves may take a neighbor's beam -- the API's
+#: candidate, along the aim's dot line -- when it reads the aim's own slates,
+#: posed on the GPU, at their depth (the processor's check). Its children are
+#: named for the aim. A run started before it replays as it ran: no borrow.
+BORROW_PATCH = "automatic-calibration-checked-borrow"
+
+
+async def _borrow(target: AutomaticTarget, plan: AutomaticCalibrationPlan) -> None:
+    candidate: Optional[AutomaticBorrowCandidate] = await _db(
+        "automatic_borrow_candidate", target,
+        result_type=Optional[AutomaticBorrowCandidate],
+    )  # fmt: skip
+    if candidate is None:
+        return
+
+    def refused(reason: str) -> BorrowCheckReport:
+        return BorrowCheckReport(mission_id=target.mission_id,
+                                 lender_id=candidate.lender_id, outcome="refused",
+                                 refusal_reason=reason)  # fmt: skip
+
+    template: Optional[dict] = await _db(
+        "resolve_mission_slate_template", target, result_type=Optional[dict]
+    )
+    if template is None:
+        report = refused("no_slate_template")
+    elif not plan.payload.frames:
+        report = refused("no_slate_frames")
+    else:
+        poses = await pose_slate_frames(
+            target.tenant_id, target.mission_id, plan, template,
+            child_prefix=_aimed(f"automatic-borrow-pose-{target.mission_id}", target),
+        )  # fmt: skip
+        if poses is None:
+            workflow.logger.warning(
+                "dive=%s: the borrow's check needs a real GPU; owed still",
+                target.mission_id,
+            )
+            return
+        await wake_per_image_processor()
+        ran, report = await _child(
+            "CheckBorrowedBeamWorkflow",
+            BorrowCheckInput(
+                mission_id=target.mission_id, lender_id=candidate.lender_id,
+                laser_position=candidate.laser_position,
+                laser_axis=candidate.laser_axis,
+                pose_points={str(p.capture_id): p.point if p.status == "posed"
+                             else None for p in poses},
+            ),
+            child_id=_aimed(f"automatic-borrow-check-{target.mission_id}", target),
+            task_queue=PROCESSOR_TASK_QUEUE,
+            timeout=CALIBRATION_CHILD_TIMEOUT,
+            result_type=BorrowCheckReport,
+        )  # fmt: skip
+        if not ran:
+            return
+    await _db("persist_automatic_borrow", target, candidate, report,
+              result_type=uuid.UUID)  # fmt: skip
+
+
+async def _size_constancy(target: AutomaticTarget, plan) -> bool:
+    """The size-constancy fit, written; False when its child did not run."""
     if not plan.payload.frames:
         result = AutomaticCalibrationResult(
             mission_id=target.mission_id,
@@ -536,16 +641,15 @@ async def _calibration(target: AutomaticTarget) -> None:
         ran, result = await _child(
             "FitAutomaticCalibrationWorkflow",
             plan.payload,
-            child_id=f"automatic-calibration-{target.mission_id}",
+            child_id=_aimed(f"automatic-calibration-{target.mission_id}", target),
             task_queue=PROCESSOR_TASK_QUEUE,
             timeout=CALIBRATION_CHILD_TIMEOUT,
             result_type=AutomaticCalibrationResult,
         )
         if not ran:
-            return
+            return False
     await _db("persist_automatic_calibration", target, plan, result)
-    if workflow.patched(SLATE_POSE_PATCH):
-        await _slate_pose(target, plan)
+    return True
 
 
 #: The slate-pose calibration (calibration v4, 0078; the owner, 2026-10-26),
@@ -556,6 +660,10 @@ SLATE_POSE_PATCH = "automatic-slate-pose-calibration"
 #: Every slate-pose answer carries its error bar (0079; 2026-10-27): one
 #: without, from a processor before the relaxed fit, is not written.
 SLATE_POSE_ERROR_BAR_PATCH = "automatic-slate-pose-error-bar"
+#: ... and at each range, from the housing's laser (slate-pose-6, 0080;
+#: 2026-10-27): one with a single SD, from a processor's free line, is not
+#: written either.
+SLATE_POSE_BY_RANGE_PATCH = "automatic-slate-pose-bar-by-range"
 
 
 async def _slate_pose(target: AutomaticTarget, plan: AutomaticCalibrationPlan) -> None:
@@ -580,7 +688,7 @@ async def _slate_pose(target: AutomaticTarget, plan: AutomaticCalibrationPlan) -
         return
     poses = await pose_slate_frames(
         target.tenant_id, target.mission_id, plan, template,
-        child_prefix=f"automatic-slate-pose-{target.mission_id}",
+        child_prefix=_aimed(f"automatic-slate-pose-{target.mission_id}", target),
     )  # fmt: skip
     if poses is None:
         workflow.logger.warning(
@@ -596,7 +704,7 @@ async def _slate_pose(target: AutomaticTarget, plan: AutomaticCalibrationPlan) -
         "ReplayAutomaticCalibrationV3Workflow",
         ReplayCalibrationInput(payload=plan.payload, size_source="pose",
                                pose_points=points),
-        child_id=f"automatic-slate-pose-fit-{target.mission_id}",
+        child_id=_aimed(f"automatic-slate-pose-fit-{target.mission_id}", target),
         task_queue=PROCESSOR_TASK_QUEUE,
         timeout=CALIBRATION_CHILD_TIMEOUT,
         result_type=CalibrationV3Report,
@@ -610,12 +718,24 @@ async def _slate_pose(target: AutomaticTarget, plan: AutomaticCalibrationPlan) -
             "from before the relaxed fit); owed still", target.mission_id,
         )  # fmt: skip
         return
+    if (report.outcome == "accepted" and report.scale_sd_by_range is None
+            and workflow.patched(SLATE_POSE_BY_RANGE_PATCH)):  # fmt: skip
+        workflow.logger.warning(
+            "dive=%s: the slate pose came back without its bar at each range (a "
+            "processor from before slate-pose-6); owed still", target.mission_id,
+        )  # fmt: skip
+        return
     posed = [p.capture_id for p in poses if p.status == "posed"]
     await _db("persist_automatic_slate_pose", target, plan, report,
               slate_template_id, posed)  # fmt: skip
 
 
 async def _lengths(target: AutomaticTarget) -> None:
+    for aimed in await _aims(target):
+        await _measure_aim(aimed)
+
+
+async def _measure_aim(target: AutomaticTarget) -> None:
     plan: Optional[AutomaticMeasurePlan] = await _db(
         "resolve_automatic_measure_inputs",
         target,
@@ -631,7 +751,7 @@ async def _lengths(target: AutomaticTarget) -> None:
     ran, result = await _child(
         "MeasureAutomaticWorkflow",
         plan.payload,
-        child_id=f"automatic-measure-{target.mission_id}",
+        child_id=_aimed(f"automatic-measure-{target.mission_id}", target),
         task_queue=PROCESSOR_LIGHT_TASK_QUEUE,
         timeout=CPU_CHILD_TIMEOUT,
         result_type=MeasureAutomaticResult,

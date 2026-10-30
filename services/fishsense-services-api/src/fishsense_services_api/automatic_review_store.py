@@ -141,7 +141,8 @@ async def automatic_frame(
                        pm.bucket AS mask_bucket, pm.object_key AS mask_key,
                        pm.width AS mask_width, pm.height AS mask_height,
                        m.length_m, m.depth_m, m.refusal, m.calibration_source,
-                       m.length_m * alc.scale_sd AS length_sd_m,
+                       m.length_m * calibration_sd_at(alc.scale_sd_by_range, alc.scale_sd, m.depth_m)
+                           AS length_sd_m,
                        m.algorithm AS m_algorithm,
                        m.algorithm_version AS m_algorithm_version,
                        s.predicted_choice, s.top1_probability, s.margin, s.top5,
@@ -250,6 +251,8 @@ class AutomaticCalibration:
     method: str = "size_constancy"
     #: The lengths' scale SD on it (0079); None where none was measured.
     scale_sd: float | None = None
+    #: That SD at each range, ``[[range m, SD], ...]`` (0080).
+    scale_sd_by_range: list | None = None
 
 
 @dataclass(frozen=True)
@@ -321,12 +324,15 @@ async def mission_automatic(
                 SELECT a.outcome, a.refusal_reason, a.algorithm_version,
                        a.frames_used, a.pair_count, a.size_ratio, a.se_px,
                        a.created_at, a.method,
-                       (SELECT x.scale_sd FROM automatic_laser_calibrations x
-                        WHERE x.tenant_id = a.tenant_id AND x.id = a.id) AS scale_sd
+                       x.scale_sd, x.scale_sd_by_range
                 FROM current_automatic_laser_calibrations a
+                JOIN automatic_laser_calibrations x
+                  ON x.tenant_id = a.tenant_id AND x.id = a.id
                 WHERE a.tenant_id = :t AND a.mission_id = :m
-                -- One per method (0078): the one the lengths would use.
-                ORDER BY a.outcome = 'accepted' DESC, a.method = 'slate_pose' DESC
+                -- One per method (0078) and aim (0081): the one the first
+                -- aim's lengths would use.
+                ORDER BY x.aim, a.outcome = 'accepted' DESC,
+                         a.method = 'slate_pose' DESC
                 LIMIT 1
                 """),
             params,
@@ -335,8 +341,12 @@ async def mission_automatic(
     lengths_use = (
         await conn.execute(
             text("""
-                SELECT calibration_source FROM automatic_measurement_calibrations
-                WHERE tenant_id = :t AND mission_id = :m
+                SELECT mc.calibration_source FROM automatic_measurement_calibrations mc
+                JOIN automatic_laser_calibrations x
+                  ON x.tenant_id = mc.tenant_id AND x.id = mc.automatic_laser_calibration_id
+                WHERE mc.tenant_id = :t AND mc.mission_id = :m
+                -- One per aim (0081): the first's.
+                ORDER BY x.aim LIMIT 1
                 """),
             params,
         )

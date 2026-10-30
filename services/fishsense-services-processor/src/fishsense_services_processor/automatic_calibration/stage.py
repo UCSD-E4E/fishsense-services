@@ -6,6 +6,7 @@ from fishsense_services_processor.automatic_calibration.activities import (
     AutomaticCalibrationActivities,
 )
 from fishsense_services_processor.automatic_calibration.workflow import (
+    CheckBorrowedBeamWorkflow,
     FitAutomaticCalibrationWorkflow,
     ReplayAutomaticCalibrationV3Workflow,
 )
@@ -19,10 +20,16 @@ _ACTIVITIES = AutomaticCalibrationActivities(
 STAGE = Stage(
     name="automatic_calibration",
     role=ROLE_PER_IMAGE,
-    workflows=[FitAutomaticCalibrationWorkflow, ReplayAutomaticCalibrationV3Workflow],
+    workflows=[
+        FitAutomaticCalibrationWorkflow,
+        ReplayAutomaticCalibrationV3Workflow,
+        CheckBorrowedBeamWorkflow,
+    ],
     activities=[
         _ACTIVITIES.fit_automatic_calibration,
         # Calibration v3, read-only until the owner switches (2026-10-22).
         _ACTIVITIES.replay_automatic_calibration_v3,
+        # The checked borrow (v27, 2026-10-29).
+        _ACTIVITIES.check_borrowed_beam,
     ],
 )
