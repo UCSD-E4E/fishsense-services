@@ -71,6 +71,7 @@ from fishsense_services_contracts.automatic_results import (
     PredictAutomaticFramesInput,
     SLATE_POSE_CALIBRATION_VERSION,
 )
+from fishsense_services_contracts.calibration_borrow import BorrowCheckReport
 from fishsense_services_contracts.calibration_v3 import CalibrationV3Report
 from fishsense_services_contracts.headtail_keypoints import (
     KeypointFrame,
@@ -94,6 +95,7 @@ from fishsense_services_orchestrator.species_predict.candidates import (
 from fishsense_services_contracts.renamed import renamed_from
 
 __all__ = [
+    "AutomaticBorrowCandidate",
     "AutomaticCalibrationPlan",
     "AutomaticMeasurePlan",
     "AutomaticResultsActivities",
@@ -138,6 +140,17 @@ class AutomaticCalibrationPlan:
 
     payload: FitAutomaticCalibrationInput
     camera_calibration_id: Optional[uuid.UUID]
+
+
+@dataclass(frozen=True)
+class AutomaticBorrowCandidate:
+    """The beam an aim would borrow, to be checked on its posed slates (0082,
+    ``fishsense_services_api.calibration_borrow.BorrowCandidate``)."""
+
+    lender_id: uuid.UUID
+    laser_position: List[float]
+    laser_axis: List[float]
+    line_px: float
 
 
 @dataclass(frozen=True)
@@ -209,6 +222,14 @@ class AutomaticResultsCatalog(Protocol):
     async def persist_automatic_calibration(
         self, tenant_id, mission_id, row: AutomaticCalibrationRow
     ) -> uuid.UUID: ...
+
+    # The borrow's types are `fishsense_services_api.calibration_borrow`'s,
+    # which needs numpy: imported where used, out of the workflow sandbox.
+    async def automatic_borrow_candidate(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, aim: int
+    ) -> Any: ...
+
+    async def persist_automatic_borrow(self, tenant_id: uuid.UUID, mission_id: uuid.UUID, candidate: Any, check: Any, *, aim: int,) -> uuid.UUID: ...  # fmt: skip
 
     async def automatic_slate_pose_owed(self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, version: str, aim: int = 0,) -> bool: ...  # fmt: skip
 
@@ -679,6 +700,52 @@ class AutomaticResultsActivities:
         return await self._catalog.automatic_calibration_owed(
             target.tenant_id, target.mission_id,
             version=AUTOMATIC_CALIBRATION_VERSION, aim=target.aim,
+        )  # fmt: skip
+
+    @activity.defn(name="automatic_borrow_candidate")
+    async def automatic_borrow_candidate(
+        self, target: AutomaticTarget
+    ) -> Optional[AutomaticBorrowCandidate]:
+        """The beam the target aim would borrow (0082), or None: none owed, or
+        the line refused it (that refusal written by the API)."""
+        found = await self._write(
+            target, self._catalog.automatic_borrow_candidate, aim=target.aim
+        )
+        if found is None:
+            return None
+        return AutomaticBorrowCandidate(
+            lender_id=found.lender_id, laser_position=list(found.laser_position),
+            laser_axis=list(found.laser_axis), line_px=found.line_px,
+        )  # fmt: skip
+
+    @activity.defn(name="persist_automatic_borrow")
+    async def persist_automatic_borrow(
+        self, target: AutomaticTarget, candidate: AutomaticBorrowCandidate,
+        report: BorrowCheckReport,
+    ) -> uuid.UUID:  # fmt: skip
+        """The check's verdict on `candidate`, written as the aim's borrow."""
+        # pylint: disable-next=import-outside-toplevel
+        from fishsense_services_api.calibration_borrow import (
+            BorrowCandidate,
+            BorrowCheck,
+        )
+
+        if report.mission_id != target.mission_id:
+            raise _refuse(target, f"a borrow check for dive {report.mission_id}")
+        if report.lender_id != candidate.lender_id:
+            raise _refuse(
+                target, f"a borrow check of another lender, {report.lender_id}"
+            )
+        return await self._write(
+            target, self._catalog.persist_automatic_borrow,
+            BorrowCandidate(lender_id=candidate.lender_id,
+                            laser_position=list(candidate.laser_position),
+                            laser_axis=list(candidate.laser_axis),
+                            line_px=candidate.line_px),
+            BorrowCheck(outcome=report.outcome, refusal_reason=report.refusal_reason,
+                        depth_ratio=report.depth_ratio, holds=report.holds,
+                        capture_ids=list(report.capture_ids)),
+            aim=target.aim,
         )  # fmt: skip
 
     # -- lengths (light) -----------------------------------------------------------

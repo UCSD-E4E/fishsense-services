@@ -32,6 +32,10 @@ from fishsense_services_contracts.task_queues import (
     PROCESSOR_TASK_QUEUE,
 )
 
+#: v27 (2026-10-29): the checked borrow (`calibration_borrow`:
+#: `BorrowCheckInput`, `BorrowCheckReport`): a neighbor's beam checked on the
+#: borrower's own posed slates before an aim with no calibration takes it.
+#: New models only; v26 parses.
 #: v26 (2026-10-27): calibration v4's report gives its error bar at each
 #: range (`CalibrationV3Report.scale_sd_by_range`): the slate-pose fit from
 #: the housing's laser reads near and far differently (279: one summary SD
@@ -104,7 +108,7 @@ from fishsense_services_contracts.task_queues import (
 #: JSON is unchanged -- each renamed field keeps its old name on the wire
 #: (`renamed.py`) -- so a v6 processor and a v7 orchestrator interoperate; only
 #: the published schema's model names differ.
-CONTRACT_VERSION = 26
+CONTRACT_VERSION = 27
 
 
 def _discover_models() -> tuple[type[BaseModel], ...]:

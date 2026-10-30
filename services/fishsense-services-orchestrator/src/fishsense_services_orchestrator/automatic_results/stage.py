@@ -98,6 +98,8 @@ def _activities(deps: Deps):
         activities.automatic_slate_pose_owed,
         activities.automatic_mission_aims,
         activities.automatic_calibration_owed,
+        activities.automatic_borrow_candidate,
+        activities.persist_automatic_borrow,
         activities.persist_automatic_slate_pose,
         activities.resolve_automatic_measure_inputs,
         activities.persist_automatic_measurements,
