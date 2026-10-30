@@ -186,11 +186,14 @@ def _keypoints_input(n):
 
 
 def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET,
-           renders="all", keypoints=0, refusals=0, pose=False):  # fmt: skip
+           renders="all", keypoints=0, refusals=0, pose=False, aims=(0,),
+           constancy=True):  # fmt: skip
     """`selected` is the cohort's answer every time, or a list of answers in
     turn (None once it runs out). `renders`: the frames are ``all`` rendered
     already, rendered ``after`` the render step, or the tenant has
-    ``no-bucket``. `pose`: the slate pose is owed (switched on, a template)."""
+    ``no-bucket``. `pose`: the slate pose is owed (switched on, a template).
+    `aims`: the mission's laser aims (0081); `constancy`: its size-constancy
+    fit is owed."""
     rendered = [renders == "all"]
     cohort = list(selected) if isinstance(selected, list) else None
 
@@ -254,8 +257,17 @@ def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET,
     @activity.defn(name="persist_automatic_calibration")
     async def cal_out(t: AutomaticTarget, p: AutomaticCalibrationPlan,
                       r: AutomaticCalibrationResult) -> uuid.UUID:  # fmt: skip
-        EVENTS.append(("persist calibration", r.outcome, r.refusal_reason))
+        EVENTS.append(("persist calibration", r.outcome, r.refusal_reason)
+                      + ((t.aim,) if t.aim else ()))  # fmt: skip
         return uuid.uuid4()
+
+    @activity.defn(name="automatic_mission_aims")
+    async def mission_aims(t: AutomaticTarget) -> List[int]:
+        return list(aims)
+
+    @activity.defn(name="automatic_calibration_owed")
+    async def constancy_owed(t: AutomaticTarget) -> bool:
+        return constancy
 
     @activity.defn(name="automatic_slate_pose_owed")
     async def pose_owed(t: AutomaticTarget) -> bool:
@@ -283,6 +295,8 @@ def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET,
 
     @activity.defn(name="resolve_automatic_measure_inputs")
     async def measure_in(t: AutomaticTarget) -> Optional[AutomaticMeasurePlan]:
+        if t.aim:
+            EVENTS.append(("measure inputs", t.aim))
         return None if plan is None else _measure_plan(plan, refusals=refusals)
 
     @activity.defn(name="persist_automatic_measure_refusals")
@@ -341,7 +355,7 @@ def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET,
             cal_out, measure_in, measure_out, wake_gpu, wake_per_image, wake_light,
             stage, cleanup, render_in, render_out, masks_out, refusals_out,
             keypoints_in, keypoints_out, pose_owed, pose_template, pose_pdf,
-            pose_out]  # fmt: skip
+            pose_out, mission_aims, constancy_owed]  # fmt: skip
 
 
 @activity.defn(name="_record")
@@ -641,6 +655,56 @@ async def test_one_mission_every_step_in_order():
         ("child", f"automatic-species-{MISSION}"),
         ("persist species", ["decode_failed"]),
     ]
+
+
+async def test_a_moved_mission_is_calibrated_and_measured_aim_by_aim():
+    """0081 (the owner, 2026-10-29): after a recorded beam move each aim is
+    its own calibration and its own lengths;
+    the second aim's children are named for it."""
+    await _run(AutomaticResultsForMissionWorkflow, TARGET, aims=(0, 1))
+
+    calibration = [e for e in EVENTS if e[0] in ("child", "persist calibration",
+                                                 "measure inputs")]  # fmt: skip
+    assert calibration[1:] == [
+        ("child", f"automatic-calibration-{MISSION}"),
+        ("persist calibration", "accepted", None),
+        ("child", f"automatic-calibration-{MISSION}-aim1"),
+        ("persist calibration", "accepted", None, 1),
+        ("child", f"automatic-measure-{MISSION}"),
+        ("measure inputs", 1),
+        ("child", f"automatic-measure-{MISSION}-aim1"),
+        ("child", f"automatic-species-{MISSION}"),
+    ]
+
+
+async def test_a_size_constancy_fit_not_owed_is_not_refitted():
+    """A mission in the cohort for other work (a length, the other aim) keeps
+    its current fit: nothing is refitted."""
+    await _run(AutomaticResultsForMissionWorkflow, TARGET, constancy=False)
+
+    assert not [e for e in EVENTS if e[0] == "persist calibration"]
+    assert ("child", f"automatic-calibration-{MISSION}") not in EVENTS
+    assert ("persist lengths", 1) in EVENTS
+
+
+async def test_a_run_from_before_aims_replays_as_it_ran(monkeypatch):
+    """The aims are behind `workflow.patched`: a run started before them --
+    one fit, one measure, the first aim -- replays under the new code as it ran."""
+    from temporalio.worker import Replayer, UnsandboxedWorkflowRunner
+
+    patched = sut.workflow.patched
+    monkeypatch.setattr(sut.workflow, "patched",
+                        lambda name: name != sut.AIMS_PATCH and patched(name))  # fmt: skip
+    history: list = []
+    await _run(AutomaticResultsForMissionWorkflow, TARGET, aims=(0, 1),
+               runner=UnsandboxedWorkflowRunner(), history=history)  # fmt: skip
+    monkeypatch.undo()
+    assert ("child", f"automatic-calibration-{MISSION}-aim1") not in EVENTS
+
+    replayed = await Replayer(
+        workflows=[AutomaticResultsForMissionWorkflow], data_converter=DATA_CONVERTER
+    ).replay_workflow(history[0], raise_on_replay_failure=False)
+    assert replayed.replay_failure is None
 
 
 async def test_an_owed_slate_pose_is_fitted_after_size_constancy():

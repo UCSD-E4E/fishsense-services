@@ -96,6 +96,8 @@ def _activities(deps: Deps):
         activities.resolve_automatic_calibration_inputs,
         activities.persist_automatic_calibration,
         activities.automatic_slate_pose_owed,
+        activities.automatic_mission_aims,
+        activities.automatic_calibration_owed,
         activities.persist_automatic_slate_pose,
         activities.resolve_automatic_measure_inputs,
         activities.persist_automatic_measurements,

@@ -127,6 +127,9 @@ class AutomaticTarget:
 
     tenant_id: uuid.UUID
     mission_id: Annotated[uuid.UUID, renamed_from("dive_id", "mission_id")]
+    #: The laser aim a calibration or measure step is for (0081): 0, or 1
+    #: after a recorded beam move. Defaulted, so a target from before decodes.
+    aim: int = 0
 
 
 @dataclass(frozen=True)
@@ -194,20 +197,22 @@ class AutomaticResultsCatalog(Protocol):
     async def persist_automatic_species(self, tenant_id, mission_id, rows) -> int: ...
 
     async def automatic_calibration_inputs(
-        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, aim: int = 0
     ) -> AutomaticCalibrationInputs: ...
+
+    async def automatic_mission_aims(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
+    ) -> list[int]: ...
+
+    async def automatic_calibration_owed(self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, version: str, aim: int = 0,) -> bool: ...  # fmt: skip
 
     async def persist_automatic_calibration(
         self, tenant_id, mission_id, row: AutomaticCalibrationRow
     ) -> uuid.UUID: ...
 
-    async def automatic_slate_pose_owed(
-        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, version: str
-    ) -> bool: ...
+    async def automatic_slate_pose_owed(self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, version: str, aim: int = 0,) -> bool: ...  # fmt: skip
 
-    async def automatic_measure_inputs(
-        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, algorithm_version: str
-    ) -> AutomaticMeasureInputs: ...
+    async def automatic_measure_inputs(self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, algorithm_version: str, aim: int = 0,) -> AutomaticMeasureInputs: ...  # fmt: skip
 
     async def persist_automatic_measurements(
         self, tenant_id, mission_id, rows
@@ -601,7 +606,7 @@ class AutomaticResultsActivities:
         self, target: AutomaticTarget
     ) -> AutomaticCalibrationPlan:
         inputs = await self._catalog.automatic_calibration_inputs(
-            target.tenant_id, target.mission_id
+            target.tenant_id, target.mission_id, aim=target.aim
         )
         frames = []
         unrendered = [c for c in inputs.candidates if c.jpeg_render_version is None]
@@ -652,11 +657,29 @@ class AutomaticResultsActivities:
             raise _refuse(target, f"a calibration for dive {result.mission_id}")
         fields = result.model_dump(exclude={"mission_id"})
         row = AutomaticCalibrationRow(
-            camera_calibration_id=plan.camera_calibration_id, **fields
-        )
+            camera_calibration_id=plan.camera_calibration_id, aim=target.aim,
+            **fields,
+        )  # fmt: skip
         return await self._write(
             target, self._catalog.persist_automatic_calibration, row
         )
+
+    @activity.defn(name="automatic_mission_aims")
+    async def automatic_mission_aims(self, target: AutomaticTarget) -> List[int]:
+        """The mission's laser aims (0081): ``[0]``, or ``[0, 1]`` after a
+        recorded beam move."""
+        return await self._catalog.automatic_mission_aims(
+            target.tenant_id, target.mission_id
+        )
+
+    @activity.defn(name="automatic_calibration_owed")
+    async def automatic_calibration_owed(self, target: AutomaticTarget) -> bool:
+        """Whether the target aim's size-constancy fit is owed at the current
+        version (0081): a mission in the cohort for other work keeps it."""
+        return await self._catalog.automatic_calibration_owed(
+            target.tenant_id, target.mission_id,
+            version=AUTOMATIC_CALIBRATION_VERSION, aim=target.aim,
+        )  # fmt: skip
 
     # -- lengths (light) -----------------------------------------------------------
 
@@ -667,8 +690,9 @@ class AutomaticResultsActivities:
         if not self._slate_pose_enabled:
             return False
         return await self._catalog.automatic_slate_pose_owed(
-            target.tenant_id, target.mission_id, version=SLATE_POSE_CALIBRATION_VERSION
-        )
+            target.tenant_id, target.mission_id,
+            version=SLATE_POSE_CALIBRATION_VERSION, aim=target.aim,
+        )  # fmt: skip
 
     @activity.defn(name="persist_automatic_slate_pose")
     async def persist_automatic_slate_pose(
@@ -704,6 +728,7 @@ class AutomaticResultsActivities:
             size_ratio=report.size_ratio,
             se_px=report.se_px,
             capture_ids=list(posed),
+            aim=target.aim,
             scale_sd=report.scale_sd if report.outcome == "accepted" else None,
             scale_sd_by_range=(
                 report.scale_sd_by_range if report.outcome == "accepted" else None
@@ -721,6 +746,7 @@ class AutomaticResultsActivities:
             target.tenant_id,
             target.mission_id,
             algorithm_version=AUTOMATIC_MEASUREMENT_VERSION,
+            aim=target.aim,
         )
         if inputs.calibration is None:
             return None

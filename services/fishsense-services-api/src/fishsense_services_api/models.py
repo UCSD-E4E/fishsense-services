@@ -24,6 +24,7 @@ from sqlalchemy import (
     Identity,
     Integer,
     MetaData,
+    SmallInteger,
     Text,
     UniqueConstraint,
     Uuid,
@@ -1425,6 +1426,8 @@ class AutomaticLaserCalibration(Base):
     scale_sd: Mapped[float | None] = mapped_column(Double)
     #: That SD at each range, ``[[range m, SD], ...]`` (0080).
     scale_sd_by_range: Mapped[list | None] = mapped_column(JSONB)
+    #: The laser aim it calibrates: 0, or 1 after a recorded move (0081).
+    aim: Mapped[int] = mapped_column(SmallInteger, server_default=text("0"))
 
 
 class AutomaticSpeciesPrediction(Base):

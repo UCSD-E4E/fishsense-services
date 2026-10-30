@@ -15,7 +15,10 @@ left alone, and the CLI writes nothing if that leaves a different count.
 
 The same, for a frame after the laser moved mid-dive (0073, the partial
 run): ``withdraw-moved-lengths`` appends ``beam_moved`` after each current
-automatic length on a (wide) frame after a recorded move.
+automatic length on a (wide) frame after a recorded move. Since each aim is
+calibrated (0081), a length is current only under its frame's own aim, so
+the frames it withdraws from are those inside a move's window: neither
+aim's.
 
 Run as the owner (it reads every tenant). Human lengths need no withdrawal:
 none was on a zoomed frame (0 of 3,314), and the measurement view now keeps
@@ -37,11 +40,11 @@ __all__ = [
 ]
 
 #: The refusal, and the frames it withdraws a current length from: zoomed
-#: (0070), or wide but after the laser moved (0073).
+#: (0070), or wide but inside a laser move's window (0073, 0081).
 REASONS = {
     "zoomed": "NOT focal_length_calibrated(c.focal_length_mm)",
     "beam_moved": "focal_length_calibrated(c.focal_length_mm) "
-    "AND NOT before_beam_move(c.tenant_id, c.mission_id, c.captured_at)",
+    "AND beam_aim(c.tenant_id, c.mission_id, c.captured_at) IS NULL",
 }
 
 
