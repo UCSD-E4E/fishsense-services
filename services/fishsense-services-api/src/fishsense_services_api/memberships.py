@@ -1,6 +1,6 @@
 """Which tenant a request acts in, and with what role.
 
-The tenant named in the URL is honoured only if the caller is a member of it,
+The tenant named in the URL is honored only if the caller is a member of it,
 or a system admin (0056): one who is not a member arrives read-only, and acts
 as its admin only while an unlock they made deliberately lasts. The query
 scopes to the caller explicitly (the app layer's line of defence); the RLS

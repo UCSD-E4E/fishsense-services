@@ -6,7 +6,7 @@ The model is 2026-10-03_slate_detector@95a77d95's presence classifier; see
 
 * **predictions are appended, never updated** (migration 0035, like every
   prediction table), and `current_slate_presence` is the latest per capture;
-* **the cohort**: a dive of **any** priority, labelled or not (every canonical
+* **the cohort**: a dive of **any** priority, labeled or not (every canonical
   frame is scored, for publication; the other cohorts are high-only,
   deliberately) whose device has a
   current pinhole calibration (the frame is rectified) and which has a
@@ -210,7 +210,7 @@ async def test_any_priority(owner_engine, app_engine, priority):
     assert await _next(app_engine, lab) == only
 
 
-async def test_labelled_frames_are_scored_too(owner_engine, app_engine):
+async def test_labeled_frames_are_scored_too(owner_engine, app_engine):
     """The owner's decision: every canonical frame, so the model can be
     evaluated against the answers people already gave."""
     lab = await tenant(owner_engine)

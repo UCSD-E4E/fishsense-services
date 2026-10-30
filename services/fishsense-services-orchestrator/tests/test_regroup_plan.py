@@ -10,7 +10,7 @@ miniature (frame and fish numbers are prod's, dropping the common prefix):
 * dive 465: frame 129276 says "Part of previous group" after 129275, but v1
   made them animals 330 and 331;
 * dive 383: frame 111926 (a Nassau Grouper) says "Not part of current group"
-  and 111927 (the Hogfish again) says the same once relabelled; v1 bound both
+  and 111927 (the Hogfish again) says the same once relabeled; v1 bound both
   to animal 323, a Hogfish.
 
 What the plan promises:
@@ -18,10 +18,10 @@ What the plan promises:
 * the clusters are exactly `regroup_by_species_labels` over the prediction
   clusters in capture order -- the planner adds no grouping rule of its own;
 * a fish is kept by the new cluster holding most of its measured frames
-  (ties: the cluster whose labelled species is the fish's, then the earlier);
+  (ties: the cluster whose labeled species is the fish's, then the earlier);
   each fish goes to at most one cluster;
 * a cluster with measured frames and no fish left gets a new fish of the
-  species its first measured frame is labelled; one with none is unbound;
+  species its first measured frame is labeled; one with none is unbound;
 * every measured frame whose fish changes is listed;
 * the plan has a digest that changes with the clusters it was made from, so
   an apply can insist on the plan that was reviewed.

@@ -87,7 +87,7 @@ class IngestMissionRequest(BaseModel):
     ] = False
 
     #: The camera port, when the operator knows it; recorded as theirs
-    #: (``operator``, with ``port_note``). A device labelled with the ``D``
+    #: (``operator``, with ``port_note``). A device labeled with the ``D``
     #: suffix (``FSL-10D``) in the folder path is the corrective optic
     #: without being told -- file names only, never the EXIF Artist (the
     #: owner, 2026-10-18) -- and a statement contradicting it
@@ -104,7 +104,7 @@ class IngestMissionRequest(BaseModel):
     dry_run: bool = False
 
     # There is deliberately no `verify_existing` here. It existed as a declared
-    # field honoured by no code, so setting it produced a normal ingest and no
+    # field honored by no code, so setting it produced a normal ingest and no
     # warning -- worse than an absent flag. Re-hashing existing rows against the
     # NAS is the checksum-verification workflows' job, done read-only.
 

@@ -505,7 +505,7 @@ def _superseded(v1_table: str, superseded: bool | None) -> bool:
 
 def _labels(v1, v2, tenant, report) -> None:
     """The four label kinds. A source is named only when certain: a sentinel
-    (no project) carries an imported judgement; a laser label on a frame whose
+    (no project) carries an imported judgment; a laser label on a frame whose
     prediction the gate auto-accepted came from the gate. Labelers become their
     Label Studio user id -- v1's user emails and names are not copied."""
     captures = _ids(v2, "captures")

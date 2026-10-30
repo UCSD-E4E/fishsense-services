@@ -172,13 +172,13 @@ async def test_a_failed_dump_does_not_stop_the_others_and_is_never_pruned():
     }
 
 
-async def test_a_cancelled_run_prunes_nothing_and_ends_cancelled():
-    """Cancelling the run (an operator's `temporal workflow cancel`) is not a
+async def test_a_canceled_run_prunes_nothing_and_ends_canceled():
+    """Canceling the run (an operator's `temporal workflow cancel`) is not a
     failed dump. v2 gathers the dumps with `return_exceptions`, which turns
     each dump's outcome into a value; had it also swallowed the run's own
     cancellation, the run would go on to prune the dumps that happened to
     finish, after being told to stop, and report a failure that never happened.
-    It doesn't: a cancelled gather re-raises even with `return_exceptions`
+    It doesn't: a canceled gather re-raises even with `return_exceptions`
     (asyncio's rule, which the workflow relies on rather than re-checking).
     Mutation-checked: catching the CancelledError around the gather fails this."""
     timeline: List[str] = []
@@ -190,7 +190,7 @@ async def test_a_cancelled_run_prunes_nothing_and_ends_cancelled():
         if payload.db_name == "fast":
             finished.set()
             return
-        while True:  # a long dump, heartbeating, until it is cancelled
+        while True:  # a long dump, heartbeating, until it is canceled
             activity.heartbeat()
             await asyncio.sleep(0.05)
 

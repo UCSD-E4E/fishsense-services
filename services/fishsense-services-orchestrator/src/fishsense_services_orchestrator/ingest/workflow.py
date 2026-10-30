@@ -1,7 +1,7 @@
 """Ingest one dive folder from the NAS into a dive and its captures.
 
 Ported from fishsense-lite@a8b2c3bc services/fishsense-api-workflow-worker/src/
-fishsense_api_workflow_worker/workflows/ingest_dive_workflow.py. Behaviour is
+fishsense_api_workflow_worker/workflows/ingest_dive_workflow.py. Behavior is
 v1's. v2 changes: the request names its tenant; the tenant and device that
 preflight resolved ride along to the scan and finalize; activities carry their
 v2 names; payloads go through the pydantic data converter.

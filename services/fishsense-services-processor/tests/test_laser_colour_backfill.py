@@ -1,6 +1,6 @@
-"""The laser-colour backfill's processor stage (contract v25, 2026-10-26).
+"""The laser-color backfill's processor stage (contract v25, 2026-10-26).
 
-Each automatic dot's colour is read off the render its prediction was made on,
+Each automatic dot's color is read off the render its prediction was made on,
 at the dot, by fishsense-core's `classify_laser_color` -- the live kernel's
 rule -- with no model and no GPU (the light role). A render not there, or not
 decoding, is the frame's status; a frame failing every try is ``failed``."""
@@ -67,7 +67,7 @@ def _frame(**kw):
 @pytest.mark.parametrize(
     "dot, colour", [((30, 30, 230), "red"), ((40, 220, 40), "green")]
 )
-async def test_the_dots_colour_is_read_off_its_render(dot, colour):
+async def test_the_dots_color_is_read_off_its_render(dot, colour):
     store = _Store(_render(dot))
     f = _frame()
 
@@ -78,7 +78,7 @@ async def test_the_dots_colour_is_read_off_its_render(dot, colour):
     assert (r.margin > 0) == (colour == "red")
 
 
-async def test_a_dot_too_close_to_call_is_read_with_no_colour():
+async def test_a_dot_too_close_to_call_is_read_with_no_color():
     r = await ActivityEnvironment().run(
         _acts(_Store(_render((120, 120, 120), (120, 120, 120)))).read_laser_colour,
         _frame(),

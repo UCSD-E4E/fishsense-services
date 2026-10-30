@@ -18,11 +18,11 @@ re-measured, or on a dive recalibrated since -- is still that fish (PR #72
 review: counting measurements alone planned those clusters unbound).
 
 Fish are handed out greedily, largest vote first: ties go to the cluster
-whose first voting frame is labelled the fish's species, then to the earlier
+whose first voting frame is labeled the fish's species, then to the earlier
 cluster, and each fish goes to at most one cluster. So a fish outvoted in
 one cluster can end up with a cluster where it holds fewer frames; the moves
 show it. A cluster with measured frames and no fish left gets a new fish of
-its first measured frame's labelled species, as stage 14 would create it; any
+its first measured frame's labeled species, as stage 14 would create it; any
 other cluster is left unbound, for stage 14.
 
 Every measured frame whose fish changes is a `Move`; stage 14 measures it

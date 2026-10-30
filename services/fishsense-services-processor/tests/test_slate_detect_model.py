@@ -3,12 +3,12 @@
 New in v2. Ported from 2026-10-03_slate_detector@95a77d95
 src/slate_detector/train.py (`GeM`, `build_model`, `transforms`, `load_model`,
 `predict`). These need the processor's `torch` extra and skip without it; they
-use a randomly initialised network, so nothing is downloaded. The real
+use a randomly initialized network, so nothing is downloaded. The real
 checkpoint is test_slate_detect_real_weights.py (opt-in). Pinned here:
 
 * the network is the source's: EfficientNet-B0, GeM pooling (its `p` a
   parameter in the checkpoint), one logit;
-* the input is the whole frame resized to 1024x768, ImageNet-normalised;
+* the input is the whole frame resized to 1024x768, ImageNet-normalized;
 * the frame and its mirror are averaged, so a frame and its mirror score the
   same;
 * a checkpoint that is not this architecture at this input size, or not

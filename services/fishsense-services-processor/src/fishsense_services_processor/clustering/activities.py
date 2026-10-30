@@ -24,7 +24,7 @@ points (label -1), which caused two defects with one root cause:
   and the dive still never drained. Guarded below.
 * Even where clustering worked, noise frames vanished. Prod dive 5 holds 17
   canonical frames and only 16 reached clusters, so one frame had no PREDICTION
-  cluster, never entered stage 2, and was invisible to species labelling.
+  cluster, never entered stage 2, and was invisible to species labeling.
 
 A noise point therefore becomes its own singleton cluster. That is the honest
 neutral answer rather than a workaround: a PREDICTION cluster is a *prediction*

@@ -6,7 +6,7 @@ Ported from 2026-10-03_slate_detector@95a77d95 src/slate_detector/train.py:
 place of global average pooling -- the slate is about 1% of the frame, and
 GeM leans toward the strongest local response instead of diluting it over the
 water -- and one logit. The whole frame is resized to 1024x768 (h, w = 768,
-1024), never cropped, normalised with ImageNet's statistics; the frame and its
+1024), never cropped, normalized with ImageNet's statistics; the frame and its
 horizontal flip are scored and their logits averaged before the sigmoid.
 
 v2 changes:
@@ -58,7 +58,7 @@ class CheckpointInvalid(ValueError):
 
 
 class GeM(nn.Module):
-    """Generalised-mean pooling (the source's, verbatim)."""
+    """Generalized-mean pooling (the source's, verbatim)."""
 
     def __init__(self, p: float = 3.0, eps: float = 1e-6):
         super().__init__()

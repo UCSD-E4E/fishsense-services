@@ -288,7 +288,7 @@ async def test_the_state_patch_removes_a_key_on_a_real_apiserver(config, apis):
 
 
 async def test_gpu_worker_falls_back_to_cpu_against_a_real_cluster(config, apis):
-    """The headline behaviour, end to end on a real apiserver.
+    """The headline behavior, end to end on a real apiserver.
 
     A test cluster can never schedule the GPU Deployment -- precisely the prod
     condition the fallback exists for. Repeated wakes must give up on it and

@@ -358,7 +358,7 @@ async def _predict_and_persist(
 
 
 async def create_then_populate(target: HeadtailTarget) -> int:
-    """Materialise the dive's head/tail project, then push its tasks (v1's
+    """Materialize the dive's head/tail project, then push its tasks (v1's
     `_populate.create_then_populate`). Returns the rows recorded."""
     project_id = await workflow.execute_activity(
         "create_headtail_label_studio_project",

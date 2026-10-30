@@ -908,9 +908,9 @@ def test_the_shadow_adapter_refuses_missing_scores_before_copying_masks():
     assert _Mask.copied == 0
 
 
-# -- the dot's colour (contract v22, 2026-10-25) ---------------------------------
+# -- the dot's color (contract v22, 2026-10-25) ---------------------------------
 #
-# The laser kernel reads the dot's colour off its pixels; the frames stage
+# The laser kernel reads the dot's color off its pixels; the frames stage
 # dropped it (`prediction, *_, checkpoint`), so no automatic row had one.
 
 
@@ -918,7 +918,7 @@ def _coloured(color="green", margin=0.31):
     return LaserDot(DOT[0], DOT[1], 0.93, 3, "laser@x", color, margin)
 
 
-def test_the_dots_colour_is_kept_whatever_the_frame_becomes():
+def test_the_dots_color_is_kept_whatever_the_frame_becomes():
     fish = automatic_frame_result(
         capture_id=CAPTURE, dot=_coloured(), jpeg_bytes=_jpeg(),
         segmenter=_Scored([(_mask_at(*DOT), 0.81)]), checkpoint="sam3/3.1@abc",
@@ -934,13 +934,13 @@ def test_the_dots_colour_is_kept_whatever_the_frame_becomes():
     assert (slate.laser_color, slate.laser_color_margin) == ("red", 0.5)
 
 
-def test_a_dot_with_no_reading_has_no_colour():
+def test_a_dot_with_no_reading_has_no_color():
     r = _result(_Scored([(_mask_at(*DOT), 0.81)]))
 
     assert (r.laser_color, r.laser_color_margin) == (None, None)
 
 
-def test_the_stage_keeps_the_kernels_colour(monkeypatch):
+def test_the_stage_keeps_the_kernels_color(monkeypatch):
     from types import SimpleNamespace
 
     from fishsense_services_processor.automatic_frames import stage

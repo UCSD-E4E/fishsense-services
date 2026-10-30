@@ -24,7 +24,7 @@ as e2e_measurement/tail/frames.csv persisted them -- every frame of the eight
 calibrated dives, and 362 and 366 sampled to 200 each (pandas, seed 0, which
 SQL cannot redraw) -- by v1 image id, which v2 captures carry as `v1_id`
 (`PAPER_REEF_FRAMES`; all 791 found in production, same dives). 289 of them
-were rejected by labellers as not measurable (a head/tail label with no
+were rejected by labelers as not measurable (a head/tail label with no
 points): coverage is over the 502 measured (tail/gate.py), and the rejected
 frames given a length are their own metric. **Coverage, seeded where?** The
 paper's stated 72 % (red 91 %, green 66 %) seeds SAM at the *human* dot
@@ -137,7 +137,7 @@ Calibration = tuple[Sequence[float], Sequence[float]]
 
 @dataclass(frozen=True)
 class ValidationFrame:
-    """One human-labelled frame and what the automatic chain made of it."""
+    """One human-labeled frame and what the automatic chain made of it."""
 
     capture_number: int
     mission_number: int
@@ -147,7 +147,7 @@ class ValidationFrame:
     green: bool
     camera_matrix: list
     human_dot: Point
-    #: None on a frame the labeller rejected as not measurable.
+    #: None on a frame the labeler rejected as not measurable.
     human_head_tail: Optional[HeadTail]
     auto_dot: Optional[Point]
     #: The automatic head/tail seeded at the automatic dot (None: no length).
@@ -156,7 +156,7 @@ class ValidationFrame:
     label_free_calibration: Optional[Calibration]
     #: Seeded at the human dot instead (ladder row C), where known.
     auto_head_tail_humandot: Optional[HeadTail] = None
-    #: The labeller rejected it as not measurable (a head/tail label with no
+    #: The labeler rejected it as not measurable (a head/tail label with no
     #: points): out of coverage's denominator, in its own metric.
     rejected: bool = False
 
@@ -312,7 +312,7 @@ def reef_coverage(frames: Sequence[ValidationFrame]) -> dict[str, Optional[float
 
 
 def reef_rejected_given_length(frames: Sequence[ValidationFrame]) -> Optional[float]:
-    """Share of the frames labellers rejected that the chain measured anyway."""
+    """Share of the frames labelers rejected that the chain measured anyway."""
     rejected = [f for f in frames if f.set == "reef" and f.rejected]
     if not rejected:
         return None

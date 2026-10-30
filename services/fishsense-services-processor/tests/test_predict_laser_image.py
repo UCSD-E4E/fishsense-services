@@ -121,7 +121,7 @@ def test_predict_from_raw_predicts_in_sensor_pixels_and_rectifies_once(monkeypat
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf")])
 def test_a_non_finite_dot_is_a_non_detection(monkeypatch, bad):
-    """A NaN passes `is not None`: v0.48.0's colour code raised on it, and it
+    """A NaN passes `is not None`: v0.48.0's color code raised on it, and it
     would otherwise be rectified, gated and stored. It is no dot (review of
     #352)."""
     _install_fake_linear_raw_image(monkeypatch, {})
@@ -136,7 +136,7 @@ def test_a_non_finite_dot_is_a_non_detection(monkeypatch, bad):
 
 
 def test_importing_the_activity_loads_no_detector_module():
-    """The colour and rectification imports are lazy: importing the stage
+    """The color and rectification imports are lazy: importing the stage
     registry must not load core's detector module (cv2, the weights
     manifest) on roles that never predict (review of #352)."""
     import subprocess  # pylint: disable=import-outside-toplevel
@@ -446,9 +446,9 @@ async def test_workflow_with_no_images_returns_empty_and_calls_nothing():
     assert results == []
 
 
-# ------------------------- colour at the call site ---------------------------
+# ------------------------- color at the call site ---------------------------
 #
-# The colour rule itself is fishsense-core's (`fishsense_core.laser_color`,
+# The color rule itself is fishsense-core's (`fishsense_core.laser_color`,
 # core #94) and is tested there. What is pinned here is how this activity
 # calls it: on the uint16 `LinearRawImage`, at the detector's own sensor
 # point, before the point is rectified for storage.
@@ -487,10 +487,10 @@ def _paint_dot(img, x, y, bgr, radius):
 @pytest.mark.parametrize(
     "sensor", [(1580.0, 395.0), (2010.0, 1450.0), (300.0, 200.0), (3700.0, 2700.0)]
 )
-def test_colour_is_read_where_the_detector_found_the_dot(monkeypatch, sensor):
+def test_color_is_read_where_the_detector_found_the_dot(monkeypatch, sensor):
     """Near the laser region rectified and sensor pixels are ~48 px apart, so
     sampling the frame at the rectified point misses the dot and reads the
-    blue-green scene. The colour is read at the detector's sensor point, with
+    blue-green scene. The color is read at the detector's sensor point, with
     no inverse map, and only the stored point is rectified: across the frame,
     corners included."""
     import cv2  # pylint: disable=import-outside-toplevel

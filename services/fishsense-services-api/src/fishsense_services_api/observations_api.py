@@ -116,11 +116,11 @@ class LaserEvidenceView(BaseModel):
     depth_m: float | None
     range_m: float | None
     calibration_producer: str | None
-    #: In the labelled frame's pixels.
+    #: In the labeled frame's pixels.
     dot: Point | None
     head: Point | None
     tail: Point | None
-    #: The labeller's colour for the dot, ``red`` or ``green``, or None.
+    #: The labeler's color for the dot, ``red`` or ``green``, or None.
     color: str | None
 
 
@@ -147,7 +147,7 @@ class ObservationDetailView(BaseModel):
     #: The phone's snout and fork (``method == "lidar"``).
     device_points: DevicePointsView | None
     #: The photo's size in pixels when it is the frame's render (a Lite
-    #: fish), for drawing the labelled points on it; None otherwise.
+    #: fish), for drawing the labeled points on it; None otherwise.
     photo_size: PhotoSize | None = None
 
 

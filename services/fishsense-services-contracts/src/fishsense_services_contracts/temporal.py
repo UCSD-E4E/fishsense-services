@@ -30,7 +30,7 @@ __all__ = ["DATA_CONVERTER", "TemporalConnection", "connect_options"]
 
 def _by_alias(value: Any) -> Any:
     """`value` with every dataclass and model dumped under its aliases. A
-    pydantic model's serializer honours aliases itself; a stdlib dataclass's
+    pydantic model's serializer honors aliases itself; a stdlib dataclass's
     does not (pydantic_core infers its fields), so each one goes through a
     `TypeAdapter` of its own type, which reads its `Annotated` aliases."""
     if isinstance(value, BaseModel):

@@ -1,7 +1,7 @@
-"""The laser-colour backfill's payloads (v25, the owner, 2026-10-26).
+"""The laser-color backfill's payloads (v25, the owner, 2026-10-26).
 
-Automatic dots predicted before contract v22 kept no colour. The backfill
-reads each one's colour off the render it was predicted on, at the dot, with
+Automatic dots predicted before contract v22 kept no color. The backfill
+reads each one's color off the render it was predicted on, at the dot, with
 fishsense-core's `classify_laser_color`, and records where it came from."""
 
 import uuid

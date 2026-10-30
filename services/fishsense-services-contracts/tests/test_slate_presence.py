@@ -183,5 +183,5 @@ def test_the_weights_are_named_by_their_sha256(sha):
         _result(weights_sha256=sha)
 
 
-def test_the_sha256_is_normalised_to_lower_case():
+def test_the_sha256_is_normalized_to_lower_case():
     assert _result(weights_sha256=SHA.upper()).weights_sha256 == SHA

@@ -146,7 +146,7 @@ def test_table_3_all_ten_within_0_05_deg():
 
 @pytest.mark.parametrize("mission", sorted(set(GOLDEN) - _CSCW_DEPARTS, key=int))
 def test_nine_paper_sessions_are_fitted_as_cscw_fitted_them(mission):
-    """cscw's frames (human dots on labelled slate frames) are consistent, so
+    """cscw's frames (human dots on labeled slate frames) are consistent, so
     the trim drops none of theirs."""
     d = GOLDEN[mission]
     fit = _fit(d)

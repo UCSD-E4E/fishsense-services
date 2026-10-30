@@ -71,7 +71,7 @@ def test_the_box_grows_by_the_padding_on_every_side():
                       min_size=1) == [80.0, 90.0, 220.0, 160.0]  # fmt: skip
 
 
-def test_a_small_box_is_grown_to_the_floor_about_its_centre():
+def test_a_small_box_is_grown_to_the_floor_about_its_center():
     assert expand_box([100, 100, 110, 110], 0.2, width=1000, height=1000,
                       min_size=64) == [73.0, 73.0, 137.0, 137.0]  # fmt: skip
 
@@ -80,7 +80,7 @@ def _frame_jpeg(width=400, height=300) -> bytes:
     frame = np.zeros((height, width, 3), dtype=np.uint8)
     frame[:, :, 2] = 255  # red, in BGR
     frame[100:200, 150:250] = (255, 0, 0)  # a blue fish
-    ok, buf = cv2.imencode(".png", frame)  # lossless, so colours are exact
+    ok, buf = cv2.imencode(".png", frame)  # lossless, so colors are exact
     assert ok
     return buf.tobytes()
 
@@ -172,7 +172,7 @@ def test_predict_image_applies_openclip_logit_scale():
 
 def test_the_scores_are_a_softmax_over_the_closed_set():
     ranking = sut.rank(
-        np.array([3.0, 4.0]),  # not unit length: normalised first
+        np.array([3.0, 4.0]),  # not unit length: normalized first
         np.array([[1.0, 0.0], [0.0, 2.0], [0.6, 0.8]]),
         logit_scale=1.0,
         choices=["a", "b", "c"],
@@ -196,9 +196,9 @@ def test_top_five_of_many_and_all_of_few():
     )
 
 
-def test_a_species_embedding_is_the_normalised_mean_of_its_prompts():
-    """coral-gardeners' `_get_text_features`: each prompt normalised, then
-    their mean normalised."""
+def test_a_species_embedding_is_the_normalized_mean_of_its_prompts():
+    """coral-gardeners' `_get_text_features`: each prompt normalized, then
+    their mean normalized."""
     prompts = np.array([[2.0, 0.0], [0.0, 3.0]])
     assert sut.mean_text_embedding(prompts) == pytest.approx(
         np.array([1.0, 1.0]) / np.sqrt(2)

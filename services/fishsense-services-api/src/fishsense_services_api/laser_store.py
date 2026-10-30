@@ -187,7 +187,7 @@ class PopulateItem:
 class LaserPopulation:
     mission_number: int
     items: list[PopulateItem]
-    #: Every current prediction's colour in the dive: the majority vote's input.
+    #: Every current prediction's color in the dive: the majority vote's input.
     colors: list[str | None]
 
 
@@ -269,7 +269,7 @@ _ORDER = "ORDER BY d.created_at, d.number"
 async def _lock_mission(
     conn: AsyncConnection, what: str, mission_id: uuid.UUID
 ) -> None:
-    """Serialise writes of one kind to one dive."""
+    """Serialize writes of one kind to one dive."""
     await conn.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": f"laser-{what}:{mission_id}"},
@@ -776,7 +776,7 @@ async def laser_populate_items(
 ) -> LaserPopulation:
     """The dive's canonical captures that need a laser task: a current
     prediction and no live completed label (v1's populate filter). Each with
-    its prediction and effective gate flag, and every prediction's colour."""
+    its prediction and effective gate flag, and every prediction's color."""
     number = await _mission_number(conn, tenant_id, mission_id)
     rows = await conn.execute(
         text(f"""
@@ -915,7 +915,7 @@ async def laser_label_studio_project_ids(
 ) -> list[int]:
     """The projects of the tenant's live laser labels (v1's endpoint).
     `incomplete` narrows to projects with open work; `gated=True` to projects
-    the gate has *finished* with (none of their live-labelled captures' current
+    the gate has *finished* with (none of their live-labeled captures' current
     predictions unjudged, at least one judged); `gated=False` is its exact
     complement. For the web portal's landing page."""
 
@@ -1033,7 +1033,7 @@ async def apply_laser_validation(
     supersedes: list[tuple[uuid.UUID, str]],
     line: LineFit | None,
 ) -> ValidationWrite:
-    """Write one judgement: supersede each flagged row that is still live,
+    """Write one judgment: supersede each flagged row that is still live,
     recording the rule that took it, and append the dive's line if it
     changed. Never revives. Every label must be one of the dive's."""
     await _lock_mission(conn, "validation", mission_id)

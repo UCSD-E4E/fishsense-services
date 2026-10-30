@@ -1,4 +1,4 @@
-"""The laser-colour backfill's orchestrator activities (2026-10-26):
+"""The laser-color backfill's orchestrator activities (2026-10-26):
 
 - `plan_colour_backfill`: the tenant's missions with automatic dots, and how
   many;
@@ -7,7 +7,7 @@
   pixels) by presigned GET; one whose render is gone, or a tenant with no
   bucket, is counted and left out (the keypoint replay's rule);
 - `record_colour_page`: a page's readings counted and compared with the
-  labellers' and the live kernel's colours, and written only with ``apply``
+  labelers' and the live kernel's colors, and written only with ``apply``
   (`laser_colour_backfill_store.record_colour_page`).
 """
 

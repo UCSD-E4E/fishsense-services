@@ -116,7 +116,7 @@ def test_worker_transform_matches_notebook_byte_for_byte(orf_path: Path):
 
 def test_a_render_is_the_whole_frame(orf_path: Path):
     """Never cropped (the owner, 2026-10-22): a Lite fish's head, tail and laser
-    dot were labelled on v1's JPEG of the same transform, and are drawn on this
+    dot were labeled on v1's JPEG of the same transform, and are drawn on this
     render at the same pixels. That holds only while the render is the raw
     frame, every pixel of it."""
     from fishsense_core.image.raw_image import RawImage

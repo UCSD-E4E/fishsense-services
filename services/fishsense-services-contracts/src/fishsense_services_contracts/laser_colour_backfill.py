@@ -1,14 +1,14 @@
-"""The laser-colour backfill (v25, the owner, 2026-10-26: "I need the data").
+"""The laser-color backfill (v25, the owner, 2026-10-26: "I need the data").
 
-Automatic dots predicted before contract v22 (#375) kept no colour: the frames
+Automatic dots predicted before contract v22 (#375) kept no color: the frames
 stage dropped what the laser kernel read. Head/tail v5 (#401) writes keypoints
 to their own table and never runs the dot step again, so nothing was going to
-fill them in. The backfill reads each dot's colour off the render its
+fill them in. The backfill reads each dot's color off the render its
 prediction was made on, at the dot (render pixels, the frame the dot is in),
 with fishsense-core's `classify_laser_color`: the live kernel's rule, on the
 8-bit render rather than the linear raw. That change of input is why a
 reading names its source and version, and why the run reports its agreement
-with the labellers' colours and the live kernel's before anything is written.
+with the labelers' colors and the live kernel's before anything is written.
 New models only."""
 
 from __future__ import annotations
@@ -29,11 +29,11 @@ __all__ = [
     "ColourReading",
 ]
 
-#: Where a backfilled colour was read: the prediction's render.
+#: Where a backfilled color was read: the prediction's render.
 COLOUR_READING_SOURCE = "render"
 #: Bumped by hand when a reading would change for an unchanged render.
 COLOUR_READING_VERSION = 1
-#: ``read`` (a colour, or too close to call), or why there is no reading.
+#: ``read`` (a color, or too close to call), or why there is no reading.
 COLOUR_READING_STATUSES = ("read", "render_unavailable", "decode_failed", "failed")
 
 

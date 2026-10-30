@@ -228,7 +228,7 @@ async def test_a_camera_without_intrinsics_fails():
 
 
 async def test_artist_disagreeing_with_the_resolved_camera_is_a_warning():
-    """Not fatal -- the serial is authoritative -- but it means a mislabelled
+    """Not fatal -- the serial is authoritative -- but it means a mislabeled
     device name or a re-housed body, and nothing else would ever notice."""
     catalog = FakeCatalog(devices={SERIAL: ResolvedDevice(DEVICE, "FSL-99", True)})
 
@@ -306,7 +306,7 @@ async def test_a_frame_without_a_readable_timestamp_fails():
 
 async def test_the_timestamp_is_the_naive_exif_value_stamped_utc():
     """The convention the existing rows follow: the camera's wall clock,
-    labelled UTC, with the recorded offset deliberately NOT applied."""
+    labeled UTC, with the recorded offset deliberately NOT applied."""
     preflight = await _run(_request(), _listing())
 
     assert preflight.images[0].taken_datetime == datetime(

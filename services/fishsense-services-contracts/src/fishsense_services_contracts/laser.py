@@ -74,13 +74,13 @@ __all__ = [
 # --- the stage version (v1's laser_predictor.py) ----------------------------
 
 #: Bumped by hand when the laser-detector stage's output would change for an
-#: unchanged image. It versions the behaviour, not the checkpoint: the region
-#: polygon, the colour rule, the gate and core's `predict()` defaults are all
+#: unchanged image. It versions the behavior, not the checkpoint: the region
+#: polygon, the color rule, the gate and core's `predict()` defaults are all
 #: inputs to it. History (v1's):
-#:   1 -- the original stage: no output gate, no colour, "Red Laser" always.
+#:   1 -- the original stage: no output gate, no color, "Red Laser" always.
 #:   2 -- 2026-08-28: predictions outside `LASER_REGION_POLYGON` are rejected,
-#:        and the laser's colour is read off the dot.
-#:   3 -- 2026-10-24: the colour is fishsense-core 4.3.0's `laser_color`; a
+#:        and the laser's color is read off the dot.
+#:   3 -- 2026-10-24: the color is fishsense-core 4.3.0's `laser_color`; a
 #:        saturated dot's margin is scaled by the brightest usable pixel, so
 #:        some saturated abstentions now vote.
 LASER_PREDICTOR_VERSION: int = 3
@@ -280,7 +280,7 @@ NOISE_ESTIMATOR = "signed_residual_mad"
 
 
 class LaserLabelRow(BaseModel):
-    """A laser label as the judgement reads it. Superseded rows included: the
+    """A laser label as the judgment reads it. Superseded rows included: the
     validator judges the full population (fishsense-core #88, lite #927)."""
 
     label_id: UUID
@@ -339,7 +339,7 @@ class ReflectionReport(BaseModel):
 
 
 class LaserValidationResult(BaseModel):
-    """What one judgement of the dive decided, for the orchestrator to write:
+    """What one judgment of the dive decided, for the orchestrator to write:
     the line (whenever one was fitted, as v1 wrote it) and the rows to
     supersede -- flagged *and still live*, never anything else."""
 

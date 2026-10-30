@@ -120,7 +120,7 @@ def _project(body_points, rvec, tvec):
 
     Analytic rather than detected, because the property below is about the
     geometry and detected corners carry sub-pixel noise that would swamp it —
-    the noise is characterised separately in the next test.
+    the noise is characterized separately in the next test.
     """
     points_3d = np.column_stack(
         [body_points, np.zeros(len(body_points), dtype=np.float64)]
@@ -213,7 +213,7 @@ def test_the_grid_orientation_does_not_change_the_plane():
     """The detected grid may come back transposed or mirrored, and must not matter.
 
     The board is a symmetric grid, so the detector's indexing is only defined
-    up to the 8 symmetries of a rectangle. A mirrored assignment is realised
+    up to the 8 symmetries of a rectangle. A mirrored assignment is realized
     by a real rotation (the board flipped 180 degrees about an in-plane axis),
     which flips the plane normal — and the ray-plane intersection divides one
     normal by the other, so the sign cancels.

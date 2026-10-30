@@ -74,7 +74,7 @@ Plus four SQL views that Superset reads directly (§2.6).
   `core_version` on the prediction tables (latest row only).
 - **State v2 must represent** (not in the v2 model yet — §9.16):
   - labels: `superseded` vs `needs_reprocess` (re-render the JPEG in place) vs **sentinel**
-    rows (no LS project) — three distinct states every reader must honour;
+    rows (no LS project) — three distinct states every reader must honor;
   - dives: `Priority` **LOW / HIGH / NONE** (NONE = deliberately parked) + `notes`;
     **calibration refusals** (columns on `dive`, expire when a newer label arrives);
     **borrowed calibration** (`calibration_dive_id`);
@@ -118,8 +118,8 @@ Plus four SQL views that Superset reads directly (§2.6).
 
 ### 2.3 Models (no MLflow anywhere in v1)
 - **Laser detector** (ResNet-34 checkpoint) — **baked into the image** from Hugging Face
-  `ucsde4e/fishsense-laser-detector`. `LASER_PREDICTOR_VERSION=3` (2026-10-24: core 4.3.0's colour rule).
-- **SAM 3.1** (head/tail, laser-centred crop) — pulled from Garage bucket **`model-weights`**
+  `ucsde4e/fishsense-laser-detector`. `LASER_PREDICTOR_VERSION=3` (2026-10-24: core 4.3.0's color rule).
+- **SAM 3.1** (head/tail, laser-centered crop) — pulled from Garage bucket **`model-weights`**
   at `{name}/{version}/{filename}`, version pinned in config, volume-cached.
   `HEADTAIL_PREDICTOR_VERSION=2`.
 - **`fishsense-core` `FishSegmentation`** (ONNX, weights embedded in the `.so`) — CPU fallback.
@@ -130,7 +130,7 @@ Plus four SQL views that Superset reads directly (§2.6).
   with unrelated projects (e.g. Coral Gardeners), **one LS project per dive per stage**.
 - **Model-assisted:** laser (predict → auto-accept gate fits the dive's own line;
   auto-accepted frames land as `ground_truth: false`), head/tail (SAM 3.1 pre-annotations),
-  species (pre-annotated from stored human judgements — not a model).
+  species (pre-annotated from stored human judgments — not a model).
 - **Still human, required:** head/tail review of **every** frame; **all** species labeling
   (grouping / exclude / top3 are never pre-annotated); dive slate; laser frames the gate
   declines or audit-samples; stage 6.1 regroup (on demand).
@@ -415,7 +415,7 @@ table, not a rewrite. Maps onto existing tables where possible.
 | **Session / Experiment** *(new)* | *(none — lives in research repos)* | Groups dives by protocol (field / pool / designed-angle), site, era, diver; carries per-dive research flags (design-excluded, accuracy evidence + the rule version that set it, split-from). Lets the cohort rule stay research code while its inputs live in the data model. *2026-10-16:* the field-trip grouping is the **Deployment** (§4.9). A research protocol grouping, if still needed, sits beside it. |
 | **Capture** (core) | `image` (+`dive`) | tenant, uploader, device, timestamps, geo, environment, **pointer to raw in Garage**, content checksum (v1: md5 of the whole ORF; duplicates across dives → `is_canonical`). Reproducibility anchor. |
 | **CaptureExtension** (per kind) | `cameraintrinsics` (Lite) | Mobile: LiDAR depth + ARKit meta; Mono: model inputs. |
-| **Dive / Batch** → **Mission** | `dive`, `diveslate`, `diveframecluster(+mapping)` | Lite offload session. Carries v1's `priority` (LOW/HIGH/NONE) + `notes`. *2026-10-16:* generalised to **Mission**, one device's recording session, with phones included (§4.9). |
+| **Dive / Batch** → **Mission** | `dive`, `diveslate`, `diveframecluster(+mapping)` | Lite offload session. Carries v1's `priority` (LOW/HIGH/NONE) + `notes`. *2026-10-16:* generalized to **Mission**, one device's recording session, with phones included (§4.9). |
 | **Camera calibration** *(new)* | `cameraintrinsics` | Per device configuration, **append-only**: **camera model type** (`pinhole` \| `axial_refractive`, extensible), medium (**air / water**), coordinate frame (**raw sensor** vs JPEG), target + target-geometry version, RMS, **port/refraction model + version**. Research shows the two halves must be modeled separately — each camera model calibrates its own laser (§2.7). |
 | **Laser calibration** *(new as a first-class entity)* | `laserextrinsics`, `divelaserline`, refusal columns on `dive`, `calibration_dive_id` | Per dive, **append-only**, names its camera calibration; records **producer** — `slate`, `checkerboard`, and the research producers `dots+range`, `dots+two_ranges`, `dots+apparent_size`, `bench` — plus lever arm, observation count, conditioning, residual, each gate verdict, and post-hoc verdicts (range trend); a refusal is a calibration outcome, not dive columns. Borrowing — §9.17. |
 | **Dive conditions** *(new)* | *(none)* | Per dive: water salinity, temperature (or a fresh/brackish/sea preset) → the water index used, and its source. Input to refraction correction. |
@@ -654,7 +654,7 @@ display.
 | Display | Superset only; **no web page shows Lite fish** | web `/captures`; the app shows only its local data |
 
 **Decisions**
-- **Mission** generalises the dive. A mission is one device's continuous recording
+- **Mission** generalizes the dive. A mission is one device's continuous recording
   session in the field. The word matches E4E's data-management tool
   ([e4e-data-management](https://github.com/UCSD-E4E/e4e-data-management)), whose mission
   folder already *is* our dive folder: `ED-NN/<mission>/` holds `metadata.json`,
@@ -694,7 +694,7 @@ display.
     - a device name with the **`D` suffix** (`FSL-10D`) is `corrective_optic`
       (`device_suffix`);
     - **nothing else is known.** A missing `D` does not mean flat. Lab data includes
-      bare-flat-port frames that were never reliably labelled.
+      bare-flat-port frames that were never reliably labeled.
   - Stages **refuse `unknown`**, as they refuse `axial_refractive` today. A flat port is
     axial, and measuring it as pinhole gives silently wrong lengths.
   - A calibration can resolve `unknown` (wuwnet): an underwater lens calibration whose
@@ -740,7 +740,7 @@ display.
   - LiDAR: depth map, mask, snout/fork versions.
   - It is the home of the per-tenant dashboards, replacing Superset. The app can later
     read the same endpoint to show a user's fish across devices.
-  - How the portal and the app look and are organised (Fish and Data, tenants in the
+  - How the portal and the app look and are organized (Fish and Data, tenants in the
     path, the public page): `docs/design/README.md`, agreed 2026-10-20.
 
 **From wuwnet** (`wuwnet-fishsense2026@5532b99`, newer than the `440c6a4` snapshot in §2.7)
@@ -818,7 +818,7 @@ v2 must do everything v1 does in production (§2) before a date is set:
 
 ### 6.3 Porting v1 while it keeps changing
 - Port **module by module** into the monorepo, adapting data access to v2's schema and
-  tenant-scoped transactions. Keep the ported code recognisable, so a later v1 change can be
+  tenant-scoped transactions. Keep the ported code recognizable, so a later v1 change can be
   re-applied by diff.
 - Track the v1 commit each ported module was taken from. Until the freeze, every v1
   commit touching ported code is re-ported, so parity keeps up with v1.
@@ -939,7 +939,7 @@ richer):
   ingestion, or the measurement/versioning model.
 - **The first real test of this claim is `lite_flatport` (wuwnet)**, and it only holds if
   the **camera model is a seam too**. A flat-port camera is axial: rays don't pass through one
-  centre, so pinhole back-projection (`WorldPointHandler`'s K⁻¹) is wrong for it, and depth
+  center, so pinhole back-projection (`WorldPointHandler`'s K⁻¹) is wrong for it, and depth
   and length need non-central rays. So the camera model must be **named on the camera
   calibration and dispatched in `fishsense-core`** — v2 stores which model and version was
   used, never assumes pinhole. Its calibration is also a different *workflow* (dry session +
@@ -1335,7 +1335,7 @@ the UI as it lands (decided 2026-10-17)*
      (477 `backfill`, 48 `device_suffix`), every mission has a purpose, and there are 4
      deployments.
    - ***2b-2, built 2026-10-20:*** only `corrective_optic` is processed (the owner: flat is
-     axial, and a dome's centring is unchecked). `camera_sql.RECTIFIABLE_MISSION` carries
+     axial, and a dome's centering is unchecked). `camera_sql.RECTIFIABLE_MISSION` carries
      the port, so laser, head/tail, species, slate presence, slate preprocessing, both
      calibrations and the automatic track admit nothing else.
      - Laser depth and measurement use `ADMITTED_PORT`: their own port, and the port of
@@ -1362,7 +1362,7 @@ the UI as it lands (decided 2026-10-17)*
 4. **Lite photos** (the owner's direction, 2026-10-18).
    - ***Built 2026-10-20:*** a Lite fish's photo on `/fish` is its capture's newest render
      in the tenant's own bucket (0051, written by the render stage of #144; one rule,
-     `renders_store.newest_render`). Labelled points are listed, not drawn, because they
+     `renders_store.newest_render`). Labeled points are listed, not drawn, because they
      were placed on v1's JPEG. Photos fill in as the render backlog runs (started by hand
      on 2026-10-20; human-measured missions first). A frame that is never rendered (a
      raw that won't decode, a mission off the corrective optic) has no photo.

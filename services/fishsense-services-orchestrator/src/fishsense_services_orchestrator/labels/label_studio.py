@@ -3,7 +3,7 @@
 Ported from fishsense-lite@a8b2c3bc services/fishsense-api-workflow-worker/src/
 fishsense_api_workflow_worker/activities/utils.py (the throttle handling, the
 heartbeat-pumped listing, `_coerce_updated_at`, `resolve_annotator_label_studio_id`).
-Behaviour is v1's. v2 change: the SDK is wrapped once, and its tasks become
+Behavior is v1's. v2 change: the SDK is wrapped once, and its tasks become
 `LabelStudioTask`s here. The SDK's models are loosely typed (its task model
 calls `annotations` a string; the payload is a list of dicts), and v1 read them
 loosely all through the sync.
@@ -74,7 +74,7 @@ def throttle_wait_seconds(error: ApiError) -> float | None:
     """Seconds to wait if `error` is a throttle, else None.
 
     Label Studio answers 429 with `{"detail": "Request was throttled.
-    Expected available in 48 seconds."}` -- honour that hint rather than
+    Expected available in 48 seconds."}` -- honor that hint rather than
     guessing, plus a small margin.
     """
     if getattr(error, "status_code", None) != 429:

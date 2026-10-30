@@ -1,7 +1,7 @@
 """The database side of re-grouping a dive that stage 6.1 already grouped.
 
 New in v2 (2026-10-14). v1 walked a dive's prediction clusters in no stated
-order, so a labeller's "Part of previous group" joined whatever cluster the
+order, so a labeler's "Part of previous group" joined whatever cluster the
 database happened to return before it: on dive 341, frame 101302 joined two
 Stoplight Parrotfish frames half an hour later instead of the Hogfish one
 second earlier; on dive 465, frames 129275 and 129276 became two animals.

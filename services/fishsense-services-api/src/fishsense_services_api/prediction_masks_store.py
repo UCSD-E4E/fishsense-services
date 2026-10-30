@@ -1,7 +1,7 @@
 """SAM masks named against their predictions (0059, 2026-10-21).
 
 A kept mask is stored in the tenant's bucket the way FishSense Mobile stores
-its mask (an 8-bit greyscale PNG, the app's ``mask_png``; `contracts.masks`,
+its mask (an 8-bit grayscale PNG, the app's ``mask_png``; `contracts.masks`,
 which this package must not import: its image has no contracts). The orchestrator checks the stored object
 first; this writes the row naming it, in the same transaction as the
 prediction it belongs to (`persist_automatic_head_tails`,

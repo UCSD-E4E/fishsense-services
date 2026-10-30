@@ -113,7 +113,7 @@ def _laser_point_in_camera_space(
             len(source_points),
         )
         return None
-    # The slate's whole contribution: template points in metres. Everything
+    # The slate's whole contribution: template points in meters. Everything
     # after `plane_from_correspondences` is target-agnostic and shared with the
     # checkerboard producer -- see `fishsense_core.plane`.
     # (N, 2) even when N is 0: a label that skips every point leaves
@@ -178,7 +178,7 @@ async def perform_laser_calibration(
 
     Every refusal is deterministic in the observations this run was
     dispatched with (or, for the describes-the-dive gate, in the dive's dots,
-    which only relabelling changes), so the orchestrator records it and raises
+    which only relabeling changes), so the orchestrator records it and raises
     non-retryably, as v1 did.
     """
     laser_points, laser_dots = _gather_laser_points(payload)

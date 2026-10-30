@@ -2,7 +2,7 @@
 
 Ported from fishsense-lite@a8b2c3bc services/fishsense-api-workflow-worker/src/
 fishsense_api_workflow_worker/activities/ (list_dive_folder_activity.py, ...).
-Behaviour is v1's. v2 change: activities are methods of a class that is *given*
+Behavior is v1's. v2 change: activities are methods of a class that is *given*
 its dependencies -- NAS settings, a NAS client factory -- instead of reading
 global settings and building clients itself. Temporal registers the bound
 methods; tests pass fakes instead of monkeypatching module globals.
@@ -460,7 +460,7 @@ class IngestActivities:
         * **any rejection**: a frame with no readable timestamp was refused
           rather than given a fabricated one, so the dive is missing an image;
         * **registered + skipped != total**: a frame was neither written nor
-          recognised as already present -- silence rather than a reported
+          recognized as already present -- silence rather than a reported
           failure, which is worse.
 
         Content overlap is computed here because it needs every frame's
@@ -806,7 +806,7 @@ async def _resolve_device(
             "intrinsics and stage 14 would report confident wrong lengths."
         )
         return None
-    # The serial is authoritative; a disagreeing Artist means a mislabelled
+    # The serial is authoritative; a disagreeing Artist means a mislabeled
     # device name or a re-housed body. Nothing else would ever notice.
     # FSL-10D is the body named FSL-10: the suffix is its port (§4.9).
     for artist in sorted(

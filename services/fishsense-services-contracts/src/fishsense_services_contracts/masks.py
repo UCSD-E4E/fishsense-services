@@ -4,7 +4,7 @@ New in v2 (2026-10-21). SAM's mask was dropped once its head/tail, box and area
 were taken. FishSense Mobile stores its fish mask as a file in the tenant's
 bucket, named in ``capture_objects``; the owner chose ours to match the app's
 (2026-10-21). The app's mask is moving from raw ``mask_u8`` to ``mask_png``
-(#230, docs/handoff/fishsense-mobile/README.md): an 8-bit greyscale PNG,
+(#230, docs/handoff/fishsense-mobile/README.md): an 8-bit grayscale PNG,
 lossless, exactly the mask's width x height, nonzero on the fish -- a fraction
 of the raw size (ours would be 12 MB raw at 4014x3016), and a browser draws it
 as it is. Ours are that PNG (review of #232):
@@ -16,7 +16,7 @@ as it is. Ours are that PNG (review of #232):
   masks;
 * **checked before it is recorded**: the processor PUTs it through a presigned
   URL and reports its size and SHA-256; the orchestrator reads it back and
-  checks both, and that its PNG header is 8-bit greyscale at the frame;
+  checks both, and that its PNG header is 8-bit grayscale at the frame;
 * **an addition, never a reason to fail**: a mask that can't be stored or
   doesn't check out costs only itself; its prediction stands.
 

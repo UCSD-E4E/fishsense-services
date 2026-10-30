@@ -15,7 +15,7 @@ v2 changes:
 
 * **one database's failure no longer stops the others.** v1 gathered the dumps
   without `return_exceptions`, so the first failure failed the workflow --
-  cancelling the other dumps mid-flight and skipping every prune, though its
+  canceling the other dumps mid-flight and skipping every prune, though its
   docstring promised the databases were independent. v2 lets every dump
   finish, prunes each database whose dump succeeded, and then fails, naming the
   databases that didn't, so the failure is still seen;

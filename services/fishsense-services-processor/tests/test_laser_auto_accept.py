@@ -256,7 +256,7 @@ def test_a_disabled_gate_still_records_what_it_would_have_done():
     `gate_verdict='auto_accepted'`. That pair is not a contradiction — it says
     the gate would have cleared this frame and the switch overruled it — and
     populate keys on `auto_accept` alone, so the disabled state is what
-    governs behaviour.
+    governs behavior.
     """
     xy = _collinear(40, jitter=0.4, seed=33)
     config = replace(DEFAULT_CONFIG, enabled=False, audit_sample_rate=0.0)

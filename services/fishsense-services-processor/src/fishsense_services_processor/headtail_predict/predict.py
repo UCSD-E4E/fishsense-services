@@ -3,10 +3,10 @@
 Ported from fishsense-lite@77e8f8e5 services/fishsense-data-processing-
 workflow-worker/src/fishsense_data_processing_workflow_worker/activities/
 predict_headtail_image.py (everything but the activity, which is in
-`activities`). Behaviour is v1's, and three of its choices are measured:
+`activities`). Behavior is v1's, and three of its choices are measured:
 
 * **read the stage-5.1 JPEG**, the exact frame the labeler is shown;
-* **crop, don't tile**: one 1800x1350 window centred on the *first* laser dot,
+* **crop, don't tile**: one 1800x1350 window centered on the *first* laser dot,
   clamped inside the frame; the gate tries every dot, first hit wins;
 * **SAM 3.1** (prompt "fish"), with fishsense-core's Mask R-CNN
   (`FishSegmentation`) as the fallback when there is no GPU.
@@ -22,7 +22,7 @@ v2 changes: ids are UUIDs; SAM 3.1 is built through fishsense-core's
 `fish.sam3.build_segmenter` (whose own `Sam3RequiresGpu` is mapped to the same
 non-retryable error); the version constants come from the contract package;
 **an abstention names the dot it came from** (the dot on the kept mask for
-`headtail_failed`, else the crop's centre, the first), where v1 left it NULL
+`headtail_failed`, else the crop's center, the first), where v1 left it NULL
 and a corrected dot never made the row stale; **a kept mask's box rides on the
 result** (`mask_bbox`, frame pixels), which the species pre-annotation stage
 crops by.

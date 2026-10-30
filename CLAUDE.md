@@ -9,7 +9,7 @@ is the only environment**: there is no staging.
 ## Non-negotiables
 
 - **Test first.** Write a failing test, run it and watch it fail, then write the
-  smallest change that makes it pass. Database behaviour, RLS above all, is
+  smallest change that makes it pass. Database behavior, RLS above all, is
   tested against real Postgres (testcontainers), never mocks or SQLite. When a
   test pins a guard, mutation-check it: break the guard and confirm the suite
   fails.
@@ -56,13 +56,18 @@ Integration tests need Docker. The host has no `python3`; use `uv run python`.
 ## Conventions
 
 - **American spelling, everywhere.** The owner is American: write color, center,
-  meter, labeled, canceled, gray, behavior, analyze, organize; not colour,
-  centre, metre, labelled, cancelled, grey, behaviour, analyse, organise. This
-  covers the website's text, API messages, docs, comments, identifiers and file
-  names. Keep a name someone else spells (Label Studio's `was_cancelled`, HTML's
-  `aria-labelledby`) as they spell it. `apps/web/lib/american-spelling.test.ts`
-  fails on British spellings in the web's source; add a word to it when one gets
-  through.
+  meter, labeled, canceled, gray, behavior, analyze, organize; not `colour`,
+  `centre`, `metre`, `labelled`, `cancelled`, `grey`, `behaviour`, `analyse`,
+  `organise`. This covers the website's text, API messages, docs, comments,
+  identifiers and file names. Keep a name someone else spells (Label Studio's
+  `was_cancelled`, HTML's `aria-labelledby`) as they spell it, and keep our own
+  names that are stored or on the wire (Temporal workflow classes and ids,
+  tables, columns, API schemas, contract fields: `ReadLaserColoursWorkflow`,
+  `LaserColoursView`); renaming one is a migration or a contract change. Two
+  tests fail on British spellings: `apps/web/lib/american-spelling.test.ts` in
+  the web's source, and `tests/test_american_spelling.py` in Python comments,
+  docstrings, test names and the markdown docs. Add a word to them when one
+  gets through.
 - **Conventional commits.** release-please derives the version from them: a
   `feat:` bumps the minor version, a `fix:` the patch. Commit messages and PR
   descriptions explain *why*, with the incident or the numbers.
@@ -171,7 +176,7 @@ Q() { docker exec fishsense-postgres-1 psql -U postgres -d fishsense_services -A
 
 - **A mission's camera port is `unknown` unless something says otherwise**
   (migration 0047; the owner's rules, 2026-10-16). Data ingested before the
-  rules, and any device labelled with the `D` suffix (`FSL-10D`), is the
+  rules, and any device labeled with the `D` suffix (`FSL-10D`), is the
   corrective optic. An operator or a lens calibration can state a port.
   The `D` counts only in file names (the path), never in the EXIF Artist,
   which is free text typed into the camera. Nothing else counts: a missing

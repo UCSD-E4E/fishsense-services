@@ -122,7 +122,7 @@ class _ProcessorStore:
 
 
 class _Encoder:
-    """Grey text for every species but Grey Snapper; the crop reads as grey."""
+    """Gray text for every species but `Grey Snapper`; the crop reads as gray."""
 
     logit_scale = 100.0
 

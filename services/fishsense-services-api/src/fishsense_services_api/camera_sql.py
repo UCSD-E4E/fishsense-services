@@ -11,7 +11,7 @@ refused dive re-selected every hour would starve them all.
 
 **The port** (PLAN.md §4.9, 2b-2; the owner, 2026-10-20). Pinhole maths is
 right only behind the corrective optic. A flat port makes the camera axial, a
-dome is pinhole-like only when centred (nothing checks that), and an unknown
+dome is pinhole-like only when centered (nothing checks that), and an unknown
 port is not yet any of them. So a dive is rectifiable only when its port is
 the corrective optic, and every stage built on this predicate inherits it. A
 mission whose port is stated otherwise is recorded and shown, but not

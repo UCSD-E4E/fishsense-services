@@ -12,7 +12,7 @@ Photon's reverse API: ``GET /reverse?lat=&lon=&limit=1&lang=en&radius=<km>``
 answers the nearest OpenStreetMap feature as GeoJSON.
 
 The name is "<feature>, <town>, <state>, <country>", each part once; a
-feature more than a kilometre from the capture (at sea, the nearest named
+feature more than a kilometer from the capture (at sea, the nearest named
 place can be far) is "near <...>". A derived name never replaces what the app
 sent; it is kept apart, with the geocoder's answer, so it can be told apart
 and re-derived.

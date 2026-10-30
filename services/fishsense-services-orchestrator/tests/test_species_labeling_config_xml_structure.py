@@ -147,8 +147,8 @@ def test_slate_branch_offers_the_not_in_list_sentinel(root):
     The slate-type leaves are exactly the `MissionSlate` template rows, and a
     slate can be missing from that table permanently — V-Slate 7 was lost
     during a dive, so it can never be scanned and never added. Without this
-    leaf the only options are a wrong neighbour or silence, and the wrong
-    neighbour is the harmful one: a wrong slate template gives a wrong
+    leaf the only options are a wrong neighbor or silence, and the wrong
+    neighbor is the harmful one: a wrong slate template gives a wrong
     *scale*, which reprojection residual cannot detect.
     """
     from fishsense_services_contracts import taxonomy

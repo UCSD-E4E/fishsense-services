@@ -59,7 +59,7 @@ _TAG_OLYMPUS_SERIAL = 0x0101
 # wrote the first, and the TG-7 — built by OM Digital Solutions after the
 # imaging arm was sold — writes the second, which is FOUR BYTES LONGER.
 #
-# Recognising only `OLYMPUS\0` did not read a TG-7 wrongly; it read nothing, so
+# Recognizing only `OLYMPUS\0` did not read a TG-7 wrongly; it read nothing, so
 # every TG-7 frame reported no serial and `preflight_ingest_activity` refused
 # the dive with "No camera serial found in any frame's Olympus MakerNote" —
 # true as stated, and impossible for an operator to act on, because the serial
@@ -151,7 +151,7 @@ def _long(raw: bytes, endian: str) -> int | None:
 
 
 def _maker_note_ifd_offset(buf: bytes, maker_note_offset: int) -> int | None:
-    """Bytes from the block's start to its IFD, or None if unrecognised.
+    """Bytes from the block's start to its IFD, or None if unrecognized.
 
     Keyed off the signature's own length rather than a constant, because that
     length is exactly what differs between the two bodies.

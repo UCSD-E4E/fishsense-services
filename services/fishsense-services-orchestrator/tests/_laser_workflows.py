@@ -86,7 +86,7 @@ class StubPlan:
 
 @workflow.defn
 class Blocker:
-    """Holds a workflow id open until signalled."""
+    """Holds a workflow id open until signaled."""
 
     def __init__(self) -> None:
         self._done = False

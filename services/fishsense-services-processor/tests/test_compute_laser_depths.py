@@ -262,7 +262,7 @@ async def test_a_depth_that_is_not_a_number_is_refused_as_non_finite():
     the kernel answers NaN (fishsense-core's docstring). That is a refusal
     too, and says so, rather than a depth."""
     # The camera ray through the principal point is the optical axis; a laser
-    # through the camera centre along it is that same line.
+    # through the camera center along it is that same line.
     calibration = LaserCalibrationGeometry(
         laser_calibration_id=CALIBRATION_ID,
         laser_position=(0.0, 0.0, 0.0),

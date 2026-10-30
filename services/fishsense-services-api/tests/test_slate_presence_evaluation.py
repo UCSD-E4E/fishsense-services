@@ -3,7 +3,7 @@
 New in v2, for the paper (owner's decision, 2026-10-05): every canonical frame
 is scored once per model version, and this view joins **every** prediction
 row (every version; `is_current` marks the latest) to the frame's human
-answer, labelled by 2026-10-03_slate_detector@95a77d95's manifest rules
+answer, labeled by 2026-10-03_slate_detector@95a77d95's manifest rules
 (src/slate_detector/dataset.py `LABELLED_SQL`, `slate_label`):
 
 * the answers are the frame's completed, live species labels with a
@@ -13,7 +13,7 @@ answer, labelled by 2026-10-03_slate_detector@95a77d95's manifest rules
   every one starts with `Fish` (so `Fish Model` too), `Calibration Targets`
   or `None`; **ambiguous**: anything else; no answer at all: NULL.
 
-The source repo's own overrides and labelling-queue answers live in that
+The source repo's own overrides and labeling-queue answers live in that
 repo, not here. A completed slate label on a task the detector queued is an
 answer to a question the model chose; `slate_label_from_detector` marks it
 so an analysis can leave it out. Dive, image and camera are v1's numbers, for

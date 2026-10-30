@@ -30,7 +30,7 @@ __all__ = [
 
 
 class LaserTarget(BaseModel):
-    """A dive of a tenant. Serialises like `object_store.StagingTarget`, so it
+    """A dive of a tenant. Serializes like `object_store.StagingTarget`, so it
     is what the staging and cleanup steps take too."""
 
     model_config = ConfigDict(validate_by_name=True)

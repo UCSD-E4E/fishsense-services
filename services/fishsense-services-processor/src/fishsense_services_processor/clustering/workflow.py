@@ -2,7 +2,7 @@
 
 Ported from fishsense-lite@a8b2c3bc services/fishsense-data-processing-workflow-
 worker/src/fishsense_data_processing_workflow_worker/workflows/
-dive_frame_clustering_workflow.py. Behaviour is v1's; v2 change: capture UUIDs,
+dive_frame_clustering_workflow.py. Behavior is v1's; v2 change: capture UUIDs,
 from the processing contract.
 
 Inputs are pre-resolved by the orchestrator's `ClusterMissionFramesParentWorkflow`,

@@ -232,7 +232,7 @@ def _no_persons_slate_work(marker: str) -> str:
     """Dive `d` holds no person's slate work: no live slate marker on a
     canonical frame, and no live slate label in a real project that the
     detector did not queue. Its own queued rows don't count, so this stays
-    true while they are labelled, and goes false for good once a person marks
+    true while they are labeled, and goes false for good once a person marks
     a slate (the marker path then owns the dive)."""
     return f"""
     NOT EXISTS (

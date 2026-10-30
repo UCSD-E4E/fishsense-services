@@ -23,7 +23,7 @@ v2 changes, each pinned here:
   `captured_at` (then `number`), members by `captured_at`, `number`. v1's
   `GET clusters` had no ORDER BY, and both "image i of N" and stage 6.1's
   "Part of previous group" read the order;
-* **stage 6.1 persists all or nothing**, serialised per dive (v1 posted one
+* **stage 6.1 persists all or nothing**, serialized per dive (v1 posted one
   cluster at a time, so a failure left a partial set that blocked every re-run),
   leaving out the dive's duplicate frames and refusing another dive's;
 * **a refusal expires by comparison, not by clearing**: the sync stamps

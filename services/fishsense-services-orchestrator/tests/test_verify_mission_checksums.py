@@ -105,7 +105,7 @@ class FakeCatalog:
 
 
 class FakeNas:
-    """A NAS that materialises real files, keyed by basename, and records what
+    """A NAS that materializes real files, keyed by basename, and records what
     was downloaded. Real files, because the activity hashes from disk in
     chunks, as spider did."""
 

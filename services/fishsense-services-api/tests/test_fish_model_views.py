@@ -368,7 +368,7 @@ async def test_near_identical_lengths_do_not_produce_flags(lab, known, research_
     assert await _suspects(research_engine) == []
 
 
-async def test_one_bad_frame_does_not_condemn_its_neighbours(
+async def test_one_bad_frame_does_not_condemn_its_neighbors(
     lab, known, research_engine
 ):
     """Regression: the group-maximum rule let prod dive 60's single 601mm frame
@@ -422,7 +422,7 @@ async def test_a_calibration_target_is_not_offered_as_a_best_fit(
     lab, known, research_engine
 ):
     """The Box (0.150 m) must never be the answer to "which model is this?": a
-    correctly-labelled Gray Anthias at 0.160 m (own -17.9%, box fit 6.7%)."""
+    correctly-labeled Gray Anthias at 0.160 m (own -17.9%, box fit 6.7%)."""
     await known("Box", 0.15)
     await lab.measure(mission=1, model="Gray Anthias", length_m=0.160)
 

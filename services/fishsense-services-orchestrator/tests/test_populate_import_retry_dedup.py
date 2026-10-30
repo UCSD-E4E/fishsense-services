@@ -12,11 +12,11 @@ the new tasks to become listable, and **raised** when they had not appeared.
 The populate activities declared no `RetryPolicy`, so Temporal retried inside
 the 30-minute `schedule_to_close`, the retry's dedup listing still could not
 see the in-flight import, and it imported the whole set again. Both copies then
-materialised.
+materialized.
 
-The consequences went past wasted labeller queue: a duplicate splits a row from
+The consequences went past wasted labeler queue: a duplicate splits a row from
 its own annotation (seven dive-437 head/tail labels were invisible to the
-pipeline because the row tracked the empty twin), and it hands a labeller a
+pipeline because the row tracked the empty twin), and it hands a labeler a
 second, *ungated* copy of a frame the laser auto-accept gate had already
 judged -- all 66 of dive 517's calibration frames were re-done by hand that way.
 
@@ -53,14 +53,14 @@ class SlowImportLabelStudio:
     """Hosted LS whose imported tasks only become listable after a delay.
 
     `visible_after_lists` is how many `tasks.list` calls must go by before the
-    tasks an import created show up. That is the real behaviour the helper has
+    tasks an import created show up. That is the real behavior the helper has
     to survive.
     """
 
     def __init__(self, task_ids: List[int], *, visible_after_lists: int = 0):
         self._ids = iter(task_ids)
         # (listable_from, task). A task is served once `_lists` reaches its
-        # threshold, which is how the materialisation lag is expressed.
+        # threshold, which is how the materialization lag is expressed.
         self._entries: List[tuple[int, SimpleNamespace]] = []
         self._lists = 0
         self._lag = visible_after_lists
@@ -144,7 +144,7 @@ async def _run(ls, tasks, items, recorded, project_id=901):
 async def test_invisible_import_does_not_raise_and_is_not_reimported():
     """The whole bug, end to end.
 
-    An import that has not materialised inside the budget must not raise --
+    An import that has not materialized inside the budget must not raise --
     raising is what made Temporal retry, and the retry is what duplicated. The
     next run must then reconcile the tasks rather than import them again.
     """
@@ -273,7 +273,7 @@ async def test_a_retry_reconciles_instead_of_re_importing():
 @pytest.mark.usefixtures("fast_poll")
 async def test_a_retry_reconciles_even_while_the_import_is_still_invisible():
     """The case the marker exists for. v1's test above lets the import
-    materialise before attempt 2, so the project listing alone already stops
+    materialize before attempt 2, so the project listing alone already stops
     the re-import there; here it has not, and only the marker does."""
     ls = SlowImportLabelStudio([91, 92], visible_after_lists=99)
     tasks = [_task("iii"), _task("jjj")]
@@ -347,7 +347,7 @@ async def test_existing_duplicates_are_reported_loudly(caplog):
     """Nothing else notices a duplicate.
 
     The label tables are unique on (image, project), so the DB cannot show one.
-    It surfaces only as a labeller served the same frame twice, or as a row
+    It surfaces only as a labeler served the same frame twice, or as a row
     tracking the empty twin of its own annotation.
     """
     ls = SlowImportLabelStudio([61])

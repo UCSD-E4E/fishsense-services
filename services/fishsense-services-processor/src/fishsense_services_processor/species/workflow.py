@@ -2,7 +2,7 @@
 
 Ported from fishsense-lite@77e8f8e5 services/fishsense-data-processing-
 workflow-worker/src/fishsense_data_processing_workflow_worker/workflows/
-preprocess_species_images_workflow.py. Behaviour is v1's: for each cluster in
+preprocess_species_images_workflow.py. Behavior is v1's: for each cluster in
 turn, every frame's `preprocess_species_image` runs together, each with a
 5-minute start-to-close (not schedule-to-close: a fan-out queued behind the
 per-image cap must not expire before it starts).

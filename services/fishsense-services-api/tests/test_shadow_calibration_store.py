@@ -134,7 +134,7 @@ async def test_an_accepted_row_carries_its_beam_and_a_refused_one_its_reason(
 # -- what it reads ----------------------------------------------------------------
 
 
-async def test_slate_frames_are_labelled_or_detected_and_say_which(
+async def test_slate_frames_are_labeled_or_detected_and_say_which(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
@@ -162,7 +162,7 @@ async def test_slate_frames_are_labelled_or_detected_and_say_which(
 async def test_a_frame_only_the_detector_calls_slate_has_no_label_dot(
     owner_engine, app_engine
 ):
-    """Production's slate fit reads slate-labelled frames only, so the labels
+    """Production's slate fit reads slate-labeled frames only, so the labels
     source does too (review of #261): a laser label on a frame only the
     presence detector calls slate stays out of it."""
     lab = await tenant(owner_engine)

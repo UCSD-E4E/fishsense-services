@@ -8,7 +8,7 @@ exactly the shape of an unschedulable GPU request, an exhausted quota, or a
 CrashLoopBackOff. ConfigMaps take strategic-merge patches, where ``None``
 removes a key. Secrets are only read: the Temporal leaf's fingerprint, which a
 wake stamps on the pods it stands up (see `ops.cert_sync`). (Ported in spirit from fishsense-lite@77e8f8e5
-tests/test_ensure_gpu_worker_running_activity.py `_Cluster`, which modelled
+tests/test_ensure_gpu_worker_running_activity.py `_Cluster`, which modeled
 v1's scale subresource and annotations.)
 """
 

@@ -7,7 +7,7 @@ names dives and labels by `number` (v1's ids for migrated rows), so a report
 reads exactly as v1's did.
 
 The plan proposes reviving exactly the superseded labels one full-population
-judgement keeps -- and nothing the validator would supersede again -- under
+judgment keeps -- and nothing the validator would supersede again -- under
 constraints that are each a way a revival could do harm:
 
 * only where the dive was actually JUDGED;

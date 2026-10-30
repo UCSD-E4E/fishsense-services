@@ -62,7 +62,7 @@ class LaserCalibrationGeometry(BaseModel):
 
     laser_calibration_id: UUID
     laser_position: Vector3
-    #: A direction; fishsense-core normalises it and refuses a zero one.
+    #: A direction; fishsense-core normalizes it and refuses a zero one.
     laser_axis: Vector3
 
 
@@ -90,7 +90,7 @@ class ComputeLaserDepthsInput(BaseModel):
 
 
 class LaserDepth(BaseModel):
-    """Where the laser dot was, in metres, in camera coordinates."""
+    """Where the laser dot was, in meters, in camera coordinates."""
 
     laser_label_id: UUID
     #: The dot it was computed at, echoed as a refusal echoes its dot. Label

@@ -16,7 +16,7 @@ role: each frame is a rawpy decode peaking at 1-3 GB.
 
 **It rectifies rather than reusing the stage-0.1 JPEG** (v1): that JPEG has a
 green laser-region outline drawn across it and has been through JPEG
-quantisation, either of which can sit on the board and move a corner; corner
+quantization, either of which can sit on the board and move a corner; corner
 positions are the entire input to the pose.
 
 **Fit** is `calibration.fit`, the steps stage 13 takes once its observations

@@ -1,12 +1,12 @@
-"""The laser-colour backfill's database side (0076; the owner, 2026-10-26).
+"""The laser-color backfill's database side (0076; the owner, 2026-10-26).
 
-Automatic dots predicted before contract v22 kept no colour. The backfill
-reads each one's colour off its render and records it in
+Automatic dots predicted before contract v22 kept no color. The backfill
+reads each one's color off its render and records it in
 ``automatic_laser_colour_readings``: append-only, naming its source and
 version, never on the prediction row. A page of readings is compared with the
-labellers' colours and the live kernel's on the same frames; only with
+labelers' colors and the live kernel's on the same frames; only with
 ``apply`` are readings written, and only for a dot still current with no
-colour of its own. Reads use the dot's own colour first, then the reading.
+color of its own. Reads use the dot's own color first, then the reading.
 """
 
 from __future__ import annotations
@@ -95,7 +95,7 @@ async def test_disagreement_and_the_live_kernel_are_counted(owner_engine, app_en
     assert counts["vs_kernel"] == {"red/green": 1}
 
 
-async def test_apply_writes_a_reading_for_an_uncoloured_dot(owner_engine, app_engine):
+async def test_apply_writes_a_reading_for_an_uncolored_dot(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     mission_id, c = await _measured(owner_engine, app_engine, lab)
     (frame,) = await _in(app_engine, lab, colour_backfill_frames, mission_id)
@@ -107,7 +107,7 @@ async def test_apply_writes_a_reading_for_an_uncoloured_dot(owner_engine, app_en
     assert await _readings(owner_engine) == [(c, "red", 163.5, "render", 1)]
 
 
-async def test_apply_never_overrides_the_dots_own_colour(owner_engine, app_engine):
+async def test_apply_never_overrides_the_dots_own_color(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     mission_id, _ = await _measured(owner_engine, app_engine, lab, laser_color="green",
                                     laser_color_margin=-80.0)  # fmt: skip
@@ -158,7 +158,7 @@ async def test_only_a_reading_is_written(owner_engine, app_engine, status):
     assert counts["written"] == 0 and counts["status"] == {status: 1}
 
 
-async def test_too_close_to_call_is_written_with_no_colour(owner_engine, app_engine):
+async def test_too_close_to_call_is_written_with_no_color(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     mission_id, c = await _measured(owner_engine, app_engine, lab)
     (frame,) = await _in(app_engine, lab, colour_backfill_frames, mission_id)
@@ -181,7 +181,7 @@ async def test_a_reading_of_another_missions_dot_is_refused(owner_engine, app_en
                   [_reading(frame)], apply=True)  # fmt: skip
 
 
-# -- the reads: the dot's own colour, else the reading, saying which ----------------
+# -- the reads: the dot's own color, else the reading, saying which ----------------
 
 from test_automatic_review_api import _lab, _number  # noqa: E402
 from test_observations_api import _get, client  # noqa: E402,F401
@@ -195,7 +195,7 @@ async def _backfilled(owner_engine, app_engine, lab, colour="red", margin=150.0)
     return mission_id, c
 
 
-async def test_a_frame_shows_a_backfilled_colour_and_where_it_came_from(
+async def test_a_frame_shows_a_backfilled_color_and_where_it_came_from(
     client, seed_memberships, owner_engine, app_engine
 ):
     lab = await _lab(seed_memberships)
@@ -207,7 +207,7 @@ async def test_a_frame_shows_a_backfilled_colour_and_where_it_came_from(
     assert body["laser_color_source"] == "render"
 
 
-async def test_the_dots_own_colour_is_shown_as_the_dots(
+async def test_the_dots_own_color_is_shown_as_the_dots(
     client, seed_memberships, owner_engine, app_engine
 ):
     lab = await _lab(seed_memberships)
@@ -219,7 +219,7 @@ async def test_the_dots_own_colour_is_shown_as_the_dots(
     assert (body["laser_color"], body["laser_color_source"]) == ("green", "dot")
 
 
-async def test_a_dot_with_no_colour_says_no_source(
+async def test_a_dot_with_no_color_says_no_source(
     client, seed_memberships, owner_engine, app_engine
 ):
     lab = await _lab(seed_memberships)

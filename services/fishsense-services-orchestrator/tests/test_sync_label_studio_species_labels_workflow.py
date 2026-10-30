@@ -9,7 +9,7 @@ tenant, and there is no user-sync step (v2 records Label Studio user ids
 directly; PLAN.md §9.14 maps them to people).
 
 v2 change, pinned last (the laser sync's): **one project's failure doesn't
-cancel the others.** v1's TaskGroup cancelled every other project mid-sync on
+cancel the others.** v1's TaskGroup canceled every other project mid-sync on
 the first failure; here each finishes, and the workflow then fails naming the
 ones that didn't.
 """

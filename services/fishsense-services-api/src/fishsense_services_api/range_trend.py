@@ -10,7 +10,7 @@ The inputs are read by `range_trend_store`; `fishsense-services-api
 audit-range-trend` is v1's scripts/audit_length_range_trend.py.
 
 WHAT IT SEES THAT NOTHING ELSE DOES. The image of the laser line fixes only
-the plane through the camera centre that contains it. Where the laser sits
+the plane through the camera center that contains it. Where the laser sits
 *within* that plane -- the in-plane angle that sets metric scale -- moves the
 dots by ~1e-13 px, so every check that looks at the dots is blind to it:
 reprojection residual (measured rho = -0.03 against length error), the
@@ -23,7 +23,7 @@ by f*eps, and to first order
     z_measured = z * (1 + eps * z / b)
 
 so a rigid object reads a length that changes linearly with range, at
-eps / b per metre. A 0.15 deg error on a 10.3 cm baseline is -2.5 % per metre.
+eps / b per meter. A 0.15 deg error on a 10.3 cm baseline is -2.5 % per meter.
 
 WHY IT IS SCALE-FREE. "The same object must read the same length at every
 range" spends no reference length. The slope is fitted on the object's own
@@ -104,7 +104,7 @@ _CI_Z = 1.96  # 95 % two-sided
 def theil_sen(x: np.ndarray, y: np.ndarray) -> tuple[float, float, float]:
     """Theil-Sen slope of y on x with Sen's 95 % confidence interval.
 
-    The median of all pairwise slopes, so one wild frame -- a mislabelled
+    The median of all pairwise slopes, so one wild frame -- a mislabeled
     head or tail -- cannot pull it. Returns (slope, ci_low, ci_high); on an
     exact line all three coincide. Fewer than three points is refused: two
     points have one slope and no interval.

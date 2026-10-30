@@ -1017,7 +1017,7 @@ class AutomaticHeadTailRow:
     laser_confidence: float | None = None
     laser_predictor_version: int | None = None
     laser_checkpoint: str | None = None
-    #: The dot's colour as the laser kernel read it, and how clearly (0072).
+    #: The dot's color as the laser kernel read it, and how clearly (0072).
     laser_color: str | None = None
     laser_color_margin: float | None = None
     head_x: float | None = None

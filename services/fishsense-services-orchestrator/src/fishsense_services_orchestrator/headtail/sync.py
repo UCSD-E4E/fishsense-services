@@ -3,7 +3,7 @@
 Ported from fishsense-lite@77e8f8e5 services/fishsense-api-workflow-worker/src/
 fishsense_api_workflow_worker/activities/
 (get_headtail_label_studio_project_ids_activity.py,
-sync_headtail_labels_for_label_studio_project_activity.py). Behaviour is v1's:
+sync_headtail_labels_for_label_studio_project_activity.py). Behavior is v1's:
 the projects are those of live head/tail labels; each task newer than the
 cursor is applied, **only when it has annotations** (unlike the laser sync, v1
 wrote nothing for a task without); a task with no live label is skipped; the

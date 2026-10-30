@@ -143,7 +143,7 @@ async def test_a_first_capture_starts_a_phone_mission(
     assert mission.name == "2026.10.11.FishSense.La Jolla Cove"
 
 
-async def test_a_capture_within_two_hours_and_a_kilometre_joins_it(
+async def test_a_capture_within_two_hours_and_a_kilometer_joins_it(
     tenants, alice, app_engine, owner_engine
 ):
     first = await _commit(app_engine, tenants["lab"], _capture(alice))
@@ -173,7 +173,7 @@ async def test_more_than_two_hours_later_starts_another(
     ).id
 
 
-async def test_more_than_a_kilometre_away_starts_another(
+async def test_more_than_a_kilometer_away_starts_another(
     tenants, alice, app_engine, owner_engine
 ):
     first = await _commit(app_engine, tenants["lab"], _capture(alice))

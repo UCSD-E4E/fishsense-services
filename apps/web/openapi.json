@@ -1908,7 +1908,7 @@
         "type": "object"
       },
       "LaserColoursView": {
-        "description": "Frames by laser colour, per source; counts, never a verdict, so a\nmission whose sources disagree shows it (`laser_colour_store`).",
+        "description": "Frames by laser color, per source; counts, never a verdict, so a\nmission whose sources disagree shows it (`laser_colour_store`).",
         "properties": {
           "automatic": {
             "$ref": "#/components/schemas/ColourCountsView"

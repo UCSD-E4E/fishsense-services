@@ -215,7 +215,7 @@ def _observation(n: int, point, *, laser_x=600.0, laser_y=500.0):
     )
 
 
-#: A realistic fitted origin: 10.4 cm from the camera centre, which is where
+#: A realistic fitted origin: 10.4 cm from the camera center, which is where
 #: every sound calibration in the fleet sits.
 _GOOD_ORIGIN_XY = (0.0624, 0.0832)
 

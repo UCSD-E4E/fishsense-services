@@ -5,7 +5,7 @@ test_populate_utils_workspace.py and the create/storage half of
 test_create_laser_label_studio_project_activity.py (which v1 says covers the
 create helper all four stages share). Names, bodies and reasons are v1's.
 
-v2 adaptations, none of which changes behaviour:
+v2 adaptations, none of which changes behavior:
 
 * the SDK is wrapped once (`LabelStudioClient`), and the helpers take it
   rather than each fetching a global client;

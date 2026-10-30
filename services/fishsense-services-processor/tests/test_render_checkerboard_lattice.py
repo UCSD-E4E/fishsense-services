@@ -347,7 +347,7 @@ async def test_a_skipped_render_writes_nothing(rectified_is, monkeypatch):
 # board seen at an angle, a saturated laser dot of 16 px radius or more makes
 # `findChessboardCornersSB` fall back to a 7 x 10 grid of the 10 x 14 board
 # that is EVERY OTHER ROW -- adjacent detected rows ~66 px apart against
-# ~33 px squares. Labelled one pitch apart, that halves the board's distance
+# ~33 px squares. Labeled one pitch apart, that halves the board's distance
 # along that axis, and so every depth the frame contributes. Its homography
 # is perfect, so services' own copy of the detector (through v0.56.0)
 # accepted it, and its test asserted the frame was kept. These pin the

@@ -2,7 +2,7 @@
 
 Ported from fishsense-lite@77e8f8e5
 services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/
-activities/stage_raw_bytes_for_dive_activity.py. Behaviour is v1's:
+activities/stage_raw_bytes_for_dive_activity.py. Behavior is v1's:
 
 * **canonical frames only** (the catalog's query), mirroring every cohort;
 * **idempotent**: a frame already staged is HEAD-skipped, so a dive in several
@@ -14,7 +14,7 @@ activities/stage_raw_bytes_for_dive_activity.py. Behaviour is v1's:
   (krg-infra#501). A transient FileStation error (502, 407, 402) propagates; a
   permanent one (408, no such file) becomes a non-retryable `NasFileNotFound`,
   and so does any failure for a file the NAS then says is not there (v2: a
-  moved file's download is a 502, which retried forever), surfaced from under the TaskGroup's ExceptionGroup so Temporal honours it;
+  moved file's download is a 502, which retried forever), surfaced from under the TaskGroup's ExceptionGroup so Temporal honors it;
 * **never skip a file** that fails to download: a silently missing frame
   would stage the dive incomplete and hide a real NAS problem;
 * **one download at a time** by default: FileStation's shared download

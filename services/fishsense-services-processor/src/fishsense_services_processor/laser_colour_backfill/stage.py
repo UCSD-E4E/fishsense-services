@@ -1,5 +1,5 @@
-"""The laser-colour backfill as a processor stage on the light role: a render
-read and one pixel neighbourhood classified per dot, no model, no GPU. Run by
+"""The laser-color backfill as a processor stage on the light role: a render
+read and one pixel neighborhood classified per dot, no model, no GPU. Run by
 hand (`laser_colour_backfill.run` in the orchestrator)."""
 
 from __future__ import annotations

@@ -2,15 +2,15 @@
 
 Pure rules, shared by ingest and the backfill so the two cannot drift:
 
-* **The port.** A device labelled with the ``D`` suffix (``FSL-10D``) is the
+* **The port.** A device labeled with the ``D`` suffix (``FSL-10D``) is the
   corrective optic -- the owner's rule, 2026-10-16. A missing ``D`` says
   nothing: lab data holds bare-flat-port frames that were never reliably
-  labelled, so the lack of it is not evidence of a flat port. Device identity
+  labeled, so the lack of it is not evidence of a flat port. Device identity
   stays the MakerNote serial; the suffix is stripped when matching names.
 
 * **The deployment.** An e4e-data-management dataset folder,
   ``YYYY.MM.DD.PROJECT.LOCATION``, is a field trip. A folder with a date and a
-  project only (``2024.06.20.REEF``) is a reorganised dump, not a dataset.
+  project only (``2024.06.20.REEF``) is a reorganized dump, not a dataset.
 
 * **The purpose**, inferred from the mission's name for an operator to review,
   with the reason. Where two rules match, or the name is a split or a pool
@@ -115,7 +115,7 @@ def strip_port_suffix(name: str | None) -> str | None:
 
 
 def device_label_in_path(source_path: str) -> str | None:
-    """A ``D``-labelled device named by a folder on the mission's path, or None.
+    """A ``D``-labeled device named by a folder on the mission's path, or None.
 
     e4edm puts the rig in a folder (``ED-00/FSL-10D/Box``); production's
     2023.08.03 dataset has it as the location (``2023.08.03.FishSense.FSL-01D``).

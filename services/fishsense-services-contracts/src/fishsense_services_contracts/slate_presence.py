@@ -2,14 +2,14 @@
 
 **New in v2.** v1's slate predictor estimated a slate's *pose*, only ever saw
 frames that held one, and was retired on 2026-08-03; this model answers
-presence only, so slate frames can be found in dives nobody has labelled. It
+presence only, so slate frames can be found in dives nobody has labeled. It
 is the lab's 2026-10-03_slate_detector@95a77d95 (src/slate_detector/train.py,
 render.py): ImageNet EfficientNet-B0 with GeM pooling in place of average
 pooling (the slate is about 1% of the frame), over the whole rectified frame
 resized to 1024x768, never cropped, the frame and its horizontal flip
 averaged. The constants live here because both sides read them: the processor
 stamps the version, and the orchestrator's cohort selects on a mismatch with
-it and queues frames at or above the threshold for labelling.
+it and queues frames at or above the threshold for labeling.
 
 **Two readers.** A prediction tags a frame for the automatic chain (excluded
 from fish measurement, a calibration candidate) and, in a dive with no slate
@@ -19,13 +19,13 @@ point.
 
 **Every canonical frame, publication-grade** (owner's decision,
 2026-10-05): every canonical frame of every dive, at every priority and
-labelled or not, is scored once per model version, and each result records
+labeled or not, is scored once per model version, and each result records
 enough to reproduce it -- model name and version, weights sha256,
 fishsense-core and processor versions, the render (`SlateRender`), the
 probability itself and when -- so the paper can evaluate the model against
 the human answers (`slate_presence_evaluation`).
 
-**Version the behaviour, not the model** (head/tail's rule). Bump
+**Version the behavior, not the model** (head/tail's rule). Bump
 `SLATE_DETECTOR_VERSION` by hand whenever the output would differ for an
 unchanged raw frame: new weights, another decode or resize, another TTA.
 History: 1 (2026-10-05) runs/final-q1/slate_efficientnet_b0.pt (sha256

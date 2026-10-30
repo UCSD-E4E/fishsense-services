@@ -145,7 +145,7 @@ class MissionSummary:
 
 def _gate_scan(*, judged: bool) -> str:
     """Correlated EXISTS body (v1's `_gate_scan`): does the outer label's
-    project hold a live-labelled capture whose current laser prediction has
+    project hold a live-labeled capture whose current laser prediction has
     (or has not) been judged by the gate?
 
     The inner label table is aliased so it can't be mistaken for the outer one,

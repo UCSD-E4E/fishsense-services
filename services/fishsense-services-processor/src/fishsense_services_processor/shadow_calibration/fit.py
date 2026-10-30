@@ -14,7 +14,7 @@ Kept from the script, exactly, so its pool result reproduces
 - the estimator: the vanishing position `t_v` along the dive's laser line that
   makes `s / (t - t_v)` most nearly constant, by Brent's bounded search on
   ``[t_min - 4005, t_min - 5]`` px;
-- the fitted axis ``K^-1 [t_v u + off n, 1]``, normalised, with ``n = (-u1, u0)``;
+- the fitted axis ``K^-1 [t_v u + off n, 1]``, normalized, with ``n = (-u1, u0)``;
 - `err_deg`: the signed offset of the fitted vanishing point from the stored
   calibration's, along the line, at the fixed ``F_PX = 2850`` px; and
   `angle_deg`, the 3-D angle between the axes;
@@ -34,7 +34,7 @@ calibration.
 v2 additions, none of which changes a ported number:
 - `err_deg_fx`: the same offset at the camera's own fx, which the paper
   reports (author, 2026-10-21);
-- the origin, from the assumed |O| along the line direction in normalised
+- the origin, from the assumed |O| along the line direction in normalized
   coordinates (score.py). The script fits the direction only, so ranges and
   the lever arm are conditional on |O|, recorded with every result.
 """

@@ -4,7 +4,7 @@ The orchestrator acts for a tenant only as a member of it (PLAN.md §9.11):
 tenants it serves are the ones it holds a membership in, granted by an admin
 and auditable like anyone's. Every tenant-keyed call **re-checks** that
 membership before opening the tenant's transaction, so a tenant id obtained
-earlier is not a standing licence -- work whose membership is revoked
+earlier is not a standing license -- work whose membership is revoked
 mid-flight stops at its next call.
 """
 

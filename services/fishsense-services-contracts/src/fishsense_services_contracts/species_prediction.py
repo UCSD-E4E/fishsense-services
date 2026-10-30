@@ -18,11 +18,11 @@ The fish classified is the one the head/tail stage already segments with SAM
 mask_bbox`), padded, cropped from the head/tail stage's rendered JPEG. So
 there is no second SAM pass, and this stage re-runs independently of it.
 
-**Version the behaviour, not the model** (head/tail's rule). Bump
+**Version the behavior, not the model** (head/tail's rule). Bump
 `SPECIES_PREDICTOR_VERSION` by hand whenever the output would differ for an
 unchanged crop: another model or checkpoint, prompt set, crop or scoring.
 History: 1 (2026-09-28) BioCLIP 2.5 ViT-H/14 over the four templates below,
-mean-normalised text embeddings, logit-scaled softmax over the species
+mean-normalized text embeddings, logit-scaled softmax over the species
 labeling config's target leaves. The fallback (BioCLIP 2, when 2.5 runs out of
 GPU memory) stamps -1: negative on purpose, so a fallback row is permanently
 stale and re-predicted once the primary can run.
@@ -73,7 +73,7 @@ SPECIES_PRIMARY_MODEL_ID = "hf-hub:imageomics/bioclip-2.5-vith14"
 SPECIES_FALLBACK_MODEL_ID = "hf-hub:imageomics/bioclip-2"
 
 #: coral-gardeners' species_prompts.py, verbatim. Each species' text embedding
-#: is the normalised mean of these four.
+#: is the normalized mean of these four.
 SPECIES_PROMPT_TEMPLATES = (
     "a photo of a {name}",
     "an underwater photo of a {name}",

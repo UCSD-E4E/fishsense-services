@@ -157,7 +157,7 @@ def test_reef_lengths_need_a_stored_calibration():
     assert reef_comparison(frames).frames == 0
 
 
-def test_coverage_of_the_frames_humans_measured_by_laser_colour():
+def test_coverage_of_the_frames_humans_measured_by_laser_color():
     frames = [_reef(1.0), _reef(1.5, auto=False), _reef(2.0, green=True),
               _reef(2.5, green=True, auto=False), _reef(3.0, green=True, auto=False)]  # fmt: skip
 
@@ -191,7 +191,7 @@ def test_the_papers_reef_frames_are_its_own_791():
 
 def test_coverage_counts_only_the_frames_humans_measured():
     """The paper's denominator is the 502 measured frames, not 791: 289 were
-    rejected by labellers as not measurable (tail/gate.py)."""
+    rejected by labelers as not measurable (tail/gate.py)."""
     frames = [_reef(1.0), _reef(1.5, auto=False), _rejected(), _rejected(auto=True)]
     assert reef_coverage(frames)["all"] == pytest.approx(1 / 2)
 

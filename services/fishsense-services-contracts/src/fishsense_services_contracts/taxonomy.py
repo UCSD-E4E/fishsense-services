@@ -180,7 +180,7 @@ SLATE_LASER_CONTENT: frozenset[str] = frozenset(
 # `MissionSlate` template rows, and a slate can be absent from that table
 # permanently -- V-Slate 7 was lost during a dive, so it can never be scanned
 # and can never be added. A labeler facing it previously had two options, both
-# bad: pick a wrong neighbour, or say nothing. The wrong neighbour is the
+# bad: pick a wrong neighbor, or say nothing. The wrong neighbor is the
 # dangerous one, because a wrong slate template yields a wrong *scale*, and
 # scale error is the one thing reprojection residual cannot see -- it would
 # calibrate cleanly and measure every fish in the dive wrong.
@@ -276,7 +276,7 @@ def calibration_target_leaf(taxonomy_path) -> str | None:
     path names a target a plane can be fitted to, else None.
 
     Reads the whole path rather than the leaf alone, unlike the slate-type
-    scan it is modelled on. A slate leaf ("V-Slate 2") is unambiguous wherever
+    scan it is modeled on. A slate leaf ("V-Slate 2") is unambiguous wherever
     it appears; "E4E Checkerboard" off its branch is not necessarily the
     calibration target, and this answer sets a dive's calibration source, so
     it should be the narrow reading.

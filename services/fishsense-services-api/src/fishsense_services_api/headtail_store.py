@@ -20,7 +20,7 @@ v1's rules, kept:
   included (no laser gate for a flagged frame), or a dive re-fires every hour;
 * stage 5.1's "done" is a head/tail row *with a project* that is not
   superseded (a project-less row is a sentinel); the predict cohort's
-  "labelled" is `completed`, not the project (populate seeds rows with one);
+  "labeled" is `completed`, not the project (populate seeds rows with one);
 * a stale prediction is a version mismatch (`IS DISTINCT FROM`, so NULL is
   stale) or one made from a laser since superseded; never-predicted dives go
   first, so the fallback tier's permanently stale rows can't starve new work;
@@ -100,7 +100,7 @@ __all__ = [
     "supersede_head_tail_labels",
 ]
 
-#: A live laser dot on capture `c`: the crop centre and the gate.
+#: A live laser dot on capture `c`: the crop center and the gate.
 _LIVE_LASER = f"""EXISTS (
     SELECT 1 FROM laser_labels l
     WHERE l.tenant_id = c.tenant_id AND l.capture_id = c.id AND {VALID_LASER}
@@ -224,7 +224,7 @@ class PredictCapture:
     capture_id: uuid.UUID
     checksum: str
     from_v1: bool
-    #: Every live dot, in label order: first is the crop centre.
+    #: Every live dot, in label order: first is the crop center.
     dots: tuple[LaserDot, ...]
     has_existing_prediction: bool
     existing_laser_superseded: bool

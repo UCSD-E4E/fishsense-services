@@ -125,7 +125,7 @@ with no edits to shared files beyond registering it.
   5. `persist_shadow_calibration`, which writes the shadow tables (§4) in one
      transaction.
 - **As built (review of #261):**
-  - The labels source takes **slate-labelled frames only**, as production's
+  - The labels source takes **slate-labeled frames only**, as production's
     slate fit does. A frame only the presence detector calls slate enters the
     detector source alone.
   - A mission with any slate frame not yet rendered **waits**
@@ -208,7 +208,7 @@ the live row.
 | `size_spread` | max/min size over frames used |
 | `range_min_m`, `range_max_m`, `lever_m` | the frames' laser-point ranges under the fitted calibration, and their spread along the optical axis (production's lever arm, §6) |
 | `lever_m_production_offset` | the same spread with the mission's own production offset, where one exists: a sensitivity check only |
-| `size_cv_pct`, `size_maxdev_pct` | slate length constancy: CV, and worst frame's deviation, of the slate's size in metres across frames (§8.4) |
+| `size_cv_pct`, `size_maxdev_pct` | slate length constancy: CV, and worst frame's deviation, of the slate's size in meters across frames (§8.4) |
 | `sam_score_min`, `sam_score_median` | over frames used |
 | `sam_model`, `sam_prompts`, `sam_threshold`, `render_long_side` | e.g. `sam3/3.1@ab12cd34ef56`, `{slate,"white board"}`, 0.3, 1600 |
 | `gate` | `jsonb`: the detector gate's thresholds and per-reason rejection counts (detector source) |
@@ -380,7 +380,7 @@ history).
 
 ## 7. The fit: a port, not a reimplementation
 
-### 7.1 What is ported, verbatim in behaviour
+### 7.1 What is ported, verbatim in behavior
 From `cscw-fishsense2027@8312780a`:
 - `slate_unknown.fit_tv`, `frame`, `F_PX`, `MIN_FRAMES`;
 - `size_constancy_sam.py`: the per-variant fit, the bootstrap (500 draws,
@@ -399,7 +399,7 @@ convention.
 
 ### 7.3 Origin and ranges
 The script fits **only the axis direction**. The origin uses the assumed
-|O| = 0.104 m along the line direction in normalised coordinates
+|O| = 0.104 m along the line direction in normalized coordinates
 (`score.calibrations`). Ranges for §6 come from intersecting each frame's dot ray
 with the fitted beam. They are therefore **conditional on the assumed |O|**,
 which is recorded.
@@ -439,7 +439,7 @@ stored beside it for comparison with cscw.
 3. **Refusals carry the disagreements:** among missions where the `port` variant
    exceeds the budget angle, at least 80% are refused by `gated`.
 4. **Slate length constancy** (new, the author's): under the shadow
-   calibration, the slate's apparent size in metres (√area × range ÷ fx) must
+   calibration, the slate's apparent size in meters (√area × range ÷ fx) must
    stay constant across range. On the pool's label dots (§6.1), its CV across
    frames is **0.7–1.7%**, and the worst frame deviates **1.4–6.4%** from the
    session median. Proposed:

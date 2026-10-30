@@ -7,7 +7,7 @@ labeling config), populate_headtail_label_studio_project_activity.py
 (`prediction_annotations`, `select_predicted_image_ids`, `_build_task`),
 backfill_headtail_predictions_activity.py (`select_attach_targets`) and
 sync_headtail_labels_for_label_studio_project_activity.py
-(`__update_headtail_label`, as a pure reading of a task). Behaviour is v1's.
+(`__update_headtail_label`, as a pure reading of a task). Behavior is v1's.
 
 The config, the seeded keypoints and the sync share one vocabulary:
 `KeyPointLabels name="kp-1" toName="image"` with `Snout` and `Fork`. A mismatch

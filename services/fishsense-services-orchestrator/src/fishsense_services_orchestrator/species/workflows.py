@@ -203,7 +203,7 @@ async def _create_project(target: SpeciesTarget) -> int:
 
 
 async def create_then_populate(target: SpeciesTarget) -> int:
-    """Materialise the dive's species project, then push its tasks; the number
+    """Materialize the dive's species project, then push its tasks; the number
     of label rows written (v1's `_populate.create_then_populate("species")`)."""
     project_id = await _create_project(target)
     return await workflow.execute_activity(

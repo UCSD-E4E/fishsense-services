@@ -346,7 +346,7 @@ async def test_every_subset_agrees_with_the_full_cluster(flagged):
         assert member.cluster_size == 3
 
 
-# --- the reprocess flag reaches its image (flag drains / resolvers honour) --------
+# --- the reprocess flag reaches its image (flag drains / resolvers honor) --------
 
 
 async def test_flagged_orphan_is_resolved():
@@ -363,7 +363,7 @@ async def test_flagged_orphan_is_resolved():
     assert _clusters(result) == [["bbb"]]
 
 
-async def test_flagged_image_is_returned_though_it_is_already_labelled():
+async def test_flagged_image_is_returned_though_it_is_already_labeled():
     result = await _resolve(
         facts(
             images=[_image(1, "aaa")],
@@ -376,7 +376,7 @@ async def test_flagged_image_is_returned_though_it_is_already_labelled():
     assert _clusters(result) == [["aaa"]]
 
 
-async def test_unflagged_labelled_image_is_still_excluded():
+async def test_unflagged_labeled_image_is_still_excluded():
     result = await _resolve(
         facts(
             images=[_image(1, "aaa")],

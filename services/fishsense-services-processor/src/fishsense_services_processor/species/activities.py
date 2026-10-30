@@ -3,7 +3,7 @@ write the JPEG a labeler sees.
 
 Ported from fishsense-lite@77e8f8e5 services/fishsense-data-processing-
 workflow-worker/src/fishsense_data_processing_workflow_worker/activities/
-preprocess_species_image.py. Behaviour is v1's, and the overlay is the
+preprocess_species_image.py. Behavior is v1's, and the overlay is the
 notebook's, byte for byte: "{i}/{N}" at (w-350, h-75), FONT_HERSHEY_SIMPLEX
 scale 5, red (BGR 0,0,255), thickness 10, LINE_AA, `cv2.imencode` at its
 default quality. The decode is fishsense-core's `RectifiedImage(RawImage)` at

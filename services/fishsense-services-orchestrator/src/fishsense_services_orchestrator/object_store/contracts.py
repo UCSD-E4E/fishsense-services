@@ -7,7 +7,7 @@ change: the activities take a (tenant, dive) pair, not v1's integer dive id.
 These stay inside the orchestrator -- the parent workflows that stage and
 clean up are the orchestrator's -- so they are not part of the processing
 contract. Any stage's own target with ``tenant_id`` and ``mission_id`` fields
-serialises to the same payload as a `StagingTarget`.
+serializes to the same payload as a `StagingTarget`.
 """
 
 from __future__ import annotations

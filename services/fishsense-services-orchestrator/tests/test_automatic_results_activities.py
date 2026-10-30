@@ -763,8 +763,8 @@ def test_the_api_repeats_the_window_and_the_cut_mask_version():
     assert api.CUT_MASK_FIX_VERSION == AUTOMATIC_HEADTAIL_PREDICTOR_VERSION == 4
 
 
-async def test_the_dots_colour_reaches_the_row():
-    """Contract v22 (2026-10-25): the processor sends the colour it read off
+async def test_the_dots_color_reaches_the_row():
+    """Contract v22 (2026-10-25): the processor sends the color it read off
     the dot, and the row keeps it."""
     written = []
     catalog = _Catalog(

@@ -653,7 +653,7 @@ async def test_a_refused_mission_is_not_offered(owner_engine, app_engine):
     assert await _board(app_engine, lab) is None
 
 
-async def test_relabelling_brings_it_back(owner_engine, app_engine):
+async def test_relabeling_brings_it_back(owner_engine, app_engine):
     """A label newer than the refusal's inputs means the inputs changed.
     Nobody has to clear anything: fixing the labels is the signal."""
     lab = await tenant(owner_engine)

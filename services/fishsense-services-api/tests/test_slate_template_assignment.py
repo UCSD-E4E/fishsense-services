@@ -67,7 +67,7 @@ async def _seeded(owner_engine):
     """Six missions and two templates (V-Slate A, v1 id 7; V-Slate B):
 
     * ``marked``: no template, one canonical frame marked `Slate, Laser on
-      slate` and unlabelled -- stage-9 work once it has a template;
+      slate` and unlabeled -- stage-9 work once it has a template;
     * ``plain``: no template, nothing to do;
     * ``same``: already on A; ``other``: already on B;
     * ``labelled``: no template, two completed slate labels on laser-dotted

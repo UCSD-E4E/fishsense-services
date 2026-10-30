@@ -1,7 +1,7 @@
 """Test helpers for the laser stages: labels as the contract carries them.
 
 v1's tests built `fishsense_api_sdk` `LaserLabel`s with an integer `id` and
-`image_id`; v2's judgement reads `LaserLabelRow`s, whose `number` and
+`image_id`; v2's judgment reads `LaserLabelRow`s, whose `number` and
 `capture_number` are those two ids for a migrated row. `label()` keeps v1's
 call shape so the ported tests read as v1's did.
 """

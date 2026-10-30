@@ -1,21 +1,21 @@
-"""The laser-colour backfill's database side (0076; the owner, 2026-10-26).
+"""The laser-color backfill's database side (0076; the owner, 2026-10-26).
 
-New in v2. Automatic dots predicted before contract v22 kept no colour, and
+New in v2. Automatic dots predicted before contract v22 kept no color, and
 head/tail v5 never runs the dot step again. The backfill reads each dot's
-colour off its prediction's render (contract v25, the processor's
+color off its prediction's render (contract v25, the processor's
 `laser_colour_backfill`). Here:
 
 * the work: every canonical capture's current automatic prediction with a dot
   and a render, a mission at a time, a page at a time -- dots that already
-  have a colour included, as the control: the live kernel read those off the
+  have a color included, as the control: the live kernel read those off the
   raw, and a render reading that disagrees with it is the change of input
   showing;
-* a page's readings counted, and compared with the labellers' colour (live,
+* a page's readings counted, and compared with the labelers' color (live,
   completed labels naming one) and the live kernel's on the same frames;
 * with ``apply``, a reading written to ``automatic_laser_colour_readings``
-  only for a dot that is still its frame's current prediction, has no colour
+  only for a dot that is still its frame's current prediction, has no color
   of its own, and has no reading at this version. Only ``read`` frames are
-  written (a colour, or too close to call); a render that wasn't there stays
+  written (a color, or too close to call); a render that wasn't there stays
   owed.
 
 The source and version are the contract's (`laser_colour_backfill.
@@ -78,7 +78,7 @@ class ColourWork:
     capture_id: uuid.UUID
     x: float
     y: float
-    #: The dot's own colour (0072), as the live kernel read it; None before.
+    #: The dot's own color (0072), as the live kernel read it; None before.
     kernel_color: str | None
     render_version: int
     camera_calibration_id: uuid.UUID | None
@@ -150,7 +150,7 @@ async def record_colour_page(
     apply: bool,
 ) -> dict:
     """Count a page's readings and compare them; with ``apply``, write the
-    ones still owed. Returns plain counts (`dict`s keyed by colour, and
+    ones still owed. Returns plain counts (`dict`s keyed by color, and
     ``"<reading>/<label or kernel>"`` for the comparisons)."""
     if not readings:
         return {"status": {}, "read": {}, "vs_label": {}, "vs_kernel": {}, "written": 0}

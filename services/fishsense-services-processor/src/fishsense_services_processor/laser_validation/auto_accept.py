@@ -65,7 +65,7 @@ half the time it is wrong.
 
 Caveat on n: one reef dive is not "reef", and its predicted images are ones
 that never received a Label Studio task, a different population from the
-labelled ones it is being compared against.
+labeled ones it is being compared against.
 """
 
 from __future__ import annotations
@@ -95,10 +95,10 @@ class MissionIneligibleReason(Enum):
     #: The dive carries predictions from a detector version that is not the
     #: current one. Unlike the others this is not a property of the fit -- it
     #: is decided before fitting, in the activity, because a line drawn across
-    #: two different detector behaviours is not a meaningful line. See
+    #: two different detector behaviors is not a meaningful line. See
     #: `fishsense_shared.laser_predictor`: stage v1 (and every pre-versioning
     #: NULL row) hardcoded the pre-annotation to "Red Laser" instead of reading
-    #: the dot, so auto-accepting one writes a possibly-wrong colour into the
+    #: the dot, so auto-accepting one writes a possibly-wrong color into the
     #: corpus with no human in the loop.
     STALE_PREDICTOR = "stale_predictor"
 
@@ -123,7 +123,7 @@ class AutoAcceptConfig:
     it just clears nothing, so no frame skips a human. A week disabled
     therefore answers "what would this do to our corpus" exactly, on current
     data, at zero risk; and if something goes wrong later, flipping it off
-    stops the behaviour without unwinding a single row. The whole config is
+    stops the behavior without unwinding a single row. The whole config is
     read from settings on the data-worker, so neither move needs a deploy.
 
     `min_predictions` / `min_inlier_fraction` are a floor-and-percentage pair
@@ -221,7 +221,7 @@ def _along_line_z(projections: np.ndarray, inlier_mask: np.ndarray) -> np.ndarra
     (a wide depth range), the MAD is large and this test goes toothless — the
     maximum z of a uniform distribution is ~1.35, well under any useful
     threshold. It bites when the dots cluster, which is the common case
-    (prod depths average 1.75 m with most frames similar). A nearest-neighbour
+    (prod depths average 1.75 m with most frames similar). A nearest-neighbor
     gap along the line would be scale-free and is the obvious upgrade if this
     proves too blunt; it is not implemented because the one real example
     available to calibrate against scored 5.2 on this measure.

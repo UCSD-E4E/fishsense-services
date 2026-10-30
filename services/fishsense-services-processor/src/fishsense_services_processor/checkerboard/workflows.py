@@ -22,7 +22,7 @@ Both fan out with `asyncio.gather` and run on the **per-image** role (v1's CPU
 queue): each frame is a rawpy decode peaking at 1-3 GB, which is what the
 role's concurrency cap of 2 exists for. v1 once ran the renders sequentially,
 reasoning the memory peak made parallel dispatch pointless; the worker's cap
-already bounds that, and the sequential loop serialised the fan-out under one
+already bounds that, and the sequential loop serialized the fan-out under one
 execution timeout.
 
 v2 changes: the calibration child returns the fit's `LaserCalibrationResult`
