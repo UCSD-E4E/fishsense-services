@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.73.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.72.0...v0.73.0) (2026-10-30)
+
+
+### Features
+
+* calibrate and measure each laser aim on its own ([77e3105](https://github.com/UCSD-E4E/fishsense-services/commit/77e31059d726cd540123fe2f515d0b4290f6c96b))
+* calibrate and measure each laser aim on its own ([d931e40](https://github.com/UCSD-E4E/fishsense-services/commit/d931e4069a2fc4d52ea0240480cb355b2b336645))
+
 ## [0.72.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.71.0...v0.72.0) (2026-10-28)
 
 
