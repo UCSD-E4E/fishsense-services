@@ -21,6 +21,7 @@ from depth_measure_seed import (  # noqa: F401  (forget_identities: a fixture)
     tenant,
 )
 from test_automatic_results_store import (
+    HOGFISH,
     VERSIONS,  # noqa: F401
     _backlog_mission,
     _in,
@@ -190,6 +191,30 @@ async def test_its_mask_and_species_come_with_it(owner_engine, app_engine):
     )
     assert (found.mask_width, found.mask_height) == (4000, 3000)
     assert (found.species, found.species_probability) == ("Hogfish", 0.71)
+
+
+async def test_a_length_out_of_distribution_for_its_species_is_flagged(
+    owner_engine, app_engine
+):
+    """2026-10-30: against the species BioCLIP names (`species_length`)."""
+    lab = await tenant(owner_engine)
+    mission_id, c = await _measured(owner_engine, app_engine, lab)
+    prediction = (await _frame(app_engine, lab, c)).prediction_id
+    await _in(app_engine, lab, persist_automatic_species, mission_id, [
+        AutomaticSpeciesRow(
+            capture_id=c, automatic_head_tail_prediction_id=prediction,
+            status="predicted", predictor_version=1, model_id="bioclip-2.5",
+            predicted_choice=HOGFISH, top1_probability=0.71, margin=0.4,
+            top5=[{"choice": HOGFISH, "probability": 0.71}],
+        )
+    ])  # fmt: skip
+
+    found = await _frame(app_engine, lab, c)
+    assert (found.species_length_flag, found.species_max_length_m) == (None, 0.91)
+
+    await exec_(owner_engine, "UPDATE automatic_measurements SET length_m = 0.02 "
+                "WHERE capture_id = :c", c=c)  # fmt: skip
+    assert (await _frame(app_engine, lab, c)).species_length_flag == "short"
 
 
 # -- a mission's run --------------------------------------------------------------

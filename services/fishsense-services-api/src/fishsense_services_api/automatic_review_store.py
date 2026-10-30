@@ -47,6 +47,10 @@ from fishsense_services_api.laser_colour_store import (
     dot_colour_columns,
     dot_colour_join,
 )
+from fishsense_services_api.species_length import (
+    SpeciesReference,
+    species_length_flag,
+)
 
 __all__ = [
     "AutomaticCalibration",
@@ -126,6 +130,10 @@ class AutomaticFrame:
     species_probability: float | None
     species_margin: float | None
     species_top5: list = field(default_factory=list)
+    #: The species' published maximum (0084), and the length judged against
+    #: it and the species' typical range (`species_length`).
+    species_max_length_m: float | None = None
+    species_length_flag: str | None = None
 
 
 async def automatic_frame(
@@ -146,6 +154,8 @@ async def automatic_frame(
                        m.algorithm AS m_algorithm,
                        m.algorithm_version AS m_algorithm_version,
                        s.predicted_choice, s.top1_probability, s.margin, s.top5,
+                       sr.max_length_m AS sr_max, sr.log_median AS sr_median,
+                       sr.log_mad AS sr_mad,
                        {dot_colour_columns("h")},
                        k.status AS k_status, k.head_x AS k_head_x,
                        k.head_y AS k_head_y, k.tail_x AS k_tail_x,
@@ -180,6 +190,9 @@ async def automatic_frame(
                   ON s.tenant_id = h.tenant_id AND s.capture_id = h.capture_id
                  AND s.automatic_head_tail_prediction_id = h.id
                  AND s.status = 'predicted'
+                LEFT JOIN species_length_references sr
+                  ON sr.scientific_name = substring(
+                      s.predicted_choice from '\\(([^()]*)\\)\\s*$')
                 WHERE h.tenant_id = :t AND h.capture_id = :c
                 """),
             {"t": tenant_id, "c": capture_id},
@@ -234,6 +247,13 @@ async def automatic_frame(
         species_probability=row.top1_probability,
         species_margin=row.margin,
         species_top5=list(row.top5 or []),
+        species_max_length_m=row.sr_max,
+        species_length_flag=species_length_flag(
+            row.length_m,
+            None if row.sr_max is None
+            else SpeciesReference(row.sr_max, log_median=row.sr_median,
+                                  log_mad=row.sr_mad),
+        ),  # fmt: skip
     )
 
 

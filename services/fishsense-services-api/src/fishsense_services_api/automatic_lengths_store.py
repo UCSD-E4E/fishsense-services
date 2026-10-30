@@ -44,6 +44,10 @@ from fishsense_services_api.laser_colour_store import (
 )
 from fishsense_services_api.review_store import COUNTS_SQL
 from fishsense_services_api.slate_presence_store import detector_slate_frame
+from fishsense_services_api.species_length import (
+    SpeciesReference,
+    species_length_flag,
+)
 
 __all__ = [
     "AutomaticLength",
@@ -113,6 +117,8 @@ _ROWS_SQL = f"""
            h.laser_confidence, {dot_colour_columns("h")}, h.sam_score,
            s.predicted_choice AS species, {_SCIENTIFIC} AS scientific_name,
            s.top1_probability AS species_probability, s.margin AS species_margin,
+           sr.max_length_m AS species_max_length_m, sr.log_median AS species_log_median,
+           sr.log_mad AS species_log_mad,
            (SELECT CASE WHEN count(*) = 1 THEN max(o.length_m) END
             FROM observations o
             WHERE o.tenant_id = c.tenant_id AND o.capture_id = c.id
@@ -128,6 +134,7 @@ _ROWS_SQL = f"""
     {dot_colour_join("h")}
     LEFT JOIN s ON s.capture_id = m.capture_id
      AND s.automatic_head_tail_prediction_id = m.automatic_head_tail_prediction_id
+    LEFT JOIN species_length_references sr ON sr.scientific_name = {_SCIENTIFIC}
     WHERE NOT {detector_slate_frame()}
       AND (CAST(:species AS text) IS NULL OR {_SCIENTIFIC} = :species)
     ORDER BY d.number, c.number
@@ -189,6 +196,11 @@ class AutomaticLength:
     scientific_name: str | None
     species_probability: float | None
     species_margin: float | None
+    #: The species' published maximum (0084), and the length judged against
+    #: it and the species' typical range (`species_length`): ``over_max``,
+    #: ``long``, ``short``, or None.
+    species_max_length_m: float | None
+    species_length_flag: str | None
     #: The frame's human length, when it has exactly one laser-measured fish.
     human_length_m: float | None
     #: The mission has a current human length somewhere (the export's
@@ -259,16 +271,25 @@ async def automatic_lengths(
     reviews = await _reviews(conn, tenant_id, [r.capture_id for r in found])
     last = chosen[-1]
     return AutomaticLengthPage(
-        [
-            AutomaticLength(**r._mapping, reviews=reviews.get(r.capture_id, {}))
-            for r in found
-        ],
+        [_length(r._mapping, reviews.get(r.capture_id, {})) for r in found],
         (
             f"{last.mission_number}:{last.capture_number}"
             if len(chosen) == limit
             else None
         ),
     )
+
+
+def _length(row, reviews: dict[str, KindReview]) -> AutomaticLength:
+    columns = dict(row)
+    median, mad = columns.pop("species_log_median"), columns.pop("species_log_mad")
+    maximum = columns["species_max_length_m"]
+    reference = (None if maximum is None
+                 else SpeciesReference(maximum, log_median=median, log_mad=mad))  # fmt: skip
+    return AutomaticLength(
+        **columns, reviews=reviews,
+        species_length_flag=species_length_flag(columns["length_m"], reference),
+    )  # fmt: skip
 
 
 async def _reviews(

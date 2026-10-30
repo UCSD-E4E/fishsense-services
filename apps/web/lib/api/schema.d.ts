@@ -968,8 +968,12 @@ export interface components {
             slate_probability: number | null;
             /** Species */
             species: string | null;
+            /** Species Length Flag */
+            species_length_flag?: string | null;
             /** Species Margin */
             species_margin: number | null;
+            /** Species Max Length M */
+            species_max_length_m?: number | null;
             /** Species Probability */
             species_probability: number | null;
             /** Species Top5 */
@@ -1030,8 +1034,12 @@ export interface components {
             scientific_name: string | null;
             /** Species */
             species: string | null;
+            /** Species Length Flag */
+            species_length_flag?: string | null;
             /** Species Margin */
             species_margin: number | null;
+            /** Species Max Length M */
+            species_max_length_m?: number | null;
             /** Species Probability */
             species_probability: number | null;
         };

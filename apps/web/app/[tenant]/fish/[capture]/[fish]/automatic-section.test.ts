@@ -51,3 +51,32 @@ describe("AutomaticSection against the measurement above", () => {
     expect(out).toContain("measured separately");
   });
 });
+
+// A length out of distribution for its species (the owner, 2026-10-30): the
+// section says so, so a reviewer looks twice -- and says nothing otherwise.
+describe("AutomaticSection against the species", () => {
+  function flagged(flag: string | null): string {
+    const f = {
+      ...frame(1.2, 0.05),
+      species: "Fish, Hogfish (Lachnolaimus maximus)",
+      species_max_length_m: 0.91,
+      species_length_flag: flag,
+    } as unknown as AutomaticFrame;
+    return renderToStaticMarkup(createElement(AutomaticSection, { frame: f, humanLengthM: null }));
+  }
+
+  it("says a length over the species' maximum is impossible for it", () => {
+    const out = flagged("over_max");
+    expect(out).toContain("For its species");
+    expect(out).toContain("Longer than the species&#x27; recorded maximum (91 cm)");
+  });
+
+  it("says a length is unusually long or short for the species", () => {
+    expect(flagged("long")).toContain("Unusually long for this species");
+    expect(flagged("short")).toContain("Unusually short for this species");
+  });
+
+  it("says nothing when the length is usual for the species", () => {
+    expect(flagged(null)).not.toContain("For its species");
+  });
+});

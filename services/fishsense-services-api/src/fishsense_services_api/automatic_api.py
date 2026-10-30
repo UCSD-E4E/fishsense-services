@@ -100,6 +100,11 @@ class AutomaticFrameView(BaseModel):
     species_probability: float | None
     species_margin: float | None
     species_top5: list[dict]
+    #: The species' published maximum (0084, FishBase), and the length judged
+    #: against it and the species' typical range in our lengths: ``over_max``
+    #: (impossible), ``long``, ``short``, or None (`species_length`).
+    species_max_length_m: float | None = None
+    species_length_flag: str | None = None
 
 
 class AutomaticCalibrationView(BaseModel):
@@ -179,6 +184,11 @@ class AutomaticLengthView(BaseModel):
     scientific_name: str | None
     species_probability: float | None
     species_margin: float | None
+    #: The species' published maximum (0084, FishBase), and the length judged
+    #: against it and the species' typical range in our lengths: ``over_max``
+    #: (impossible), ``long``, ``short``, or None (`species_length`).
+    species_max_length_m: float | None = None
+    species_length_flag: str | None = None
     #: The frame's human length, when it has exactly one laser-measured fish.
     human_length_m: float | None
     #: The mission has a current human length somewhere.
@@ -289,6 +299,8 @@ def add_automatic_routes(
             species_probability=found.species_probability,
             species_margin=found.species_margin,
             species_top5=found.species_top5,
+            species_max_length_m=found.species_max_length_m,
+            species_length_flag=found.species_length_flag,
         )
 
     @app.get(
