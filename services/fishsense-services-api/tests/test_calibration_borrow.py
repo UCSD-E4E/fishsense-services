@@ -42,6 +42,8 @@ from fishsense_services_api.automatic_results_store import InvalidAutomaticResul
 from fishsense_services_api.calibration_borrow import (
     BORROW_VERSION,
     BORROW_WORK,
+    LINE_ONLY_SD_PER_M,
+    UNCHECKED,
     BorrowCheck,
     automatic_borrow_candidate,
     persist_automatic_borrow,
@@ -290,25 +292,72 @@ async def test_a_checked_borrow_serves_the_aim_with_its_bar_widened(
     assert not await _in(app_engine, lab, _owes, mission_id)
 
 
-@pytest.mark.parametrize("reason", ["slates_disagree", "too_few_posed",
-                                    "no_slate_template"])  # fmt: skip
-async def test_a_refused_check_serves_nothing_and_is_a_try(
-    owner_engine, app_engine, reason
+async def test_slates_that_disagree_serve_nothing_and_are_a_try(
+    owner_engine, app_engine
 ):
+    reason = "slates_disagree"
     lab = await tenant(owner_engine)
     mission_id, device_id, frames = await _borrower(owner_engine, app_engine, lab)
     await _lender(owner_engine, app_engine, lab, device_id)
     candidate = await _candidate(app_engine, lab, mission_id)
 
     refused = await _check(app_engine, lab, mission_id, candidate, frames,
-                           outcome="refused", reason=reason,
-                           ratio=0.09 if reason == "slates_disagree" else None)  # fmt: skip
+                           outcome="refused", reason=reason, ratio=0.09)  # fmt: skip
 
     row = await _row(owner_engine, refused)
     assert (row["outcome"], row["refusal_reason"]) == ("refused", reason)
     assert (row["laser_axis"], row["scale_sd_by_range"]) == (None, None)
     assert (await _measure(app_engine, lab, mission_id, 1)).calibration is None
     assert not await _in(app_engine, lab, _owes, mission_id)
+
+
+@pytest.mark.parametrize("reason", sorted(UNCHECKED))
+async def test_an_unchecked_borrow_serves_the_aim_on_the_line_with_a_wider_bar(
+    owner_engine, app_engine, reason
+):
+    """No slates to check it on (the owner, 2026-10-30): the line alone, and
+    the bar widened by `LINE_ONLY_SD_PER_M` at each range."""
+    lab = await tenant(owner_engine)
+    mission_id, device_id, frames = await _borrower(owner_engine, app_engine, lab)
+    _, lent = await _lender(owner_engine, app_engine, lab, device_id)
+    candidate = await _candidate(app_engine, lab, mission_id)
+
+    borrowed = await _check(app_engine, lab, mission_id, candidate, frames,
+                            outcome="refused", reason=reason, ratio=None)  # fmt: skip
+
+    row = await _row(owner_engine, borrowed)
+    assert {k: row[k] for k in ("outcome", "refusal_reason", "borrowed_from",
+                                "borrow_depth_ratio", "borrow_holds")} == {
+        "outcome": "accepted", "refusal_reason": None, "borrowed_from": lent,
+        "borrow_depth_ratio": None, "borrow_holds": None,
+    }  # fmt: skip
+    assert row["borrow_line_px"] == round(candidate.line_px, 2)
+    assert row["laser_axis"] == OTHER_BEAM[1]
+    assert LINE_ONLY_SD_PER_M == 0.04
+    widened = [[1.0, math.hypot(0.02, 0.04)], [3.0, math.hypot(0.03, 0.12)]]
+    assert np.allclose(row["scale_sd_by_range"], widened)
+    assert row["scale_sd"] == pytest.approx(math.hypot(0.03, 0.12))  # widest, 0.75-3 m
+    cal = (await _measure(app_engine, lab, mission_id, 1)).calibration
+    assert cal.automatic_laser_calibration_id == borrowed
+    assert not await _in(app_engine, lab, _owes, mission_id)
+
+
+async def test_a_try_at_an_earlier_version_is_owed_again(owner_engine, app_engine):
+    """borrow-1 refused what borrow-2 accepts: its tries are not this one's."""
+    lab = await tenant(owner_engine)
+    mission_id, device_id, frames = await _borrower(owner_engine, app_engine, lab)
+    await _lender(owner_engine, app_engine, lab, device_id)
+    await _check(app_engine, lab, mission_id,
+                 await _candidate(app_engine, lab, mission_id), frames,
+                 outcome="refused", reason="slates_disagree", ratio=0.09)  # fmt: skip
+    assert not await _in(app_engine, lab, _owes, mission_id)
+
+    await exec_(owner_engine, """UPDATE automatic_laser_calibrations
+                SET algorithm_version = 'borrow-1'
+                WHERE mission_id = :m AND method = 'borrowed'""", m=mission_id)  # fmt: skip
+
+    assert BORROW_VERSION == "borrow-2"
+    assert await _in(app_engine, lab, _owes, mission_id)
 
 
 async def test_a_lender_that_is_not_the_aims_is_refused(owner_engine, app_engine):
