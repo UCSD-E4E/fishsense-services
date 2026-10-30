@@ -169,7 +169,7 @@ async def shadow_calibration_inputs(
                 frame_source=("both" if r.labelled and by_detector
                               else "label" if r.labelled else "detector"),
                 slate_probability=detected.get(r.id),
-                # Production's slate fit reads slate-labelled frames only.
+                # Production's slate fit reads slate-labeled frames only.
                 label_dot=(None if r.lx is None or not r.labelled
                            else (float(r.lx), float(r.ly))),
                 label_id=r.label_id if r.labelled else None,
@@ -371,7 +371,7 @@ async def persist_shadow_calibrations(
 def shadow_calibration_cohort() -> str:
     """Mission `d` has a slate frame and no shadow result at `:av`. A frame
     the detector alone calls slate is found by the orchestrator per mission
-    (`slate_frames`); the cohort selects on labelled slate frames and on the
+    (`slate_frames`); the cohort selects on labeled slate frames and on the
     detector's own predicate, so both kinds enter."""
     from fishsense_services_api.slate_presence_store import (  # pylint: disable=import-outside-toplevel
         detector_slate_frame,

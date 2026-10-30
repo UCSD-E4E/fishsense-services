@@ -1,7 +1,7 @@
 """``fishsense-services-api validate-automatic``: the harness on a database.
 
 New in v2. Reads, never writes: per paper dive (by number, in a tenant), the
-frames humans labelled (a valid laser label and a valid head/tail label, the
+frames humans labeled (a valid laser label and a valid head/tail label, the
 lowest-numbered of each, as stage 14 takes them), their species content (the
 pool's fish models and ruler, with their tape lengths from
 `current_fish_model_references`; the reef's anything but a slate), the dive's
@@ -78,7 +78,7 @@ async def _auto(app_engine, lab, mission_id, c):
         )])  # fmt: skip
 
 
-async def test_frames_are_the_human_labelled_frames_of_the_paper_missions(
+async def test_frames_are_the_human_labeled_frames_of_the_paper_missions(
     owner_engine, app_engine, references
 ):
     await references("Grouper", 0.36)
@@ -206,7 +206,7 @@ async def test_the_papers_listed_reef_frames_include_the_rejected_ones(
 ):
     """Given the paper's frame list (v1 image ids), a reef dive's frames are
     exactly those, and a listed frame whose head/tail label has no points --
-    a labeller's "not measurable" -- is in, as rejected."""
+    a labeler's "not measurable" -- is in, as rejected."""
     lab = await tenant(owner_engine)
     reef = await _paper_mission(owner_engine, lab, 347)
     measured = await _labelled(owner_engine, lab, reef, None)

@@ -3,13 +3,13 @@
 New in v2 (no v1 counterpart). Ported from coral-gardeners-fish-detector@
 67c8627 src/coral_fish_pipeline/classification/bioclip_classifier.py
 (`BioCLIPClassifier`: the allowed and forbidden models, `_load_model`,
-`_get_text_features`, `_get_logit_scale`, `_predict_image`). Its behaviour,
+`_get_text_features`, `_get_logit_scale`, `_predict_image`). Its behavior,
 kept:
 
 * only BioCLIP 2.5 (ViT-H/14) and BioCLIP 2; **the original BioCLIP is
   forbidden**, whatever form its id takes;
-* each species' text embedding is the normalised mean of its four prompts'
-  normalised embeddings (`species_prompts`);
+* each species' text embedding is the normalized mean of its four prompts'
+  normalized embeddings (`species_prompts`);
 * the image embedding is scored against them with the model's own
   `logit_scale` (100 when it has none), softmaxed over the closed set;
 * top-5, the top-1 probability and the margin (top-1 minus top-2);
@@ -108,7 +108,7 @@ def _normalise(x: np.ndarray) -> np.ndarray:
 
 
 def mean_text_embedding(prompt_features: np.ndarray) -> np.ndarray:
-    """One species' embedding: each prompt's normalised, then their mean."""
+    """One species' embedding: each prompt's normalized, then their mean."""
     return _normalise(_normalise(np.asarray(prompt_features, dtype=np.float64)).mean(0))
 
 

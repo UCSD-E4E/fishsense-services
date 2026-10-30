@@ -28,7 +28,7 @@ A reject that counts supersedes too (the code review of #293, 2026-10-22):
   label of the kind is superseded, whoever placed it;
 * ``wrong_fish``, ``bad_mask`` and ``dot_wrong`` are said of the automatic
   result: only the labels an accept of that result made are superseded. A
-  labeller's points are not judged by them.
+  labeler's points are not judged by them.
 
 Only the latest word counts. A Learning review can't be backed once a newer
 review of the frame and kind counts (which it would otherwise undo), and

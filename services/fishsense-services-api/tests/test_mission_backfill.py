@@ -108,7 +108,7 @@ async def test_what_was_ingested_before_the_rule_is_the_corrective_optic(
         "corrective_optic",
         "backfill",
     )
-    # A D-labelled device says so whenever it was ingested; that is the stronger
+    # A D-labeled device says so whenever it was ingested; that is the stronger
     # evidence, so it is the source even for a mission the rule also covers.
     assert (changes[labelled].port, changes[labelled].port_source) == (
         "corrective_optic",

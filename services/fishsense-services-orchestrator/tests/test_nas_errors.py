@@ -47,7 +47,7 @@ def test_routine_transient_codes_are_left_to_temporals_backoff(code):
     )  # returns: the caller re-raises and Temporal retries
 
 
-def test_an_unrecognised_error_errs_toward_retrying():
+def test_an_unrecognized_error_errs_toward_retrying():
     raise_if_permanent_dsm_error(RuntimeError("something odd"), context="x")
 
 

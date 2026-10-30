@@ -114,7 +114,7 @@ async def test_an_unknown_port_cannot_claim_a_source(owner):
             await _mission(owner, lab, "/m/1", port="unknown", port_source="operator")
 
 
-async def test_unrecognised_ports_and_sources_are_refused(owner):
+async def test_unrecognized_ports_and_sources_are_refused(owner):
     lab = await _tenant(owner, "lab")
     with pytest.raises(IntegrityError, match="missions_port_check"):
         async with owner.begin_nested():

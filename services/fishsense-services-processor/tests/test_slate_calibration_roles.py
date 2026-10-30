@@ -7,7 +7,7 @@ checkerboard and lattice rows) and src/.../roles.py's lists. v1's reasons:
 * stage 9, checkerboard calibration and lattice verification each decode a
   full-resolution `.ORF` per frame (1-3 GB), so they run on the per-image
   role, whose cap of 2 is a memory ceiling;
-* stage 13 reads already-labelled points and holds no image bytes, so it runs
+* stage 13 reads already-labeled points and holds no image bytes, so it runs
   on the light role -- on 2026-09-04 two consecutive v1 calibrations expired on
   ScheduleToStart queued behind one preprocess.
 """

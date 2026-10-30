@@ -197,7 +197,7 @@ async def test_no_per_image_worker_polling_stands_nrp_up_as_before():
 
 
 async def test_a_poller_check_that_fails_stands_nrp_up_rather_than_fail_the_wake():
-    """The check is an optimisation: when Temporal can't answer it, the wake
+    """The check is an optimization: when Temporal can't answer it, the wake
     does what it always did."""
     cluster = FakeCluster()
 

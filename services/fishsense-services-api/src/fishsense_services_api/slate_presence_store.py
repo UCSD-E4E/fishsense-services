@@ -12,7 +12,7 @@ prediction store is (`species_prediction_store`), with its rules:
   pinhole calibration (the frame is rectified; `camera_sql`) and which has a
   canonical capture with no current prediction at the current model version.
   By the owner's decision (2026-10-05) **every** canonical frame is scored,
-  labelled or not, in every dive at every priority, so the predictions can
+  labeled or not, in every dive at every priority, so the predictions can
   be evaluated for publication (`slate_presence_evaluation`, migration
   0035); every other cohort is high-only, deliberately. An abstention (`decode_failed`) is a
   prediction, so a raw that never decodes doesn't re-select its dive hourly.

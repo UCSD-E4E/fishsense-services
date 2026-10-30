@@ -2,13 +2,13 @@
 
 New in v2 (no v1 counterpart). v1's species populate
 (test_populate_species_label_studio_project.py) seeds a task's prediction
-from a sentinel's imported judgement only. Pinned here:
+from a sentinel's imported judgment only. Pinned here:
 
 * **ships disabled**: with `FISHSENSE_SPECIES_PREDICTION_ENABLED` unset,
   populate never reads a species prediction, and a task carries none;
 * enabled, a task is seeded with the capture's current BioCLIP suggestion
   as a *prediction* -- never an annotation, so a human confirms every label;
-* a human's imported judgement wins over the model's: it stays the task's
+* a human's imported judgment wins over the model's: it stays the task's
   only prediction;
 * below the threshold the suggestion is "Other (Identifiable but
   Nontarget)";
@@ -183,7 +183,7 @@ async def test_a_capture_with_no_prediction_is_seeded_without_one():
     assert sdk.imported[0]["predictions"] == []
 
 
-async def test_a_human_judgement_wins_over_the_models():
+async def test_a_human_judgment_wins_over_the_models():
     judgement = species(1, project=None, content_of_image=HOGFISH)
 
     sdk, _ = await _populate(

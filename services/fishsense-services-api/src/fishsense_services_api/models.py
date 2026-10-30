@@ -1353,7 +1353,7 @@ class AutomaticHeadTailPrediction(Base):
     laser_confidence: Mapped[float | None] = mapped_column(Double)
     laser_predictor_version: Mapped[int | None] = mapped_column(Integer)
     laser_checkpoint: Mapped[str | None] = mapped_column(Text)
-    #: The dot's colour, ``red`` or ``green``, and how clearly (0072).
+    #: The dot's color, ``red`` or ``green``, and how clearly (0072).
     laser_color: Mapped[str | None] = mapped_column(Text)
     laser_color_margin: Mapped[float | None] = mapped_column(Double)
     head_x: Mapped[float | None] = mapped_column(Double)
@@ -1554,9 +1554,9 @@ class AutomaticKeypointPrediction(Base):
 
 
 class AutomaticLaserColourReading(Base):
-    """An automatic dot's colour read off its render after the fact (0076):
+    """An automatic dot's color read off its render after the fact (0076):
     the backfill of dots predicted before contract v22; append-only, and
-    never over the dot's own colour."""
+    never over the dot's own color."""
 
     __tablename__ = "automatic_laser_colour_readings"
     __table_args__ = (

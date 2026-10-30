@@ -1,4 +1,4 @@
-"""The laser-colour backfill's workflows (the owner, 2026-10-26).
+"""The laser-color backfill's workflows (the owner, 2026-10-26).
 
 `BackfillLaserColoursForMissionWorkflow`: one mission's dots a page at a
 time, each page read on the light processor (`ReadLaserColoursWorkflow`) and

@@ -1,11 +1,11 @@
-"""The per-dive laser-label judgement: which labels one line fit flags.
+"""The per-dive laser-label judgment: which labels one line fit flags.
 
 Ported from fishsense-lite@77e8f8e5 services/fishsense-data-processing-
 workflow-worker/src/fishsense_data_processing_workflow_worker/
 laser_label_validation/judgement.py. The single definition of what the
 validator decides, shared by the two things that act on it -- the hourly
 validator (supersedes what is flagged) and the remediation tool (revives
-superseded labels the same judgement keeps). A second copy would drift, and
+superseded labels the same judgment keeps). A second copy would drift, and
 then a revived label is superseded again within the hour.
 
 It judges the dive's FULL population, superseded labels included, in
@@ -20,7 +20,7 @@ nothing, and none of them says the labels are good.
 v2 change: labels are the contract's `LaserLabelRow`s. v1's `(image_id, id)`
 is `(capture_number, number)` -- both v1's ids for a migrated row, so a
 migrated dive is ordered, and so fitted, exactly as v1 fitted it -- and the
-ids the judgement speaks in (`flagged_ids`, `kept_ids`) are label numbers.
+ids the judgment speaks in (`flagged_ids`, `kept_ids`) are label numbers.
 
 The reflection split detector is fishsense-core's
 (`fishsense_core.laser_reflection`, core #92, from 4.3.0). Services carried a
@@ -68,7 +68,7 @@ __all__ = [
 # labelers wrong at that rate.
 MAX_OUTLIER_FRACTION = 0.5
 
-#: Verdicts. Only the last two are judgements.
+#: Verdicts. Only the last two are judgments.
 TOO_FEW = "too_few"
 NO_FIT = "no_fit"
 NOT_CONFIDENT = "not_confident"
@@ -99,7 +99,7 @@ class MissionJudgement:  # pylint: disable=too-many-instance-attributes
 
     @property
     def kept_ids(self) -> set:
-        """Positives the judgement did not flag. Meaningful only if judged."""
+        """Positives the judgment did not flag. Meaningful only if judged."""
         return {label.number for label in self.positives} - self.flagged_ids
 
     def is_calibration(self, label_id) -> bool:

@@ -304,7 +304,7 @@ async def laser_depth_work(
 async def lock_mission(
     conn: AsyncConnection, stage: str, mission_id: uuid.UUID
 ) -> None:
-    """Serialise one stage's persists of one dive, so two can't both find the
+    """Serialize one stage's persists of one dive, so two can't both find the
     same work still open."""
     await conn.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),

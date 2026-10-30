@@ -213,7 +213,7 @@ class CheckerboardObservation(BaseModel):
     """One frame's dot in camera space, or why the frame could not say."""
 
     capture_id: UUID
-    #: `[x, y, z]` in metres; None when the frame is unusable.
+    #: `[x, y, z]` in meters; None when the frame is unusable.
     point: list[float] | None
     laser_x: float
     laser_y: float

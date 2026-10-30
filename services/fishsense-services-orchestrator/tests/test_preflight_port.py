@@ -1,6 +1,6 @@
 """Preflight decides a mission's camera port, and says so (PLAN.md §4.9).
 
-The owner's rules (2026-10-16): a device labelled with the ``D`` suffix is the
+The owner's rules (2026-10-16): a device labeled with the ``D`` suffix is the
 corrective optic, and nothing else is known -- a missing ``D`` is not evidence
 of a flat port. Only file names are trusted for the ``D`` (the owner,
 2026-10-18): preflight takes it from the folder path (e4edm's

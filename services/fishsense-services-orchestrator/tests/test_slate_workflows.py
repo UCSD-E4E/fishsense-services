@@ -13,7 +13,7 @@ v2 changes, pinned here:
 * the sync lists projects with their tenants and has **no user-sync step**
   (v2 records Label Studio user ids directly, PLAN.md §9.14);
 * **one project's sync failure doesn't cancel the others**: v1 ran them in a
-  TaskGroup, so the first failure cancelled every other project mid-sync.
+  TaskGroup, so the first failure canceled every other project mid-sync.
   Here each finishes, and the workflow then fails naming the ones that
   didn't (the laser sync's port, for the same reason).
 """

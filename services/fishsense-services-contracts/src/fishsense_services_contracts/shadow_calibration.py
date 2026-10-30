@@ -138,7 +138,7 @@ class FitShadowCalibrationInput(BaseModel):
     frames: Dict[str, List[ShadowFitFrame]]
     #: The detector line's population: every automatic dot ``[x, y, conf]``.
     mission_detector_dots: List[List[float]] = []
-    #: Full-res px per render px, for the slate's size in metres.
+    #: Full-res px per render px, for the slate's size in meters.
     render_scale: float = 1.0
     sam_model: str
 

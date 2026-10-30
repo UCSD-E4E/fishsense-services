@@ -166,7 +166,7 @@ class MaskBackfillActivities:
         written = 0
         if objects is not None and stored:
             # `checked_masks` reads each back: the key the source's for its
-            # capture, the bytes the ones reported, an 8-bit greyscale PNG.
+            # capture, the bytes the ones reported, an 8-bit grayscale PNG.
             views = [SimpleNamespace(capture_id=r.capture_id, mask=r.mask,
                                      width=r.mask.width, height=r.mask.height)
                      for r in stored]  # fmt: skip

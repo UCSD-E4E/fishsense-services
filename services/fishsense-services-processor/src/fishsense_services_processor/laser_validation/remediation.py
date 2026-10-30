@@ -8,7 +8,7 @@ to revive. The dry run, the apply step's safety check and the tests all go
 through `plan_mission`, so there is one definition of "what remediation would
 do".
 
-The judgement is `judge_mission` -- the validator's own -- so a revived label is
+The judgment is `judge_mission` -- the validator's own -- so a revived label is
 exactly one the next hourly validator run keeps.
 
 v2 change: the plan is the contract's `MissionPlan`, and names the dive and its

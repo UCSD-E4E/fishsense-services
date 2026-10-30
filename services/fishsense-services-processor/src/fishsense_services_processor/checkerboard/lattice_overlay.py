@@ -8,7 +8,7 @@ are the detected corners one board square apart, or two?
 
 **Why geometry alone cannot answer it.** A uniformly mis-latticed detection --
 every corner two squares apart while `body_points` labels them one apart -- is
-still a perfect grid. It is an exact homography of the modelled grid, so a
+still a perfect grid. It is an exact homography of the modeled grid, so a
 grid-residual gate reads ~0 and passes it (the residual catches grids whose
 spacing is *mixed*); a coarse lattice is *smaller* than the declared board, so
 a size bound never fires; and `check_fit_self_consistency` compares 2-D dots,
@@ -25,12 +25,12 @@ their dives read -75% to +45% on length. A scale error of exactly 2x or 4x is
 what a coarse lattice produces and what noise does not.
 
 Since fishsense-core 4.3.0 (#98) the detector does see the uniform case, by
-looking at the image rather than the geometry: `checker_parity` reads the grey
-level at each detected cell's centre, which alternates dark and light only
+looking at the image rather than the geometry: `checker_parity` reads the gray
+level at each detected cell's center, which alternates dark and light only
 when the cells are single squares, and refuses a lattice that does not. That
 gate is what fixed the every-other-row detection a 16 px laser dot provoked on
 a warped board. Core measured it on synthetic boards. On production's real
-frames (2026-10-24/25, read-only: all 745 checkerboard-labelled renders of the
+frames (2026-10-24/25, read-only: all 745 checkerboard-labeled renders of the
 17 missions with a calibration target, against services' detector on OpenCV
 5) it refused one lattice services' detector accepted that is every other
 column (mission 522, capture 134474, parity 0.13), and no lattice of single
@@ -57,7 +57,7 @@ import numpy as np
 __all__ = ["draw_lattice_overlay"]
 
 #: BGR. Magenta edges and yellow corners, because the board itself is black and
-#: white and backscatter is grey-green — neither channel pair collides with the
+#: white and backscatter is gray-green — neither channel pair collides with the
 #: thing being judged.
 _EDGE_COLOR = (255, 0, 255)
 _CORNER_COLOR = (0, 255, 255)

@@ -228,7 +228,7 @@ class TestTheTagIsAnIdempotencyKey:
 # -- pre-annotation only ------------------------------------------------------------------
 
 
-def test_a_task_carrying_only_a_prediction_syncs_as_unlabelled():
+def test_a_task_carrying_only_a_prediction_syncs_as_unlabeled():
     """The sync reads annotations, never predictions: a suggestion nobody
     confirmed writes nothing, and completes nothing."""
     (body,) = sut.prediction_annotations(_prediction(), 0.5)
@@ -259,8 +259,8 @@ def test_attaches_a_placeable_prediction_to_an_incomplete_task():
     assert targets == {uuid.UUID(int=1): (901, 70)}
 
 
-def test_a_human_judgement_is_never_replaced_by_a_models():
-    """A sentinel's imported judgement is already the task's prediction."""
+def test_a_human_judgment_is_never_replaced_by_a_models():
+    """A sentinel's imported judgment is already the task's prediction."""
     targets = sut.select_attach_targets(
         [_prediction(1)], [_task(1)], judged={uuid.UUID(int=1)}
     )

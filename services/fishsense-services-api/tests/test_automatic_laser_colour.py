@@ -1,9 +1,9 @@
-"""The automatic dot's colour (contract v22, 2026-10-25).
+"""The automatic dot's color (contract v22, 2026-10-25).
 
-The laser kernel always read the dot's colour off its pixels; the automatic
+The laser kernel always read the dot's color off its pixels; the automatic
 frames stage dropped it, so no automatic row had one. It is now kept on the
 row (``laser_color``/``laser_color_margin``, 0072) and shown wherever the
-automatic dot is: a frame's result, the lengths list, and a mission's colour
+automatic dot is: a frame's result, the lengths list, and a mission's color
 counts beside the human labels' and the human-path predictions'.
 """
 
@@ -37,7 +37,7 @@ async def _current(owner_engine, c):
         ).one()
 
 
-async def test_a_row_keeps_its_dots_colour(owner_engine, app_engine):
+async def test_a_row_keeps_its_dots_color(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     mission_id = await _backlog_mission(owner_engine, lab)
     c = await capture(owner_engine, lab, mission_id)
@@ -50,14 +50,14 @@ async def test_a_row_keeps_its_dots_colour(owner_engine, app_engine):
     assert tuple(await _current(owner_engine, c)) == ("green", 0.31)
 
 
-async def test_a_row_from_before_has_no_colour(owner_engine, app_engine):
+async def test_a_row_from_before_has_no_color(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     _, c = await _measured(owner_engine, app_engine, lab)
 
     assert tuple(await _current(owner_engine, c)) == (None, None)
 
 
-async def test_a_colour_is_red_or_green(owner_engine, app_engine):
+async def test_a_color_is_red_or_green(owner_engine, app_engine):
     lab = await tenant(owner_engine)
     _, c = await _measured(owner_engine, app_engine, lab)
 
@@ -75,7 +75,7 @@ from test_automatic_review_api import _lab, _number  # noqa: E402
 from test_observations_api import _get, client  # noqa: E402,F401
 
 
-async def test_a_frames_result_shows_its_dots_colour(
+async def test_a_frames_result_shows_its_dots_color(
     client, seed_memberships, owner_engine, app_engine
 ):
     lab = await _lab(seed_memberships)
@@ -88,7 +88,7 @@ async def test_a_frames_result_shows_its_dots_colour(
     assert (body["laser_color"], body["laser_color_margin"]) == ("green", 0.31)
 
 
-async def test_each_automatic_length_shows_its_dots_colour(
+async def test_each_automatic_length_shows_its_dots_color(
     client, seed_memberships, owner_engine, app_engine
 ):
     lab = await _lab(seed_memberships)
@@ -116,7 +116,7 @@ async def _prediction(owner_engine, lab, c, color, *, x=10.0):
     )  # fmt: skip
 
 
-async def test_a_mission_counts_its_laser_colours_by_source(
+async def test_a_mission_counts_its_laser_colors_by_source(
     client, seed_memberships, owner_engine, app_engine
 ):
     """Counts, not a verdict: a mission whose sources disagree shows it."""
@@ -141,7 +141,7 @@ async def test_a_mission_counts_its_laser_colours_by_source(
     }
 
 
-async def test_an_observation_shows_its_labels_colour(
+async def test_an_observation_shows_its_labels_color(
     client, seed_memberships, owner_engine
 ):
     from observation_seed import ALICE, lite

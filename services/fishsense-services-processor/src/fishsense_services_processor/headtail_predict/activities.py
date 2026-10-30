@@ -2,7 +2,7 @@
 
 Ported from fishsense-lite@77e8f8e5 services/fishsense-data-processing-
 workflow-worker/src/fishsense_data_processing_workflow_worker/activities/
-predict_headtail_image.py (`predict_headtail_image`). Behaviour is v1's:
+predict_headtail_image.py (`predict_headtail_image`). Behavior is v1's:
 
 * **a GPU-less worker leaves an existing row alone** unless the laser behind
   it was superseded -- rewriting would be identical (a fallback row) or a

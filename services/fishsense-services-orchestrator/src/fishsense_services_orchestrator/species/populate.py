@@ -3,13 +3,13 @@
 Ported from fishsense-lite@77e8f8e5 services/fishsense-api-workflow-worker/src/
 fishsense_api_workflow_worker/activities/
 populate_species_label_studio_project_activity.py (`_select_target_images`,
-`_sentinel_judgements`, `_build_task`). Behaviour is v1's:
+`_sentinel_judgements`, `_build_task`). Behavior is v1's:
 
 * a frame is a target when it carries a valid laser (the catalog's query), has
   no completed species row (in any project, sentinels included -- so a
   completed sentinel takes its frame out for good, which is why such a
-  sentinel is refused as a judgement), and has no live row in THIS project;
-* a sentinel's judgement becomes the task's *prediction*, never an
+  sentinel is refused as a judgment), and has no live row in THIS project;
+* a sentinel's judgment becomes the task's *prediction*, never an
   annotation: an annotation reads as completed human work, and the sync would
   write it back as a labeler's answer.
 
@@ -59,11 +59,11 @@ def select_target_captures(
 def sentinel_judgements(
     species_labels: list[SpeciesLabelRow],
 ) -> dict[uuid.UUID, SpeciesLabelRow]:
-    """Capture -> the sentinel row carrying a pre-existing species judgement.
+    """Capture -> the sentinel row carrying a pre-existing species judgment.
 
     Sentinels are rows with no Label Studio project -- what every preprocess
-    cohort reads as "no label", which lets an import of judgements sit in the
-    database without taking its dives out of the labelling flow. One that
+    cohort reads as "no label", which lets an import of judgments sit in the
+    database without taking its dives out of the labeling flow. One that
     says nothing contributes nothing.
     """
     out: dict[uuid.UUID, SpeciesLabelRow] = {}
@@ -73,7 +73,7 @@ def sentinel_judgements(
         if label.completed or label.superseded:
             # A completed sentinel takes its frame out of population for good
             # (the completed set has no project filter); treating it as "not a
-            # judgement" keeps that from looking like a successful import.
+            # judgment" keeps that from looking like a successful import.
             activity.logger.warning(
                 "capture %s has a %s judgement sentinel; ignoring it as a "
                 "pre-annotation source (a completed sentinel removes the image "
@@ -93,11 +93,11 @@ def build_species_task(
     suggestion: list[dict] | None = None,
 ) -> dict:
     """A Label Studio task: the image under both `image` and `img` (legacy
-    configs use either), and a judgement, if any, as its prediction.
+    configs use either), and a judgment, if any, as its prediction.
 
-    v2: with no judgement, a model's `suggestion` (BioCLIP's, already Label
+    v2: with no judgment, a model's `suggestion` (BioCLIP's, already Label
     Studio `predictions`; `species_predict.labeling`) is the prediction
-    instead. A human's judgement always wins, and neither is ever an
+    instead. A human's judgment always wins, and neither is ever an
     annotation."""
     prediction = build_prediction(judgement) if judgement is not None else None
     predictions = [prediction] if prediction is not None else list(suggestion or [])

@@ -220,7 +220,7 @@ async def test_a_mission_with_a_pre_versioning_prediction_is_refused():
 
 
 async def test_a_mission_with_an_older_detector_version_is_refused():
-    """Explicit v1, not just NULL: the version that got the colour wrong."""
+    """Explicit v1, not just NULL: the version that got the color wrong."""
     result = await _run(_on_line(40, version=1))
 
     assert result.summary.reason == "stale_predictor"
@@ -228,7 +228,7 @@ async def test_a_mission_with_an_older_detector_version_is_refused():
 
 
 async def test_the_whole_mission_is_refused_not_just_the_stale_frames():
-    """A line fitted across two detector behaviours is not a meaningful fit."""
+    """A line fitted across two detector behaviors is not a meaningful fit."""
     predictions = _on_line(40)
     predictions[39] = _prediction(39, (predictions[39].x, predictions[39].y), 1)
 

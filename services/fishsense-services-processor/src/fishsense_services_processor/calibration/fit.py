@@ -204,7 +204,7 @@ def fit_laser(
 
     # Drop observations that disagree with the ray before fitting.
     # `calibrate_laser` is plain least squares, so one badly-placed dot drags
-    # the line -- and because the fit reports the z=0 crossing, a metre or
+    # the line -- and because the fit reports the z=0 crossing, a meter or
     # more behind the observations, a small angular error is levered into a
     # large baseline error. Dive 103's 6.25 cm baseline came from 17
     # otherwise clean observations.

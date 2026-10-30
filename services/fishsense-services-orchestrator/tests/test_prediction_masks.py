@@ -1,11 +1,11 @@
 """Checking a stored SAM mask before it is recorded (contract 12, 0059).
 
 New in v2 (2026-10-21). The processor PUTs each kept mask -- the app's
-``mask_png`` (#230): 8-bit greyscale PNG at the frame -- to a key the
+``mask_png`` (#230): 8-bit grayscale PNG at the frame -- to a key the
 orchestrator presigned, and reports its size and SHA-256. It runs on machines
 we don't own, so before a mask is named against its prediction the
 orchestrator reads it back: the key one of this stage's for this result's
-capture, the bytes the ones reported, the PNG header 8-bit greyscale at the
+capture, the bytes the ones reported, the PNG header 8-bit grayscale at the
 frame. A mask that fails is left unrecorded and deleted; its prediction still
 stands. Review of #232: the masks come back parallel to the results, the
 reads run several at once, and nothing is decompressed.

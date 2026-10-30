@@ -3,7 +3,7 @@ only once nothing is reading it.
 
 Ported from fishsense-lite@77e8f8e5
 services/fishsense-api-workflow-worker/src/fishsense_api_workflow_worker/
-activities/cleanup_raw_bytes_for_dive_activity.py. Behaviour is v1's:
+activities/cleanup_raw_bytes_for_dive_activity.py. Behavior is v1's:
 
 * runs after the processor has written the JPEGs, and drops only the
   reproducible-from-NAS raw scratch; the JPEGs stay (Label Studio presigns

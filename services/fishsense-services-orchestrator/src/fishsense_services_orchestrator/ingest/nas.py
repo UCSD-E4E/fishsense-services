@@ -81,7 +81,7 @@ class NasEntry:
 
     Deliberately minimal: ingest only needs to tell files from directories,
     match `.ORF` by name, and report sizes. Everything else DSM returns is
-    passed over rather than modelled.
+    passed over rather than modeled.
     """
 
     path: str

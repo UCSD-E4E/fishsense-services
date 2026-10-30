@@ -4,7 +4,7 @@ New in v2 (2026-10-21). The mobile app syncs its fish mask as ``mask_u8``:
 uint8, width x height, nonzero = fish, in the pixels of the frame it measured
 (docs/handoff/fishsense-mobile/SYNC.md). Ours are stored the same way, at the
 frame SAM segmented, as the PNG the app's mask is moving to (#230: 8-bit
-greyscale, lossless, nonzero = fish). Each mask is a new key: a
+grayscale, lossless, nonzero = fish). Each mask is a new key: a
 re-run never overwrites a mask an older prediction names.
 """
 

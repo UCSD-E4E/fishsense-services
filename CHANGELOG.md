@@ -84,7 +84,7 @@
 
 ### Features
 
-* **api:** every mission's laser colours in one read (list_mission_laser_colors) ([7743b85](https://github.com/UCSD-E4E/fishsense-services/commit/7743b8566fcbdb9a966c61e1fd1aa80632719a0e))
+* **api:** every mission's laser colors in one read (list_mission_laser_colors) ([7743b85](https://github.com/UCSD-E4E/fishsense-services/commit/7743b8566fcbdb9a966c61e1fd1aa80632719a0e))
 * automatic slate-pose calibration behind a switch (calibration v4, 0078) ([bb2b8d5](https://github.com/UCSD-E4E/fishsense-services/commit/bb2b8d5ea1d9666dfc38c96c64430504a7e04e9b))
 * automatic slate-pose calibration behind a switch (calibration v4, 0078) ([cf5e428](https://github.com/UCSD-E4E/fishsense-services/commit/cf5e428c3b00ce37966c3397b32a0515b81a8fc1))
 
@@ -101,7 +101,7 @@
 
 ### Features
 
-* backfill laser colours for older automatic dots, read off their renders ([c8ed174](https://github.com/UCSD-E4E/fishsense-services/commit/c8ed174b5fc6d217778e431fab65d96b36d460ec))
+* backfill laser colors for older automatic dots, read off their renders ([c8ed174](https://github.com/UCSD-E4E/fishsense-services/commit/c8ed174b5fc6d217778e431fab65d96b36d460ec))
 
 ## [0.65.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.64.0...v0.65.0) (2026-10-26)
 
@@ -171,7 +171,7 @@
 
 ### Features
 
-* keep the automatic dot's laser colour, and show laser colour everywhere ([c6b8ad7](https://github.com/UCSD-E4E/fishsense-services/commit/c6b8ad7d0b42eb56772703ebb0bda240c25c3794))
+* keep the automatic dot's laser color, and show laser color everywhere ([c6b8ad7](https://github.com/UCSD-E4E/fishsense-services/commit/c6b8ad7d0b42eb56772703ebb0bda240c25c3794))
 * laser point and length from fishsense-core, refusing unmeasurable dots (item 5; contract v21, migration 0071) ([a6b832e](https://github.com/UCSD-E4E/fishsense-services/commit/a6b832ed2048a402893dd1e4a303971180ddd631))
 
 ## [0.59.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.59.0...v0.59.1) (2026-10-26)
@@ -229,15 +229,15 @@
 
 ### Features
 
-* laser predictor v3 (fishsense-core 4.3.0's colour rule) ([8aadbe1](https://github.com/UCSD-E4E/fishsense-services/commit/8aadbe1fcea7ee7c383d514daf076c735310f0cb))
-* **processor:** laser colour and reflection split from fishsense-core, laser predictor v3 (items 7-8; migration 0067) ([e766c45](https://github.com/UCSD-E4E/fishsense-services/commit/e766c45003c49d664665dde60344ef1cbfda81ea))
+* laser predictor v3 (fishsense-core 4.3.0's color rule) ([8aadbe1](https://github.com/UCSD-E4E/fishsense-services/commit/8aadbe1fcea7ee7c383d514daf076c735310f0cb))
+* **processor:** laser color and reflection split from fishsense-core, laser predictor v3 (items 7-8; migration 0067) ([e766c45](https://github.com/UCSD-E4E/fishsense-services/commit/e766c45003c49d664665dde60344ef1cbfda81ea))
 
 
 ### Bug Fixes
 
 * **processor:** calibration guards from fishsense-core (item 6) ([4caf9d1](https://github.com/UCSD-E4E/fishsense-services/commit/4caf9d15035f298b2ffa0e978e5075542bf6ec88))
-* **processor:** read the laser colour where the detector found the dot (review of [#352](https://github.com/UCSD-E4E/fishsense-services/issues/352)) ([dc73f77](https://github.com/UCSD-E4E/fishsense-services/commit/dc73f77c9757d007b6a2052ab62a3a64596c98fc))
-* **processor:** v4 finds the template page on the board before ECC, not centred ([b19d086](https://github.com/UCSD-E4E/fishsense-services/commit/b19d086fb751fe7fbd159e5c85b7d310e41cd05f))
+* **processor:** read the laser color where the detector found the dot (review of [#352](https://github.com/UCSD-E4E/fishsense-services/issues/352)) ([dc73f77](https://github.com/UCSD-E4E/fishsense-services/commit/dc73f77c9757d007b6a2052ab62a3a64596c98fc))
+* **processor:** v4 finds the template page on the board before ECC, not centered ([b19d086](https://github.com/UCSD-E4E/fishsense-services/commit/b19d086fb751fe7fbd159e5c85b7d310e41cd05f))
 
 ## [0.55.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.54.1...v0.55.0) (2026-10-24)
 
@@ -575,8 +575,8 @@
 
 ### Features
 
-* **web:** show fish lengths in millimetres ([a89dc78](https://github.com/UCSD-E4E/fishsense-services/commit/a89dc78e673a4897e13da0e98b9279ab9459706a))
-* **web:** show fish lengths in millimetres ([4ecf34d](https://github.com/UCSD-E4E/fishsense-services/commit/4ecf34de8cf64ac68504d5380b8eefcbbbe3d240))
+* **web:** show fish lengths in millimeters ([a89dc78](https://github.com/UCSD-E4E/fishsense-services/commit/a89dc78e673a4897e13da0e98b9279ab9459706a))
+* **web:** show fish lengths in millimeters ([4ecf34d](https://github.com/UCSD-E4E/fishsense-services/commit/4ecf34de8cf64ac68504d5380b8eefcbbbe3d240))
 
 ## [0.27.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.27.0...v0.27.1) (2026-10-21)
 
@@ -1178,7 +1178,7 @@
 * **processor:** head/tail prediction, SAM 3.1 on the GPU role with the Mask R-CNN fallback ([ce9e0b0](https://github.com/UCSD-E4E/fishsense-services/commit/ce9e0b0287a20c4c6090f2349684bcead81d1c0f))
 * **processor:** laser calibration kernels, gates and checkerboard detection ([fac8d4e](https://github.com/UCSD-E4E/fishsense-services/commit/fac8d4e6eed174de527888752a414cdc083b856f))
 * **processor:** laser depth and measure-fish geometry on the light role ([ea3c777](https://github.com/UCSD-E4E/fishsense-services/commit/ea3c7773a4611325be7800e17eef70ccc6eb461d))
-* **processor:** laser-label judgement, the auto-accept gate and remediation planning on the light role ([c7d14d6](https://github.com/UCSD-E4E/fishsense-services/commit/c7d14d6a195ec5329834c619e6828e8ff5f71a1c))
+* **processor:** laser-label judgment, the auto-accept gate and remediation planning on the light role ([c7d14d6](https://github.com/UCSD-E4E/fishsense-services/commit/c7d14d6a195ec5329834c619e6828e8ff5f71a1c))
 * **processor:** model weights from Garage, verified by fishsense-core ([a647551](https://github.com/UCSD-E4E/fishsense-services/commit/a6475512b62eef56b6e682a922198a97fc800866))
 * **processor:** port stage 1's clustering kernel and workflow ([9eaaca9](https://github.com/UCSD-E4E/fishsense-services/commit/9eaaca92645d0ec2f2760d7886e109b6572c57e6))
 * **processor:** read staged frames and write a tenant's JPEGs by the ref it is handed ([e151cb7](https://github.com/UCSD-E4E/fishsense-services/commit/e151cb71fccc76236424b3b9854226b317ecea90))

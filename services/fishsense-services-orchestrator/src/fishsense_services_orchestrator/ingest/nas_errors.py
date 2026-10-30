@@ -6,7 +6,7 @@ Shared classification of Synology FileStation errors into retryable and
 permanent.
 
 Extracted from `stage_raw_bytes_for_mission_activity` when ingest needed the same
-judgement. The rule it encodes is worth stating once: **retry/backoff belongs to
+judgment. The rule it encodes is worth stating once: **retry/backoff belongs to
 the Temporal retry policy on the activity call, never to an inner loop.** An
 inner loop underneath Temporal's outer retry is what produced the
 200×-per-file download storm that tripped the NAS auto-block (krg-infra#501).
@@ -59,7 +59,7 @@ __all__ = [
 def dsm_error_code(exc: BaseException) -> int | None:
     """The FileStation error code: the error's own `.code`, else parsed from a
     message like `"Synology API error <code>"`. Returns None when neither
-    carries one — an unrecognised error is treated as transient, which
+    carries one — an unrecognized error is treated as transient, which
     errs toward retrying rather than toward declaring a dive dead."""
     code = getattr(exc, "code", None)
     if isinstance(code, int):
@@ -77,7 +77,7 @@ def is_nas_not_found(exc: BaseException) -> bool:
 def raise_if_permanent_dsm_error(exc: BaseException, *, context: str) -> None:
     """Convert a missing-path error into a non-retryable `ApplicationError`.
 
-    Returns normally when the error is transient (or unrecognised), leaving the
+    Returns normally when the error is transient (or unrecognized), leaving the
     caller to re-raise so Temporal's policy owns the backoff.
 
     `context` names what was being reached for — a path, a folder — because the

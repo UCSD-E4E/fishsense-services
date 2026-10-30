@@ -471,7 +471,7 @@ async def _labelled_mission(owner_engine, tenant, *, flagged, canonical=True):
     return mission, capture
 
 
-async def test_fully_labelled_mission_is_not_selected_without_a_flag(
+async def test_fully_labeled_mission_is_not_selected_without_a_flag(
     owner_engine, app_engine
 ):
     """The control. If this ever fails the test below proves nothing."""
@@ -625,7 +625,7 @@ async def test_a_capture_says_whether_it_came_from_v1(owner_engine, app_engine):
 class TestFlaggedImages:
     """v1's test_resolvers_honour_needs_reprocess.py / test_reprocess_flag_drains.py."""
 
-    async def test_flagged_image_is_returned_though_it_is_already_labelled(
+    async def test_flagged_image_is_returned_though_it_is_already_labeled(
         self, owner_engine, app_engine
     ):
         lab = await _tenant(owner_engine)
@@ -637,7 +637,7 @@ class TestFlaggedImages:
         captures = (await _inputs(app_engine, lab, mission)).captures
         assert [c.capture_id for c in captures] == [capture]
 
-    async def test_unflagged_labelled_image_is_still_excluded(
+    async def test_unflagged_labeled_image_is_still_excluded(
         self, owner_engine, app_engine
     ):
         lab = await _tenant(owner_engine)
@@ -1138,13 +1138,13 @@ async def test_selects_an_unpredicted_image_with_a_valid_laser(
     ids=["no-coordinates", "incomplete", "superseded"],
 )
 async def test_skips_an_image_with_no_usable_laser(owner_engine, app_engine, laser):
-    """The dot is the crop centre; without one there is nothing to predict on."""
+    """The dot is the crop center; without one there is nothing to predict on."""
     lab = await _tenant(owner_engine)
     mission, _, _ = await _predict_seed(owner_engine, lab, **laser)
     assert await _needing(app_engine, lab, mission) == []
 
 
-async def test_skips_an_image_a_human_already_labelled(owner_engine, app_engine):
+async def test_skips_an_image_a_human_already_labeled(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
     mission, capture, _ = await _predict_seed(owner_engine, lab)
     await _headtail(owner_engine, lab, capture, completed=True)
@@ -1414,9 +1414,7 @@ async def test_a_prediction_naming_another_captures_laser_is_refused(
 # -- the populate cohort (v1's test_headtail_population_cohort.py) -----------------
 
 
-async def test_population_selects_a_predicted_unlabelled_image(
-    owner_engine, app_engine
-):
+async def test_population_selects_a_predicted_unlabeled_image(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
     mission, capture, _ = await _predict_seed(owner_engine, lab)
     await _prediction(owner_engine, lab, capture)
@@ -1438,7 +1436,7 @@ async def test_an_abstention_still_opens_the_gate(owner_engine, app_engine):
     assert await _population(app_engine, lab) == [mission]
 
 
-async def test_drops_out_once_labelling_is_complete(owner_engine, app_engine):
+async def test_drops_out_once_labeling_is_complete(owner_engine, app_engine):
     lab = await _tenant(owner_engine)
     _, capture, _ = await _predict_seed(owner_engine, lab)
     await _prediction(owner_engine, lab, capture)
@@ -1446,7 +1444,7 @@ async def test_drops_out_once_labelling_is_complete(owner_engine, app_engine):
     assert await _population(app_engine, lab) == []
 
 
-async def test_stays_in_the_cohort_while_labelling_is_incomplete(
+async def test_stays_in_the_cohort_while_labeling_is_incomplete(
     owner_engine, app_engine
 ):
     """ "No completed label", not "no row" -- so the idempotent populate

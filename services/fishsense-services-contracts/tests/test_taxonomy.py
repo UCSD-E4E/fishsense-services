@@ -208,7 +208,7 @@ def test_sql_broader_rows_are_not_also_in_the_corpus():
 # Added 2026-08-27. V-Slate 7 was lost during a dive, so it can never be
 # scanned and can never become a `MissionSlate` template row. Before the
 # sentinel, a labeler looking at it was offered only V-Slate 1..4 and had to
-# either pick a wrong neighbour or say nothing -- and a wrong slate produces a
+# either pick a wrong neighbor or say nothing -- and a wrong slate produces a
 # wrong *scale*, which reprojection error is blind to. The sentinel is the
 # honest third answer.
 

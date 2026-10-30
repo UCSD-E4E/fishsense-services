@@ -5,7 +5,7 @@ the tenant's admin role. What these pin beyond that:
 
 * a mission shows its facts: purpose, port and what said so, place, trip;
 * an operator may state a port only where the owner's rules have not: a
-  ``D``-labelled device or the backfill of what was already ingested is fact
+  ``D``-labeled device or the backfill of what was already ingested is fact
   (2026-10-16), and the API will not contradict it;
 * deployments are listed, read with their missions, and created by admins.
 """
@@ -261,7 +261,7 @@ async def test_an_operators_port_can_be_withdrawn(client, tenants, owner_engine)
     )
 
 
-async def test_an_unrecognised_port_is_refused(client, tenants, owner_engine):
+async def test_an_unrecognized_port_is_refused(client, tenants, owner_engine):
     await _mission(owner_engine, tenants["lab"], 7)
 
     response = await client.put(

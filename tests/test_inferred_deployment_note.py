@@ -1,4 +1,4 @@
-"""The web recognises the note ``infer-deployments`` leaves on each trip it makes.
+"""The web recognizes the note ``infer-deployments`` leaves on each trip it makes.
 
 Data's pages say how a deployment was made (docs/design/README.md: an inferred
 trip never passes for a planned one); the web reads it from the note the API's

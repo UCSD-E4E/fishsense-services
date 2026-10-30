@@ -53,15 +53,15 @@ DeploymentNumber = Annotated[int, Path(ge=1)]
 class ColourCountsView(BaseModel):
     red: int
     green: int
-    #: A dot with no colour: a label without one, or an abstaining reading.
+    #: A dot with no color: a label without one, or an abstaining reading.
     unread: int
 
 
 class LaserColoursView(BaseModel):
-    """Frames by laser colour, per source; counts, never a verdict, so a
+    """Frames by laser color, per source; counts, never a verdict, so a
     mission whose sources disagree shows it (`laser_colour_store`)."""
 
-    #: Labellers' choice, on live labels with a dot.
+    #: Labelers' choice, on live labels with a dot.
     labels: ColourCountsView
     #: The human path's laser stage, read off the dot.
     predictions: ColourCountsView

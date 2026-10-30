@@ -196,7 +196,7 @@ async def test_activity_no_groups_is_not_a_skip():
 
 
 def _sentinel(n: int, *, grouping: str | None = None):
-    """An imported judgement: carries a species, belongs to no LS project."""
+    """An imported judgment: carries a species, belongs to no LS project."""
     return species(
         n,
         project=None,

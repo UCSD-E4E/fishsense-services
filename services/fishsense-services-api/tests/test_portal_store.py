@@ -164,7 +164,7 @@ async def _seed_three_projects(seed):
 
 
 async def test_omitted_gated_is_unchanged(seed, app_engine, lab):
-    """Default behaviour must not move -- every project still surfaces."""
+    """Default behavior must not move -- every project still surfaces."""
     await _seed_three_projects(seed)
     assert await _ids(app_engine, lab) == [FULLY_GATED, PARTIALLY_GATED, UNGATED]
 

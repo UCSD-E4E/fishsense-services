@@ -1,9 +1,9 @@
-"""The laser-colour backfill (contract v25, the owner, 2026-10-26).
+"""The laser-color backfill (contract v25, the owner, 2026-10-26).
 
 A page of a mission's automatic dots, each with the render its prediction was
 made on; one whose render is gone is counted and left out. Each page is read
 on the light processor and its readings recorded: compared with the
-labellers' and the live kernel's colours, and written only with ``apply``.
+labelers' and the live kernel's colors, and written only with ``apply``.
 The run goes on past a mission that fails, and its result is the report:
 every mission's counts, and their totals."""
 

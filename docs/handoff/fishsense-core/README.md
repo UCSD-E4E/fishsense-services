@@ -7,10 +7,10 @@
 
 ## What we found
 
-We ran services' own detector (`checkerboard/detection.py`, the one production runs through v0.55.0, on OpenCV 5) and core 4.3.0's `detect_checkerboard` over every checkerboard-labelled frame in production:
+We ran services' own detector (`checkerboard/detection.py`, the one production runs through v0.55.0, on OpenCV 5) and core 4.3.0's `detect_checkerboard` over every checkerboard-labeled frame in production:
 - 745 rendered frames, from the 17 missions that have a calibration target;
 - all on the E4E board: 10 × 14 interior corners, 42.17 mm pitch;
-- read-only. The renders are rectified JPEGs, the same frames the labellers saw.
+- read-only. The renders are rectified JPEGs, the same frames the labelers saw.
 
 | | Frames |
 |---|---|
@@ -22,7 +22,7 @@ We ran services' own detector (`checkerboard/detection.py`, the one production r
 
 The 32 frames only services' detector accepts fall into three groups.
 
-**1. Correct refusals: 3 frames. Keep this behaviour.**
+**1. Correct refusals: 3 frames. Keep this behavior.**
 - Mission 522, capture 134474: services' detector returns a 7 × 10 grid that takes **every other column**. Each drawn cell is two squares wide and one tall. `checker_parity` scores it 0.133 and core refuses it. This is the 2x scale error #98 describes, found in real production data.
 - Mission 499, capture 132470, and mission 512, capture 133460: junk 3 × 3 grids, with a worst corner at 9–11 % of the spacing.
 

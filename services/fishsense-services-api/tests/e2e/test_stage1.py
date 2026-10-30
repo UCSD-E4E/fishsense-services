@@ -24,7 +24,7 @@ T0 = datetime(2024, 8, 21, 8, 0, tzinfo=UTC)
 
 
 def _seed_a_mission_ready_for_clustering(stack) -> tuple[uuid.UUID, list[set]]:
-    """Two bursts of three frames, ten minutes apart, all laser-labelled."""
+    """Two bursts of three frames, ten minutes apart, all laser-labeled."""
     slug = stack.grant(ORCHESTRATOR)
     bursts: list[set] = [set(), set()]
     with stack.owner_engine.begin() as conn:

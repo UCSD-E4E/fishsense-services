@@ -23,10 +23,10 @@ it working.
 
 | Ask | Since | Where | Status |
 |---|---|---|---|
-| **Send the fish mask as a PNG** (role `mask_png`): 8-bit greyscale, lossless, the same width × height as the mask geometry, nonzero = fish | 2026-10-21 | "Coming from the server" below | **Proposed; don't send it yet.** The server doesn't accept `mask_png` until the change below lands. Keep sending `mask_u8` until then. |
+| **Send the fish mask as a PNG** (role `mask_png`): 8-bit grayscale, lossless, the same width × height as the mask geometry, nonzero = fish | 2026-10-21 | "Coming from the server" below | **Proposed; don't send it yet.** The server doesn't accept `mask_png` until the change below lands. Keep sending `mask_u8` until then. |
 | **Send `time_zone` with each commit**, the IANA zone the phone was in (`TimeZone.current.identifier`) | 2026-10-21 | [SYNC.md §5](SYNC.md#5-api-reference) | **Open.** Optional, but without it a mission's day is taken in UTC, so an evening in San Diego is named for the next day. A zone the server doesn't know is refused (422). |
-| **Show lengths in whole millimetres** (`424 mm`) | 2026-10-21 | [DESIGN.md §4](DESIGN.md#4-type-and-the-length) | **Open.** Display only: the sync payload stays in metres (`length_m`). |
-| **Adopt the shared design language**: tabs Camera · Fish · Data · Settings, colour tokens, the blue/orange overlay, type | 2026-10-20 | [DESIGN.md](DESIGN.md) | **Open.** Build the Data tab grouped by day for now (see "Coming from the server"). |
+| **Show lengths in whole millimeters** (`424 mm`) | 2026-10-21 | [DESIGN.md §4](DESIGN.md#4-type-and-the-length) | **Open.** Display only: the sync payload stays in meters (`length_m`). |
+| **Adopt the shared design language**: tabs Camera · Fish · Data · Settings, color tokens, the blue/orange overlay, type | 2026-10-20 | [DESIGN.md](DESIGN.md) | **Open.** Build the Data tab grouped by day for now (see "Coming from the server"). |
 | Sign-in for sync (Authentik, code + PKCE); capturing works signed out | 2026-10-14 | [SYNC.md §1](SYNC.md#1-sign-in-required-to-sync) | Built in app 1.1.0 (mobile #69, #73). **Not seen in production:** no capture had synced as of 2026-10-21. |
 | Database v8: capture UUID, capturer, install id, versions, row strides, pose, lossless frame, measurement versions | 2026-10-11 | [SYNC.md §2](SYNC.md#2-what-to-save-with-each-capture-database-v8) | Built in app 1.1.0 (mobile #68). Issues #56, #57 and #59 are still open in fishsense-mobile, so close them if #68 settled them. **Not seen in production.** |
 | Sync: upload, commit, measurement versions | 2026-10-11 | [SYNC.md §4](SYNC.md#4-how-to-sync-one-capture) | Built in app 1.1.0 (mobile #72). **Not seen in production.** Please tell us when the first real sync is due, and we'll watch it arrive. |
@@ -61,8 +61,8 @@ Newest first. Versions are fishsense-services releases.
   and the place the phone named (else `Mobile`). On the web a phone mission shows
   "Phone" as its camera and has no camera port. Nothing changes in the sync
   protocol; the commit gains the optional `time_zone` (above).
-- **2026-10-21 (v0.28.0): lengths show in millimetres on the web.** Display only.
-  The API and the sync payload stay in metres.
+- **2026-10-21 (v0.28.0): lengths show in millimeters on the web.** Display only.
+  The API and the sync payload stay in meters.
 - **2026-10-20: one design language for the app and the web** ([DESIGN.md](DESIGN.md)).
 - **2026-10-16 (v0.9.0): the server names places the app couldn't.** When
   `location.place_name` is null, the server derives a name from the coordinates on
@@ -83,7 +83,7 @@ Newest first. Versions are fishsense-services releases.
   the web's fish page needs to draw the mask over the photo.
   - The server can't compress the mask after upload: it keeps every file byte-for-byte
     under the SHA-256 the app computed. So the PNG is made on the phone.
-  - **The contract:** an 8-bit greyscale PNG, exactly `mask.width` × `mask.height`
+  - **The contract:** an 8-bit grayscale PNG, exactly `mask.width` × `mask.height`
     pixels, nonzero on the fish, declared and committed like any other file. Its
     SHA-256 and size are those of the PNG bytes. The server will check its dimensions
     against the mask geometry, as it checks `mask_u8`'s size today.

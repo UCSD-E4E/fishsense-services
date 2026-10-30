@@ -69,7 +69,7 @@ async def test_returns_empty_when_no_images():
 #
 # 2. Even on a dive that clusters well, noise frames vanished. Prod dive 5 has
 #    17 canonical frames and 16 in clusters, so one frame had no PREDICTION
-#    cluster, never entered stage 2, and was invisible to species labelling.
+#    cluster, never entered stage 2, and was invisible to species labeling.
 #
 # The fix is to treat a noise point as its own singleton cluster. A PREDICTION
 # cluster is a *prediction* that labelers correct in stage 6.1, and "this frame
@@ -105,7 +105,7 @@ async def test_uniform_spacing_at_every_small_n(n):
 async def test_a_noise_frame_becomes_its_own_cluster_rather_than_vanishing():
     """The prod dive-5 shape: a dense burst plus one stray frame far away. The
     stray must survive as a singleton -- before, it was dropped and never
-    reached species labelling."""
+    reached species labeling."""
     base = datetime(2026, 5, 5, 10, 0, 0, tzinfo=timezone.utc)
     burst = [_img(i, base + timedelta(seconds=i)) for i in range(1, 8)]
     stray = _img(99, base + timedelta(hours=3))

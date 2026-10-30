@@ -140,9 +140,9 @@ async def evaluate_laser_auto_accept(
 
     # Refuse the WHOLE dive if ANY prediction is not from the current detector
     # (v1's rule and reasons): stage v1 and every pre-versioning row hardcoded
-    # "Red Laser", and auto-accepting one writes a possibly-wrong colour with no
+    # "Red Laser", and auto-accepting one writes a possibly-wrong color with no
     # human in the loop. Whole dive, because a line fitted across two detector
-    # behaviours is not a meaningful fit.
+    # behaviors is not a meaningful fit.
     stale = [p for p in predictions if p.predictor_version != LASER_PREDICTOR_VERSION]
     if stale:
         activity.logger.warning(
@@ -231,7 +231,7 @@ async def validate_laser_labels_for_mission(
 ) -> LaserValidationResult:
     # pylint: disable=too-many-return-statements
     #   v1's flat guard -> log -> return per verdict.
-    """One judgement of the dive's FULL population (superseded included), in
+    """One judgment of the dive's FULL population (superseded included), in
     (capture number, label number) order. Returns the line whenever one was
     fitted, and the labels to supersede: flagged AND still live, each with the
     rule that took it. Never a revival -- that is the reviewed remediation

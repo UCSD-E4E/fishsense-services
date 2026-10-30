@@ -84,7 +84,7 @@ def test_keypoints_are_percentages_of_the_rectified_frame():
     values = [item["value"] for item in prediction["result"]]
 
     assert (values[0]["x"], values[0]["y"]) == (0.0, 0.0)
-    # (200, 150) of a 400x300 frame is dead centre.
+    # (200, 150) of a 400x300 frame is dead center.
     assert (values[4]["x"], values[4]["y"]) == (50.0, 50.0)
     # (400, 0) is the right edge, top.
     assert (values[2]["x"], values[2]["y"]) == (100.0, 0.0)
@@ -255,7 +255,7 @@ async def _populate(renders) -> int:
 
 async def test_the_activity_returns_a_count_not_the_result_tuple(monkeypatch):
     """`import_tasks_and_record_labels` returns an `ImportResult`; returned
-    as-is it would serialise as `[recorded, deferred]` with no error."""
+    as-is it would serialize as `[recorded, deferred]` with no error."""
     published: list[int] = []
     _patch_import(monkeypatch, ImportResult(recorded=3, deferred=0), published)
 

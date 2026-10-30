@@ -301,7 +301,7 @@ async def test_transient_502_propagates_without_inner_retry(s3):
 
 
 async def test_permanent_408_raises_non_retryable_application_error(s3):
-    """Surfaced un-wrapped from the TaskGroup, so Temporal honours it."""
+    """Surfaced un-wrapped from the TaskGroup, so Temporal honors it."""
     nas = _Nas(error=DSMError("Synology API error 408"))
 
     with pytest.raises(ApplicationError) as excinfo:

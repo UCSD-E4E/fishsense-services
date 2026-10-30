@@ -1,17 +1,17 @@
 """Stage 9 and the dive-slate project, fed by the slate detector too.
 
 New in v2. Until now a frame reached a dive's slate project only when a
-labeller answered its species task `Slate, Laser on slate`
+labeler answered its species task `Slate, Laser on slate`
 (tests/test_slate_store.py, v1's path, unchanged). The slate detector
 (2026-10-03_slate_detector@95a77d95; `slate_presence_store`) finds slate
-frames in dives nobody labelled, and **a dive with no slate labels** has its
+frames in dives nobody labeled, and **a dive with no slate labels** has its
 detector frames (current P(slate) >= 0.5) drawn and queued as well, so slate
 calibration needs no frame-hunting. Pinned here:
 
 * "no slate labels" means no person's slate work in the dive: no live species
   slate marker on a canonical frame, and no live slate label in a real project
   that the detector did not queue. So it stays true while the detector's own
-  rows are labelled, and goes false for good once a person marks a slate
+  rows are labeled, and goes false for good once a person marks a slate
   (the marker path then owns the dive);
 * a detector frame follows a marked frame's rules from there (canonical, no
   live slate label in a real project for stage 9, none completed for
@@ -80,7 +80,7 @@ async def _candidates(app_engine, lab, mission_id):
 # ---------- stage 9: the cohort ----------
 
 
-async def test_a_detected_slate_frame_in_an_unlabelled_mission_selects_it(
+async def test_a_detected_slate_frame_in_an_unlabeled_mission_selects_it(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)
@@ -191,7 +191,7 @@ async def test_a_superseded_marker_does_not_hand_the_mission_to_a_person(
 async def test_the_detectors_own_rows_do_not_close_the_mission(
     owner_engine, app_engine
 ):
-    """A queued frame is labelled; the dive's other detected frame is still
+    """A queued frame is labeled; the dive's other detected frame is still
     work: its rows are the detector's, not a person's slate labels."""
     lab = await tenant(owner_engine)
     only = await _slate_mission(owner_engine, lab)

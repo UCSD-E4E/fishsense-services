@@ -88,7 +88,7 @@ def test_writing_nothing_is_opt_in():
 
 
 def test_the_request_carries_no_verify_existing_flag():
-    """Removed in v1 (#618), not renamed: declared and honoured by no code, so
+    """Removed in v1 (#618), not renamed: declared and honored by no code, so
     setting it produced a normal ingest and no warning. Pydantic ignores
     unknown keys, so assert the field is genuinely gone."""
     stale = IngestMissionRequest(

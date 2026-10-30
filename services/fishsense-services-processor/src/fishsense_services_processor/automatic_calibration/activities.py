@@ -30,9 +30,9 @@ laser where the beam meets the slate (a reflection, or the detector on the
 slate's pattern), and its range is wrong. Session 77 had 33 of its 60 detector
 dots 35-41 px off its line, in one run of frames, and fitted with them its
 vanishing point moved from the paper's -2069 px to -3732 px, standard error
-1510 px; without them, on cscw's features and the labelled line, -2069 px,
+1510 px; without them, on cscw's features and the labeled line, -2069 px,
 0.8 px (77 itself is refused below). cscw never met this: its fits used human
-dots on human-labelled slate frames. The dots are gated on the dive's line
+dots on human-labeled slate frames. The dots are gated on the dive's line
 (above), or, with none, the RANSAC line through the frames' own dots
 (`fit_dive_line`'s 4 px inliers: the most dots that agree) -- which gates
 only: the fit is then given no line and takes cscw's fallback, the direction

@@ -46,7 +46,7 @@ def expand_box(
     box: Iterable[float], padding: float, width: int, height: int, min_size: int = 1
 ) -> list[float]:
     """coral-gardeners' `expand_box_xyxy`: grow by `padding` of the box's size
-    on every side, then to at least `min_size` about its centre, then clip."""
+    on every side, then to at least `min_size` about its center, then clip."""
     x1, y1, x2, y2 = map(float, box)
     pad_x = max(1.0, x2 - x1) * padding
     pad_y = max(1.0, y2 - y1) * padding

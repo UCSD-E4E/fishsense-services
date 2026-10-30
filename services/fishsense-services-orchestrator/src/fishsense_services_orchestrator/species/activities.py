@@ -33,7 +33,7 @@ v2 changes:
 * new in v2, **off by default**: with the species pre-annotation stage
   enabled (`species_predict.settings`), populate seeds a task with the
   capture's BioCLIP suggestion as its prediction -- never an annotation, and
-  never over a human's imported judgement -- and points the project's
+  never over a human's imported judgment -- and points the project's
   `model_version` at the tag most of its tasks carry.
 """
 
@@ -478,7 +478,7 @@ class SpeciesActivities:
 
         # Supersede pass: retire open rows of *other* projects, never this
         # project's own, and never a sentinel -- it is the pre-annotation
-        # source, and a dead-lettered judgement is lost for any frame this
+        # source, and a dead-lettered judgment is lost for any frame this
         # run deferred.
         stale = [
             label.id
@@ -652,7 +652,7 @@ class SpeciesActivities:
     async def update_mission_image_groups(
         self, target: SpeciesTarget
     ) -> UpdateMissionImageGroupsResult:
-        """Materialise the dive's label-studio clusters from its species
+        """Materialize the dive's label-studio clusters from its species
         labels, all or nothing; refuse if it already has some."""
         facts = await self._catalog.species_grouping_facts(
             target.tenant_id, target.mission_id

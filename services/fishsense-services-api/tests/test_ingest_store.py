@@ -438,7 +438,7 @@ async def test_the_catalog_writes_a_mission_through_the_commit_protocol(
 async def test_the_catalog_rechecks_membership_on_every_tenant_call(
     owner_engine, app_engine, seed_memberships
 ):
-    """A tenant id from preflight is not a standing licence: an ingest that
+    """A tenant id from preflight is not a standing license: an ingest that
     loses its membership mid-flight stops at its next call, rather than
     finishing on the strength of an earlier check."""
     tenants = await seed_memberships(

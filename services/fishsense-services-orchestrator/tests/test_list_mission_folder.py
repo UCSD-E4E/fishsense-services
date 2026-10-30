@@ -6,7 +6,7 @@ harness changed: v2 activities are methods of `IngestActivities`, which is
 given its NAS settings and client factory instead of reading globals, and a
 request names its tenant.
 
-The behaviour under test is almost entirely about what ingest *refuses* to do.
+The behavior under test is almost entirely about what ingest *refuses* to do.
 
 **One request means one dive, and a dive is exactly one directory.** That is
 not a simplification: spider walked the tree recursively but then assigned

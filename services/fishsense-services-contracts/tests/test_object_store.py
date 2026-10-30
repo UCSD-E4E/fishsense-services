@@ -3,9 +3,9 @@ reference the orchestrator hands the processor.
 
 Ported from fishsense-lite@77e8f8e5 libs/fishsense-shared/tests/
 test_object_store.py (the settings-to-client half: `open_client`'s bucket
-defaults and prefix normalisation). v1 read a Dynaconf ``[object_store]``
-section and normalised it when a client was built; v2 reads
-``FISHSENSE_OBJECT_STORE_*`` and normalises it once, at startup. v1's rules,
+defaults and prefix normalization). v1 read a Dynaconf ``[object_store]``
+section and normalized it when a client was built; v2 reads
+``FISHSENSE_OBJECT_STORE_*`` and normalizes it once, at startup. v1's rules,
 kept:
 
 * ``labels_bucket`` falls back to ``bucket``, so a single-bucket deployment
@@ -119,7 +119,7 @@ def test_a_single_bucket_setup_says_so_with_an_empty_legacy_prefix(env):
     assert ObjectStoreConnection().legacy_labels_prefix == ""
 
 
-def test_v1s_production_buckets_are_honoured(env):
+def test_v1s_production_buckets_are_honored(env):
     env.setenv("FISHSENSE_OBJECT_STORE_LABELS_BUCKET", "labels-fishsense-lite")
     settings = ObjectStoreConnection()
 
@@ -132,7 +132,7 @@ def test_v1s_production_buckets_are_honoured(env):
     ("value", "expected"),
     [("", ""), ("/fishsense-lite/", "fishsense-lite"), ("a/b/", "a/b")],
 )
-def test_prefixes_are_normalised_so_no_key_has_a_double_slash(
+def test_prefixes_are_normalized_so_no_key_has_a_double_slash(
     env, field, value, expected
 ):
     env.setenv(f"FISHSENSE_OBJECT_STORE_{field.upper()}", value)

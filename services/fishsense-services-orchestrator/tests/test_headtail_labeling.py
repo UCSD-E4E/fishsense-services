@@ -63,7 +63,7 @@ def _prediction(
 # -- the pre-annotation (v1's test_headtail_populate_predictions.py) ---------------
 
 
-def test_emits_two_keypoints_labelled_snout_and_fork():
+def test_emits_two_keypoints_labeled_snout_and_fork():
     out = prediction_annotations(_prediction())
     assert len(out) == 1
     results = out[0]["result"]

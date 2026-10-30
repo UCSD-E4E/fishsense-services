@@ -6,7 +6,7 @@ predict_laser_image.py. Runs fishsense-core's `LaserDetector` on one frame and
 returns the predicted dot in rectified pixels -- the space labelers place laser
 labels -- so it can seed the laser Label Studio task as a pre-annotation.
 
-Behaviour is v1's:
+Behavior is v1's:
 
 * the detector loads once per process, under a lock (double-checked): on a
   cold pod the first batch of activities enters the lazy init together, and
@@ -14,7 +14,7 @@ Behaviour is v1's:
 * `LinearRawImage` (linear + Bayer excess, what the 6-channel model was
   trained on), the dot returned in rectified pixels with the dive's
   intrinsics;
-* the colour is read off the dot while the decoded frame is in hand -- at the
+* the color is read off the dot while the decoded frame is in hand -- at the
   *sensor* point, because the frame is not rectified (the two are up to
   ~48 px apart near the laser region);
 * a dot outside the expected-laser region is dropped (`rejected_out_of_region`),
@@ -33,7 +33,7 @@ v2 changes:
 * the raw frame is an `ObjectRef`, streamed to a temporary file;
 * the checkpoint recorded is core's canonical name for it (resolved by
   content), not a path's basename;
-* **the colour rule is fishsense-core's** (`fishsense_core.laser_color`,
+* **the color rule is fishsense-core's** (`fishsense_core.laser_color`,
   core #94, from 4.3.0): `classify_laser_color`. Services carried its own
   copy, ported verbatim from fishsense-lite@77e8f8e5, through v0.55.0. Core's copy departs from it on purpose in two places: a
   saturated dot's margin is scaled by its brightest *usable* pixel, not the
@@ -45,19 +45,19 @@ v2 changes:
   (5 right, 1 wrong). `LASER_PREDICTOR_VERSION` was at first left at 2 for
   it (2026-10-23: the version gates re-prediction and the auto-accept gate's
   staleness check for the whole stage, the dot itself is unchanged, and
-  colour is taken as a dive-level majority). The colour rule is one of the
+  color is taken as a dive-level majority). The color rule is one of the
   version's inputs, though, and the owner approved the bump: it is 3 from
-  2026-10-24, so the open frames of missions still being labelled are
+  2026-10-24, so the open frames of missions still being labeled are
   re-predicted and re-judged under core's rule;
 * **the dot is predicted in sensor pixels and rectified once** (review of
   #352). v1 asked the detector for rectified output and mapped the point back
-  to the sensor to read the colour; the inverse runs in float64 where the
-  forward map runs in float32, so the colour was read a fraction of a pixel
-  off the dot. Now the colour is read at the detector's own point and the
+  to the sensor to read the color; the inverse runs in float64 where the
+  forward map runs in float32, so the color was read a fraction of a pixel
+  off the dot. Now the color is read at the detector's own point and the
   stored point is `fishsense_core.laser.rectify_prediction` of it, the call
   `predict(rectify_output=True)` makes itself, so stored points are unchanged;
 * **a non-finite dot is a non-detection.** A NaN passes `is not None`; v1's
-  colour code raised on it, and it would otherwise be rectified, gated and
+  color code raised on it, and it would otherwise be rectified, gated and
   stored.
 * **weights that cannot load are final** (2026-10-24): settings missing,
   bytes that aren't the pinned file, an object not in the bucket, or no
@@ -151,7 +151,7 @@ def _predict_from_raw(
     wavelength: str | None,
 ) -> Any:
     """Off-loop CPU/GPU work: decode to a `LinearRawImage`, run the detector
-    in sensor pixels, read the colour there, and rectify the dot.
+    in sensor pixels, read the color there, and rectify the dot.
 
     Returns `(prediction, width, height, color, color_margin, checkpoint)`.
     `cv2.undistort` preserves the image size, so the rectified dims equal the

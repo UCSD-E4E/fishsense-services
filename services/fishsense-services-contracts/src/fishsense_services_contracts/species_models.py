@@ -1,7 +1,7 @@
 """BioCLIP with fish-model classes, read-only (v20, owner 2026-10-23).
 
 BioCLIP's closed set is the species config's "Fish" leaves, so a plastic fish
-model is always named as some real species (2,591 human-labelled model frames:
+model is always named as some real species (2,591 human-labeled model frames:
 mutton snapper 1,299, goliath grouper 266, ...). This replay scores each
 automatic frame's crop twice -- against that set alone (the control: what
 production answers) and with the "Fish Model" leaves added, each by prompts of

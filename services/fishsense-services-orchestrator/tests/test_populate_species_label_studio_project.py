@@ -277,16 +277,16 @@ async def test_publishes_a_complete_project_whose_tasks_were_all_imported_before
     sdk.projects.update.assert_called_once_with(id=70, is_published=True)
 
 
-# --- pre-annotation from stored judgements ----------------------------------
+# --- pre-annotation from stored judgments ----------------------------------
 
 
 def _judgement(n: int, content: str, **extra):
-    """A sentinel row (no project) carrying a species judgement — what a bulk
-    import of hand-labelled work looks like."""
+    """A sentinel row (no project) carrying a species judgment — what a bulk
+    import of hand-labeled work looks like."""
     return species(n, project=None, content_of_image=content, **extra)
 
 
-def test_build_task_carries_a_pre_annotation_when_a_judgement_exists():
+def test_build_task_carries_a_pre_annotation_when_a_judgment_exists():
     judgement = _judgement(
         7, "Fish, Hogfish (Lachnolaimus maximus)", fish_measurable_category="no"
     )
@@ -302,7 +302,7 @@ def test_build_task_carries_a_pre_annotation_when_a_judgement_exists():
     assert not task["annotations"]
 
 
-def test_sentinel_judgements_ignores_rows_belonging_to_a_real_project():
+def test_sentinel_judgments_ignores_rows_belonging_to_a_real_project():
     """A row with a project id is a labeler's own row, not an import. Feeding it
     back as a prediction would show a labeler their own answer as a suggestion."""
     labels = [
@@ -311,13 +311,13 @@ def test_sentinel_judgements_ignores_rows_belonging_to_a_real_project():
     assert not sut.sentinel_judgements(labels)
 
 
-def test_sentinel_judgements_ignores_a_sentinel_that_says_nothing():
+def test_sentinel_judgments_ignores_a_sentinel_that_says_nothing():
     """Prod carries ~2,000 legacy NULL-project sentinels with no species set.
     They must stay inert rather than producing empty predictions."""
     assert not sut.sentinel_judgements([species(5, project=None)])
 
 
-def test_sentinel_judgements_keys_by_image():
+def test_sentinel_judgments_keys_by_image():
     labels = [
         _judgement(5, "Fish, Hogfish (Lachnolaimus maximus)"),
         _judgement(6, "Fish, Grey Snapper (Lutjanus griseus)"),
@@ -328,9 +328,9 @@ def test_sentinel_judgements_keys_by_image():
     assert found[capture(6)].content_of_image == "Fish, Grey Snapper (Lutjanus griseus)"
 
 
-def test_a_stored_judgement_does_not_take_the_image_out_of_population():
+def test_a_stored_judgment_does_not_take_the_image_out_of_population():
     """The property that makes the whole approach safe: only a *non-sentinel*
-    row drops an image, so a judgement leaves its frame in the labelling
+    row drops an image, so a judgment leaves its frame in the labeling
     flow."""
     judgements = [_judgement(5, "Fish, Hogfish (Lachnolaimus maximus)")]
 
@@ -339,9 +339,9 @@ def test_a_stored_judgement_does_not_take_the_image_out_of_population():
     assert [c.capture_id for c in selected] == [capture(5)]
 
 
-async def test_the_supersede_pass_leaves_judgement_sentinels_alone():
+async def test_the_supersede_pass_leaves_judgment_sentinels_alone():
     """A sentinel's NULL project is not equal to the target, so v1's pass fell
-    through and dead-lettered the judgement the very run that read it."""
+    through and dead-lettered the judgment the very run that read it."""
     judgement = _judgement(1, "Fish, Hogfish (Lachnolaimus maximus)")
     sdk = FakeSdk([3001])
 
@@ -355,10 +355,10 @@ async def test_the_supersede_pass_leaves_judgement_sentinels_alone():
     assert sdk.imported[0]["predictions"][0]["model_version"].startswith("species")
 
 
-def test_a_completed_judgement_sentinel_is_refused_rather_than_honoured():
+def test_a_completed_judgment_sentinel_is_refused_rather_than_honored():
     """`completed` on a sentinel takes its image out of population for good
     (the completed-id set has no project filter), so it is not treated as a
-    judgement."""
+    judgment."""
     completed = with_(
         _judgement(5, "Fish, Hogfish (Lachnolaimus maximus)"), completed=True
     )

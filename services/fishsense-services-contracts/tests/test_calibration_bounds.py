@@ -9,7 +9,7 @@ read it, and the API's SQL function ``plausible_laser_baseline`` (migration
 
 The baseline is the offset between camera and laser on one rig — hardware, not
 a property of a dive. Over all 35 stored calibrations its interquartile range
-is 9.99-10.45 cm, half a centimetre across both producers, every camera and two
+is 9.99-10.45 cm, half a centimeter across both producers, every camera and two
 years. Eight fits sit outside 9.7-14.5 cm and back 663 of 3,104 measurements at
 -75% to +45% error, and two more (8.90, 9.51 cm) hide a -14 to -18 % close-range
 error behind a flat-looking median.
@@ -95,7 +95,7 @@ def test_refuses_the_baselines_that_produced_bad_lengths(baseline_cm):
 
 
 def test_a_zero_baseline_is_not_plausible():
-    """A laser at the camera centre is not a rig, it is a failed fit."""
+    """A laser at the camera center is not a rig, it is a failed fit."""
     assert not is_plausible_baseline([0.0, 0.0, 0.0])
 
 
@@ -104,7 +104,7 @@ def test_the_bounds_are_inclusive_at_the_edges():
     assert is_plausible_baseline([MAX_BASELINE_M, 0.0])
 
 
-def test_overrides_are_honoured():
+def test_overrides_are_honored():
     """So a caller can tighten for an experiment without editing the module."""
     assert not is_plausible_baseline(
         [0.104, 0.0], min_baseline_m=0.11, max_baseline_m=0.12

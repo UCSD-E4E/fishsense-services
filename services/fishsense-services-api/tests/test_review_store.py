@@ -465,7 +465,7 @@ async def test_a_reject_of_the_result_alone_keeps_a_label_studio_label(
     lab, people, frame, app_engine, owner_engine
 ):
     """A wrong mask or fish, or a wrong dot, says the automatic result is
-    wrong: it says nothing of a labeller's points."""
+    wrong: it says nothing of a labeler's points."""
     for reason in ("bad_mask", "wrong_fish"):
         await _review(app_engine, lab, capture_id=frame[0], reviewer_id=people[EXPERT],
                       kind="head_tail", action="reject", reason=reason)  # fmt: skip

@@ -4,11 +4,11 @@ Ported from fishsense-lite@77e8f8e5 services/fishsense-data-processing-
 workflow-worker/tests/test_laser_dive_judgement.py. Names, bodies and reasons
 are v1's; v2 adaptation: labels are `LaserLabelRow`s, whose `number` and
 `capture_number` are v1's label and image ids for a migrated row, so the ids
-the judgement speaks in are numbers.
+the judgment speaks in are numbers.
 
 Two callers act on it and must never disagree: the hourly validator, which
 supersedes what it flags, and the remediation tool, which revives superseded
-labels the same judgement keeps. A dive too small to fit, a line that is not
+labels the same judgment keeps. A dive too small to fit, a line that is not
 confident, a reflection split and a refused (>50%) fit all flag nothing -- and
 none of them is a verdict that the labels are good.
 """
@@ -40,14 +40,14 @@ def test_a_clean_mission_with_nothing_to_flag_is_still_judged():
     assert judgement.flagged_ids == set()
 
 
-def test_too_few_positives_is_not_a_judgement():
+def test_too_few_positives_is_not_a_judgment():
     judgement = judge_mission(prod_like_mission(n=4), calibration_image_ids=set())
 
     assert not judgement.judged
     assert judgement.status == "too_few"
 
 
-def test_a_line_that_is_not_confident_is_not_a_judgement():
+def test_a_line_that_is_not_confident_is_not_a_judgment():
     """Twelve dots on two distinct pixels: core 4.1.0 gives a line whose
     inliers sit on fewer than 3 distinct pixels a confidence of 0."""
     dots = [(100.0, 100.0)] * 6 + [(200.0, 140.0)] * 6
@@ -60,7 +60,7 @@ def test_a_line_that_is_not_confident_is_not_a_judgement():
     assert judgement.flagged_ids == set()
 
 
-def test_a_reflection_split_is_not_a_judgement():
+def test_a_reflection_split_is_not_a_judgment():
     judgement = judge_mission(reflection_mission(), calibration_image_ids=set())
 
     assert not judgement.judged
@@ -68,7 +68,7 @@ def test_a_reflection_split_is_not_a_judgement():
     assert judgement.reflection is not None
 
 
-def test_the_fraction_gate_is_not_a_judgement(monkeypatch):
+def test_the_fraction_gate_is_not_a_judgment(monkeypatch):
     from fishsense_services_processor.laser_validation import judgement as sut
 
     def flags_sixty_percent(xy, _fit, **_kwargs):

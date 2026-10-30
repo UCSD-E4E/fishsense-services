@@ -8,7 +8,7 @@ only, so a suggestion nobody confirmed writes nothing.
 
 The prediction is a result on the species `<Taxonomy name="species"
 toName="image">`, whose value is a path: `["Fish", "Hogfish (Lachnolaimus
-maximus)"]` (the shape `species.preannotation` seeds a sentinel's judgement
+maximus)"]` (the shape `species.preannotation` seeds a sentinel's judgment
 in, and `species.parsing.parse_results` reads back).
 
 **Open set**: BioCLIP scores a closed list, so a fish outside it still gets a
@@ -53,7 +53,7 @@ _IMAGE_OBJECT = "image"
 def species_model_version_tag(predictor_version: int, other_threshold: float) -> str:
     """The Label Studio `model_version` of a suggestion: the row's own
     version (a fallback row is tagged as one) and the threshold. It is the
-    backfill's idempotency key, so it names the behaviour and nothing else."""
+    backfill's idempotency key, so it names the behavior and nothing else."""
     return f"bioclip-v{predictor_version} other<{other_threshold:g}"
 
 
@@ -103,7 +103,7 @@ def select_attach_targets(
 ) -> dict[uuid.UUID, tuple[int, int]]:
     """`capture -> (task, project)` for the backfill: a prediction with
     something to suggest, and an incomplete live task. A capture whose task
-    already carries a human's imported judgement (`judged`, the sentinel
+    already carries a human's imported judgment (`judged`, the sentinel
     pre-annotation) is left to it. The first such task per capture wins."""
     placeable = {p.capture_id for p in predictions if p.status == "predicted"}
     targets: dict[uuid.UUID, tuple[int, int]] = {}
@@ -138,7 +138,7 @@ def project_tags(
     other_threshold: float,
 ) -> dict[int, Counter]:
     """Per project, how many incomplete tasks carry each tag: a human's
-    imported judgement where there is one, else the model's suggestion."""
+    imported judgment where there is one, else the model's suggestion."""
     tag_of = {capture_id: PREANNOTATION_MODEL_VERSION for capture_id in judged}
     for prediction in state.predictions:
         if prediction.capture_id in tag_of:

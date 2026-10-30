@@ -46,8 +46,8 @@ def test_a_mask_box_must_be_a_box():
         )  # fmt: skip
 
 
-def test_a_frame_result_may_carry_the_dots_colour():
-    """v22 (2026-10-25): the automatic dot's colour, read off its pixels by
+def test_a_frame_result_may_carry_the_dots_color():
+    """v22 (2026-10-25): the automatic dot's color, read off its pixels by
     the laser stage's kernel, as the human path's prediction carries it."""
     result = AutomaticFrameResult(
         capture_id=uuid4(),
@@ -60,7 +60,7 @@ def test_a_frame_result_may_carry_the_dots_colour():
     assert (result.laser_color, result.laser_color_margin) == ("green", 0.31)
 
 
-def test_a_colour_is_red_or_green():
+def test_a_color_is_red_or_green():
     with pytest.raises(ValidationError):
         AutomaticFrameResult(
             capture_id=uuid4(),
@@ -70,8 +70,8 @@ def test_a_colour_is_red_or_green():
         )
 
 
-def test_a_v21_frame_result_still_parses_with_no_colour():
-    """A processor still on v21 sends no colour; the orchestrator takes it."""
+def test_a_v21_frame_result_still_parses_with_no_color():
+    """A processor still on v21 sends no color; the orchestrator takes it."""
     result = AutomaticFrameResult.model_validate(
         {
             "capture_id": str(uuid4()),

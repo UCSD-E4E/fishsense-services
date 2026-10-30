@@ -297,7 +297,7 @@ class TestDetail:
             "dot": {"x": 1925.0, "y": 1310.0},
             "head": {"x": 1600.0, "y": 1125.0},
             "tail": {"x": 2200.0, "y": 1360.0},
-            # The seed's label names no colour.
+            # The seed's label names no color.
             "color": None,
         }
         assert body["device_points"] is None
@@ -306,7 +306,7 @@ class TestDetail:
     async def test_a_rendered_lite_fish_says_how_big_its_photo_is(
         self, client, owner_engine, tenants
     ):
-        """The page draws the labelled points on the render at their pixels
+        """The page draws the labeled points on the render at their pixels
         (the render is never cropped: the processor's whole-frame test), so
         it needs the render's size to place them."""
         capture_id, fish_id = await lite(

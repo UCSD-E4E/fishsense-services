@@ -345,7 +345,7 @@ def _server(get) -> MCPServer:
     @tool
     async def list_mission_laser_colors(ctx: Context, slug: Slug) -> dict:
         """Every mission's frames by laser color, in one call: for each mission
-        with a dot, counts of red, green and unread from the labellers, the
+        with a dot, counts of red, green and unread from the labelers, the
         human path's laser stage and the automatic dot -- as get_mission's
         `laser_colors`, for the whole tenant."""
         return {"missions": await get(ctx, _path("tenants", slug, "laser-colors"))}

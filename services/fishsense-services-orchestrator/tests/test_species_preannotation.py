@@ -4,11 +4,11 @@ Ported verbatim from fishsense-lite@77e8f8e5 services/fishsense-api-workflow-
 worker/tests/test_species_preannotation.py (v2: the parser is
 `species.parsing.parse_results`; the shape tripwire reads v2's row).
 
-The CSV of hand-labelled species judgements (3,000 FSL-01 frames, 2023-08 to
+The CSV of hand-labeled species judgments (3,000 FSL-01 frames, 2023-08 to
 2024-06) is loaded into prod as *sentinel* `SpeciesLabel` rows —
 `label_studio_project_id IS NULL`, which every preprocess cohort treats as
-"no label", so the dives stay in the labelling flow. This module turns such a
-row into a Label Studio prediction so the labeler sees the judgement
+"no label", so the dives stay in the labeling flow. This module turns such a
+row into a Label Studio prediction so the labeler sees the judgment
 pre-filled and confirms it rather than retyping it.
 
 **The test that matters is the round trip.** `build_prediction` is the exact
@@ -113,7 +113,7 @@ def test_every_field_survives_together():
 
 def test_grouping_and_top_three_are_never_pre_annotated():
     """The CSV has no column for either, and they are not guessable: `grouping`
-    is a judgement about the frame before this one, and `top_three` selects
+    is a judgment about the frame before this one, and `top_three` selects
     which frames of an individual get measured. Emitting a default would put a
     fabricated answer in front of the labeler, and `top_three` is what stage 14
     keys measurability on — so a wrong one silently decides what gets measured.
@@ -205,7 +205,7 @@ def test_a_value_that_is_not_a_full_taxonomy_path_is_not_pre_annotated(content):
 
 def test_a_malformed_species_value_does_not_suppress_the_other_controls():
     """Rejecting the species path must not throw away a usable measurable or
-    angle judgement that came with it."""
+    angle judgment that came with it."""
     pred = build_prediction(
         _row(content_of_image="Fish Model,", fish_measurable_category="no")
     )

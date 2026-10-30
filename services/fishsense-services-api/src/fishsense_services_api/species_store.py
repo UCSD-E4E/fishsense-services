@@ -40,7 +40,7 @@ v2 changes:
   member's `captured_at` (then `number`), members by `captured_at`, `number`.
   v1's cluster read had no ORDER BY, yet "image i of N" and stage 6.1's
   "Part of previous group" both read it;
-* **stage 6.1 writes all or nothing**, serialised per dive, and refuses a
+* **stage 6.1 writes all or nothing**, serialized per dive, and refuses a
   capture of another dive (v1 posted cluster by cluster, so a failure left a
   partial set that blocked every re-run). A duplicate frame of the dive is
   left out rather than refused: migrated clusters hold some, and v1 grouped
@@ -206,7 +206,7 @@ class SpeciesLabelRow:
     id: uuid.UUID
     number: int
     capture_id: uuid.UUID
-    #: None: a sentinel (an imported judgement, not a labeler's task).
+    #: None: a sentinel (an imported judgment, not a labeler's task).
     ls_project_id: int | None
     ls_task_id: int | None
     completed: bool

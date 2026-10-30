@@ -2,7 +2,7 @@
 migration 0047).
 
 * **The port** an operator states is recorded as ``operator``, with their
-  note. Where the owner's rules have spoken -- a ``D``-labelled device, or the
+  note. Where the owner's rules have spoken -- a ``D``-labeled device, or the
   backfill of what was already ingested (2026-10-16) -- the port is fact, and
   a different one is refused rather than written over it: those rules are the
   only thing that makes a port known, and nothing an operator knows outranks

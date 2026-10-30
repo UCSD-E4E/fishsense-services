@@ -2,7 +2,7 @@
 
 Ported from fishsense-lite@77e8f8e5 services/fishsense-data-processing-
 workflow-worker/src/fishsense_data_processing_workflow_worker/workflows/
-predict_headtail_images_workflow.py. Behaviour is v1's: every image at once,
+predict_headtail_images_workflow.py. Behavior is v1's: every image at once,
 each with 15 minutes start-to-close (generous next to the ~0.6 s a prediction
 takes, because a cold pod's first activity also pays the weight fetch and the
 SAM 3.1 load), and one result per image, returned to the orchestrator's

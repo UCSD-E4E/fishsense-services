@@ -71,7 +71,7 @@ __all__ = [
 
 @dataclass(frozen=True)
 class HeadtailTarget:
-    """A dive of a tenant. Serialises as the object store's `StagingTarget`."""
+    """A dive of a tenant. Serializes as the object store's `StagingTarget`."""
 
     tenant_id: uuid.UUID
     mission_id: Annotated[uuid.UUID, renamed_from("dive_id", "mission_id")]

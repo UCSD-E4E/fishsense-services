@@ -2,7 +2,7 @@
 tenant-scoped.
 
 New in v2 (2026-10-14). v1's stage 6.1 walked a dive's prediction clusters in
-no stated order, so a labeller's "Part of previous group" joined whatever
+no stated order, so a labeler's "Part of previous group" joined whatever
 cluster the database returned before it, not the one captured before it. On
 dive 341 that put Hogfish frame 101302 with two Stoplight Parrotfish frames
 half an hour later, and on dive 465 it split one parrotfish into animals 330

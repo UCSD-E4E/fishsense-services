@@ -73,7 +73,7 @@ class AutomaticFrame:
     #: Full-frame pixels of the render below.
     laser: Point | None
     laser_confidence: float | None
-    #: The dot's colour as the laser kernel read it, and how clearly (0072);
+    #: The dot's color as the laser kernel read it, and how clearly (0072);
     #: None when it gave no reading, and on every row from before.
     laser_color: str | None
     laser_color_margin: float | None

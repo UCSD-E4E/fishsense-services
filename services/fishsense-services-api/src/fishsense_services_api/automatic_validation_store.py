@@ -1,7 +1,7 @@
 """What the validation harness reads, tenant-scoped and read-only.
 
 New in v2. For the paper's dives (cscw-fishsense2027@96a8da07; by dive number)
-the frames humans labelled, as the paper chose them:
+the frames humans labeled, as the paper chose them:
 
 * a canonical capture with a valid laser label and a valid head/tail label,
   the lowest-numbered of each (stage 14's choice, `measurement_work`);
@@ -9,7 +9,7 @@ the frames humans labelled, as the paper chose them:
   are fish models and the ruler (score.py: content matching ``Fish Model`` or
   ``Ruler``), the model being the content's last component, with its tape
   length from `current_fish_model_references`; reef frames are anything but a
-  slate (tail/stage.py), labelled or not;
+  slate (tail/stage.py), labeled or not;
 * green or red, from the laser label (evaluate.py);
 * the camera matrix, the dive's effective stored calibration (0026's
   `mission_laser_geometry`) and its label-free one (own, else its link's);
@@ -20,7 +20,7 @@ the frames humans labelled, as the paper chose them:
 * **the paper's own reef frames** when `reef_frames` names them (v1 image id
   -> dive; the CLI passes `PAPER_REEF_FRAMES`, Phase C): the reef dives'
   frames are exactly those, and one whose head/tail label has no points -- a
-  labeller's "not measurable" -- is in, as `rejected`.
+  labeler's "not measurable" -- is in, as `rejected`.
 
 `session_calibrations` is Table 3's input: each session's stored laser axis
 and its own accepted label-free fit, as the fit recorded it.

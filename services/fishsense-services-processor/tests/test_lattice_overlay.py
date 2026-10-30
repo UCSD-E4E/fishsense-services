@@ -8,8 +8,8 @@ apart, or two?**
 
 A grid residual cannot tell, and that is not a gap in the threshold -- it is
 structural. A uniformly mis-latticed grid (every corner two squares apart,
-`body_points` labelling them one apart) is still a perfect grid, so it is an
-exact homography of the modelled grid and the residual is ~0. A residual gate
+`body_points` labeling them one apart) is still a perfect grid, so it is an
+exact homography of the modeled grid and the residual is ~0. A residual gate
 catches a grid whose spacing is *mixed*; the uniform case sails through it,
 through a declared-board size bound (a coarse lattice is smaller), and through
 `check_fit_self_consistency` (which compares 2-D dots that a pure scale error
@@ -147,7 +147,7 @@ def test_caption_is_drawn_when_supplied():
 
     A labeler's verdict is only actionable if we know what shape was detected,
     and the LS task carries the dive elsewhere. Burning it in keeps the two
-    together in the one artefact a human looks at.
+    together in the one artifact a human looks at.
     """
     points = _grid_points(3, 4, spacing=60)
     plain = draw_lattice_overlay(_make_image(), rows=3, cols=4, image_points=points)

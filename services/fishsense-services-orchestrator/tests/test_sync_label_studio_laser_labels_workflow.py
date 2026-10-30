@@ -8,7 +8,7 @@ is no user-sync step (v2 records Label Studio user ids directly -- PLAN.md
 processor's validation stage.
 
 v2 change, pinned last: **one project's failure doesn't cancel the others.**
-v1 ran the projects in a TaskGroup, so the first failure cancelled every
+v1 ran the projects in a TaskGroup, so the first failure canceled every
 other project mid-sync. Here each project syncs independently, and the
 workflow then fails naming the ones that didn't.
 """

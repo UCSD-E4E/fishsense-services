@@ -38,7 +38,7 @@ async def test_the_plan_judges_the_full_population():
     assert plan.superseded_now == 2
 
 
-async def test_the_plan_honours_exclusions():
+async def test_the_plan_honors_exclusions():
     labels = prod_like_mission(superseded={9, 20})
 
     plan = await _plan(labels, excluded_label_ids=[labels[9].number])
@@ -47,7 +47,7 @@ async def test_the_plan_honours_exclusions():
     assert plan.excluded_kept == [labels[9].number]
 
 
-async def test_the_plan_honours_an_excluded_mission():
+async def test_the_plan_honors_an_excluded_mission():
     plan = await _plan(prod_like_mission(superseded={9}), mission_excluded=True)
 
     assert plan.status == "excluded"

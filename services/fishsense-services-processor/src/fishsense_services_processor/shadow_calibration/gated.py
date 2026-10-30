@@ -20,7 +20,7 @@ variant is cscw's script exactly (`fit.port_fit`); this adds, around it:
 
 Also recorded, deciding nothing: the lever arm with the mission's own
 production offset (author's sensitivity check), and slate length constancy --
-the slate's size in metres across range (§8.4).
+the slate's size in meters across range (§8.4).
 """
 
 from __future__ import annotations
@@ -252,7 +252,7 @@ def gated_fit(
 ) -> GatedResult:
     """The gated fit of one dot source's slate frames. `size_to_full_px`
     converts a size (sqrt-area at the render SAM saw) to full-res px, for the
-    slate's size in metres."""
+    slate's size in meters."""
     th = thresholds
     u, K = np.asarray(u, float), np.asarray(K, float)
     sized = [f for f in frames if f.size is not None]

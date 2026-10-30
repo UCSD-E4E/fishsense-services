@@ -1,4 +1,4 @@
-"""The laser-colour backfill's processor workflow: `ReadLaserColoursWorkflow`,
+"""The laser-color backfill's processor workflow: `ReadLaserColoursWorkflow`,
 one `read_laser_colour` per dot, in parallel. A dot failing every try is
 recorded as ``failed`` (the keypoint replay's shape; no model, so no worker
 refusal)."""

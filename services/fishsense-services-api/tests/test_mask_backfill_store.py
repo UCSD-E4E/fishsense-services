@@ -104,7 +104,7 @@ async def _headtail(owner_engine, app_engine, lab, m, c, **extra):
     return label
 
 
-async def test_the_headtail_work_names_its_labelled_dot_and_jpeg(
+async def test_the_headtail_work_names_its_labeled_dot_and_jpeg(
     owner_engine, app_engine
 ):
     lab = await tenant(owner_engine)

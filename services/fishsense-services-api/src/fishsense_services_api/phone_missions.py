@@ -37,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 GAP = timedelta(hours=2)
 REACH_M = 1000.0
 
-#: Great-circle metres between a capture ``c`` and the point (:lat, :lon).
+#: Great-circle meters between a capture ``c`` and the point (:lat, :lon).
 _METRES = """
     2 * 6371000 * asin(sqrt(
         power(sin(radians(c.latitude - CAST(:lat AS double precision)) / 2), 2)

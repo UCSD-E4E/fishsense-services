@@ -7,7 +7,7 @@ fishsense_api_workflow_worker/activities/reprocess_scope.py
 the flag clear names captures rather than checksums (only a canonical capture
 is ever drawn, so they are the same frames). These never cross to the
 processor, so they are not part of the processing contract. A `SpeciesTarget`
-serialises like the object store's `StagingTarget`, so a parent hands it to
+serializes like the object store's `StagingTarget`, so a parent hands it to
 the staging steps as it is.
 """
 

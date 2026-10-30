@@ -42,7 +42,7 @@ open questions. [`DIAGRAMS.md`](DIAGRAMS.md) draws it.
 keeps tenants apart. The API acts for the signed-in user's memberships. The
 orchestrator acts as the service principal `service:fishsense-orchestrator`,
 which must be granted a membership in a tenant before it can work on that
-tenant's data. Partner organisations get their own tenants; see
+tenant's data. Partner organizations get their own tenants; see
 [`docs/partner-tenants.md`](docs/partner-tenants.md).
 
 ## Running it locally
@@ -101,7 +101,7 @@ or that holds migrated v1 data.
 ## Tests
 
 The rule is **test first**: write a failing test, then the code that makes it
-pass. Database behaviour is tested against real Postgres (testcontainers, so
+pass. Database behavior is tested against real Postgres (testcontainers, so
 Docker must be running), because RLS can't be faked.
 
 ```sh
@@ -208,5 +208,5 @@ says what differs.
 - [`DIAGRAMS.md`](DIAGRAMS.md): components, domain model, and sequences.
 - [`docs/port-plan.md`](docs/port-plan.md) and [`docs/port-map/`](docs/port-map): how v1 was ported, slice by slice.
 - [`docs/cutover.md`](docs/cutover.md): the cutover and operations runbook.
-- [`docs/partner-tenants.md`](docs/partner-tenants.md): onboarding a partner organisation.
+- [`docs/partner-tenants.md`](docs/partner-tenants.md): onboarding a partner organization.
 - [`CHANGELOG.md`](CHANGELOG.md): what each release changed.
