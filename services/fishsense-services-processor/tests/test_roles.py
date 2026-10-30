@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import inspect
 import re
+from importlib.metadata import version
 from datetime import timedelta
 
 import pytest
@@ -265,4 +266,5 @@ async def test_a_worker_names_its_role_and_device(role, memory, device):
         worker = build_worker(env.client, role=role, stages=[_stage(role)],
                               gpu_memory_bytes=memory)  # fmt: skip
         identity = worker.config()["identity"]
-    assert identity.endswith(f"/{role}/{device}")
+    release = version("fishsense-services-processor")
+    assert identity.endswith(f"/{role}/{device}/{release}")

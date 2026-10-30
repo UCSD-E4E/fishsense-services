@@ -234,8 +234,10 @@ async def test_count_per_image_pollers_counts_the_processor_queue():
 
 @pytest.mark.integration
 async def test_per_image_pollers_counts_a_live_per_image_worker_on_a_real_server():
-    """Against a real Temporal (the dev server): a worker polling as
-    `.../per_image/cpu` counts; a GPU-role one on the same queue does not."""
+    """Against a real Temporal (the dev server): a worker of this release
+    polling as `.../per_image/cpu/<release>` counts; a GPU-role one on the
+    same queue does not, nor a per-image one of another release (the lab
+    workers on v0.72.0 under v0.74.0, 2026-10-30)."""
     import asyncio
     import uuid as _uuid
 
@@ -243,6 +245,8 @@ async def test_per_image_pollers_counts_a_live_per_image_worker_on_a_real_server
     from temporalio.client import Client
     from temporalio.testing import WorkflowEnvironment
     from temporalio.worker import Worker
+
+    from importlib.metadata import version
 
     from fishsense_services_orchestrator.nrp.activities import per_image_pollers
 
@@ -252,15 +256,22 @@ async def test_per_image_pollers_counts_a_live_per_image_worker_on_a_real_server
 
     queue = f"per-image-{_uuid.uuid4()}"
     async with await WorkflowEnvironment.start_local() as env:
+        release = version("fishsense-services-orchestrator")
         lab = Worker(env.client, task_queue=queue, activities=[noop],
-                     identity="1@kastner-ml/per_image/cpu")  # fmt: skip
+                     identity=f"1@kastner-ml/per_image/cpu/{release}")  # fmt: skip
         other = await Client.connect(
             env.client.service_client.config.target_host,
             namespace=env.client.namespace,
         )  # one worker per queue per client
         gpu = Worker(other, task_queue=queue, activities=[noop],
-                     identity="2@waiter/gpu/cuda")  # fmt: skip
-        async with lab, gpu:
+                     identity=f"2@waiter/gpu/cuda/{release}")  # fmt: skip
+        third = await Client.connect(
+            env.client.service_client.config.target_host,
+            namespace=env.client.namespace,
+        )
+        stale = Worker(third, task_queue=queue, activities=[noop],
+                       identity="3@waiter/per_image/cpu/0.0.1")  # fmt: skip
+        async with lab, gpu, stale:
             for _ in range(50):
                 if await per_image_pollers(env.client, queue):
                     break

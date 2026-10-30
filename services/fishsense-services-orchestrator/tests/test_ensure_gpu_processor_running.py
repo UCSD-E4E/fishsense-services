@@ -276,14 +276,17 @@ async def test_no_cuda_worker_polling_stands_nrp_up_as_before():
 
 @pytest.mark.integration
 async def test_cuda_pollers_counts_a_live_cuda_worker_on_a_real_server():
-    """Against a real Temporal (the dev server): a worker polling as
-    `.../gpu/cuda` counts; one polling as the CPU fallback does not."""
+    """Against a real Temporal (the dev server): a worker of this release
+    polling as `.../gpu/cuda/<release>` counts; one polling as the CPU
+    fallback does not, nor a CUDA one of another release (2026-10-30)."""
     import asyncio
     import uuid as _uuid
 
     from temporalio import activity as _activity
     from temporalio.testing import WorkflowEnvironment
     from temporalio.worker import Worker
+
+    from importlib.metadata import version
 
     from fishsense_services_orchestrator.nrp.activities import cuda_pollers
 
@@ -293,8 +296,9 @@ async def test_cuda_pollers_counts_a_live_cuda_worker_on_a_real_server():
 
     queue = f"gpu-{_uuid.uuid4()}"
     async with await WorkflowEnvironment.start_local() as env:
+        release = version("fishsense-services-orchestrator")
         cuda = Worker(env.client, task_queue=queue, activities=[noop],
-                      identity="1@lab/gpu/cuda")  # fmt: skip
+                      identity=f"1@lab/gpu/cuda/{release}")  # fmt: skip
         from temporalio.client import Client
 
         other = await Client.connect(
@@ -302,8 +306,14 @@ async def test_cuda_pollers_counts_a_live_cuda_worker_on_a_real_server():
             namespace=env.client.namespace,
         )  # one worker per queue per client: the fallback is another process
         cpu = Worker(other, task_queue=queue, activities=[noop],
-                     identity="2@fallback/gpu/cpu")  # fmt: skip
-        async with cuda, cpu:
+                     identity=f"2@fallback/gpu/cpu/{release}")  # fmt: skip
+        third = await Client.connect(
+            env.client.service_client.config.target_host,
+            namespace=env.client.namespace,
+        )
+        stale = Worker(third, task_queue=queue, activities=[noop],
+                       identity="3@lab/gpu/cuda/0.0.1")  # fmt: skip
+        async with cuda, cpu, stale:
             for _ in range(50):
                 if await cuda_pollers(env.client, queue):
                     break
