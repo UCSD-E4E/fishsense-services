@@ -51,6 +51,24 @@ calibrations (n=4) the line-checked borrow read 0.1-3.8% off at 0.75-2 m.
 What it cannot see: the check measures the beam against poses, not against
 a known length, so a pose's own error is in it; and slates at a few ranges
 say little about the beam beyond them.
+
+The unchecked borrow (0083; the owner, 2026-10-30). An aim with no slates to
+check the candidate on (`UNCHECKED`: no template, no slate frame, too few
+posed points) takes it on the line alone, with a wider bar: the lender's,
+widened by `LINE_ONLY_SD_PER_M` times the range. On 2026-10-30 that was 33 of
+the 88 aims tried, every one within the line's 10 px. The bar is the same
+control's: the 23 line-checked borrows with a lender bar, unchecked, read
+1.5% per meter from the own fit (median, at every range -- the shift along
+the line the line cannot see grows with range), p90 6-8% per meter. 4% per
+meter, with both fits' bars, held 87% within one bar at each range and
+91-100% within two (fitted on those 23, not held out: at 1 m, 4%; 2 m, 8%; 5
+m, 20%, before the lender's). The three worst (475<-478, 284<-290,
+408<-414) read 9% short at 1 m, 34% at 5 m: within 2.3 bars.
+
+What it cannot see beyond the checked borrow's: the control's missions all
+had slates (their own fits are the answer), the aims it serves have none;
+whether they differ otherwise, say in how far the beam was moved between
+dives, is unmeasured.
 """
 
 from __future__ import annotations
@@ -83,8 +101,10 @@ __all__ = [
     "BORROW_WORK",
     "BorrowCandidate",
     "BorrowCheck",
+    "LINE_ONLY_SD_PER_M",
     "MIN_LINE_DOTS",
     "RIVAL_SHARE",
+    "UNCHECKED",
     "automatic_borrow_candidate",
     "beam_line_px",
     "dot_line",
@@ -101,6 +121,14 @@ RIVAL_SHARE = 0.5
 BORROW_RANGES_M = (0.75, 1.0, 1.5, 2.0, 3.0)
 #: The borrow's work term, over mission `d` (the cohort's).
 BORROW_WORK = _BORROW_WORK
+#: The check's refusals that are no check at all: nothing to pose (0083).
+UNCHECKED = frozenset({"no_slate_template", "no_slate_frames", "too_few_posed"})
+#: An unchecked borrow's bar beyond the lender's, relative, per meter of
+#: range (see the module).
+LINE_ONLY_SD_PER_M = 0.04
+#: The fish's ranges, over which `scale_sd` is the widest of the bar (the
+#: slate pose's, `pose._FISH_RANGES_M`).
+_FISH_RANGES_M = (0.75, 3.0)
 
 
 @dataclass(frozen=True)
@@ -247,7 +275,8 @@ async def persist_automatic_borrow(
 ) -> uuid.UUID:
     """Write the check's verdict on `candidate` as the aim's borrow; its id.
     The candidate must still be one of the aim's lenders; an accepted borrow
-    takes its beam, and its error bar widened by the check."""
+    takes its beam, and its error bar widened by the check -- or, with no
+    check to make (`UNCHECKED`), by `LINE_ONLY_SD_PER_M`."""
     lender = next(
         (r for r in await _lender_rows(conn, tenant_id, mission_id)
          if r.id == candidate.lender_id),
@@ -264,20 +293,26 @@ async def persist_automatic_borrow(
         "borrow_holds": check.holds if check.depth_ratio is not None else None,
         "capture_ids": list(check.capture_ids), "frames_used": len(check.capture_ids),
     }  # fmt: skip
-    if check.outcome != "accepted":
+    unchecked = check.outcome != "accepted" and check.refusal_reason in UNCHECKED
+    if check.outcome != "accepted" and not unchecked:
         row = _refused(check.refusal_reason or "slates_disagree", aim, camera.id,
                        **found)  # fmt: skip
         return await persist_automatic_calibration(conn, tenant_id, mission_id, row)
-    widen = abs(check.depth_ratio)
+    if unchecked:
+        by_range = [[r, math.hypot(sd, LINE_ONLY_SD_PER_M * r)]
+                    for r, sd in lender.scale_sd_by_range]  # fmt: skip
+        lo, hi = _FISH_RANGES_M
+        scale_sd = max(sd for r, sd in by_range if lo <= r <= hi)
+    else:
+        widen = abs(check.depth_ratio)
+        by_range = [[r, math.hypot(sd, widen)] for r, sd in lender.scale_sd_by_range]
+        scale_sd = math.hypot(lender.scale_sd, widen)
     row = AutomaticCalibrationRow(
         outcome="accepted", algorithm_version=BORROW_VERSION,
         camera_calibration_id=camera.id, method="borrowed", aim=aim,
         laser_position=[float(v) for v in lender.laser_position],
         laser_axis=[float(v) for v in lender.laser_axis],
         o_mag_m=float(np.linalg.norm(lender.laser_position)),
-        scale_sd=math.hypot(lender.scale_sd, widen),
-        scale_sd_by_range=[[r, math.hypot(sd, widen)]
-                           for r, sd in lender.scale_sd_by_range],
-        **found,
+        scale_sd=scale_sd, scale_sd_by_range=by_range, **found,
     )  # fmt: skip
     return await persist_automatic_calibration(conn, tenant_id, mission_id, row)

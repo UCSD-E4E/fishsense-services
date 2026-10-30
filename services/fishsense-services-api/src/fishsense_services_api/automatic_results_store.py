@@ -420,8 +420,10 @@ def _slate_pose_work(aims: str | None = None) -> str:
 
 _SLATE_POSE_WORK = _slate_pose_work()
 
-#: The checked borrow's version (0082, `calibration_borrow`).
-BORROW_VERSION = "borrow-1"
+#: The borrow's version (0082, `calibration_borrow`): borrow-2 (0083) accepts
+#: on the line alone what had no slates to check it, so borrow-1's tries are
+#: owed again.
+BORROW_VERSION = "borrow-2"
 
 
 def _lenders(m: str) -> str:
@@ -1440,7 +1442,8 @@ class AutomaticCalibrationRow:
     #: A ``borrowed`` row (0082, `calibration_borrow`): the lender's row it
     #: tried, how far that beam runs off the aim's dot line, and the check on
     #: the aim's posed slates -- the median over holds of beam depth / pose
-    #: depth - 1, and on how many holds. All four on an accepted borrow.
+    #: depth - 1, and on how many holds. An accepted borrow has the first
+    #: two, and the check's two unless it had no slates to check (0083).
     borrowed_from: uuid.UUID | None = None
     borrow_line_px: float | None = None
     borrow_depth_ratio: float | None = None
