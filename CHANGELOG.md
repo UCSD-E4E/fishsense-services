@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.76.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.75.2...v0.76.0) (2026-10-30)
+
+
+### Features
+
+* flag automatic lengths out of distribution for their species ([afa7355](https://github.com/UCSD-E4E/fishsense-services/commit/afa73557fee528227aa1d91acdf611f896578a13))
+
 ## [0.75.2](https://github.com/UCSD-E4E/fishsense-services/compare/v0.75.1...v0.75.2) (2026-10-30)
 
 
