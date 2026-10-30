@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.75.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.74.0...v0.75.0) (2026-10-30)
+
+
+### Features
+
+* **api:** borrow on the line alone, with a wider bar, when there are no slates to check ([e6d31ee](https://github.com/UCSD-E4E/fishsense-services/commit/e6d31ee4d271163c9f1a4a2556b3563d07fb4cf2))
+* **api:** borrow on the line alone, with a wider bar, when there are no slates to check ([bf9050d](https://github.com/UCSD-E4E/fishsense-services/commit/bf9050dd11ece35e1041769d2c3dcc45cf5c504b))
+
 ## [0.74.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.73.0...v0.74.0) (2026-10-30)
 
 
