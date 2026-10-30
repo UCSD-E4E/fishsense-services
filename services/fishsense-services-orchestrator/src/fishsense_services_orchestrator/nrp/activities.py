@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
+from importlib.metadata import version
 
 from temporalio import activity
 from temporalio.api.enums.v1 import TaskQueueType
@@ -87,6 +88,12 @@ PerImagePollersCheck = Callable[[str], Awaitable[int]]
 LIVE_POLLER = timedelta(minutes=2)
 
 
+def _release() -> str:
+    """This orchestrator's release: every worker it counts must run it
+    (`contracts.workers`; release-please moves the packages together)."""
+    return version("fishsense-services-orchestrator")
+
+
 async def _live_pollers(
     client: Client, task_queue: str, counts: Callable[[str], bool]
 ) -> int:
@@ -109,16 +116,22 @@ async def _live_pollers(
 
 
 async def cuda_pollers(client: Client, task_queue: str) -> int:
-    """How many CUDA GPU workers (`contracts.workers`) polled `task_queue`'s
-    activities within `LIVE_POLLER`: on NRP or off it (lab machines,
-    2026-10-19), a GPU is a GPU."""
-    return await _live_pollers(client, task_queue, is_cuda_worker)
+    """How many CUDA GPU workers (`contracts.workers`) of this release polled
+    `task_queue`'s activities within `LIVE_POLLER`: on NRP or off it (lab
+    machines, 2026-10-19), a GPU is a GPU -- if it runs this release."""
+    release = _release()
+    return await _live_pollers(
+        client, task_queue, lambda identity: is_cuda_worker(identity, release)
+    )
 
 
 async def per_image_pollers(client: Client, task_queue: str) -> int:
-    """How many per-image workers polled `task_queue` within `LIVE_POLLER`:
-    NRP pods and the lab render workers alike (#158)."""
-    return await _live_pollers(client, task_queue, is_per_image_worker)
+    """How many per-image workers of this release polled `task_queue` within
+    `LIVE_POLLER`: NRP pods and the lab render workers alike (#158)."""
+    release = _release()
+    return await _live_pollers(
+        client, task_queue, lambda identity: is_per_image_worker(identity, release)
+    )
 
 
 async def _cuda_pollers_through_the_worker_client(task_queue: str) -> int:
