@@ -420,6 +420,63 @@ def _slate_pose_work(aims: str | None = None) -> str:
 
 _SLATE_POSE_WORK = _slate_pose_work()
 
+#: The checked borrow's version (0082, `calibration_borrow`).
+BORROW_VERSION = "borrow-1"
+
+
+def _lenders(m: str) -> str:
+    """The calibrations that may lend to mission `m` (an alias over
+    `missions`), as `l`: the current accepted fits of another mission on its
+    device that started within a day of it with an error bar at each range
+    (a borrow widens it: the slate pose's; size constancy has none), each
+    fitted under its current pinhole camera. Never a borrow: no chains."""
+    return f"""(
+        SELECT l.* FROM missions lm
+        JOIN current_automatic_laser_calibrations l
+          ON l.tenant_id = lm.tenant_id AND l.mission_id = lm.id
+        WHERE lm.tenant_id = {m}.tenant_id AND lm.device_id = {m}.device_id
+          AND lm.id <> {m}.id
+          AND lm.started_at BETWEEN {m}.started_at - interval '1 day'
+                                AND {m}.started_at + interval '1 day'
+          AND l.outcome = 'accepted' AND l.method <> 'borrowed'
+          AND (SELECT p.scale_sd_by_range FROM automatic_laser_calibrations p
+               WHERE p.id = l.id) IS NOT NULL
+          AND l.camera_calibration_id IN (
+              SELECT cc.id FROM current_camera_calibrations cc
+              WHERE cc.tenant_id = {m}.tenant_id AND cc.device_id = {m}.device_id
+                AND cc.camera_model = 'pinhole')
+    ) l"""
+
+
+def _borrow_work(aims: str | None = None) -> str:
+    """An aim (`aims`: each of mission `d`'s) no calibration serves (0082),
+    with a lender it has not tried at this version -- none tried, or one
+    current since: the borrow is owed. With no lender there is nothing to
+    try, so a mission alone on its device that day is never held for one."""
+    return f"""(
+        EXISTS (
+            SELECT 1 FROM captures c
+            WHERE c.tenant_id = d.tenant_id AND c.mission_id = d.id AND c.is_canonical
+        )
+        AND EXISTS (SELECT 1 FROM {aims or _aims()} WHERE NOT EXISTS (
+            SELECT 1 FROM automatic_measurement_calibrations mc
+            JOIN automatic_laser_calibrations x
+              ON x.tenant_id = mc.tenant_id AND x.id = mc.automatic_laser_calibration_id
+            WHERE mc.tenant_id = d.tenant_id AND mc.mission_id = d.id
+              AND x.aim = aims.aim
+        ) AND EXISTS (
+            SELECT 1 FROM {_lenders("d")} WHERE NOT EXISTS (
+                SELECT 1 FROM current_automatic_laser_calibrations a
+                WHERE a.tenant_id = d.tenant_id AND a.mission_id = d.id
+                  AND a.method = 'borrowed' AND {_AIM_OF_A} = aims.aim
+                  AND a.algorithm_version = '{BORROW_VERSION}'
+                  AND a.created_at >= l.created_at)
+        ))
+    )"""
+
+
+_BORROW_WORK = _borrow_work()
+
 #: Automatic head/tail v5 (owner, 2026-10-24/25): fishsense-core's SimCC
 #: keypoints on the frame's SAM box replace the SAM rule's extreme points for
 #: every frame but the fish models'. Its rows are `automatic_keypoint_
@@ -512,7 +569,7 @@ def automatic_results_cohort(*, species: bool = True) -> str:
     slate pose off). Species has its own switch (2026-10-15): off, a dive
     whose only work is species is not in it."""
     work = [_FRAMES_WORK, _KEYPOINTS_WORK, _CALIBRATION_WORK, _SLATE_POSE_WORK,
-            _LENGTHS_WORK]  # fmt: skip
+            _BORROW_WORK, _LENGTHS_WORK]  # fmt: skip
     if species:
         work.insert(1, _SPECIES_WORK)
     return f"""{RECTIFIABLE_MISSION}
@@ -1380,6 +1437,14 @@ class AutomaticCalibrationRow:
     scale_sd_by_range: list | None = None
     #: The laser aim it calibrates (0081): 0, or 1 after a recorded move.
     aim: int = 0
+    #: A ``borrowed`` row (0082, `calibration_borrow`): the lender's row it
+    #: tried, how far that beam runs off the aim's dot line, and the check on
+    #: the aim's posed slates -- the median over holds of beam depth / pose
+    #: depth - 1, and on how many holds. All four on an accepted borrow.
+    borrowed_from: uuid.UUID | None = None
+    borrow_line_px: float | None = None
+    borrow_depth_ratio: float | None = None
+    borrow_holds: int | None = None
 
 
 class OtherAimCapture(InvalidAutomaticResults):
@@ -1425,7 +1490,8 @@ async def persist_automatic_calibration(
                     line_direction, line_offset_px, o_mag_m, frames_used,
                     candidate_count, pair_count, size_ratio, se_px,
                     pair_residual_sd, capture_ids, core_version, method,
-                    slate_template_id, scale_sd, scale_sd_by_range, aim)
+                    slate_template_id, scale_sd, scale_sd_by_range, aim,
+                    borrowed_from, borrow_line_px, borrow_depth_ratio, borrow_holds)
                 VALUES (:t, :d, :outcome, :algorithm_version, :refusal_reason,
                         :camera_calibration_id, CAST(:laser_position AS jsonb),
                         CAST(:laser_axis AS jsonb), :vanishing_px,
@@ -1433,7 +1499,8 @@ async def persist_automatic_calibration(
                         :frames_used, :candidate_count, :pair_count, :size_ratio,
                         :se_px, :pair_residual_sd, :capture_ids, :core_version,
                         :method, :slate_template_id, :scale_sd,
-                        CAST(:scale_sd_by_range AS jsonb), :aim)
+                        CAST(:scale_sd_by_range AS jsonb), :aim, :borrowed_from,
+                        :borrow_line_px, :borrow_depth_ratio, :borrow_holds)
                 RETURNING id
                 """),
             {"t": tenant_id, "d": mission_id, **values},
@@ -1741,6 +1808,33 @@ class AutomaticResultsCatalog(ServicePrincipal):
     ) -> list[int]:
         async with self._tenant(tenant_id) as conn:
             return await automatic_mission_aims(conn, tenant_id, mission_id)
+
+    async def automatic_borrow_candidate(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, *, aim: int
+    ):
+        """`calibration_borrow.automatic_borrow_candidate`."""
+        from fishsense_services_api.calibration_borrow import (
+            automatic_borrow_candidate,
+        )
+
+        async with self._tenant(tenant_id) as conn:
+            return await automatic_borrow_candidate(
+                conn, tenant_id, mission_id, aim=aim
+            )
+
+    async def persist_automatic_borrow(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID, candidate, check, *,
+        aim: int,
+    ) -> uuid.UUID:  # fmt: skip
+        """`calibration_borrow.persist_automatic_borrow`."""
+        from fishsense_services_api.calibration_borrow import (
+            persist_automatic_borrow,
+        )
+
+        async with self._tenant(tenant_id) as conn:
+            return await persist_automatic_borrow(
+                conn, tenant_id, mission_id, candidate, check, aim=aim
+            )
 
     async def persist_automatic_calibration(
         self, tenant_id: uuid.UUID, mission_id: uuid.UUID, row: AutomaticCalibrationRow

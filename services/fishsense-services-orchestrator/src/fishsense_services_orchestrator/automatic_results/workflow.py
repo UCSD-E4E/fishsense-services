@@ -94,6 +94,10 @@ with workflow.unsafe.imports_passed_through():
         MeasureAutomaticResult,
         PredictAutomaticFramesInput,
     )
+    from fishsense_services_contracts.calibration_borrow import (
+        BorrowCheckInput,
+        BorrowCheckReport,
+    )
     from fishsense_services_contracts.calibration_v3 import (
         CalibrationV3Report,
         ReplayCalibrationInput,
@@ -108,6 +112,7 @@ with workflow.unsafe.imports_passed_through():
         SpeciesPredictionResult,
     )
     from fishsense_services_orchestrator.automatic_results.activities import (
+        AutomaticBorrowCandidate,
         AutomaticCalibrationPlan,
         AutomaticMeasurePlan,
         AutomaticTarget,
@@ -558,6 +563,68 @@ async def _calibrate_aim(target: AutomaticTarget) -> None:
         return
     if workflow.patched(SLATE_POSE_PATCH):
         await _slate_pose(target, plan)
+    if per_aim and workflow.patched(BORROW_PATCH):
+        await _borrow(target, plan)
+
+
+#: The checked borrow (0082; the owner, 2026-10-29): once an aim's own fits
+#: are done, an aim nothing serves may take a neighbor's beam -- the API's
+#: candidate, along the aim's dot line -- when it reads the aim's own slates,
+#: posed on the GPU, at their depth (the processor's check). Its children are
+#: named for the aim. A run started before it replays as it ran: no borrow.
+BORROW_PATCH = "automatic-calibration-checked-borrow"
+
+
+async def _borrow(target: AutomaticTarget, plan: AutomaticCalibrationPlan) -> None:
+    candidate: Optional[AutomaticBorrowCandidate] = await _db(
+        "automatic_borrow_candidate", target,
+        result_type=Optional[AutomaticBorrowCandidate],
+    )  # fmt: skip
+    if candidate is None:
+        return
+
+    def refused(reason: str) -> BorrowCheckReport:
+        return BorrowCheckReport(mission_id=target.mission_id,
+                                 lender_id=candidate.lender_id, outcome="refused",
+                                 refusal_reason=reason)  # fmt: skip
+
+    template: Optional[dict] = await _db(
+        "resolve_mission_slate_template", target, result_type=Optional[dict]
+    )
+    if template is None:
+        report = refused("no_slate_template")
+    elif not plan.payload.frames:
+        report = refused("no_slate_frames")
+    else:
+        poses = await pose_slate_frames(
+            target.tenant_id, target.mission_id, plan, template,
+            child_prefix=_aimed(f"automatic-borrow-pose-{target.mission_id}", target),
+        )  # fmt: skip
+        if poses is None:
+            workflow.logger.warning(
+                "dive=%s: the borrow's check needs a real GPU; owed still",
+                target.mission_id,
+            )
+            return
+        await wake_per_image_processor()
+        ran, report = await _child(
+            "CheckBorrowedBeamWorkflow",
+            BorrowCheckInput(
+                mission_id=target.mission_id, lender_id=candidate.lender_id,
+                laser_position=candidate.laser_position,
+                laser_axis=candidate.laser_axis,
+                pose_points={str(p.capture_id): p.point if p.status == "posed"
+                             else None for p in poses},
+            ),
+            child_id=_aimed(f"automatic-borrow-check-{target.mission_id}", target),
+            task_queue=PROCESSOR_TASK_QUEUE,
+            timeout=CALIBRATION_CHILD_TIMEOUT,
+            result_type=BorrowCheckReport,
+        )  # fmt: skip
+        if not ran:
+            return
+    await _db("persist_automatic_borrow", target, candidate, report,
+              result_type=uuid.UUID)  # fmt: skip
 
 
 async def _size_constancy(target: AutomaticTarget, plan) -> bool:

@@ -13,12 +13,17 @@ with workflow.unsafe.imports_passed_through():
         AutomaticCalibrationResult,
         FitAutomaticCalibrationInput,
     )
+    from fishsense_services_contracts.calibration_borrow import (
+        BorrowCheckInput,
+        BorrowCheckReport,
+    )
     from fishsense_services_contracts.calibration_v3 import (
         CalibrationV3Report,
         ReplayCalibrationInput,
     )
 
 __all__ = [
+    "CheckBorrowedBeamWorkflow",
     "FIT_TIMEOUT",
     "FitAutomaticCalibrationWorkflow",
     "ReplayAutomaticCalibrationV3Workflow",
@@ -69,4 +74,24 @@ class ReplayAutomaticCalibrationV3Workflow:
             heartbeat_timeout=timedelta(minutes=5),
             retry_policy=RetryPolicy(maximum_attempts=2),
             result_type=CalibrationV3Report,
+        )
+
+
+@workflow.defn
+class CheckBorrowedBeamWorkflow:
+    """The checked borrow's check (v27, 2026-10-29): a neighbor's beam against
+    the borrower's posed slate points. Nothing is stored; the orchestrator
+    writes the borrow."""
+
+    # pylint: disable=too-few-public-methods
+    @workflow.run
+    async def run(self, request: BorrowCheckInput) -> BorrowCheckReport:
+        return await workflow.execute_activity(
+            "check_borrowed_beam",
+            request,
+            start_to_close_timeout=timedelta(minutes=5),
+            retry_policy=RetryPolicy(
+                maximum_attempts=3, non_retryable_error_types=["ValueError"]
+            ),
+            result_type=BorrowCheckReport,
         )

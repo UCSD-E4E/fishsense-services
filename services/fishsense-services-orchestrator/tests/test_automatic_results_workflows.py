@@ -56,6 +56,7 @@ from fishsense_services_contracts.headtail_keypoints import (
     KeypointFramesInput,
     KeypointResult,
 )
+from fishsense_services_contracts.calibration_borrow import BorrowCheckReport
 from fishsense_services_contracts.calibration_v3 import CalibrationV3Report
 from fishsense_services_contracts.calibration_v4 import SlatePose
 from fishsense_services_contracts.object_store import ObjectRef
@@ -66,6 +67,7 @@ from fishsense_services_contracts.species_prediction import (
     SpeciesPredictionResult,
 )
 from fishsense_services_orchestrator.automatic_results.activities import (
+    AutomaticBorrowCandidate,
     AutomaticCalibrationPlan,
     AutomaticMeasurePlan,
     AutomaticTarget,
@@ -101,6 +103,10 @@ CAMERA = uuid.uuid4()
 QUEUE = "test-automatic-results"
 K = [[1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0]]
 REF = ObjectRef(bucket="b", key="k")
+BORROW_CANDIDATE = AutomaticBorrowCandidate(
+    lender_id=uuid.uuid4(), laser_position=[-0.0325, -0.0997, 0.0],
+    laser_axis=[0.03, 0.03, 0.999], line_px=3.5,
+)  # fmt: skip
 EVENTS: list[tuple] = []
 #: Per GPU child, whether each frame came with a mask upload (contract 12).
 MASKED: list[list] = []
@@ -108,6 +114,10 @@ MASKED: list[list] = []
 STAGED: list[tuple] = []
 #: What each cohort query was told to exclude, in turn.
 SELECTS: list[tuple] = []
+#: The checked borrow's calls (0082): ``("candidate", aim)`` and
+#: ``("persist", outcome, refusal, points, aim)``, apart from `EVENTS` so the
+#: steps' order there stays as it was where no borrow is owed.
+BORROWS: list[tuple] = []
 
 
 def _frames_input(n, *, rendered=True):
@@ -187,13 +197,14 @@ def _keypoints_input(n):
 
 def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET,
            renders="all", keypoints=0, refusals=0, pose=False, aims=(0,),
-           constancy=True):  # fmt: skip
+           constancy=True, borrow=(), template=True):  # fmt: skip
     """`selected` is the cohort's answer every time, or a list of answers in
     turn (None once it runs out). `renders`: the frames are ``all`` rendered
     already, rendered ``after`` the render step, or the tenant has
     ``no-bucket``. `pose`: the slate pose is owed (switched on, a template).
     `aims`: the mission's laser aims (0081); `constancy`: its size-constancy
-    fit is owed."""
+    fit is owed. `borrow`: the aims with a borrow candidate (0082);
+    `template`: the mission has a slate template."""
     rendered = [renders == "all"]
     cohort = list(selected) if isinstance(selected, list) else None
 
@@ -269,6 +280,20 @@ def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET,
     async def constancy_owed(t: AutomaticTarget) -> bool:
         return constancy
 
+    @activity.defn(name="automatic_borrow_candidate")
+    async def borrow_candidate(
+        t: AutomaticTarget,
+    ) -> Optional[AutomaticBorrowCandidate]:
+        BORROWS.append(("candidate", t.aim))
+        return BORROW_CANDIDATE if t.aim in borrow else None
+
+    @activity.defn(name="persist_automatic_borrow")
+    async def borrow_out(t: AutomaticTarget, c: AutomaticBorrowCandidate,
+                         r: BorrowCheckReport) -> uuid.UUID:  # fmt: skip
+        assert (r.mission_id, r.lender_id) == (t.mission_id, c.lender_id)
+        BORROWS.append(("persist", r.outcome, r.refusal_reason, r.points, t.aim))
+        return uuid.uuid4()
+
     @activity.defn(name="automatic_slate_pose_owed")
     async def pose_owed(t: AutomaticTarget) -> bool:
         return pose
@@ -276,6 +301,8 @@ def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET,
     @activity.defn(name="resolve_mission_slate_template")
     async def pose_template(t: AutomaticTarget) -> Optional[dict]:
         EVENTS.append(("slate template",))
+        if not template:
+            return None
         return {"slate_template_id": str(TEMPLATE), "dpi": 300,
                 "reference_points": [[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]],
                 "slate_pdf": REF.model_dump(mode="json")}  # fmt: skip
@@ -355,7 +382,8 @@ def _stubs(*, mode="gpu", frames=2, species=1, slate=8, plan=1, selected=TARGET,
             cal_out, measure_in, measure_out, wake_gpu, wake_per_image, wake_light,
             stage, cleanup, render_in, render_out, masks_out, refusals_out,
             keypoints_in, keypoints_out, pose_owed, pose_template, pose_pdf,
-            pose_out, mission_aims, constancy_owed]  # fmt: skip
+            pose_out, mission_aims, constancy_owed, borrow_candidate,
+            borrow_out]  # fmt: skip
 
 
 @activity.defn(name="_record")
@@ -580,6 +608,22 @@ class _PoseFitWithoutBarsByRange:  # pylint: disable=too-few-public-methods
         return _pose_fit(payload, 0.02)
 
 
+@workflow.defn(name="CheckBorrowedBeamWorkflow")
+class _BorrowCheck:  # pylint: disable=too-few-public-methods
+    """The processor's check: every posed point within the tolerance."""
+
+    @workflow.run
+    async def run(self, payload: dict) -> dict:
+        await _record_child()
+        posed = [k for k, v in payload["pose_points"].items() if v is not None]
+        assert payload["laser_axis"] == BORROW_CANDIDATE.laser_axis
+        return BorrowCheckReport(
+            mission_id=payload["mission_id"], lender_id=payload["lender_id"],
+            outcome="accepted", depth_ratio=0.01, holds=1, points=len(posed),
+            capture_ids=posed,
+        ).model_dump(mode="json")  # fmt: skip
+
+
 @workflow.defn(name="MeasureAutomaticWorkflow")
 class _Measure:  # pylint: disable=too-few-public-methods
     @workflow.run
@@ -596,6 +640,7 @@ async def _run(
 ):  # fmt: skip
     EVENTS.clear()
     SELECTS.clear()
+    BORROWS.clear()
     MASKED.clear()
     STAGED.clear()
     async with await WorkflowEnvironment.start_time_skipping(
@@ -615,7 +660,7 @@ async def _run(
                               else _FailingSpecies if species_fails else _Species,
                               _Keypoints, _Pose]),
             Worker(env.client, task_queue=PROCESSOR_TASK_QUEUE, activities=[_record],
-                   workflows=[_Calibration, _Render,
+                   workflows=[_Calibration, _Render, _BorrowCheck,
                               _PoseFitWithoutErrorBars if old_pose_fit
                               else _PoseFitWithoutBarsByRange if pose_fit_v5
                               else _PoseFit]),
@@ -700,6 +745,72 @@ async def test_a_run_from_before_aims_replays_as_it_ran(monkeypatch):
                runner=UnsandboxedWorkflowRunner(), history=history)  # fmt: skip
     monkeypatch.undo()
     assert ("child", f"automatic-calibration-{MISSION}-aim1") not in EVENTS
+
+    replayed = await Replayer(
+        workflows=[AutomaticResultsForMissionWorkflow], data_converter=DATA_CONVERTER
+    ).replay_workflow(history[0], raise_on_replay_failure=False)
+    assert replayed.replay_failure is None
+
+
+async def test_each_aim_is_offered_the_checked_borrow_after_its_fits():
+    """0082: once an aim's fits are done, the API is asked for a borrow; with
+    none owed, nothing else runs."""
+    await _run(AutomaticResultsForMissionWorkflow, TARGET, aims=(0, 1))
+
+    assert BORROWS == [("candidate", 0), ("candidate", 1)]
+    assert not [e for e in EVENTS if "borrow" in str(e)]
+
+
+async def test_a_borrow_candidate_is_checked_on_the_aims_posed_slates():
+    """The aim's slate frames are posed on the GPU, the processor reads them
+    through the candidate's beam, and the verdict is written: children named
+    for the aim."""
+    await _run(AutomaticResultsForMissionWorkflow, TARGET, aims=(0, 1), borrow=(1,),
+               slate=3)  # fmt: skip
+
+    at = EVENTS.index(("persist calibration", "accepted", None, 1))
+    assert EVENTS[at + 1 : at + 7] == [
+        ("slate template",),
+        ("wake gpu",),
+        ("stage slate pdf",),
+        ("child", f"automatic-borrow-pose-{MISSION}-aim1-0"),
+        ("wake per-image",),
+        ("child", f"automatic-borrow-check-{MISSION}-aim1"),
+    ]
+    # The stub poses every frame but the first.
+    assert BORROWS == [("candidate", 0), ("candidate", 1),
+                       ("persist", "accepted", None, 2, 1)]  # fmt: skip
+
+
+async def test_without_a_template_the_borrow_is_refused_unchecked():
+    await _run(AutomaticResultsForMissionWorkflow, TARGET, aims=(0, 1), borrow=(1,),
+               template=False)  # fmt: skip
+
+    assert BORROWS[-1] == ("persist", "refused", "no_slate_template", 0, 1)
+    assert not [e for e in EVENTS if "borrow" in str(e)]
+
+
+async def test_without_slate_frames_the_borrow_is_refused_unchecked():
+    await _run(AutomaticResultsForMissionWorkflow, TARGET, aims=(0, 1), borrow=(1,),
+               slate=0)  # fmt: skip
+
+    assert BORROWS[-1] == ("persist", "refused", "no_slate_frames", 0, 1)
+    assert not [e for e in EVENTS if "borrow" in str(e)]
+
+
+async def test_a_run_from_before_the_borrow_replays_as_it_ran(monkeypatch):
+    """The borrow is behind `workflow.patched`: a run started before it (the
+    aims, no borrow: v0.73.0) replays under the new code as it ran."""
+    from temporalio.worker import Replayer, UnsandboxedWorkflowRunner
+
+    patched = sut.workflow.patched
+    monkeypatch.setattr(sut.workflow, "patched",
+                        lambda name: name != sut.BORROW_PATCH and patched(name))  # fmt: skip
+    history: list = []
+    await _run(AutomaticResultsForMissionWorkflow, TARGET, aims=(0, 1), borrow=(1,),
+               runner=UnsandboxedWorkflowRunner(), history=history)  # fmt: skip
+    monkeypatch.undo()
+    assert not BORROWS
 
     replayed = await Replayer(
         workflows=[AutomaticResultsForMissionWorkflow], data_converter=DATA_CONVERTER
