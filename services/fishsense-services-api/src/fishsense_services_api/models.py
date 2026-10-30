@@ -179,6 +179,26 @@ class Species(Base):
     created_at: Mapped[datetime] = _created_at()
 
 
+class SpeciesLengthReference(Base):
+    """A species' published maximum and its typical log length in our
+    automatic lengths (0084, `species_length`): global, written only by the
+    migration."""
+
+    __tablename__ = "species_length_references"
+    __table_args__ = (
+        CheckConstraint("max_length_m > 0", name="species_length_references_max_check"),
+        CheckConstraint("log_mad > 0", name="species_length_references_mad_check"),
+    )
+
+    scientific_name: Mapped[str] = mapped_column(Text, primary_key=True)
+    max_length_m: Mapped[float] = mapped_column(Double)
+    max_length_source: Mapped[str] = mapped_column(Text)
+    log_median: Mapped[float | None] = mapped_column(Double)
+    log_mad: Mapped[float | None] = mapped_column(Double)
+    typical_n: Mapped[int | None] = mapped_column(Integer)
+    typical_derived_on: Mapped[date | None] = mapped_column(Date)
+
+
 class CalibrationTarget(Base):
     """A checkerboard; versioned by ``valid_from``, pitch per axis."""
 
