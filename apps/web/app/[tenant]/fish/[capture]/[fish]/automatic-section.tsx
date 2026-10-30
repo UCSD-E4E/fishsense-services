@@ -139,6 +139,13 @@ export function AutomaticSection({
               ? `${frame.species}${frame.species_probability != null ? ` (${Math.round(frame.species_probability * 100)}%)` : ""}`
               : "—"}
           </Row>
+          {speciesNote(frame.species_length_flag, frame.species_max_length_m) && (
+            <Row label="For its species">
+              <span className="font-medium text-warn">
+                {speciesNote(frame.species_length_flag, frame.species_max_length_m)}
+              </span>
+            </Row>
+          )}
           <Row label="Model">
             <span className="font-mono text-[13px] text-fg-2">
               {[frame.checkpoint, frame.core_version && `core ${frame.core_version}`].filter(Boolean).join(" · ") || "—"}
@@ -151,7 +158,21 @@ export function AutomaticSection({
   );
 }
 
-function Points({ overlay }: { overlay: NonNullable<ReturnType<typeof automaticOverlay>> }) {
+// The length against its species (the API's `species_length`, 2026-10-30):
+// over the published maximum is impossible for it -- a calibration, the
+// points, or the species is wrong -- and far outside its typical range is
+// worth a second look. Nothing when it is usual.
+function speciesNote(flag: string | null | undefined, maxM: number | null | undefined): string | null {
+  if (flag === "over_max") {
+    const max = maxM != null ? ` (${Math.round(maxM * 100)} cm)` : "";
+    return `Longer than the species' recorded maximum${max}: check the calibration, the head and tail, or the species`;
+  }
+  if (flag === "long") return "Unusually long for this species: worth a second look";
+  if (flag === "short") return "Unusually short for this species: worth a second look";
+  return null;
+}
+
+function Points({ overlay }:{ overlay: NonNullable<ReturnType<typeof automaticOverlay>> }) {
   const r = overlay.width / 110;
   const { head, tail, laser } = overlay;
   return (

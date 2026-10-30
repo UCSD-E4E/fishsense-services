@@ -109,6 +109,23 @@ async def test_a_length_comes_with_what_judges_it(owner_engine, app_engine):
     assert page.next is None
 
 
+async def test_a_length_out_of_distribution_for_its_species_is_flagged(
+    owner_engine, app_engine
+):
+    """2026-10-30: against the species BioCLIP names (`species_length`)."""
+    lab = await tenant(owner_engine)
+    mission_id, c = await _measured(owner_engine, app_engine, lab)
+    await _species(owner_engine, app_engine, lab, mission_id, c)
+
+    (row,) = (await _in(app_engine, lab, automatic_lengths)).lengths
+    assert (row.species_length_flag, row.species_max_length_m) == (None, 0.91)
+
+    await exec_(owner_engine, "UPDATE automatic_measurements SET length_m = 1.0 "
+                "WHERE capture_id = :c", c=c)  # fmt: skip
+    (row,) = (await _in(app_engine, lab, automatic_lengths)).lengths
+    assert row.species_length_flag == "over_max"
+
+
 async def test_the_rows_are_the_exports(owner_engine, app_engine):
     """Every current automatic length the export holds, and no other."""
     lab = await tenant(owner_engine)

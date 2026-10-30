@@ -528,6 +528,17 @@
             ],
             "title": "Species"
           },
+          "species_length_flag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Species Length Flag"
+          },
           "species_margin": {
             "anyOf": [
               {
@@ -538,6 +549,17 @@
               }
             ],
             "title": "Species Margin"
+          },
+          "species_max_length_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Species Max Length M"
           },
           "species_probability": {
             "anyOf": [
@@ -801,6 +823,17 @@
             ],
             "title": "Species"
           },
+          "species_length_flag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Species Length Flag"
+          },
           "species_margin": {
             "anyOf": [
               {
@@ -811,6 +844,17 @@
               }
             ],
             "title": "Species Margin"
+          },
+          "species_max_length_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Species Max Length M"
           },
           "species_probability": {
             "anyOf": [
