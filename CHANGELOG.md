@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.77.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.76.0...v0.77.0) (2026-10-31)
+
+
+### Features
+
+* offer BioCLIP the fish commonly recorded where a mission was ([e85e169](https://github.com/UCSD-E4E/fishsense-services/commit/e85e169c5eda4510c44b13fb8d0556977742acd5))
+* offer BioCLIP the fish commonly recorded where a mission was ([5d34e94](https://github.com/UCSD-E4E/fishsense-services/commit/5d34e9433b8d5bf2678898ad1bb3e9f775f3b640))
+
 ## [0.76.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.75.2...v0.76.0) (2026-10-30)
 
 
