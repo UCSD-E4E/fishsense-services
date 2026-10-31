@@ -52,6 +52,12 @@ from fishsense_services_api.prediction_masks_store import (
 )
 from fishsense_services_api.camera_sql import RECTIFIABLE_MISSION
 from fishsense_services_api.service_principal import ServicePrincipal
+from fishsense_services_api.regional_species import (
+    SPECIES_LIST_VERSION,
+    SpeciesList,
+    automatic_species_list,
+    mission_species_region,
+)
 from fishsense_services_api.slate_presence_store import detector_slate_frame
 
 __all__ = [
@@ -327,6 +333,7 @@ _SPECIES_WORK = f"""NOT {_SESSION} AND EXISTS (
               SELECT 1 FROM {_latest("automatic_species_predictions")} s
               WHERE s.automatic_head_tail_prediction_id = h.id
                 AND s.predictor_version = :sv
+                AND s.species_list_version = {SPECIES_LIST_VERSION}
           )
     )"""
 
@@ -646,13 +653,17 @@ AUTOMATIC_SPECIES_CAPTURES = f"""
            h.jpeg_camera_calibration_id
     FROM captures c
     CROSS JOIN {_current_row("current_automatic_head_tail_predictions", "h")}
-    LEFT JOIN {_current_row("current_automatic_species_predictions", "s")} ON true
+    -- The table's latest row, not the view's: the view predates 0085's
+    -- columns (its `*` was expanded when it was made).
+    LEFT JOIN LATERAL {_latest("automatic_species_predictions")} s ON true
     WHERE c.tenant_id = :t AND c.mission_id = :d AND c.is_canonical
       AND h.status = 'predicted' AND NOT {_DETECTOR_SLATE}
       AND h.jpeg_render_version IS NOT NULL
       AND NOT {_calibration_session(":t", ":d")}
       AND (s.id IS NULL OR s.automatic_head_tail_prediction_id <> h.id
-           OR s.predictor_version IS DISTINCT FROM :sv)
+           OR s.predictor_version IS DISTINCT FROM :sv
+           -- chosen from another list (0085)
+           OR s.species_list_version IS DISTINCT FROM {SPECIES_LIST_VERSION})
     ORDER BY c.number
     """
 
@@ -1312,19 +1323,24 @@ async def persist_automatic_species(
         return 0
     await _check_captures(conn, tenant_id, mission_id, [r.capture_id for r in rows])
     await _check_head_tails(conn, tenant_id, rows)
+    # The list it chose from (0085): the mission's region's, as the
+    # orchestrator offered it.
+    region = await mission_species_region(conn, tenant_id, mission_id)
     for r in rows:
         await conn.execute(
             text("""
                 INSERT INTO automatic_species_predictions (
                     tenant_id, capture_id, automatic_head_tail_prediction_id, status,
                     predictor_version, model_id, predicted_choice, top1_probability,
-                    margin, top5)
+                    margin, top5, species_region, species_list_version)
                 VALUES (:t, :capture_id, :automatic_head_tail_prediction_id, :status,
                         :predictor_version, :model_id, :predicted_choice,
-                        :top1_probability, :margin, CAST(:top5 AS jsonb))
+                        :top1_probability, :margin, CAST(:top5 AS jsonb), :region,
+                        :list_version)
                 """),
-            {"t": tenant_id, **asdict(r), "top5": json.dumps(r.top5)},
-        )
+            {"t": tenant_id, **asdict(r), "top5": json.dumps(r.top5),
+             "region": region, "list_version": SPECIES_LIST_VERSION},
+        )  # fmt: skip
     return len(rows)
 
 
@@ -1769,6 +1785,12 @@ class AutomaticResultsCatalog(ServicePrincipal):
             return await automatic_species_captures(
                 conn, tenant_id, mission_id, species_version=species_version
             )
+
+    async def automatic_species_list(
+        self, tenant_id: uuid.UUID, mission_id: uuid.UUID
+    ) -> SpeciesList:
+        async with self._tenant(tenant_id) as conn:
+            return await automatic_species_list(conn, tenant_id, mission_id)
 
     async def persist_automatic_species(
         self, tenant_id: uuid.UUID, mission_id: uuid.UUID, rows
