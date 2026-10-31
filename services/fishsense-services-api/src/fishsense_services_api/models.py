@@ -199,6 +199,24 @@ class SpeciesLengthReference(Base):
     typical_derived_on: Mapped[date | None] = mapped_column(Date)
 
 
+class RegionalSpecies(Base):
+    """A fish commonly recorded in a broad region, which BioCLIP may name
+    there (0085, `regional_species`): global, written only by the migration."""
+
+    __tablename__ = "regional_species"
+    __table_args__ = (
+        CheckConstraint("rank > 0", name="regional_species_rank_check"),
+        UniqueConstraint("region", "rank"),
+    )
+
+    region: Mapped[str] = mapped_column(Text, primary_key=True)
+    scientific_name: Mapped[str] = mapped_column(Text, primary_key=True)
+    rank: Mapped[int] = mapped_column(Integer)
+    common_name: Mapped[str] = mapped_column(Text)
+    aphia_id: Mapped[int] = mapped_column(Integer)
+    obis_records: Mapped[int] = mapped_column(Integer)
+
+
 class CalibrationTarget(Base):
     """A checkerboard; versioned by ``valid_from``, pitch per axis."""
 
@@ -1485,6 +1503,10 @@ class AutomaticSpeciesPrediction(Base):
     margin: Mapped[float | None] = mapped_column(Double)
     top5: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     created_at: Mapped[datetime] = _created_at()
+    #: The list it chose from (0085): its mission's region, and the lists'
+    #: version.
+    species_region: Mapped[str | None] = mapped_column(Text)
+    species_list_version: Mapped[int | None] = mapped_column(Integer)
 
 
 class AutomaticMeasurement(Base):

@@ -57,6 +57,10 @@ from fishsense_services_contracts.object_store import (
 from fishsense_services_contracts.renders import render_key
 from fishsense_services_api.renders_store import RenderAt
 from fishsense_services_contracts.species_prediction import SpeciesPredictionResult
+from fishsense_services_api.regional_species import SpeciesList
+from fishsense_services_orchestrator.species_predict.candidates import (
+    species_candidates,
+)
 from fishsense_services_orchestrator.automatic_results.activities import (
     AutomaticResultsActivities,
     AutomaticTarget,
@@ -67,6 +71,8 @@ MISSION = uuid.uuid4()
 TARGET = AutomaticTarget(TENANT_A, MISSION)
 K = [[3000.0, 0.0, 2048.0], [0.0, 3000.0, 1536.0], [0.0, 0.0, 1.0]]
 T0 = datetime(2026, 1, 1, tzinfo=UTC)
+#: A mission in no region: the targets alone (0085).
+NO_REGION = SpeciesList(None, [])
 
 
 class _Catalog:
@@ -204,7 +210,7 @@ async def test_with_species_off_the_cohort_has_no_species_work():
 
 
 async def test_with_species_off_there_are_no_species_images():
-    catalog = _Catalog(automatic_species_captures=[
+    catalog = _Catalog(automatic_species_list=NO_REGION, automatic_species_captures=[
         AutomaticSpeciesCapture(uuid.uuid4(), "cc" * 16, True, uuid.uuid4(),
                                 [1, 2, 30, 40], False, 1, CAMERA),
     ])  # fmt: skip
@@ -411,7 +417,7 @@ async def test_species_are_cropped_by_the_automatic_mask_from_its_render():
     ht = uuid.uuid4()
     a, b = uuid.uuid4(), uuid.uuid4()
     old_camera = uuid.uuid4()
-    catalog = _Catalog(automatic_species_captures=[
+    catalog = _Catalog(automatic_species_list=NO_REGION, automatic_species_captures=[
         AutomaticSpeciesCapture(a, "cc" * 16, True, ht, [1, 2, 30, 40], False,
                                 AUTOMATIC_JPEG_RENDER_VERSION, CAMERA),
         AutomaticSpeciesCapture(b, "ee" * 16, True, uuid.uuid4(), [1, 2, 3, 4],
@@ -439,7 +445,7 @@ async def test_a_capture_whose_named_render_is_not_recorded_fails_the_species_st
     did not exist) -- which would hold its mission in the cohort for good.
     Failed, it is a strike, and visible."""
     c = uuid.uuid4()
-    catalog = _Catalog(automatic_species_captures=[
+    catalog = _Catalog(automatic_species_list=NO_REGION, automatic_species_captures=[
         AutomaticSpeciesCapture(c, "cc" * 16, True, uuid.uuid4(), [1, 2, 30, 40],
                                 False, 1, CAMERA),
     ])  # fmt: skip
@@ -452,16 +458,57 @@ async def test_a_capture_whose_named_render_is_not_recorded_fails_the_species_st
     assert error.value.type == "AutomaticRenderMissing" and error.value.non_retryable
 
 
-async def test_a_species_outside_the_candidates_is_refused():
-    catalog = _Catalog(persist_automatic_species=1)
-    bad = SpeciesPredictionResult(
+def _species(choice):
+    return SpeciesPredictionResult(
         capture_id=uuid.uuid4(), headtail_prediction_id=uuid.uuid4(),
-        status="predicted", predicted_choice="Fish, Nemo (Amphiprion nemo)",
-        top1_probability=0.9, margin=0.5, predictor_version=1, model_id="m",
+        status="predicted", predicted_choice=choice, top1_probability=0.9,
+        margin=0.5, predictor_version=1, model_id="m",
     )  # fmt: skip
+
+
+KEYS = SpeciesList("Florida Keys, USA", [
+    ("Bluehead Wrasse", "Thalassoma bifasciatum"),
+    ("Hogfish", "Lachnolaimus maximus"),  # a target too
+    ("Nurse Shark", "Ginglymostoma cirratum"),
+])  # fmt: skip
+NURSE_SHARK = "Fish, Nurse Shark (Ginglymostoma cirratum)"
+
+
+@pytest.mark.parametrize("region", [NO_REGION, KEYS])
+async def test_a_species_outside_the_candidates_is_refused(region):
+    catalog = _Catalog(persist_automatic_species=1, automatic_species_list=region)
+    bad = _species("Fish, Nemo (Amphiprion nemo)")
     with pytest.raises(ApplicationError):
         await _run(_acts(catalog).persist_automatic_species, TARGET, [bad])
-    assert catalog.calls == []
+    assert "persist_automatic_species" not in [name for name, _, _ in catalog.calls]
+
+
+async def test_a_mission_in_a_region_is_offered_its_fish_after_the_targets():
+    """Regional species (0085; the owner, 2026-10-30): BioCLIP may also name
+    the fish commonly recorded where the mission was, so a fish that is no
+    target is not forced into one's name. The targets keep their own
+    choices, and a region's fish that is one is not offered twice."""
+    catalog = _Catalog(automatic_species_captures=[], automatic_species_list=KEYS)
+
+    got = await _run(_acts(catalog).resolve_automatic_species_inputs, TARGET)
+
+    targets = species_candidates()
+    assert got.candidates[: len(targets)] == targets
+    assert [(c.choice, c.scientific_name) for c in got.candidates[len(targets):]] == [
+        ("Fish, Bluehead Wrasse (Thalassoma bifasciatum)", "Thalassoma bifasciatum"),
+        (NURSE_SHARK, "Ginglymostoma cirratum"),
+    ]  # fmt: skip
+
+
+async def test_a_regions_fish_is_persisted_only_where_it_was_offered():
+    keys = _Catalog(persist_automatic_species=1, automatic_species_list=KEYS)
+    assert await _run(_acts(keys).persist_automatic_species, TARGET,
+                      [_species(NURSE_SHARK)]) == 1  # fmt: skip
+
+    nowhere = _Catalog(persist_automatic_species=1, automatic_species_list=NO_REGION)
+    with pytest.raises(ApplicationError):
+        await _run(_acts(nowhere).persist_automatic_species, TARGET,
+                   [_species(NURSE_SHARK)])  # fmt: skip
 
 
 # -- calibration and lengths ------------------------------------------------------

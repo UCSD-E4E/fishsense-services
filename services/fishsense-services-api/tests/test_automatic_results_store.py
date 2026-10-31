@@ -2057,3 +2057,92 @@ async def test_the_missions_with_automatic_dots(owner_engine, app_engine):
 
     found = await _in(app_engine, lab, missions_with_automatic_dots)
     assert [m for m, _ in found] == [dotted]
+
+
+# -- regional species (0085): BioCLIP's choices by where the mission was ----------
+
+
+async def _in_folder(owner_engine, lab, mission_id, source_path):
+    await exec_(owner_engine, "UPDATE missions SET source_path = :p WHERE id = :d",
+                p=source_path, d=mission_id)  # fmt: skip
+
+
+async def test_a_missions_species_list_is_its_regions(owner_engine, app_engine):
+    """A mission in Islamorada is offered the Florida Keys' fish, most
+    recorded first; one in no region, none (the 13 targets alone)."""
+    from fishsense_services_api.regional_species import automatic_species_list
+
+    lab = await tenant(owner_engine)
+    keys, nowhere = [await _backlog_mission(owner_engine, lab) for _ in range(2)]
+    await _in_folder(owner_engine, lab, keys, "2023.08.03.FishSense/Islamorada_FSL-01D")
+    await _in_folder(owner_engine, lab, nowhere, "2023-09-07 REEF Data Dump/FSL-01")
+
+    listed = await _in(app_engine, lab, automatic_species_list, keys)
+    unlisted = await _in(app_engine, lab, automatic_species_list, nowhere)
+
+    assert listed.region == "Florida Keys, USA"
+    assert len(listed.species) == 45
+    assert listed.species[0] == ("Bluehead Wrasse", "Thalassoma bifasciatum")
+    assert ("Nurse Shark", "Ginglymostoma cirratum") in listed.species
+    assert (unlisted.region, unlisted.species) == (None, [])
+
+
+async def test_a_species_row_records_the_list_it_chose_from(owner_engine, app_engine):
+    from fishsense_services_api.regional_species import SPECIES_LIST_VERSION
+
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    await _in_folder(
+        owner_engine, lab, mission_id, "CubaTrip2024_FSL06/062724_Farallon"
+    )
+    a = await capture(owner_engine, lab, mission_id)
+    await _predict(app_engine, lab, mission_id, _predicted(a))
+    (job,) = await _in(app_engine, lab, automatic_species_captures, mission_id,
+                       species_version=1)  # fmt: skip
+
+    await _in(app_engine, lab, persist_automatic_species, mission_id, [
+        AutomaticSpeciesRow(capture_id=a, automatic_head_tail_prediction_id=
+                            job.automatic_head_tail_prediction_id, status="predicted",
+                            predictor_version=1, model_id="m",
+                            predicted_choice=HOGFISH, top1_probability=0.9,
+                            margin=0.5, top5=[{"choice": HOGFISH,
+                                               "probability": 0.9}])])  # fmt: skip
+
+    (row,) = await _rows(owner_engine, """
+        SELECT species_region, species_list_version FROM automatic_species_predictions""")  # fmt: skip
+    assert row == {"species_region": "Caribbean",
+                   "species_list_version": SPECIES_LIST_VERSION}  # fmt: skip
+    assert await _in(app_engine, lab, automatic_species_captures, mission_id,
+                     species_version=1) == []  # fmt: skip
+
+
+async def test_a_species_row_from_an_older_list_is_owed_again(owner_engine, app_engine):
+    """Before 0085 BioCLIP chose among the 13 targets only: those rows, and
+    any from an older list, are predicted again, and hold their mission in
+    the cohort until they are."""
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    a = await capture(owner_engine, lab, mission_id)
+    await _predict(app_engine, lab, mission_id, _predicted(a))
+    # Refused, so species is the only work it could have left.
+    await _in(app_engine, lab, persist_automatic_calibration, mission_id,
+              _label_free(outcome="refused", refusal_reason="no_candidates",
+                          laser_position=None, laser_axis=None))  # fmt: skip
+    (job,) = await _in(app_engine, lab, automatic_species_captures, mission_id,
+                       species_version=1)  # fmt: skip
+    await _in(app_engine, lab, persist_automatic_species, mission_id, [
+        AutomaticSpeciesRow(capture_id=a, automatic_head_tail_prediction_id=
+                            job.automatic_head_tail_prediction_id, status="predicted",
+                            predictor_version=1, model_id="m",
+                            predicted_choice=HOGFISH, top1_probability=0.9,
+                            margin=0.5, top5=[{"choice": HOGFISH,
+                                               "probability": 0.9}])])  # fmt: skip
+    assert await _next(app_engine, lab) is None
+
+    await exec_(owner_engine,
+                "UPDATE automatic_species_predictions SET species_list_version = NULL")  # fmt: skip
+
+    (again,) = await _in(app_engine, lab, automatic_species_captures, mission_id,
+                         species_version=1)  # fmt: skip
+    assert again.capture_id == a and again.has_existing_prediction
+    assert await _next(app_engine, lab) == mission_id

@@ -91,6 +91,7 @@ from fishsense_services_contracts.masks import MaskUpload
 from fishsense_services_orchestrator.masks import checked_masks, discard, mask_upload
 from fishsense_services_orchestrator.species_predict.candidates import (
     species_candidates,
+    with_regional,
 )
 from fishsense_services_contracts.renamed import renamed_from
 
@@ -565,6 +566,7 @@ class AutomaticResultsActivities:
                 candidates=species_candidates(),
                 images=[],
             )
+        candidates = await self._species_candidates(target)
         captures = await self._catalog.automatic_species_captures(
             target.tenant_id,
             target.mission_id,
@@ -586,9 +588,16 @@ class AutomaticResultsActivities:
         return PredictSpeciesImagesInput(
             tenant_id=target.tenant_id,
             mission_id=target.mission_id,
-            candidates=species_candidates(),
+            candidates=candidates,
             images=images,
         )
+
+    async def _species_candidates(self, target: AutomaticTarget) -> list:
+        """The targets and the mission's region's fish (0085)."""
+        regional = await self._catalog.automatic_species_list(
+            target.tenant_id, target.mission_id
+        )
+        return with_regional(regional.species)
 
     @activity.defn(name="persist_automatic_species")
     async def persist_automatic_species(
@@ -596,7 +605,7 @@ class AutomaticResultsActivities:
     ) -> int:
         if refused := sorted({r.status for r in results} - set(SPECIES_STATUSES)):
             raise _refuse(target, f"species status {refused} is not a prediction")
-        choices = {c.choice for c in species_candidates()}
+        choices = {c.choice for c in await self._species_candidates(target)}
         named = {r.predicted_choice for r in results if r.predicted_choice} | {
             s.choice for r in results for s in r.top5
         }
