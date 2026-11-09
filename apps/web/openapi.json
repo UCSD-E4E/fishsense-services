@@ -7102,7 +7102,7 @@
     },
     "/tenants/{slug}/regions": {
       "get": {
-        "description": "Where the tenant's wild fish were measured, by broad region, for\nits Today map (`tenant_regions_store`). Fish models are left off.",
+        "description": "Where the tenant's wild fish were measured, by broad region, for\nits Today map (`tenant_regions_store`). Fish models are left off.\n``source=automatic`` counts the automatic lengths: unvalidated.",
         "operationId": "get_tenant_regions",
         "parameters": [
           {
@@ -7111,6 +7111,20 @@
             "required": true,
             "schema": {
               "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "human",
+              "enum": [
+                "human",
+                "automatic"
+              ],
+              "title": "Source",
               "type": "string"
             }
           }

@@ -31,10 +31,24 @@ export function recentDeployments(deployments: Deployment[], n: number): Deploym
     .slice(0, n);
 }
 
+/** Whose labels the Today map counts: the human ones, or the automatic
+ *  lengths (unvalidated; the owner, 2026-11-08). */
+export type MapSource = "human" | "automatic";
+
+/** The map asked for in the page's `?map=`: the human labels unless it says
+ *  automatic. */
+export function mapSource(raw: string | undefined): MapSource {
+  return raw === "automatic" ? "automatic" : "human";
+}
+
 /** Where the tenant's fish were measured, by broad region (the Today map). */
-export async function getTenantRegions(accessToken: string, slug: string): Promise<TenantRegions> {
+export async function getTenantRegions(
+  accessToken: string,
+  slug: string,
+  source: MapSource = "human",
+): Promise<TenantRegions> {
   const { data, error, response } = await apiClient(accessToken).GET("/tenants/{slug}/regions", {
-    params: { path: { slug: safeSlug(slug) } },
+    params: { path: { slug: safeSlug(slug) }, query: source === "automatic" ? { source } : {} },
   });
   if (data === undefined) throw failure("fishsense-api regions failed", response, error);
   return data;

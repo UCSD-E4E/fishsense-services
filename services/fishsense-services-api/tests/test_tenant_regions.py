@@ -154,3 +154,122 @@ class TestTenantRegions:
         found = await _regions(app_engine, tenants["lab"])
 
         assert (found.regions, found.elsewhere) == ([], 0)
+
+
+async def _automatic(owner_engine, app_engine, lab, folder: str | None):
+    """A frame with a current automatic length, its mission in ``folder``."""
+    from test_automatic_results_store import _measured
+
+    mission_id, c = await _measured(owner_engine, app_engine, lab)
+    if folder is not None:
+        await exec_(
+            owner_engine,
+            "UPDATE missions SET source_path = :p WHERE id = :m",
+            p=f"/nas/{folder}/FSL-{next(_devices)} dive",
+            m=mission_id,
+        )
+    return mission_id, c
+
+
+async def _automatic_regions(app_engine, tenant_id):
+    async with tenant_transaction(app_engine, tenant_id) as conn:
+        return await tenant_regions(conn, tenant_id, source="automatic")
+
+
+class TestAutomaticRegions:
+    """The map from the automatic lengths instead (the owner, 2026-11-08: a
+    toggle between the human and the automatic labels). Unvalidated: the
+    page says so. The lengths are the automatic lengths list's
+    (`automatic_lengths_store`): current ones, no slate frame."""
+
+    async def test_lengths_are_counted_at_their_missions_region(
+        self, owner_engine, app_engine
+    ):
+        from depth_measure_seed import tenant
+
+        lab = await tenant(owner_engine)
+        await _automatic(owner_engine, app_engine, lab, "102724_Islamorada")
+        await _automatic(owner_engine, app_engine, lab, "Alligator Reef")
+        await _automatic(owner_engine, app_engine, lab, "Nathans Pool")
+        await _automatic(owner_engine, app_engine, lab, None)
+
+        found = await _automatic_regions(app_engine, lab)
+
+        assert {r.name: r.fish for r in found.regions} == {KEYS: 2, SOCAL: 1}
+        assert found.regions[0].name == KEYS
+        assert found.elsewhere == 1
+
+    async def test_the_human_map_does_not_count_them(self, owner_engine, app_engine):
+        from depth_measure_seed import tenant
+
+        lab = await tenant(owner_engine)
+        await _automatic(owner_engine, app_engine, lab, "Islamorada")
+
+        found = await _regions(app_engine, lab)
+
+        assert (found.regions, found.elsewhere) == ([], 0)
+
+    async def test_a_frame_with_gps_is_placed_by_it(self, owner_engine, app_engine):
+        from depth_measure_seed import tenant
+
+        lab = await tenant(owner_engine)
+        _, c = await _automatic(owner_engine, app_engine, lab, None)
+        await exec_(
+            owner_engine,
+            "UPDATE captures SET latitude = 32.8665, longitude = -117.2546 "
+            "WHERE id = :c",
+            c=c,
+        )  # La Jolla
+
+        found = await _automatic_regions(app_engine, lab)
+
+        assert {r.name: r.fish for r in found.regions} == {SOCAL: 1}
+
+    async def test_a_slate_frame_is_left_off(self, owner_engine, app_engine):
+        from test_slate_presence_store import _row as _slate_row
+
+        from depth_measure_seed import tenant
+        from fishsense_services_api.slate_presence_store import (
+            persist_slate_presence,
+        )
+
+        lab = await tenant(owner_engine)
+        mission_id, c = await _automatic(owner_engine, app_engine, lab, "Islamorada")
+        async with tenant_transaction(app_engine, lab) as conn:
+            await persist_slate_presence(conn, lab, mission_id, [_slate_row(c)])
+
+        found = await _automatic_regions(app_engine, lab)
+
+        assert (found.regions, found.elsewhere) == ([], 0)
+
+    async def test_a_stale_length_is_left_off(self, owner_engine, app_engine):
+        """A newer head/tail makes the length stale: it isn't current."""
+        from test_automatic_results_store import _in, _predict, _predicted
+
+        from depth_measure_seed import tenant
+
+        lab = await tenant(owner_engine)
+        mission_id, c = await _automatic(owner_engine, app_engine, lab, "Islamorada")
+        await _predict(app_engine, lab, mission_id, _predicted(c, head_x=1700.0))
+
+        found = await _automatic_regions(app_engine, lab)
+
+        assert (found.regions, found.elsewhere) == ([], 0)
+
+    async def test_a_frame_a_person_labeled_a_fish_model_is_left_off(
+        self, owner_engine, app_engine
+    ):
+        """As on the human map: the decoys of pool trials are not wild fish."""
+        from depth_measure_seed import calibrate, fish, measurement, tenant
+
+        lab = await tenant(owner_engine)
+        mission_id, c = await _automatic(owner_engine, app_engine, lab, "Islamorada")
+        await _automatic(owner_engine, app_engine, lab, "Islamorada")
+        cal = await calibrate(owner_engine, lab, mission_id)
+        await measurement(
+            owner_engine, lab, c, await fish(owner_engine, lab, model="Ginny"), cal
+        )
+
+        found = await _automatic_regions(app_engine, lab)
+
+        assert {r.name: r.fish for r in found.regions} == {KEYS: 1}

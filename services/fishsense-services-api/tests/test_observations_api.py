@@ -274,6 +274,29 @@ class TestRegions:
 
         assert response.status_code == 404
 
+    async def test_the_automatic_lengths_map_on_asking(
+        self, client, owner_engine, app_engine, tenants
+    ):
+        """A toggle between the human and the automatic labels (the owner,
+        2026-11-08); the human map stays the default."""
+        from test_automatic_results_store import _measured
+
+        await lite(owner_engine, tenants["lab"], species=("A b", "C"))
+        await _measured(owner_engine, app_engine, tenants["lab"])
+        await _measured(owner_engine, app_engine, tenants["lab"])
+
+        human = await _get(client, "/tenants/lab/regions")
+        automatic = await _get(client, "/tenants/lab/regions", source="automatic")
+
+        assert human.json() == {"regions": [], "elsewhere": 1}
+        assert automatic.status_code == 200
+        assert automatic.json() == {"regions": [], "elsewhere": 2}
+
+    async def test_an_unknown_source_is_refused(self, client, tenants):
+        response = await _get(client, "/tenants/lab/regions", source="robots")
+
+        assert response.status_code == 422
+
 
 class TestDetail:
     async def test_a_lite_fish_shows_its_laser_evidence(

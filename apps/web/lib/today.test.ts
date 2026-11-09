@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { project } from "./public-page";
-import { bubbleSize, getTenantRegions, mapFrame, MAP_ASPECT, recentDeployments } from "./today";
+import { bubbleSize, getTenantRegions, mapFrame, mapSource, MAP_ASPECT, recentDeployments } from "./today";
 import type { Deployment } from "./mission-facts";
 
 const d = (number: number, started_on: string | null) =>
@@ -93,5 +93,28 @@ describe("getTenantRegions", () => {
     expect(fetchMock.mock.calls[0][0].url).toBe("http://api.test/tenants/lab/regions");
     expect(fetchMock.mock.calls[0][0].headers.get("authorization")).toBe("Bearer t");
     expect(found.regions).toEqual([SOCAL]);
+  });
+
+  it("asks for the automatic lengths' map when told to", async () => {
+    const fetchMock = vi.fn(
+      async (_request: Request) =>
+        new Response(JSON.stringify({ regions: [], elsewhere: 0 }), {
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getTenantRegions("t", "lab", "automatic");
+
+    expect(fetchMock.mock.calls[0][0].url).toBe("http://api.test/tenants/lab/regions?source=automatic");
+  });
+});
+
+describe("mapSource", () => {
+  it("is the human labels unless the automatic ones are asked for", () => {
+    expect(mapSource("automatic")).toBe("automatic");
+    expect(mapSource(undefined)).toBe("human");
+    expect(mapSource("human")).toBe("human");
+    expect(mapSource("robots")).toBe("human");
   });
 });

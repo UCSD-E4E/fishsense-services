@@ -10,7 +10,7 @@ import { WorkSections } from "@/app/_shell/work-sections";
 import { getDeployments } from "@/lib/mission-facts";
 import { getObservationPage } from "@/lib/observations";
 import { paths } from "@/lib/tenant-paths";
-import { getTenantRegions, getTenantSummary, recentDeployments } from "@/lib/today";
+import { getTenantRegions, getTenantSummary, recentDeployments, type MapSource } from "@/lib/today";
 import { getIsSystemAdmin } from "@/lib/system-admin";
 
 /** The numbers and "Needs you" both read the summary: asked once per request. */
@@ -61,27 +61,63 @@ export async function Numbers({ token, slug }: Section) {
   );
 }
 
-/** Where the tenant's wild fish were measured, by broad region, on a map. */
-export async function WhereMeasured({ token, slug }: Section) {
+/** Where the tenant's wild fish were measured, by broad region, on a map:
+ *  by the human labels, or by the automatic lengths, which nobody has
+ *  reviewed and the map says so (the owner, 2026-11-08). */
+export async function WhereMeasured({ token, slug, source = "human" }: Section & { source?: MapSource }) {
+  const automatic = source === "automatic";
   let found;
   try {
-    found = await getTenantRegions(token, slug);
+    found = await getTenantRegions(token, slug, source);
   } catch (error) {
     unstable_rethrow(error);
     return <Failure>Could not load the map: {reason(error)}</Failure>;
   }
   if (found.regions.length === 0) {
-    return <p className="text-fg-2">Measured fish will appear here by region.</p>;
+    return (
+      <p className="text-fg-2">
+        {automatic ? "Automatic lengths will appear here by region." : "Measured fish will appear here by region."}
+      </p>
+    );
   }
   return (
     <div className="flex flex-col gap-2">
+      {automatic && (
+        <p className="text-sm text-fg-2">
+          The automatic run&apos;s lengths, not reviewed by a person: one per frame, slate frames left out.
+        </p>
+      )}
       <RegionMap regions={found.regions} />
       {found.elsewhere > 0 && (
         <p className="text-sm text-fg-2">
-          {found.elsewhere.toLocaleString()} more fish without a region.
+          {found.elsewhere.toLocaleString()} more {automatic ? "automatic lengths" : "fish"} without a region.
         </p>
       )}
     </div>
+  );
+}
+
+const MAP_SOURCES: { source: MapSource; label: string }[] = [
+  { source: "human", label: "Human labels" },
+  { source: "automatic", label: "Automatic labels" },
+];
+
+/** Which labels the map counts: a link each, so the choice is in the URL. */
+export function MapSourceToggle({ slug, source }: { slug: string; source: MapSource }) {
+  return (
+    <nav aria-label="Map labels" className="flex flex-wrap gap-2">
+      {MAP_SOURCES.map((s) => (
+        <Link
+          key={s.source}
+          href={s.source === "automatic" ? `${paths.tenant(slug)}?map=automatic` : paths.tenant(slug)}
+          scroll={false}
+          aria-current={s.source === source ? "page" : undefined}
+          className="inline-flex h-11 items-center rounded-chip border border-line bg-surface px-4 text-sm font-medium aria-[current=page]:border-teal aria-[current=page]:bg-teal-tint aria-[current=page]:font-semibold aria-[current=page]:text-teal-fg"
+        >
+          {s.label}
+        </Link>
+      ))}
+    </nav>
   );
 }
 
