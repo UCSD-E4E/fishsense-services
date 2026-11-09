@@ -273,3 +273,131 @@ class TestAutomaticRegions:
         found = await _automatic_regions(app_engine, lab)
 
         assert {r.name: r.fish for r in found.regions} == {KEYS: 1}
+
+
+async def _mapped(app_engine, lab) -> int:
+    """Every automatic length on the map: in a region or elsewhere."""
+    found = await _automatic_regions(app_engine, lab)
+    return sum(r.fish for r in found.regions) + found.elsewhere
+
+
+class TestAutomaticRegionsAreTheCurrentLengths:
+    """The map restates `current_automatic_measurements`'s rules rather than
+    read the view (2026-11-09: through the view, the lab's map ran past the
+    app role's 30 s statement timeout, and the page showed a 500; over 120 s
+    by hand, against 5.7 s restated). These pin each rule; on production the
+    restatement picked the view's row on all 27,313 of the lab's current
+    frames."""
+
+    async def test_a_frame_measured_twice_counts_once(self, owner_engine, app_engine):
+        from test_automatic_results_store import _in
+
+        from depth_measure_seed import tenant
+        from fishsense_services_api.automatic_results_store import (
+            AutomaticMeasurementRow,
+            persist_automatic_measurements,
+        )
+
+        lab = await tenant(owner_engine)
+        mission_id, c = await _automatic(owner_engine, app_engine, lab, "Islamorada")
+        (old,) = await _rows(owner_engine, "SELECT * FROM automatic_measurements")
+        await _in(app_engine, lab, persist_automatic_measurements, mission_id, [
+            AutomaticMeasurementRow(
+                capture_id=c,
+                automatic_head_tail_prediction_id=old["automatic_head_tail_prediction_id"],
+                automatic_keypoint_prediction_id=old["automatic_keypoint_prediction_id"],
+                calibration_source=old["calibration_source"],
+                automatic_laser_calibration_id=old["automatic_laser_calibration_id"],
+                laser_calibration_id=old["laser_calibration_id"],
+                camera_calibration_id=old["camera_calibration_id"],
+                length_m=0.43, depth_m=2.1, algorithm="laser_depth_fronto_parallel",
+                algorithm_version="1", core_version="4.1.0",
+            )
+        ])  # fmt: skip
+
+        assert await _mapped(app_engine, lab) == 1
+
+    async def test_a_length_on_a_superseded_calibration_is_left_off(
+        self, owner_engine, app_engine
+    ):
+        from test_automatic_results_store import _in, _label_free
+
+        from depth_measure_seed import tenant
+        from fishsense_services_api.automatic_results_store import (
+            persist_automatic_calibration,
+        )
+
+        lab = await tenant(owner_engine)
+        mission_id, _ = await _automatic(owner_engine, app_engine, lab, "Islamorada")
+        await _in(app_engine, lab, persist_automatic_calibration, mission_id,
+                  _label_free())  # fmt: skip
+
+        assert await _mapped(app_engine, lab) == 0
+
+    async def test_a_length_off_its_frames_beam_aim_is_left_off(
+        self, owner_engine, app_engine
+    ):
+        """A frame measured with the first aim's beam, then found to be after
+        the laser moved, has no current length."""
+        from _slate_calibration_seed import beam_moved_after
+        from test_automatic_results_store import _backlog_mission
+        from test_calibration_per_aim import (
+            BEAM,
+            _dots,
+            _frames,
+            _length,
+            _measure,
+            _persist,
+        )
+
+        from depth_measure_seed import tenant
+
+        lab = await tenant(owner_engine)
+        mission_id = await _backlog_mission(owner_engine, lab)
+        first, later = await _frames(owner_engine, app_engine, lab, mission_id,
+                                     _dots(BEAM, 2))  # fmt: skip
+        await _persist(app_engine, lab, mission_id)
+        inputs = await _measure(app_engine, lab, mission_id)
+        for c in (first, later):
+            await _length(app_engine, lab, mission_id, inputs, c)
+        assert await _mapped(app_engine, lab) == 2
+
+        await beam_moved_after(owner_engine, first)
+
+        assert await _mapped(app_engine, lab) == 1
+
+    def test_the_map_does_not_read_the_current_lengths_view(self):
+        from fishsense_services_api import tenant_regions_store
+
+        assert "current_automatic_measurements" not in (
+            tenant_regions_store._AUTOMATIC_SQL
+        )
+
+    async def test_the_view_it_restates_is_unchanged(self, owner_engine):
+        """A migration that changes `current_automatic_measurements` must
+        change the map's restatement too (`tenant_regions_store`), then
+        update this pin."""
+        import hashlib
+
+        from sqlalchemy import text
+
+        async with owner_engine.connect() as conn:
+            definition = (
+                await conn.execute(
+                    text(
+                        "SELECT pg_get_viewdef("
+                        "'current_automatic_measurements'::regclass, true)"
+                    )
+                )
+            ).scalar_one()
+        assert hashlib.sha256(definition.encode()).hexdigest() == VIEW_SHA256
+
+
+async def _rows(engine, sql, **params):
+    from test_automatic_results_store import _rows as rows
+
+    return await rows(engine, sql, **params)
+
+
+#: sha256 of `current_automatic_measurements`'s definition (0081).
+VIEW_SHA256 = "0f73b4ec22cb318bbd889b9de226aae6dab618cfbf3566faf560bb1de13ed582"
