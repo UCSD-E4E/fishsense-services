@@ -43,7 +43,7 @@ from fishsense_services_api.observation_store import (
 )
 from fishsense_services_api.place_naming import PlaceNamer
 from fishsense_services_api.summary_store import tenant_summary
-from fishsense_services_api.tenant_regions_store import tenant_regions
+from fishsense_services_api.tenant_regions_store import Source, tenant_regions
 from fishsense_services_api.tenant_stores import NoTenantStore, TenantStores
 
 __all__ = ["add_observation_routes"]
@@ -268,11 +268,12 @@ def add_observation_routes(
         operation_id="get_tenant_regions",
         response_model=TenantRegionsView,
     )
-    async def regions(member: Member) -> TenantRegionsView:
+    async def regions(member: Member, source: Source = "human") -> TenantRegionsView:
         """Where the tenant's wild fish were measured, by broad region, for
-        its Today map (`tenant_regions_store`). Fish models are left off."""
+        its Today map (`tenant_regions_store`). Fish models are left off.
+        ``source=automatic`` counts the automatic lengths: unvalidated."""
         async with tenant_transaction(engine, member.tenant_id) as conn:
-            found = await tenant_regions(conn, member.tenant_id)
+            found = await tenant_regions(conn, member.tenant_id, source=source)
         return TenantRegionsView(
             regions=[TenantRegionView(**asdict(r)) for r in found.regions],
             elsewhere=found.elsewhere,

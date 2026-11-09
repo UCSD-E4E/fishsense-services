@@ -791,6 +791,7 @@ export interface paths {
          * Regions
          * @description Where the tenant's wild fish were measured, by broad region, for
          *     its Today map (`tenant_regions_store`). Fish models are left off.
+         *     ``source=automatic`` counts the automatic lengths: unvalidated.
          */
         get: operations["get_tenant_regions"];
         put?: never;
@@ -3585,7 +3586,9 @@ export interface operations {
     };
     get_tenant_regions: {
         parameters: {
-            query?: never;
+            query?: {
+                source?: "human" | "automatic";
+            };
             header?: never;
             path: {
                 slug: string;

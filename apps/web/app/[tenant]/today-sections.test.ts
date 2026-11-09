@@ -9,7 +9,7 @@
 import { createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { NeedsYou, Numbers, RecentFish, RecentTrips, WhereMeasured, Work } from "./today-sections";
+import { MapSourceToggle, NeedsYou, Numbers, RecentFish, RecentTrips, WhereMeasured, Work } from "./today-sections";
 
 vi.mock("@/app/_shell/work-sections", () => ({
   WorkSections: ({ dashboards }: { dashboards: boolean }) =>
@@ -219,5 +219,51 @@ describe("WhereMeasured", () => {
 
     expect(out).toContain('role="alert"');
     expect(out).toContain("Could not load the map");
+  });
+
+  it("maps the automatic lengths, and says nobody has reviewed them", async () => {
+    const fetchMock = api({ "/tenants/lab/regions": regions });
+
+    const out = await html(WhereMeasured({ ...SECTION, source: "automatic" }));
+
+    expect(new URL(fetchMock.mock.calls[0][0].url).searchParams.get("source")).toBe("automatic");
+    expect(out).toContain("2,101 fish");
+    expect(out).toContain("not reviewed by a person");
+    expect(out).toContain("8 more automatic lengths without a region");
+  });
+
+  it("says where automatic lengths will show before there are any", async () => {
+    api({ "/tenants/lab/regions": { regions: [], elsewhere: 0 } });
+
+    expect(await html(WhereMeasured({ ...SECTION, source: "automatic" }))).toContain(
+      "Automatic lengths will appear here by region",
+    );
+  });
+
+  it("the human map does not say it is automatic", async () => {
+    api({ "/tenants/lab/regions": regions });
+
+    expect(await html(WhereMeasured(SECTION))).not.toContain("not reviewed by a person");
+  });
+});
+
+describe("MapSourceToggle", () => {
+  /** The attributes of the link labeled `label`. */
+  function link(markup: string, label: string): string {
+    const found = markup.match(new RegExp(`<a ([^>]*)>${label}</a>`));
+    expect(found).not.toBeNull();
+    return found![1];
+  }
+
+  it("links to each map and marks the one shown", () => {
+    const human = renderToStaticMarkup(MapSourceToggle({ slug: "lab", source: "human" }));
+    const automatic = renderToStaticMarkup(MapSourceToggle({ slug: "lab", source: "automatic" }));
+
+    expect(link(human, "Human labels")).toContain('href="/lab"');
+    expect(link(human, "Human labels")).toContain('aria-current="page"');
+    expect(link(human, "Automatic labels")).toContain('href="/lab?map=automatic"');
+    expect(link(human, "Automatic labels")).not.toContain('aria-current="page"');
+    expect(link(automatic, "Automatic labels")).toContain('aria-current="page"');
+    expect(link(automatic, "Human labels")).not.toContain('aria-current="page"');
   });
 });

@@ -4,12 +4,14 @@ import { Suspense } from "react";
 import { requireSignedIn } from "@/app/_shell/guard";
 import { tenantFor } from "@/app/_shell/tenant";
 import { paths } from "@/lib/tenant-paths";
+import { mapSource } from "@/lib/today";
 import type { TenantMembership } from "@/lib/fishsense-api";
 import {
   Failure,
   FishLoading,
   LineLoading,
   MapLoading,
+  MapSourceToggle,
   NeedsYou,
   NothingYet,
   Numbers,
@@ -25,7 +27,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
-type Props = { params: Promise<{ tenant: string }> };
+type Props = { params: Promise<{ tenant: string }>; searchParams: Promise<{ map?: string }> };
 
 /**
  * A tenant's Today (docs/design/README.md, Home pages): its numbers, its
@@ -38,8 +40,9 @@ type Props = { params: Promise<{ tenant: string }> };
  * this (2026-10-21) the page waited on all of them, and the summary took
  * 12 s on production.
  */
-export default async function TodayPage({ params }: Props) {
+export default async function TodayPage({ params, searchParams }: Props) {
   const { tenant: slug } = await params;
+  const source = mapSource((await searchParams).map);
   const session = await requireSignedIn(paths.tenant(slug));
   const token = session.accessToken ?? "";
 
@@ -73,9 +76,15 @@ export default async function TodayPage({ params }: Props) {
           </Suspense>
 
           <section className="flex flex-col gap-3">
-            <h2 className="text-xl font-semibold">Where we&apos;ve measured</h2>
-            <Suspense fallback={<MapLoading />}>
-              <WhereMeasured token={token} slug={slug} />
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-xl font-semibold">Where we&apos;ve measured</h2>
+              <div className="ml-auto">
+                <MapSourceToggle slug={slug} source={source} />
+              </div>
+            </div>
+            {/* Keyed by the labels, so a switch shows the map loading again. */}
+            <Suspense key={source} fallback={<MapLoading />}>
+              <WhereMeasured token={token} slug={slug} source={source} />
             </Suspense>
           </section>
 
