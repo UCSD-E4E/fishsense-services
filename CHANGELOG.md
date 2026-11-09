@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.78.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.78.0...v0.78.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* **api:** automatic map no longer times out ([66c0b97](https://github.com/UCSD-E4E/fishsense-services/commit/66c0b97672b7fdfbe24a793861c8f291e24c7b14))
+* **api:** automatic map no longer times out ([acf9701](https://github.com/UCSD-E4E/fishsense-services/commit/acf97014c7a679c6f4398f8bedec91cd2bd15de8))
+
 ## [0.78.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.77.0...v0.78.0) (2026-11-09)
 
 
