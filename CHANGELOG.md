@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.78.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.77.0...v0.78.0) (2026-11-09)
+
+
+### Features
+
+* toggle the tenant map between human and automatic labels ([7ea79c7](https://github.com/UCSD-E4E/fishsense-services/commit/7ea79c7cee4e773e062183441b06752757da5c71))
+* toggle the tenant map between human and automatic labels ([b3dd956](https://github.com/UCSD-E4E/fishsense-services/commit/b3dd956d0b9fb4a28bd9007511be3bab654956f6))
+
 ## [0.77.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.76.0...v0.77.0) (2026-10-31)
 
 
