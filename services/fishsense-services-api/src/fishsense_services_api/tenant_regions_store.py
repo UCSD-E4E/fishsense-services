@@ -47,17 +47,61 @@ _HUMAN_SQL = """
     GROUP BY m.source_path, o.latitude, o.longitude
 """
 
+#: The automatic lengths, by the rules of the view `current_automatic_measurements`
+#: (0081), restated here rather than read through the view. Through the view,
+#: the lab's map ran past the app role's 30 s statement timeout and the page
+#: showed a 500 (2026-11-09, v0.78.0; over 120 s by hand). Postgres expected one
+#: row, so it re-ran the view's per-mission calibration pick
+#: (`automatic_measurement_calibrations`) for each of the lab's 70,378
+#: measurement rows. Here the pick is read once per tenant (``mc``, 203 rows for
+#: the lab), and each step is materialized so the planner cannot nest-loop them
+#: again. It took 5.7 s, and on production it picked the view's row for all
+#: 27,313 of the lab's current frames. The rules: a frame's current length is its
+#: newest measurement whose head/tail is the frame's newest prediction, whose
+#: calibration is its mission's current pick, and whose aim is the frame's beam
+#: aim. A change to the view must change this too: tests/test_tenant_regions.py
+#: pins the view.
 _AUTOMATIC_SQL = f"""
+    WITH mc AS MATERIALIZED (
+        SELECT mc.mission_id, mc.calibration_source,
+               mc.automatic_laser_calibration_id, mc.laser_calibration_id,
+               x.aim
+        FROM automatic_measurement_calibrations mc
+        LEFT JOIN automatic_laser_calibrations x
+          ON x.tenant_id = mc.tenant_id
+         AND x.id = mc.automatic_laser_calibration_id
+        WHERE mc.tenant_id = :t
+    ),
+    am AS MATERIALIZED (
+        SELECT DISTINCT ON (m.capture_id) m.capture_id, m.length_m
+        FROM automatic_measurements m
+        JOIN captures c ON c.tenant_id = m.tenant_id AND c.id = m.capture_id
+        JOIN LATERAL (
+            SELECT h.id FROM automatic_head_tail_predictions h
+            WHERE h.tenant_id = m.tenant_id AND h.capture_id = m.capture_id
+            ORDER BY h.seq DESC
+            LIMIT 1
+        ) ht ON ht.id = m.automatic_head_tail_prediction_id
+        JOIN mc ON mc.mission_id = c.mission_id
+         AND mc.calibration_source = m.calibration_source
+         AND NOT mc.automatic_laser_calibration_id
+                 IS DISTINCT FROM m.automatic_laser_calibration_id
+         AND NOT mc.laser_calibration_id IS DISTINCT FROM m.laser_calibration_id
+         AND beam_aim(c.tenant_id, c.mission_id, c.captured_at) = mc.aim
+        WHERE m.tenant_id = :t
+        ORDER BY m.capture_id, m.seq DESC
+    ),
+    fish_model AS MATERIALIZED (
+        SELECT DISTINCT o.capture_id FROM observations o
+        WHERE o.tenant_id = :t AND o.fish_model IS NOT NULL
+    )
     SELECT d.source_path, c.latitude, c.longitude, count(*) AS fish
-    FROM current_automatic_measurements am
-    JOIN captures c ON c.tenant_id = am.tenant_id AND c.id = am.capture_id
+    FROM am
+    JOIN captures c ON c.tenant_id = :t AND c.id = am.capture_id
     JOIN missions d ON d.tenant_id = c.tenant_id AND d.id = c.mission_id
-    WHERE am.tenant_id = :t AND am.length_m IS NOT NULL
+    WHERE am.length_m IS NOT NULL
       AND NOT {detector_slate_frame()}
-      AND NOT EXISTS (
-          SELECT 1 FROM observations o
-          WHERE o.tenant_id = c.tenant_id AND o.capture_id = c.id
-            AND o.fish_model IS NOT NULL)
+      AND NOT EXISTS (SELECT 1 FROM fish_model f WHERE f.capture_id = c.id)
     GROUP BY d.source_path, c.latitude, c.longitude
 """
 
