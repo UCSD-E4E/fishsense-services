@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.80.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.80.0...v0.80.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **api:** keep a pool trial's fish models off the automatic map ([3601b5e](https://github.com/UCSD-E4E/fishsense-services/commit/3601b5e272a542600200da10b07e9271d8eda9ca))
+
 ## [0.80.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.79.0...v0.80.0) (2026-11-10)
 
 
