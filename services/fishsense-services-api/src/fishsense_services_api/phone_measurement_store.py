@@ -1,4 +1,4 @@
-"""The phone measurement's database side (0087; the owner, 2026-11-09).
+"""The phone measurement's database side (0088; the owner, 2026-11-09).
 
 The server measures a phone capture that was never measured, as FishSense
 Mobile measures it (the owner's rule, 2026-10-21): one with its JPEG and

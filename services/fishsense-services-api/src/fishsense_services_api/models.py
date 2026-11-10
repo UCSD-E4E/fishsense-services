@@ -1924,7 +1924,7 @@ class MaskRegeneration(Base):
 
 class PhoneMeasurement(Base):
     """A phone capture measured on the server as FishSense Mobile measures
-    it, or why not (0087); unvalidated, never a `measurements` row;
+    it, or why not (0088); unvalidated, never a `measurements` row;
     append-only."""
 
     __tablename__ = "phone_measurements"

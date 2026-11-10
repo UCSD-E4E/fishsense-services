@@ -16,14 +16,14 @@ named in the row (the tenant's bucket, ``masks/phone/<capture>/...``).
 Append-only (SELECT, INSERT), tenant-scoped under forced RLS.
 ``current_phone_measurements`` is each capture's latest row.
 
-Revision ID: 0087
-Revises: 0086
+Revision ID: 0088
+Revises: 0087
 """
 
 from alembic import context, op
 
-revision = "0087"
-down_revision = "0086"
+revision = "0088"
+down_revision = "0087"
 
 TABLE = "phone_measurements"
 ACTIVE_TENANT = "NULLIF(current_setting('app.tenant_id', true), '')::uuid"
