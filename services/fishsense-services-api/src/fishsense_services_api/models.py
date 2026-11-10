@@ -1922,6 +1922,59 @@ class MaskRegeneration(Base):
     created_at: Mapped[datetime] = _created_at()
 
 
+class PhoneMeasurement(Base):
+    """A phone capture measured on the server as FishSense Mobile measures
+    it, or why not (0087); unvalidated, never a `measurements` row;
+    append-only."""
+
+    __tablename__ = "phone_measurements"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id"),
+        _fk(("tenant_id", "capture_id"), "captures"),
+        Index(None, "tenant_id", "capture_id", "seq"),
+        CheckConstraint(
+            "status IN ('measured', 'no_fish', 'headtail_failed', 'depth_failed', "
+            "'image_unavailable', 'decode_failed')",
+            name="phone_measurements_status_check",
+        ),
+        CheckConstraint("length_m > 0", name="phone_measurements_length_check"),
+        CheckConstraint(
+            "status <> 'measured' OR (length_m IS NOT NULL AND snout_x IS NOT NULL "
+            "AND snout_y IS NOT NULL AND fork_x IS NOT NULL AND fork_y IS NOT NULL)",
+            name="phone_measurements_measured_check",
+        ),
+        CheckConstraint(
+            "mask_key IS NULL OR status IN ('measured', 'headtail_failed', "
+            "'depth_failed')",
+            name="phone_measurements_mask_status_check",
+        ),
+    )  # fmt: skip
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    status: Mapped[str] = mapped_column(Text)
+    length_m: Mapped[float | None] = mapped_column(Double)
+    snout_x: Mapped[float | None] = mapped_column(Double)
+    snout_y: Mapped[float | None] = mapped_column(Double)
+    fork_x: Mapped[float | None] = mapped_column(Double)
+    fork_y: Mapped[float | None] = mapped_column(Double)
+    snout_depth_m: Mapped[float | None] = mapped_column(Double)
+    fork_depth_m: Mapped[float | None] = mapped_column(Double)
+    mask_bucket: Mapped[str | None] = mapped_column(Text)
+    mask_key: Mapped[str | None] = mapped_column(Text)
+    mask_sha256: Mapped[str | None] = mapped_column(Text)
+    mask_size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    mask_width: Mapped[int | None] = mapped_column(Integer)
+    mask_height: Mapped[int | None] = mapped_column(Integer)
+    model_id: Mapped[str | None] = mapped_column(Text)
+    core_version: Mapped[str | None] = mapped_column(Text)
+    algorithm: Mapped[str] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+
 class CaptureThumbnail(Base):
     """A render's thumbnail for /fish's cards, or that the render was not
     there to read (0053); append-only."""
