@@ -33,6 +33,7 @@ class TestRegionRules:
         [
             ("Islamorada", KEYS),
             ("Key Largo", KEYS),
+            ("Qui Lagoon", KEYS),  # the owner, 2026-11-09
             ("Cuba", CARIBBEAN),
             ("San Diego", SOCAL),
             ("Pool", KEYS),

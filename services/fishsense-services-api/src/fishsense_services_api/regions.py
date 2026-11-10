@@ -30,6 +30,7 @@ REGIONS: dict[str, tuple[float, float]] = {
 _FIELD = {
     "Islamorada": "Florida Keys, USA",
     "Key Largo": "Florida Keys, USA",
+    "Qui Lagoon": "Florida Keys, USA",  # the owner, 2026-11-09
     "Cuba": "Caribbean",
     "Cayman Islands": "Caribbean",
     "St Lucia": "Caribbean",
