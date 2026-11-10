@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.78.2](https://github.com/UCSD-E4E/fishsense-services/compare/v0.78.1...v0.78.2) (2026-11-10)
+
+
+### Bug Fixes
+
+* **api:** Qui Lagoon is in the Florida Keys ([3759232](https://github.com/UCSD-E4E/fishsense-services/commit/37592329a7e4122d35496d370818097dd599881e))
+* **api:** Qui Lagoon is in the Florida Keys ([31fa051](https://github.com/UCSD-E4E/fishsense-services/commit/31fa0514c0802a1d6875677fc39ff4340681ae16))
+
 ## [0.78.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.78.0...v0.78.1) (2026-11-09)
 
 
