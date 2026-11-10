@@ -310,6 +310,22 @@ class MissionAutomatic:
     within_10_pct: int
 
 
+#: A mission's current lengths, each with its frame's human length when the
+#: frame has exactly one. Filtered on the view's own ``mission_id`` (0086),
+#: which its DISTINCT ON keys, so the read stays inside the mission. Filtered
+#: through ``captures`` instead, the view built the whole tenant's lengths
+#: first: past the app role's 30 s timeout on production (2026-11-09).
+_MISSION_LENGTHS_SQL = """
+    SELECT m.capture_id, m.length_m, m.refusal,
+           (SELECT CASE WHEN count(*) = 1 THEN max(o.length_m) END
+            FROM observations o
+            WHERE o.tenant_id = m.tenant_id AND o.capture_id = m.capture_id
+              AND o.method = 'laser') AS human_m
+    FROM current_automatic_measurements m
+    WHERE m.tenant_id = :t AND m.mission_id = :m
+"""
+
+
 async def mission_automatic(
     conn: AsyncConnection, tenant_id: uuid.UUID, mission_id: uuid.UUID
 ) -> MissionAutomatic:
@@ -373,16 +389,7 @@ async def mission_automatic(
     ).scalar_one_or_none()
     measured = (
         await conn.execute(
-            text("""
-                SELECT m.capture_id, m.length_m, m.refusal,
-                       (SELECT CASE WHEN count(*) = 1 THEN max(o.length_m) END
-                        FROM observations o
-                        WHERE o.tenant_id = m.tenant_id AND o.capture_id = m.capture_id
-                          AND o.method = 'laser') AS human_m
-                FROM current_automatic_measurements m
-                JOIN captures c ON c.tenant_id = m.tenant_id AND c.id = m.capture_id
-                WHERE m.tenant_id = :t AND c.mission_id = :m
-                """),
+            text(_MISSION_LENGTHS_SQL),
             params,
         )
     ).all()

@@ -1426,6 +1426,15 @@ class AutomaticLaserCalibration(Base):
         _fk(("tenant_id", "mission_id"), "missions"),
         _fk(("tenant_id", "camera_calibration_id"), "camera_calibrations"),
         _fk(("tenant_id", "borrowed_from"), "automatic_laser_calibrations"),
+        # A mission's current row per method and aim, by lookup (0086).
+        Index(
+            "automatic_laser_calibrations_current_idx",
+            "tenant_id",
+            "mission_id",
+            "method",
+            "aim",
+            "seq",
+        ),
     )
 
     id: Mapped[uuid.UUID] = _id()

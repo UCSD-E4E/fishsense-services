@@ -403,3 +403,15 @@ async def test_a_rerun_of_the_keypoints_shows_the_newest(owner_engine, app_engin
 
     assert (found.head, found.tail) == ((1795.0, 1502.0), (2280.0, 1485.0))
     assert found.keypoint_checkpoint == "simcc@rerun"
+
+
+def test_a_missions_lengths_are_read_by_the_views_mission():
+    """0086: the current lengths' DISTINCT ON keys the frame's mission, so a
+    filter on the view's ``mission_id`` stays inside the mission. Filtered
+    through ``captures`` the view builds the whole tenant's lengths first:
+    past the 30 s timeout on production (2026-11-09), about 2 s with 0086."""
+    from fishsense_services_api import automatic_review_store
+
+    sql = automatic_review_store._MISSION_LENGTHS_SQL
+    assert "m.mission_id = :m" in sql
+    assert "c.mission_id" not in sql
