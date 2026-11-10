@@ -41,7 +41,7 @@ CAPTURE = uuid.UUID(int=3)
 
 def test_a_mask_key_is_new_per_mask_under_its_source_and_capture():
     assert mask_key("automatic", CAPTURE, ID) == (f"masks/automatic/{CAPTURE}/{ID}.png")
-    assert set(MASK_SOURCES) == {"automatic", "headtail"}
+    assert set(MASK_SOURCES) == {"automatic", "headtail", "phone"}
     assert MASK_CONTENT_TYPE == "image/png"
 
 
