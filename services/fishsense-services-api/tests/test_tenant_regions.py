@@ -400,5 +400,6 @@ async def _rows(engine, sql, **params):
     return await rows(engine, sql, **params)
 
 
-#: sha256 of `current_automatic_measurements`'s definition (0081).
-VIEW_SHA256 = "0f73b4ec22cb318bbd889b9de226aae6dab618cfbf3566faf560bb1de13ed582"
+#: sha256 of `current_automatic_measurements`'s definition (0086: the rules
+#: unchanged; the pick asked per length, keyed by mission).
+VIEW_SHA256 = "f7140c53178aa34c5906cfa9cccf175f3024d1b711a1200d1f12d7f0a9459642"
