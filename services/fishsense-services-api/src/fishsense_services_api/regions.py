@@ -15,6 +15,7 @@ from math import asin, cos, radians, sin, sqrt
 __all__ = [
     "NEAREST_WITHIN_KM",
     "REGIONS",
+    "is_pool",
     "nearest_region",
     "region_of_place",
 ]
@@ -57,6 +58,11 @@ def region_of_place(place: str | None, *, pools: bool = True) -> str | None:
     if place is None:
         return None
     return _FIELD.get(place) or (_POOLS.get(place) if pools else None)
+
+
+def is_pool(place: str | None) -> bool:
+    """The place is a pool (a `place_of` place)."""
+    return place in _POOLS
 
 
 def nearest_region(latitude: float, longitude: float) -> str | None:

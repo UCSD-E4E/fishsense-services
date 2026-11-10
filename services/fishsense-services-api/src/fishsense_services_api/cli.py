@@ -32,6 +32,11 @@ fishsense-services-api withdraw-zoomed-lengths [--apply]
                                     # dry run: the automatic lengths on frames
                                     # shot zoomed in (0070); --apply appends a
                                     # `zoomed` refusal after each, as the owner
+fishsense-services-api withdraw-fish-model-lengths --tenant lab --missions 509 [--apply]
+                                    # dry run: the automatic lengths on frames
+                                    # nobody measured in a pool trial's
+                                    # missions (0089); --apply appends a
+                                    # `fish_model` refusal after each
 fishsense-services-api detect-beam-moves [--apply]
                                     # dry run: the missions whose laser moved
                                     # mid-dive (0073); --apply records them, as
@@ -84,6 +89,10 @@ from fishsense_services_api.beam_moves import (
     detect_beam_move,
     mission_dots,
     record_beam_move,
+)
+from fishsense_services_api.fish_model_withdrawal import (
+    fish_model_automatic_lengths,
+    withdraw_fish_model_lengths,
 )
 from fishsense_services_api.zoom_gate import (
     withdraw_zoomed_automatic_lengths,
@@ -289,6 +298,17 @@ def build_parser() -> argparse.ArgumentParser:
         "move (0073), appending a refusal after each; a dry run by default",
     )
     moved.add_argument("--apply", action="store_true", help="write it")
+    decoys = commands.add_parser(
+        "withdraw-fish-model-lengths",
+        help="withdraw the automatic lengths on frames nobody measured in a pool "
+        "trial's missions, the fish models (0089), appending a refusal after "
+        "each; a dry run by default",
+    )
+    decoys.add_argument("--tenant", required=True, help="tenant id or slug")
+    decoys.add_argument(
+        "--missions", required=True, help="comma-separated mission numbers"
+    )
+    decoys.add_argument("--apply", action="store_true", help="write it")
     assign = commands.add_parser(
         "assign-slate-templates",
         help="record the slate template of missions that have none, from a "
@@ -425,6 +445,8 @@ async def main(argv: Sequence[str]) -> int:
         return await _withdraw_lengths(args, "zoomed", "on zoomed frames")
     if args.command == "withdraw-moved-lengths":
         return await _withdraw_lengths(args, "beam_moved", "after a laser move")
+    if args.command == "withdraw-fish-model-lengths":
+        return await _withdraw_fish_model_lengths(args)
     if args.command == "detect-beam-moves":
         return await _detect_beam_moves(args)
     if args.command == "public-totals":
@@ -1007,6 +1029,52 @@ async def _withdraw_lengths(args: argparse.Namespace, reason: str, where: str) -
                 return 0
             written = await withdraw_zoomed_automatic_lengths(
                 conn, [z.measurement_id for z in listed], reason
+            )
+            if written != len(listed):
+                raise RuntimeError(
+                    f"wrote {written} of {len(listed)}: lengths changed meanwhile, "
+                    "nothing written"
+                )
+        print(f"withdrew {written}")
+        return 0
+    finally:
+        await engine.dispose()
+
+
+async def _withdraw_fish_model_lengths(args: argparse.Namespace) -> int:
+    """Dry run unless --apply; the apply writes exactly the lengths listed."""
+    settings = _settings(MigrationSettings)
+    if settings is None:
+        return 2
+    numbers = sorted({int(n) for n in args.missions.split(",") if n.strip()})
+    engine = create_async_engine(settings.migration_database_url.get_secret_value())
+    try:
+        tenant_id = await _tenant_id(engine, args.tenant)
+        if tenant_id is None:
+            print(f"unknown tenant {args.tenant!r}", file=sys.stderr)
+            return 1
+        async with engine.begin() as conn:
+            listed = await fish_model_automatic_lengths(conn, tenant_id, numbers)
+            if not listed:
+                print("no automatic length on an unmeasured frame in missions "
+                      f"{numbers}: nothing to withdraw")  # fmt: skip
+                return 0
+            verb = (
+                "Withdrawing"
+                if args.apply
+                else "DRY RUN: nothing written. Would withdraw"
+            )
+            print(f"{verb} {len(listed)} automatic length(s) as fish models in "
+                  f"{args.tenant}, missions {numbers}:")  # fmt: skip
+            for z in listed:
+                print(f"  mission {z.mission}  {z.capture_id}  "
+                      f"{z.length_m * 1000:.1f} mm")  # fmt: skip
+            if not args.apply:
+                print(f"\nto write it: {args.command} --tenant {args.tenant} "
+                      f"--missions {args.missions} --apply")  # fmt: skip
+                return 0
+            written = await withdraw_fish_model_lengths(
+                conn, tenant_id, numbers, [z.measurement_id for z in listed]
             )
             if written != len(listed):
                 raise RuntimeError(

@@ -15,8 +15,11 @@ GPS (a phone's), the nearest region; else it is "elsewhere".
 automatic lengths list's (`automatic_lengths_store`), current and on no frame
 the slate detector calls a slate, placed by the same rules from the frame's
 own GPS. They are unvalidated, and the page says so. A frame a person
-labeled a fish model is left off, as on the human map; a fish model nobody
-labeled cannot be told from a wild fish, so it stays on.
+labeled a fish model is left off, as on the human map. A fish model nobody
+labeled cannot be told from a wild fish, so a pool's lengths are left off
+whole: the lab's map showed 11 fish in Southern California, unlabeled frames
+of a Nathan's Pool trial (mission 509) whose 162 labeled fish were all fish
+models (the owner, 2026-11-10). The human map keeps a pool's wild fish.
 """
 
 from __future__ import annotations
@@ -30,7 +33,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from fishsense_services_api.deployment_inference import place_of
-from fishsense_services_api.regions import REGIONS, nearest_region, region_of_place
+from fishsense_services_api.regions import (
+    REGIONS,
+    is_pool,
+    nearest_region,
+    region_of_place,
+)
 from fishsense_services_api.slate_presence_store import detector_slate_frame
 
 __all__ = ["Source", "TenantRegion", "TenantRegions", "tenant_regions"]
@@ -132,7 +140,10 @@ async def tenant_regions(
     by_region: Counter[str] = Counter()
     elsewhere = 0
     for row in rows:
-        region = region_of_place(place_of(row.source_path)) if row.source_path else None
+        place = place_of(row.source_path) if row.source_path else None
+        if source == "automatic" and is_pool(place):
+            continue
+        region = region_of_place(place)
         if region is None and row.latitude is not None and row.longitude is not None:
             region = nearest_region(row.latitude, row.longitude)
         if region is None:
