@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.78.3](https://github.com/UCSD-E4E/fishsense-services/compare/v0.78.2...v0.78.3) (2026-11-10)
+
+
+### Bug Fixes
+
+* **automatic:** a slate pose serves only on its mission's template ([0c04c27](https://github.com/UCSD-E4E/fishsense-services/commit/0c04c27a87bca418d8707a0cd91effa136fe2c9d))
+* **automatic:** a slate pose serves only on its mission's template ([2ad5d86](https://github.com/UCSD-E4E/fishsense-services/commit/2ad5d86d0bb5fdfdbecbb21b9a23f5fd62b27984))
+
 ## [0.78.2](https://github.com/UCSD-E4E/fishsense-services/compare/v0.78.1...v0.78.2) (2026-11-10)
 
 
