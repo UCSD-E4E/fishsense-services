@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.79.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.78.3...v0.79.0) (2026-11-10)
+
+
+### Features
+
+* **processor:** measure phone captures as FishSense Mobile does ([fcd217e](https://github.com/UCSD-E4E/fishsense-services/commit/fcd217e55e4be13fcd0e751aace9fd0a1bb7d07c))
+
+
+### Bug Fixes
+
+* **api:** current automatic lengths read a mission at a time ([8181555](https://github.com/UCSD-E4E/fishsense-services/commit/818155568192a9d2a7de7160abb8a25f0df6dc82))
+
 ## [0.78.3](https://github.com/UCSD-E4E/fishsense-services/compare/v0.78.2...v0.78.3) (2026-11-10)
 
 
