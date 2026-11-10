@@ -20,8 +20,9 @@ as it is. Ours are that PNG (review of #232):
 * **an addition, never a reason to fail**: a mask that can't be stored or
   doesn't check out costs only itself; its prediction stands.
 
-Both stages that segment store theirs: the automatic track (the capture's
-render) and the human-path head/tail predictor (its head/tail JPEG).
+The stages that segment store theirs: the automatic track (the capture's
+render), the human-path head/tail predictor (its head/tail JPEG), and the
+phone measurement (the phone's JPEG, v28).
 """
 
 from __future__ import annotations
@@ -46,8 +47,8 @@ __all__ = [
 ]
 
 #: The stage whose prediction a mask belongs to.
-MASK_SOURCES = ("automatic", "headtail")
-MaskSource = Literal["automatic", "headtail"]
+MASK_SOURCES = ("automatic", "headtail", "phone")
+MaskSource = Literal["automatic", "headtail", "phone"]
 MASK_CONTENT_TYPE = "image/png"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _PREFIX = "masks/"

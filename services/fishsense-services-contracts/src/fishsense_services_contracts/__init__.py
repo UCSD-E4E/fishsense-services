@@ -32,6 +32,10 @@ from fishsense_services_contracts.task_queues import (
     PROCESSOR_TASK_QUEUE,
 )
 
+#: v28 (2026-11-09): phone captures measured on the server as FishSense Mobile
+#: measures them (`phone_measurement`: `PhoneMeasureInput`, `PhoneMeasured`),
+#: and masks gain the ``phone`` source (`masks.MASK_SOURCES`). New models and
+#: a value added; v27 parses.
 #: v27 (2026-10-29): the checked borrow (`calibration_borrow`:
 #: `BorrowCheckInput`, `BorrowCheckReport`): a neighbor's beam checked on the
 #: borrower's own posed slates before an aim with no calibration takes it.
@@ -108,7 +112,7 @@ from fishsense_services_contracts.task_queues import (
 #: JSON is unchanged -- each renamed field keeps its old name on the wire
 #: (`renamed.py`) -- so a v6 processor and a v7 orchestrator interoperate; only
 #: the published schema's model names differ.
-CONTRACT_VERSION = 27
+CONTRACT_VERSION = 28
 
 
 def _discover_models() -> tuple[type[BaseModel], ...]:
