@@ -321,6 +321,11 @@ def add_observation_routes(
                         else None
                     ),
                     fish=[MeasuredFish(fish_id=f, length_m=n) for f, n in c.fish],
+                    phone=(
+                        None
+                        if c.phone is None
+                        else PhoneLengthView(status=c.phone[0], length_m=c.phone[1])
+                    ),
                 )
                 for c in page
             ],
@@ -466,6 +471,15 @@ class CaptureCardView(BaseModel):
     photo_url: str | None
     #: Empty for a capture with no measured fish.
     fish: list[MeasuredFish]
+    #: A phone capture's current server result (2026-11-10): unvalidated,
+    #: never a measured fish. None when the server never measured it.
+    phone: "PhoneLengthView | None" = None
+
+
+class PhoneLengthView(BaseModel):
+    #: ``measured``, or why not (`phone_measurement_api`).
+    status: str
+    length_m: float | None
 
 
 class CaptureCardPage(BaseModel):

@@ -460,6 +460,9 @@ class CaptureCard:
     photo_key: str | None
     #: Its measured fish, ``(fish_id, length_m)``; empty when none is measured.
     fish: list[tuple[uuid.UUID, float]]
+    #: A phone capture's current server result, ``(status, length_m)``
+    #: (`current_phone_measurements`): unvalidated, never a measured fish.
+    phone: tuple[str, float | None] | None = None
 
     @property
     def cursor(self) -> tuple[datetime, uuid.UUID]:
@@ -500,8 +503,11 @@ async def mission_captures(
                                        ORDER BY o.fish_id)
                        FROM observations o
                        WHERE o.tenant_id = c.tenant_id AND o.capture_id = c.id
-                   ), '[]'::json) AS fish
+                   ), '[]'::json) AS fish,
+                   p.status AS phone_status, p.length_m AS phone_length_m
             FROM captures c
+            LEFT JOIN current_phone_measurements p
+              ON p.tenant_id = c.tenant_id AND p.capture_id = c.id
             LEFT JOIN LATERAL (
                 SELECT h.key FROM capture_thumbnails h
                 JOIN capture_renders rr ON rr.tenant_id = h.tenant_id AND rr.id = h.render_id
@@ -532,6 +538,9 @@ async def mission_captures(
             captured_at=r.captured_at,
             photo_key=r.photo_key,
             fish=[(uuid.UUID(f), length) for f, length in r.fish],
+            phone=(
+                None if r.phone_status is None else (r.phone_status, r.phone_length_m)
+            ),
         )
         for r in rows
     ]

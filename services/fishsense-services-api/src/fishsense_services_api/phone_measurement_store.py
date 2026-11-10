@@ -23,6 +23,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -30,12 +31,14 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from fishsense_services_api.service_principal import ServicePrincipal
 
 __all__ = [
+    "CurrentPhoneMeasurement",
     "OwedMission",
     "OwedPhoneCapture",
     "PHONE_STATUSES",
     "PhoneMeasurementCatalog",
     "PhoneMeasurementMask",
     "PhoneMeasurementResult",
+    "current_phone_measurement",
     "owed_captures",
     "owed_missions",
     "record_phone_measurements",
@@ -204,6 +207,59 @@ async def record_phone_measurements(
              "error": r.error},
         )  # fmt: skip
     return len(results)
+
+
+@dataclass(frozen=True)
+class CurrentPhoneMeasurement:
+    """A capture's current server result, with its JPEG, for the web (the
+    owner, 2026-11-10). Unvalidated."""
+
+    capture_id: uuid.UUID
+    status: str
+    length_m: float | None
+    snout_x: float | None
+    snout_y: float | None
+    fork_x: float | None
+    fork_y: float | None
+    snout_depth_m: float | None
+    fork_depth_m: float | None
+    mask_bucket: str | None
+    mask_key: str | None
+    mask_width: int | None
+    mask_height: int | None
+    model_id: str | None
+    core_version: str | None
+    algorithm: str
+    error: str | None
+    created_at: datetime
+    photo_bucket: str | None
+    photo_key: str | None
+
+
+async def current_phone_measurement(
+    conn: AsyncConnection, tenant_id: uuid.UUID, capture_id: uuid.UUID
+) -> CurrentPhoneMeasurement | None:
+    """The capture's current server result (`current_phone_measurements`), or
+    None when the server never measured it."""
+    row = (
+        await conn.execute(
+            text("""
+                SELECT p.capture_id, p.status, p.length_m, p.snout_x, p.snout_y,
+                       p.fork_x, p.fork_y, p.snout_depth_m, p.fork_depth_m,
+                       p.mask_bucket, p.mask_key, p.mask_width, p.mask_height,
+                       p.model_id, p.core_version, p.algorithm, p.error,
+                       p.created_at, rgb.bucket AS photo_bucket,
+                       rgb.object_key AS photo_key
+                FROM current_phone_measurements p
+                LEFT JOIN capture_objects rgb
+                  ON rgb.tenant_id = p.tenant_id AND rgb.capture_id = p.capture_id
+                 AND rgb.role = 'rgb_jpeg'
+                WHERE p.tenant_id = :t AND p.capture_id = :c
+                """),
+            {"t": tenant_id, "c": capture_id},
+        )
+    ).one_or_none()
+    return None if row is None else CurrentPhoneMeasurement(**row._mapping)
 
 
 class PhoneMeasurementCatalog(ServicePrincipal):

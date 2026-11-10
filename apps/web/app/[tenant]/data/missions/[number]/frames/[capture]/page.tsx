@@ -6,9 +6,11 @@ import { AutomaticSection } from "@/app/[tenant]/fish/[capture]/[fish]/automatic
 import { getAutomaticFrame } from "@/lib/automatic";
 import { isSlug, isUuid } from "@/lib/ids";
 import { frameLink, getMissionCaptures, parseCaptureCursor } from "@/lib/mission-captures";
-import { getMission } from "@/lib/mission-facts";
+import { getMission, isPhoneMission } from "@/lib/mission-facts";
+import { getPhoneMeasurement } from "@/lib/phone-measurement";
 import { getCaptureReviews, getMySkills } from "@/lib/reviews";
 import { paths } from "@/lib/tenant-paths";
+import { PhoneSection } from "./phone-section";
 import { ReviewWorkspace } from "./review-workspace";
 
 export const dynamic = "force-dynamic";
@@ -42,6 +44,9 @@ export default async function FramePage({ params, searchParams }: Props) {
     at ? getMissionCaptures(token, tenant, number, at, 1) : null,
   ]);
   if (!mission) notFound();
+  // A phone capture nobody measured may have the server's measurement
+  // (2026-11-10): unvalidated, shown on its own.
+  const phone = isPhoneMission(mission) ? await getPhoneMeasurement(token, tenant, capture) : null;
   const next = after?.captures[0];
   const nextHref = next ? frameLink(tenant, number, next) : null;
 
@@ -57,7 +62,21 @@ export default async function FramePage({ params, searchParams }: Props) {
         </Link>{" "}
         <span aria-hidden>›</span> Frame
       </nav>
-      {frame ? (
+      {phone ? (
+        <>
+          <PhoneSection
+            measurement={phone}
+            maskSrc={phone.mask_url ? `/api/phone-masks/${tenant}/${capture}` : null}
+          />
+          {nextHref && (
+            <p className="mt-3 text-right">
+              <Link href={nextHref} className="text-sm font-medium text-teal-fg hover:underline">
+                Next capture →
+              </Link>
+            </p>
+          )}
+        </>
+      ) : frame ? (
         <AutomaticSection
           frame={frame}
           humanLengthM={null}

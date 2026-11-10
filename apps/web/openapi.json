@@ -951,6 +951,16 @@
             "title": "Fish",
             "type": "array"
           },
+          "phone": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhoneLengthView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "photo_url": {
             "anyOf": [
               {
@@ -3436,6 +3446,215 @@
         "title": "ObservationView",
         "type": "object"
       },
+      "PhoneLengthView": {
+        "properties": {
+          "length_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Length M"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "length_m"
+        ],
+        "title": "PhoneLengthView",
+        "type": "object"
+      },
+      "PhoneMeasurementView": {
+        "properties": {
+          "algorithm": {
+            "title": "Algorithm",
+            "type": "string"
+          },
+          "core_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Core Version"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "fork": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhonePoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fork_depth_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fork Depth M"
+          },
+          "length_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Length M"
+          },
+          "mask_height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mask Height"
+          },
+          "mask_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mask Url"
+          },
+          "mask_width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mask Width"
+          },
+          "measured_at": {
+            "format": "date-time",
+            "title": "Measured At",
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "photo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Url"
+          },
+          "snout": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhonePoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "snout_depth_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snout Depth M"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "length_m",
+          "snout",
+          "fork",
+          "snout_depth_m",
+          "fork_depth_m",
+          "photo_url",
+          "mask_url",
+          "mask_width",
+          "mask_height",
+          "model_id",
+          "core_version",
+          "algorithm",
+          "error",
+          "measured_at"
+        ],
+        "title": "PhoneMeasurementView",
+        "type": "object"
+      },
+      "PhonePoint": {
+        "properties": {
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "title": "PhonePoint",
+        "type": "object"
+      },
       "PhotoSize": {
         "properties": {
           "height": {
@@ -4818,6 +5037,112 @@
           }
         ],
         "summary": "Get Mask"
+      }
+    },
+    "/tenants/{slug}/captures/{capture_id}/phone-measurement": {
+      "get": {
+        "description": "The capture's current server measurement. Unvalidated.",
+        "operationId": "get_phone_measurement",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "capture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Capture Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneMeasurementView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Phone Measurement"
+      }
+    },
+    "/tenants/{slug}/captures/{capture_id}/phone-measurement/mask": {
+      "get": {
+        "description": "The current server measurement's mask, as its PNG bytes.",
+        "operationId": "get_phone_measurement_mask",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "capture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Capture Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/png": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Phone Mask"
       }
     },
     "/tenants/{slug}/captures/{capture_id}/reviews": {
