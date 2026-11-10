@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.80.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.79.0...v0.80.0) (2026-11-10)
+
+
+### Features
+
+* run the phone measurement and keep its results, unvalidated ([c46f865](https://github.com/UCSD-E4E/fishsense-services/commit/c46f86580b79acf8c4a2b77fd3cfe39e9e5ce17b))
+
 ## [0.79.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.78.3...v0.79.0) (2026-11-10)
 
 
