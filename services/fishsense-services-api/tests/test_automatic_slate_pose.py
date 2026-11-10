@@ -100,6 +100,8 @@ async def test_lengths_take_the_slate_pose_first_then_size_constancy_then_the_li
     template = await _with_template(owner_engine, session)
     link_constancy = await _persist(app_engine, lab, session, _label_free())
     mission_id = await _backlog_mission(owner_engine, lab, source_mission=session)
+    # Each pose on its own mission's template, as it is posed (0086).
+    await _set_template(owner_engine, mission_id, template)
 
     chosen = lambda: _measured_with(
         app_engine, lab, mission_id, owner_engine
@@ -234,3 +236,50 @@ async def test_whether_one_missions_slate_pose_is_owed(owner_engine, app_engine)
     assert await owed() is True
     await _persist(app_engine, lab, mission_id, _posed(template))
     assert await owed() is False
+
+
+async def _set_template(owner_engine, mission_id, template):
+    await exec_(owner_engine, "UPDATE missions SET slate_template_id = :s WHERE id = :m",
+                s=template, m=mission_id)  # fmt: skip
+
+
+async def test_a_slate_pose_serves_only_while_its_template_is_its_missions(
+    owner_engine, app_engine
+):
+    """Mission 116 (2026-11-09): posed on Tic-Tac-Toe 6, its slate is a 7 the
+    owner read in its frames. Its template corrected or cleared, the pose fit
+    on the wrong template serves its lengths no longer -- its own size
+    constancy does, or nothing -- and serves again if the template returns."""
+    lab = await tenant(owner_engine)
+    mission_id = await _backlog_mission(owner_engine, lab)
+    template = await _with_template(owner_engine, mission_id)
+    own_constancy = await _persist(app_engine, lab, mission_id, _label_free())
+    own_pose = await _persist(app_engine, lab, mission_id, _posed(template))
+    chosen = lambda: _measured_with(
+        app_engine, lab, mission_id, owner_engine
+    )  # noqa: E731
+    assert (await chosen()).automatic_laser_calibration_id == own_pose
+
+    await _set_template(owner_engine, mission_id, None)
+    assert (await chosen()).automatic_laser_calibration_id == own_constancy
+    await _with_template(owner_engine, mission_id)  # another template
+    assert (await chosen()).automatic_laser_calibration_id == own_constancy
+    await _set_template(owner_engine, mission_id, template)
+    assert (await chosen()).automatic_laser_calibration_id == own_pose
+
+
+async def test_a_links_slate_pose_serves_only_while_its_template_is_the_links(
+    owner_engine, app_engine
+):
+    lab = await tenant(owner_engine)
+    session = await _backlog_mission(owner_engine, lab)
+    template = await _with_template(owner_engine, session)
+    link_pose = await _persist(app_engine, lab, session, _posed(template))
+    mission_id = await _backlog_mission(owner_engine, lab, source_mission=session)
+    chosen = lambda: _measured_with(
+        app_engine, lab, mission_id, owner_engine
+    )  # noqa: E731
+    assert (await chosen()).automatic_laser_calibration_id == link_pose
+
+    await _set_template(owner_engine, session, None)
+    assert (await chosen()) is None
