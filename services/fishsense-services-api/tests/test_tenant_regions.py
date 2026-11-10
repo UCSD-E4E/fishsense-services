@@ -191,7 +191,7 @@ class TestAutomaticRegions:
         lab = await tenant(owner_engine)
         await _automatic(owner_engine, app_engine, lab, "102724_Islamorada")
         await _automatic(owner_engine, app_engine, lab, "Alligator Reef")
-        await _automatic(owner_engine, app_engine, lab, "Nathans Pool")
+        await _automatic(owner_engine, app_engine, lab, "San Diego")
         await _automatic(owner_engine, app_engine, lab, None)
 
         found = await _automatic_regions(app_engine, lab)
@@ -199,6 +199,28 @@ class TestAutomaticRegions:
         assert {r.name: r.fish for r in found.regions} == {KEYS: 2, SOCAL: 1}
         assert found.regions[0].name == KEYS
         assert found.elsewhere == 1
+
+    async def test_a_pools_lengths_are_left_off(self, owner_engine, app_engine):
+        """A pool holds fish models, and a frame nobody labeled cannot be told
+        from a wild fish: the lab's map showed 11 in Southern California,
+        unlabeled frames of a Nathan's Pool trial (the owner, 2026-11-10). Off
+        the map, not elsewhere, whatever the frame's GPS says."""
+        from depth_measure_seed import tenant
+
+        lab = await tenant(owner_engine)
+        await _automatic(owner_engine, app_engine, lab, "Nathans Pool")
+        _, c = await _automatic(owner_engine, app_engine, lab, "Pool Calibration")
+        await exec_(
+            owner_engine,
+            "UPDATE captures SET latitude = 24.9, longitude = -80.6 WHERE id = :c",
+            c=c,
+        )
+        await _automatic(owner_engine, app_engine, lab, "Islamorada")
+
+        found = await _automatic_regions(app_engine, lab)
+
+        assert {r.name: r.fish for r in found.regions} == {KEYS: 1}
+        assert found.elsewhere == 0
 
     async def test_the_human_map_does_not_count_them(self, owner_engine, app_engine):
         from depth_measure_seed import tenant
