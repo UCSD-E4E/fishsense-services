@@ -438,7 +438,9 @@ def _lenders(m: str) -> str:
     `missions`), as `l`: the current accepted fits of another mission on its
     device that started within a day of it with an error bar at each range
     (a borrow widens it: the slate pose's; size constancy has none), each
-    fitted under its current pinhole camera. Never a borrow: no chains."""
+    fitted under its current pinhole camera. Never a borrow: no chains. A
+    slate pose lends only while it was posed on its mission's current
+    template, as it serves (0086: 116's pose on a template its slate isn't)."""
     return f"""(
         SELECT l.* FROM missions lm
         JOIN current_automatic_laser_calibrations l
@@ -450,6 +452,9 @@ def _lenders(m: str) -> str:
           AND l.outcome = 'accepted' AND l.method <> 'borrowed'
           AND (SELECT p.scale_sd_by_range FROM automatic_laser_calibrations p
                WHERE p.id = l.id) IS NOT NULL
+          AND (l.method <> 'slate_pose'
+               OR (SELECT p.slate_template_id FROM automatic_laser_calibrations p
+                   WHERE p.id = l.id) = lm.slate_template_id)
           AND l.camera_calibration_id IN (
               SELECT cc.id FROM current_camera_calibrations cc
               WHERE cc.tenant_id = {m}.tenant_id AND cc.device_id = {m}.device_id

@@ -73,6 +73,9 @@ async def _lender(owner_engine, app_engine, lab, device_id, *, beam=OTHER_BEAM,
     if method == "slate_pose":
         row = {"slate_template_id": await slate_template(owner_engine),
                "algorithm_version": "slate-pose-6", **row}  # fmt: skip
+        # Posed with its mission's template, as a slate pose always is.
+        await exec_(owner_engine, "UPDATE missions SET slate_template_id = :s "
+                    "WHERE id = :m", s=row["slate_template_id"], m=lender)  # fmt: skip
     return lender, await _persist(
         app_engine, lab, lender, method=method,
         camera_calibration_id=await _camera(app_engine, lab, lender),
@@ -418,3 +421,37 @@ async def test_a_borrow_is_owed_once_per_lender_not_without_one(
 
     await _lender(owner_engine, app_engine, lab, device_id)
     assert await owed()  # a fit since
+
+
+async def _lenders_template_cleared(owner_engine, lender):
+    await exec_(owner_engine, "UPDATE missions SET slate_template_id = NULL "
+                "WHERE id = :m", m=lender)  # fmt: skip
+
+
+async def test_a_slate_pose_off_its_missions_template_lends_nothing(
+    owner_engine, app_engine
+):
+    """A pose fitted on a template its mission no longer has (116's, 2026-11-09)
+    serves nothing, so it lends nothing either."""
+    lab = await tenant(owner_engine)
+    mission_id, device_id, _ = await _borrower(owner_engine, app_engine, lab)
+    lender, _ = await _lender(owner_engine, app_engine, lab, device_id)
+    await _lenders_template_cleared(owner_engine, lender)
+
+    assert await _candidate(app_engine, lab, mission_id) is None
+    assert not await _in(app_engine, lab, _owes, mission_id)
+
+
+async def test_a_borrow_stops_serving_when_its_lenders_template_changes(
+    owner_engine, app_engine
+):
+    lab = await tenant(owner_engine)
+    mission_id, device_id, frames = await _borrower(owner_engine, app_engine, lab)
+    lender, _ = await _lender(owner_engine, app_engine, lab, device_id)
+    await _check(app_engine, lab, mission_id,
+                 await _candidate(app_engine, lab, mission_id), frames)  # fmt: skip
+    assert (await _measure(app_engine, lab, mission_id, 1)).calibration is not None
+
+    await _lenders_template_cleared(owner_engine, lender)
+
+    assert (await _measure(app_engine, lab, mission_id, 1)).calibration is None

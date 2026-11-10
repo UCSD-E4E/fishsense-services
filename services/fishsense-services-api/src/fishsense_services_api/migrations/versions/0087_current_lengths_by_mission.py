@@ -20,7 +20,10 @@ The fixes:
 * ``automatic_laser_calibrations_current_idx`` on (tenant, mission, method,
   aim, seq). The pick now reads "current" as *no newer row of its mission,
   method and aim*: the same rows as the ``DISTINCT ON`` view, with an index
-  lookup each instead of a sort. Its columns are unchanged.
+  lookup each instead of a sort. 0086's rule is kept: a slate pose serves
+  while it was posed on its mission's template, and a borrow while its
+  lender's fit is current and (a slate pose) on its lender's template. Its
+  columns are unchanged.
 * ``current_automatic_measurements`` asks the pick once per length, for that
   frame's own mission, and keeps the pick whose calibration is at the frame's
   aim (0081's rule), rather than joining the pick whole. Its ``DISTINCT ON``
@@ -28,29 +31,32 @@ The fixes:
   same row; a mission's read now stays inside the mission. It gains
   ``mission_id``, at the end.
 
-On the replica, before and after: one frame 2.5 ms and 1.7 ms; one mission
-over 60 s and 34 ms (2.1 s when filtered through ``captures`` rather than
-``mission_id``); the lab tenant over 60 s and 2.1 s; every tenant 41 s and
-2.1 s. Both views gave the same rows as before: 27,313 of 27,313 current
-lengths, and 203 of 203 picks.
+On the replica, before and after: one frame 2.5 ms and 2.1 ms; one mission
+over 60 s and 50 ms (2.3 s when filtered through ``captures`` rather than
+``mission_id``); the lab tenant over 60 s and 2.4 s; every tenant 41 s and
+2.4 s. Against 0086's views on the same rows (1,748 laser calibrations), both
+gave the same: 27,313 of 27,313 current lengths, and 212 of 212 picks. No
+accepted slate pose there was off its mission's template, so 0086's rule is
+pinned by its tests (tests/test_automatic_slate_pose.py,
+tests/test_calibration_borrow.py), not by the replica.
 
-The downgrade puts 0085's definitions back (0082's pick, 0081's lengths) and
+The downgrade puts 0086's definitions back (0086's pick, 0081's lengths) and
 drops the index. A view's column cannot be dropped by CREATE OR REPLACE, so
 the lengths view is rebuilt without ``mission_id``, and the research export
 over it with it, each from the definition, options and readers Postgres
 holds (as 0074's downgrade does).
 
-Pinned by tests/test_migration_0086.py.
+Pinned by tests/test_migration_0087.py.
 
-Revision ID: 0086
-Revises: 0085
+Revision ID: 0087
+Revises: 0086
 """
 
 from alembic import op
 from sqlalchemy import text
 
-revision = "0086"
-down_revision = "0085"
+revision = "0087"
+down_revision = "0086"
 
 _INDEX = "automatic_laser_calibrations_current_idx"
 
@@ -87,11 +93,20 @@ _PICK_0086 = f"""
           AND ((a.mission_id = d.id AND a.aim = aims.aim)
                OR (aims.aim = 0 AND a.mission_id = d.calibration_source_mission_id
                    AND a.aim = 0 AND a.method <> 'borrowed'))
-          -- A borrow serves while its lender's fit is current (0082).
+          -- A slate pose serves while it was posed on its mission's
+          -- template (0086).
+          AND (a.method <> 'slate_pose' OR a.slate_template_id = (
+              SELECT o.slate_template_id FROM missions o
+              WHERE o.tenant_id = a.tenant_id AND o.id = a.mission_id))
+          -- A borrow serves while its lender's fit is current (0082) and on
+          -- its lender's template (0086).
           AND (a.method <> 'borrowed' OR EXISTS (
               SELECT 1 FROM automatic_laser_calibrations l
+              JOIN missions lm ON lm.tenant_id = l.tenant_id AND lm.id = l.mission_id
               WHERE l.tenant_id = a.tenant_id AND l.id = a.borrowed_from
-                AND {_current("l")}))
+                AND {_current("l")}
+                AND (l.method <> 'slate_pose'
+                     OR l.slate_template_id = lm.slate_template_id)))
         ORDER BY (a.method <> 'borrowed') DESC, (a.mission_id = d.id) DESC,
                  (a.method = 'slate_pose') DESC
         LIMIT 1
@@ -141,9 +156,9 @@ _LENGTHS_0086 = f"""
     ORDER BY m.tenant_id, c.mission_id, m.capture_id, m.seq DESC
 """
 
-# -- 0085's definitions, for the downgrade: 0082's pick and 0081's lengths.
+# -- 0086's definitions, for the downgrade: 0086's pick and 0081's lengths.
 
-_PICK_0085 = """
+_PICK_PREVIOUS = """
     SELECT d.tenant_id, d.id AS mission_id, 'label_free'::text AS calibration_source,
            lf.id AS automatic_laser_calibration_id, NULL::uuid AS laser_calibration_id,
            lf.laser_position, lf.laser_axis, cc.id AS camera_calibration_id,
@@ -161,10 +176,21 @@ _PICK_0085 = """
           AND ((a.mission_id = d.id AND x.aim = aims.aim)
                OR (aims.aim = 0 AND a.mission_id = d.calibration_source_mission_id
                    AND x.aim = 0 AND a.method <> 'borrowed'))
-          -- A borrow serves while its lender's fit is current (0082).
+          -- A slate pose serves while it was posed on its mission's
+          -- template (0086).
+          AND (a.method <> 'slate_pose' OR x.slate_template_id = (
+              SELECT o.slate_template_id FROM missions o
+              WHERE o.tenant_id = a.tenant_id AND o.id = a.mission_id))
+          -- A borrow serves while its lender's fit is current (0082) and on
+          -- its lender's template (0086).
           AND (a.method <> 'borrowed' OR EXISTS (
               SELECT 1 FROM current_automatic_laser_calibrations l
-              WHERE l.tenant_id = a.tenant_id AND l.id = x.borrowed_from))
+              JOIN automatic_laser_calibrations lx
+                ON lx.tenant_id = l.tenant_id AND lx.id = l.id
+              JOIN missions lm ON lm.tenant_id = l.tenant_id AND lm.id = l.mission_id
+              WHERE l.tenant_id = a.tenant_id AND l.id = x.borrowed_from
+                AND (l.method <> 'slate_pose'
+                     OR lx.slate_template_id = lm.slate_template_id)))
         ORDER BY (a.method <> 'borrowed') DESC, (a.mission_id = d.id) DESC,
                  (a.method = 'slate_pose') DESC
         LIMIT 1
@@ -172,7 +198,7 @@ _PICK_0085 = """
     WHERE lf.id IS NOT NULL
 """
 
-_LENGTHS_0085 = f"""
+_LENGTHS_PREVIOUS = f"""
     SELECT DISTINCT ON (m.tenant_id, m.capture_id) {_COLUMNS}
     FROM automatic_measurements m
     JOIN captures c ON c.tenant_id = m.tenant_id AND c.id = m.capture_id
@@ -274,7 +300,7 @@ def downgrade() -> None:
     export = _held(_EXPORT)
     op.execute(f"DROP VIEW {_EXPORT}")
     op.execute(f"DROP VIEW {_LENGTHS}")
-    _create(_LENGTHS, _LENGTHS_0085, *lengths[1:])
+    _create(_LENGTHS, _LENGTHS_PREVIOUS, *lengths[1:])
     _create(_EXPORT, *export)
-    _replace_view(_PICK, _PICK_0085)
+    _replace_view(_PICK, _PICK_PREVIOUS)
     op.execute(f"DROP INDEX {_INDEX}")
