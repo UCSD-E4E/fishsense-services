@@ -181,6 +181,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{slug}/captures/{capture_id}/phone-measurement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Phone Measurement
+         * @description The capture's current server measurement. Unvalidated.
+         */
+        get: operations["get_phone_measurement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{slug}/captures/{capture_id}/phone-measurement/mask": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Phone Mask
+         * @description The current server measurement's mask, as its PNG bytes.
+         */
+        get: operations["get_phone_measurement_mask"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{slug}/captures/{capture_id}/reviews": {
         parameters: {
             query?: never;
@@ -1067,6 +1107,7 @@ export interface components {
             client_capture_uuid: string | null;
             /** Fish */
             fish: components["schemas"]["MeasuredFish"][];
+            phone?: components["schemas"]["PhoneLengthView"] | null;
             /** Photo Url */
             photo_url: string | null;
         };
@@ -1759,6 +1800,54 @@ export interface components {
             place_name: string | null;
             species: components["schemas"]["SpeciesView"] | null;
         };
+        /** PhoneLengthView */
+        PhoneLengthView: {
+            /** Length M */
+            length_m: number | null;
+            /** Status */
+            status: string;
+        };
+        /** PhoneMeasurementView */
+        PhoneMeasurementView: {
+            /** Algorithm */
+            algorithm: string;
+            /** Core Version */
+            core_version: string | null;
+            /** Error */
+            error: string | null;
+            fork: components["schemas"]["PhonePoint"] | null;
+            /** Fork Depth M */
+            fork_depth_m: number | null;
+            /** Length M */
+            length_m: number | null;
+            /** Mask Height */
+            mask_height: number | null;
+            /** Mask Url */
+            mask_url: string | null;
+            /** Mask Width */
+            mask_width: number | null;
+            /**
+             * Measured At
+             * Format: date-time
+             */
+            measured_at: string;
+            /** Model Id */
+            model_id: string | null;
+            /** Photo Url */
+            photo_url: string | null;
+            snout: components["schemas"]["PhonePoint"] | null;
+            /** Snout Depth M */
+            snout_depth_m: number | null;
+            /** Status */
+            status: string;
+        };
+        /** PhonePoint */
+        PhonePoint: {
+            /** X */
+            x: number;
+            /** Y */
+            y: number;
+        };
         /** PhotoSize */
         PhotoSize: {
             /** Height */
@@ -2335,6 +2424,70 @@ export interface operations {
         };
     };
     get_automatic_mask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+                capture_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_phone_measurement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+                capture_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhoneMeasurementView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_phone_measurement_mask: {
         parameters: {
             query?: never;
             header?: never;

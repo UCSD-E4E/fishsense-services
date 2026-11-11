@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { formatLength } from "@/lib/captures";
 import { captureCardLink, type CaptureCard } from "@/lib/mission-captures";
+import { phoneCardLabel } from "@/lib/phone-measurement";
 
 /** A mission's captures as cards, measured or not: the photo, then its
- *  length (linking to the fish), or "Not measured" (linking to the frame). */
+ *  length (linking to the fish), the server's unvalidated phone length or why
+ *  it has none (2026-11-10), or "Not measured" (each linking to the frame). */
 export function CaptureGrid({
   slug,
   mission,
@@ -34,6 +36,8 @@ export function CaptureGrid({
                 <span className="whitespace-nowrap font-semibold tabular-nums">
                   {c.fish.map((f) => (f.length_m == null ? "—" : formatLength(f.length_m))).join(", ")}
                 </span>
+              ) : phoneCardLabel(c.phone) ? (
+                <PhoneLabel label={phoneCardLabel(c.phone)!} />
               ) : (
                 <span className="text-sm text-fg-2">Not measured</span>
               )}
@@ -54,5 +58,18 @@ export function CaptureGrid({
         );
       })}
     </ul>
+  );
+}
+
+/** The server's phone result on a card: a length, marked unvalidated, or why
+ *  there is none. Never a measured fish's length. */
+function PhoneLabel({ label }: { label: { text: string; unvalidated: boolean } }) {
+  return label.unvalidated ? (
+    <span className="flex items-baseline gap-1.5 whitespace-nowrap">
+      <span className="font-semibold tabular-nums">{label.text}</span>
+      <span className="text-xs font-semibold text-warn">unvalidated</span>
+    </span>
+  ) : (
+    <span className="text-sm text-fg-2">{label.text}</span>
   );
 }

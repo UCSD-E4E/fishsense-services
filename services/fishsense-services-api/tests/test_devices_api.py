@@ -248,6 +248,8 @@ async def test_every_operation_has_an_explicit_operation_id(offline_client):
         "get_my_membership",
         "get_my_skills",
         "get_observation",
+        "get_phone_measurement",
+        "get_phone_measurement_mask",
         "get_public_summary",
         "get_tenant_regions",
         "get_tenant_summary",
