@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.81.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.80.1...v0.81.0) (2026-11-11)
+
+
+### Features
+
+* show the server's phone lengths, unvalidated, on missions and frames ([58959b5](https://github.com/UCSD-E4E/fishsense-services/commit/58959b505c21baa77b77c675c691a0af2fce26a8))
+
 ## [0.80.1](https://github.com/UCSD-E4E/fishsense-services/compare/v0.80.0...v0.80.1) (2026-11-10)
 
 
