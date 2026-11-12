@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.83.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.82.0...v0.83.0) (2026-11-12)
+
+
+### Features
+
+* show every fish on the Fish page, with how much to trust it ([aa64e81](https://github.com/UCSD-E4E/fishsense-services/commit/aa64e811b75b494ab21cdf61c4d96dbd621f5728))
+* show every fish on the Fish page, with how much to trust it ([eb4ccc3](https://github.com/UCSD-E4E/fishsense-services/commit/eb4ccc36812b27c42ca90e753bb3a2dc389a5e6f))
+
 ## [0.82.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.81.0...v0.82.0) (2026-11-12)
 
 
