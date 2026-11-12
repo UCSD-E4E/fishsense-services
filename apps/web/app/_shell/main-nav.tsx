@@ -5,11 +5,19 @@ import { usePathname } from "next/navigation";
 import { navItems } from "@/lib/nav";
 
 /** The main navigation, marking the section the current page is in. */
-export function MainNav({ staff, lastTenant }: { staff: boolean; lastTenant: string | null }) {
+export function MainNav({
+  staff,
+  lastTenant,
+  systemAdmin,
+}: {
+  staff: boolean;
+  lastTenant: string | null;
+  systemAdmin: boolean;
+}) {
   const pathname = usePathname() ?? "/";
   return (
     <ul className="flex flex-wrap gap-1">
-      {navItems(pathname, { staff, lastTenant }).map((item) => (
+      {navItems(pathname, { staff, lastTenant, systemAdmin }).map((item) => (
         <li key={item.href}>
           <Link
             href={item.href}

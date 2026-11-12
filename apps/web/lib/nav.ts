@@ -1,6 +1,6 @@
 /**
  * The portal's main navigation (docs/design/README.md, Navigation): Today
- * (`/lab`), Fish, Data, and Labeling for staff. Map and Settings join when their pages
+ * (`/lab`), Fish, Data, Labeling for staff, and Dataset for system admins. Map and Settings join when their pages
  * exist, so the nav never links to a page that is not there.
  *
  * Fish and Data are a tenant's (`/lab/fish`, `/lab/data`): they link into the
@@ -9,15 +9,23 @@
  */
 import { paths, tenantOf } from "./tenant-paths";
 
+/** Every tenant's data at once: a system admin's page. */
+export const DATASET_PATH = "/admin/dataset";
+
 export type NavItem = { label: string; href: string; active: boolean };
 
-type Context = { staff: boolean; lastTenant: string | null };
+type Context = {
+  staff: boolean;
+  lastTenant: string | null;
+  /** A system admin also sees the whole dataset (the owner, 2026-11-11). */
+  systemAdmin?: boolean;
+};
 
 function segments(pathname: string): string[] {
   return pathname.split("/").filter(Boolean);
 }
 
-export function navItems(pathname: string, { staff, lastTenant }: Context): NavItem[] {
+export function navItems(pathname: string, { staff, lastTenant, systemAdmin = false }: Context): NavItem[] {
   const here = tenantOf(pathname);
   const tenant = here ?? lastTenant;
   const section = here ? segments(pathname)[1] : undefined;
@@ -43,6 +51,13 @@ export function navItems(pathname: string, { staff, lastTenant }: Context): NavI
       label: "Labeling",
       href: "/portal",
       active: pathname === "/portal" || pathname.startsWith("/portal/"),
+    });
+  }
+  if (systemAdmin) {
+    items.push({
+      label: "Dataset",
+      href: DATASET_PATH,
+      active: pathname === DATASET_PATH,
     });
   }
   return items;

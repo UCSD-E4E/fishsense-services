@@ -8,7 +8,7 @@ import { LAST_TENANT_COOKIE } from "@/lib/tenant-paths";
 import { Mark } from "./mark";
 import { MainNav } from "./main-nav";
 import { SignInFallback, SignInLink } from "./sign-in-link";
-import { otherTenants } from "@/lib/system-admin";
+import { getIsSystemAdmin, otherTenants } from "@/lib/system-admin";
 import { allTenants, myTenants } from "./tenant";
 import { TenantSwitcher, type SwitcherTenant } from "./tenant-switcher";
 import { ThemeToggle } from "./theme-toggle";
@@ -29,6 +29,19 @@ async function systemAdminTenants(
     unstable_rethrow(error);
     console.error("app shell: reading every tenant failed", error);
     return [];
+  }
+}
+
+/** Whether the user is a system admin, for the Dataset link; not, when it
+ *  can't be read (the link, not the page, pays for a failure). */
+async function isSystemAdmin(accessToken: string | null): Promise<boolean> {
+  if (!accessToken) return false;
+  try {
+    return await getIsSystemAdmin(accessToken);
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("app shell: reading whether the user is a system admin failed", error);
+    return false;
   }
 }
 
@@ -53,6 +66,7 @@ export async function AppHeader() {
   const state = await shellState(() => auth());
   const tenants = await switcherTenants(state.accessToken);
   const others = await systemAdminTenants(state.accessToken, tenants);
+  const systemAdmin = await isSystemAdmin(state.accessToken);
   // The cookie is only a preference: it counts while the user is still in it
   // (the middleware remembers any tenant-shaped path, a 404 included), and
   // otherwise their first tenant stands in.
@@ -75,7 +89,7 @@ export async function AppHeader() {
         {state.signedIn && (
           <>
             <TenantSwitcher tenants={tenants} others={others} lastTenant={lastTenant} />
-            <MainNav staff={state.staff} lastTenant={lastTenant} />
+            <MainNav staff={state.staff} lastTenant={lastTenant} systemAdmin={systemAdmin} />
           </>
         )}
         <div className="ml-auto flex items-center gap-3">

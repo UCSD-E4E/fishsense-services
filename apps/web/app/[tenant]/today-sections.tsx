@@ -10,7 +10,13 @@ import { WorkSections } from "@/app/_shell/work-sections";
 import { getDeployments } from "@/lib/mission-facts";
 import { getObservationPage } from "@/lib/observations";
 import { paths } from "@/lib/tenant-paths";
-import { getTenantRegions, getTenantSummary, recentDeployments, type MapSource } from "@/lib/today";
+import {
+  getTenantRegions,
+  getTenantSummary,
+  recentDeployments,
+  type MapSource,
+  type TenantRegions,
+} from "@/lib/today";
 import { getIsSystemAdmin } from "@/lib/system-admin";
 
 /** The numbers and "Needs you" both read the summary: asked once per request. */
@@ -73,6 +79,12 @@ export async function WhereMeasured({ token, slug, source = "human" }: Section &
     unstable_rethrow(error);
     return <Failure>Could not load the map: {reason(error)}</Failure>;
   }
+  return <RegionsOnMap found={found} automatic={automatic} />;
+}
+
+/** Regions on the map, or what will be there: the Today map's, and the
+ *  system admins' map of every tenant's (app/admin/dataset). */
+export function RegionsOnMap({ found, automatic }: { found: TenantRegions; automatic: boolean }) {
   if (found.regions.length === 0) {
     return (
       <p className="text-fg-2">
@@ -102,14 +114,15 @@ const MAP_SOURCES: { source: MapSource; label: string }[] = [
   { source: "automatic", label: "Automatic labels" },
 ];
 
-/** Which labels the map counts: a link each, so the choice is in the URL. */
-export function MapSourceToggle({ slug, source }: { slug: string; source: MapSource }) {
+/** Which labels the map counts: a link each, so the choice is in the URL
+ *  (`base`, the page's path, with `?map=automatic`). */
+export function MapSourceToggle({ base, source }: { base: string; source: MapSource }) {
   return (
     <nav aria-label="Map labels" className="flex flex-wrap gap-2">
       {MAP_SOURCES.map((s) => (
         <Link
           key={s.source}
-          href={s.source === "automatic" ? `${paths.tenant(slug)}?map=automatic` : paths.tenant(slug)}
+          href={s.source === "automatic" ? `${base}?map=automatic` : base}
           scroll={false}
           aria-current={s.source === source ? "page" : undefined}
           className="inline-flex h-11 items-center rounded-chip border border-line bg-surface px-4 text-sm font-medium aria-[current=page]:border-teal aria-[current=page]:bg-teal-tint aria-[current=page]:font-semibold aria-[current=page]:text-teal-fg"
