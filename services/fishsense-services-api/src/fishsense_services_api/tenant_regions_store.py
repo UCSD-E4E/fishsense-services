@@ -6,13 +6,18 @@ owner, 2026-10-21), so nothing finer than a region leaves here. Wild fish
 only: fish models, the decoys of pool trials, are left off (the owner, the
 same day), as on the public map. On production that took the lab's map from
 3,314 fish to its 203 wild ones, and Southern California off it: Nathan's
-Pool held fish models alone. A fish is placed by its mission's folder (a
-pool at its region, for a wild fish measured in one); else by its capture's
-GPS (a phone's), the nearest region; else it is "elsewhere". A capture with
-no GPS whose mission's site `regions.region_of_site` names is at that region
-(the owner, 2026-11-12: CCFRP's phone captures have no GPS, and its three
-sites are in San Diego). GPS wins over the site (the owner, the same day): a
-capture with GPS no region holds is "elsewhere", whatever its site.
+Pool held fish models alone.
+
+A fish is placed by its capture's GPS, the nearest region; else by its
+mission's folder (a pool at its region, for a wild fish measured in one);
+else by its mission's site; else it is "elsewhere". GPS wins outright (the
+owner, 2026-11-12: "it is an actual measurement of where we are"): a capture
+with GPS no region holds is "elsewhere", whatever its folder or site says.
+The folder came first until then, from when the map held only Lite fish,
+which have no GPS. A site counts when `regions.region_of_site` names it (the
+owner, 2026-11-12: CCFRP's phone captures have no GPS, and its three sites
+are in San Diego). The automatic map still leaves a pool's lengths off by its
+folder, GPS or not: GPS cannot tell a pool.
 
 ``source="automatic"`` counts the automatic lengths instead (the owner,
 2026-11-08: a toggle between the human and the automatic labels): the
@@ -163,14 +168,10 @@ async def tenant_regions(
         place = place_of(row.source_path) if row.source_path else None
         if source == "automatic" and is_pool(place):
             continue
-        region = region_of_place(place)
-        if region is None:
-            has_gps = row.latitude is not None and row.longitude is not None
-            region = (
-                nearest_region(row.latitude, row.longitude)
-                if has_gps
-                else region_of_site(row.site)
-            )
+        if row.latitude is not None and row.longitude is not None:
+            region = nearest_region(row.latitude, row.longitude)
+        else:
+            region = region_of_place(place) or region_of_site(row.site)
         if region is None:
             elsewhere += row.fish
         else:

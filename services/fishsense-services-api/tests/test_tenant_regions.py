@@ -156,6 +156,33 @@ class TestTenantRegions:
         assert {r.name: r.fish for r in found.regions} == {SOCAL: 1}
         assert found.elsewhere == 1
 
+    @pytest.mark.parametrize(
+        "latitude, longitude, expected",
+        [
+            (32.8665, -117.2546, ({SOCAL: 1}, 0)),  # La Jolla
+            (48.85, 2.35, ({}, 1)),  # Paris: no region, and the folder is not asked
+        ],
+    )
+    async def test_gps_wins_over_the_folder(
+        self, owner_engine, app_engine, tenants, latitude, longitude, expected
+    ):
+        """GPS wins outright (the owner, 2026-11-12: "it is an actual
+        measurement of where we are"): a folder names a place only when the
+        capture has no GPS."""
+        lab = tenants["lab"]
+        await _filed(owner_engine, lab, "102724_Islamorada")
+        await exec_(
+            owner_engine,
+            "UPDATE captures SET latitude = :la, longitude = :lo WHERE tenant_id = :t",
+            la=latitude,
+            lo=longitude,
+            t=lab,
+        )
+
+        found = await _regions(app_engine, lab)
+
+        assert ({r.name: r.fish for r in found.regions}, found.elsewhere) == expected
+
     async def test_a_fish_with_no_place_is_elsewhere(
         self, owner_engine, app_engine, tenants
     ):
