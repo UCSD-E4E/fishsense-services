@@ -553,6 +553,40 @@ class TestPhoneMeasurementsOnTheAutomaticMap:
         assert {r.name: r.fish for r in found.regions} == {SOCAL: 1}
         assert found.elsewhere == 0
 
+    @pytest.mark.parametrize(
+        "latitude, longitude, expected",
+        [
+            (24.55, -81.78, ({KEYS: 1}, 0)),  # Key West
+            (48.85, 2.35, ({}, 1)),  # Paris: no region, and the site is not asked
+        ],
+    )
+    async def test_gps_wins_over_the_site(
+        self, owner_engine, app_engine, latitude, longitude, expected
+    ):
+        """GPS wins (the owner, 2026-11-12): the site is asked only when the
+        capture has none."""
+        from depth_measure_seed import tenant
+
+        lab = await tenant(owner_engine)
+        c = await _phone_measured(app_engine, lab, {})
+        await exec_(
+            owner_engine,
+            "UPDATE captures SET latitude = :la, longitude = :lo WHERE id = :c",
+            la=latitude,
+            lo=longitude,
+            c=c,
+        )
+        await exec_(
+            owner_engine,
+            "UPDATE missions SET site = 'SIO' WHERE id = "
+            "(SELECT mission_id FROM captures WHERE id = :c)",
+            c=c,
+        )
+
+        found = await _automatic_regions(app_engine, lab)
+
+        assert ({r.name: r.fish for r in found.regions}, found.elsewhere) == expected
+
     async def test_the_human_map_does_not_count_them(self, owner_engine, app_engine):
         from depth_measure_seed import tenant
 
