@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.88.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.87.0...v0.88.0) (2026-11-12)
+
+
+### Features
+
+* **api:** CCFRP's sites on the map ([ea92341](https://github.com/UCSD-E4E/fishsense-services/commit/ea923415af6d62ebb6d435db00c764f238b440fa))
+* **api:** GPS wins on the map, and CCFRP's sites ([f2a5839](https://github.com/UCSD-E4E/fishsense-services/commit/f2a583969a94df8acc4adac57c6b4be99b14af94))
+
+
+### Bug Fixes
+
+* **api:** GPS wins outright on the map ([166200f](https://github.com/UCSD-E4E/fishsense-services/commit/166200f6e1a1ffe0210f75133f09d7de292adb49))
+* **api:** GPS wins over a mission's site on the map ([c6c10e3](https://github.com/UCSD-E4E/fishsense-services/commit/c6c10e3fd544c5159d8f260c6cc94c3010a8ad54))
+
 ## [0.87.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.86.0...v0.87.0) (2026-11-12)
 
 
