@@ -37,6 +37,11 @@ fishsense-services-api withdraw-fish-model-lengths --tenant lab --missions 509 [
                                     # nobody measured in a pool trial's
                                     # missions (0089); --apply appends a
                                     # `fish_model` refusal after each
+fishsense-services-api deploy-phone-missions --tenant ccfrp-ucsd [--apply FINGERPRINT]
+                                    # dry run: put phone missions that are in
+                                    # no deployment into one (one place, two
+                                    # days); --apply <the dry run's
+                                    # fingerprint> writes it, as the owner
 fishsense-services-api detect-beam-moves [--apply]
                                     # dry run: the missions whose laser moved
                                     # mid-dive (0073); --apply records them, as
@@ -89,6 +94,13 @@ from fishsense_services_api.beam_moves import (
     detect_beam_move,
     mission_dots,
     record_beam_move,
+)
+from fishsense_services_api.phone_deployments import (
+    PlanChanged as PhonePlanChanged,
+)
+from fishsense_services_api.phone_deployments import (
+    apply_phone_deployments,
+    plan_phone_deployments,
 )
 from fishsense_services_api.fish_model_withdrawal import (
     fish_model_automatic_lengths,
@@ -309,6 +321,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--missions", required=True, help="comma-separated mission numbers"
     )
     decoys.add_argument("--apply", action="store_true", help="write it")
+    phone_trips = commands.add_parser(
+        "deploy-phone-missions",
+        help="put the phone missions that are in no deployment into one (one "
+        "place, dates at most two days apart); a dry run by default",
+    )
+    phone_trips.add_argument("--tenant", required=True, help="tenant id or slug")
+    phone_trips.add_argument(
+        "--apply",
+        metavar="FINGERPRINT",
+        help="write the plan whose dry run printed this fingerprint",
+    )
     assign = commands.add_parser(
         "assign-slate-templates",
         help="record the slate template of missions that have none, from a "
@@ -447,6 +470,8 @@ async def main(argv: Sequence[str]) -> int:
         return await _withdraw_lengths(args, "beam_moved", "after a laser move")
     if args.command == "withdraw-fish-model-lengths":
         return await _withdraw_fish_model_lengths(args)
+    if args.command == "deploy-phone-missions":
+        return await _deploy_phone_missions(args)
     if args.command == "detect-beam-moves":
         return await _detect_beam_moves(args)
     if args.command == "public-totals":
@@ -1082,6 +1107,46 @@ async def _withdraw_fish_model_lengths(args: argparse.Namespace) -> int:
                     "nothing written"
                 )
         print(f"withdrew {written}")
+        return 0
+    finally:
+        await engine.dispose()
+
+
+async def _deploy_phone_missions(args: argparse.Namespace) -> int:
+    """Dry run unless --apply names the fingerprint of the plan reviewed."""
+    settings = _settings(MigrationSettings)
+    if settings is None:
+        return 2
+    engine = create_async_engine(settings.migration_database_url.get_secret_value())
+    try:
+        tenant_id = await _tenant_id(engine, args.tenant)
+        if tenant_id is None:
+            print(f"unknown tenant {args.tenant!r}", file=sys.stderr)
+            return 1
+        if args.apply:
+            try:
+                async with engine.begin() as conn:
+                    applied = await apply_phone_deployments(
+                        conn, tenant_id, expect=args.apply
+                    )
+            except PhonePlanChanged as error:
+                print(f"nothing written: {error}", file=sys.stderr)
+                return 1
+            print(f"applied {args.apply}: {applied.missions} missions, "
+                  f"{applied.deployments} new deployments")  # fmt: skip
+            return 0
+        async with engine.begin() as conn:
+            plan = await plan_phone_deployments(conn, tenant_id)
+        print("DRY RUN: nothing written")
+        print(f"{sum(t.missions_count for t in plan.trips)} phone missions into "
+              f"{len(plan.trips)} deployments "
+              f"({sum(not t.exists for t in plan.trips)} new)")  # fmt: skip
+        for t in plan.trips:
+            print(f"  {'joins' if t.exists else 'new  '} {t.name}  "
+                  f"{t.started_on}..{t.ended_on}  missions "
+                  f"{', '.join(map(str, t.missions))}")  # fmt: skip
+        print(f"\nto write exactly this plan: {args.command} --tenant "
+              f"{args.tenant} --apply {plan.fingerprint}")  # fmt: skip
         return 0
     finally:
         await engine.dispose()
