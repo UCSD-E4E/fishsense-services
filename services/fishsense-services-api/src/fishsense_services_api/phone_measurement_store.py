@@ -227,6 +227,7 @@ class CurrentPhoneMeasurement:
     mask_key: str | None
     mask_width: int | None
     mask_height: int | None
+    mask_sha256: str | None
     model_id: str | None
     core_version: str | None
     algorithm: str
@@ -250,7 +251,7 @@ async def current_phone_measurement(
                 SELECT p.capture_id, p.status, p.length_m, p.snout_x, p.snout_y,
                        p.fork_x, p.fork_y, p.snout_depth_m, p.fork_depth_m,
                        p.mask_bucket, p.mask_key, p.mask_width, p.mask_height,
-                       p.model_id, p.core_version, p.algorithm, p.error,
+                       p.mask_sha256, p.model_id, p.core_version, p.algorithm, p.error,
                        p.created_at, rgb.bucket AS photo_bucket,
                        rgb.object_key AS photo_key,
                        s.predicted_choice AS species_choice,

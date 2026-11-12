@@ -361,6 +361,17 @@
             ],
             "title": "Mask Height"
           },
+          "mask_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mask Sha256"
+          },
           "mask_url": {
             "anyOf": [
               {
@@ -3561,6 +3572,17 @@
               }
             ],
             "title": "Mask Height"
+          },
+          "mask_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mask Sha256"
           },
           "mask_url": {
             "anyOf": [
