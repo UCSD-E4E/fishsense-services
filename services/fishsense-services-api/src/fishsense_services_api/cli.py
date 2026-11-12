@@ -55,6 +55,11 @@ fishsense-services-api assign-slate-templates --tenant lab --from mapping.json
                                     # missions with none (the owner,
                                     # 2026-10-26), and the Label Studio and
                                     # calibration work that sets off;
+fishsense-services-api move-missions --from lab --to reef --missions-file reef.txt
+                                    # dry run: move the missions and all that
+                                    # hangs off them to another tenant;
+                                    # --apply <the dry run's fingerprint>
+                                    # writes it, as the owner
 fishsense-services-api retire-slate-labels --tenant lab --mission 436 \\
     --label <id> [--label <id> ...] --reason mirrored
                                     # dry run: supersede the slate labels with
@@ -165,6 +170,12 @@ from fishsense_services_api.slate_template_assignment import (
     AssignmentRefused,
     apply_assignment,
     plan_assignment,
+)
+from fishsense_services_api.tenant_move import (
+    MovePlan,
+    MoveRefused,
+    apply_move,
+    plan_move,
 )
 from fishsense_services_api.slate_label_retirement import (
     RetirementPlan,
@@ -370,6 +381,28 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="FINGERPRINT",
         help="write the plan whose dry run printed this fingerprint",
     )
+    move = commands.add_parser(
+        "move-missions",
+        help="move missions, and everything that hangs off them, to another "
+        "tenant; a dry run by default",
+    )
+    move.add_argument("--from", dest="source", required=True,
+                      help="the source tenant's slug, or its id")  # fmt: skip
+    move.add_argument("--to", dest="target", required=True,
+                      help="the target tenant's slug, or its id")  # fmt: skip
+    move.add_argument("--mission", action="append", type=int, default=[],
+                      help="a mission's number; repeatable")  # fmt: skip
+    move.add_argument("--missions-file", type=Path,
+                      help="mission numbers, one per line (# comments)")  # fmt: skip
+    move.add_argument("--source-bucket",
+                      help="the source's bucket (fishsense-tenant-<source slug>)")  # fmt: skip
+    move.add_argument("--target-bucket",
+                      help="the target's bucket (fishsense-tenant-<target slug>)")  # fmt: skip
+    move.add_argument(
+        "--apply",
+        metavar="FINGERPRINT",
+        help="write the move whose dry run printed this fingerprint",
+    )
     backfill = commands.add_parser(
         "backfill-mission-facts",
         help="plan (and with --apply, write) the port, deployment and purpose of "
@@ -482,6 +515,8 @@ async def main(argv: Sequence[str]) -> int:
         return await _backfill_mission_facts(args)
     if args.command == "assign-slate-templates":
         return await _assign_slate_templates(args)
+    if args.command == "move-missions":
+        return await _move_missions(args)
     if args.command == "retire-slate-labels":
         return await _retire_slate_labels(args)
     if args.command == "infer-deployments":
@@ -858,6 +893,80 @@ def format_retirement_plan(plan: RetirementPlan) -> str:
             "leave the current set"
         )
     return "\n".join(lines)
+
+
+def format_move_plan(plan: MovePlan, source: str, target: str) -> str:
+    """The dry run's report: the missions, the cameras, the rows by table."""
+    lines = [f"move {len(plan.missions)} missions from {source} to {target}:",
+             "  " + " ".join(map(str, plan.missions))]  # fmt: skip
+    if plan.devices_moved:
+        lines.append("cameras moving: " + ", ".join(plan.devices_moved))
+    if plan.devices_split:
+        lines.append(f"cameras moving, with a copy staying in {source}: "
+                     + ", ".join(plan.devices_split))  # fmt: skip
+    lines.append("rows moving:")
+    lines += [f"  {table:<36} {n:>8}" for table, n in plan.rows]
+    if plan.repointed:
+        lines.append(f"rows staying in {source}, pointed at a camera's copy:")
+        lines += [f"  {table:<36} {n:>8}" for table, n in plan.repointed]
+    return "\n".join(lines)
+
+
+def _mission_numbers(args: argparse.Namespace) -> list[int]:
+    numbers = list(args.mission)
+    if args.missions_file is not None:
+        for line in args.missions_file.read_text().splitlines():
+            line = line.split("#", 1)[0].strip()
+            if line:
+                numbers.append(int(line))
+    return numbers
+
+
+async def _move_missions(args: argparse.Namespace) -> int:
+    """Dry run unless --apply names the fingerprint of the move reviewed; as
+    the schema owner, across both tenants."""
+    settings = _settings(MigrationSettings)
+    if settings is None:
+        return 2
+    engine = create_async_engine(settings.migration_database_url.get_secret_value())
+    try:
+        source = await _tenant_id(engine, args.source)
+        target = await _tenant_id(engine, args.target)
+        for given, found in ((args.source, source), (args.target, target)):
+            if found is None:
+                print(f"unknown tenant {given!r}", file=sys.stderr)
+                return 1
+        async with engine.connect() as conn:
+            slugs = dict((await conn.execute(text(
+                "SELECT id, slug FROM tenants WHERE id IN (:s, :t)"),
+                {"s": source, "t": target})).all())  # fmt: skip
+        buckets = dict(
+            source_bucket=args.source_bucket or f"fishsense-tenant-{slugs[source]}",
+            target_bucket=args.target_bucket or f"fishsense-tenant-{slugs[target]}",
+        )
+        numbers = _mission_numbers(args)
+        try:
+            if args.apply:
+                async with engine.begin() as conn:
+                    plan = await apply_move(conn, source, target, numbers,
+                                            expect=args.apply, **buckets)  # fmt: skip
+                print(f"applied {args.apply}: moved {len(plan.missions)} missions "
+                      f"from {slugs[source]} to {slugs[target]}")  # fmt: skip
+                return 0
+            async with engine.begin() as conn:
+                plan = await plan_move(conn, source, target, numbers, **buckets)
+        except (PlanChanged, MoveRefused) as error:
+            print(f"nothing written: {error}", file=sys.stderr)
+            return 1
+        print("DRY RUN: nothing written")
+        print(format_move_plan(plan, slugs[source], slugs[target]))
+        listed = (f"--missions-file {args.missions_file}" if args.missions_file
+                  else " ".join(f"--mission {n}" for n in plan.missions))  # fmt: skip
+        print(f"\nto write exactly this move: move-missions --from {args.source} "
+              f"--to {args.target} {listed} --apply {plan.fingerprint}")  # fmt: skip
+        return 0
+    finally:
+        await engine.dispose()
 
 
 async def _retire_slate_labels(args: argparse.Namespace) -> int:
