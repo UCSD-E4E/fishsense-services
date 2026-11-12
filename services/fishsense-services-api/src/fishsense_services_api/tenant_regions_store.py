@@ -6,9 +6,18 @@ owner, 2026-10-21), so nothing finer than a region leaves here. Wild fish
 only: fish models, the decoys of pool trials, are left off (the owner, the
 same day), as on the public map. On production that took the lab's map from
 3,314 fish to its 203 wild ones, and Southern California off it: Nathan's
-Pool held fish models alone. A fish is placed by its mission's folder (a
-pool at its region, for a wild fish measured in one); else by its capture's
-GPS (a phone's), the nearest region; else it is "elsewhere".
+Pool held fish models alone.
+
+A fish is placed by its capture's GPS, the nearest region; else by its
+mission's folder (a pool at its region, for a wild fish measured in one);
+else by its mission's site; else it is "elsewhere". GPS wins outright (the
+owner, 2026-11-12: "it is an actual measurement of where we are"): a capture
+with GPS no region holds is "elsewhere", whatever its folder or site says.
+The folder came first until then, from when the map held only Lite fish,
+which have no GPS. A site counts when `regions.region_of_site` names it (the
+owner, 2026-11-12: CCFRP's phone captures have no GPS, and its three sites
+are in San Diego). The automatic map still leaves a pool's lengths off by its
+folder, GPS or not: GPS cannot tell a pool.
 
 ``source="automatic"`` counts the automatic lengths instead (the owner,
 2026-11-08: a toggle between the human and the automatic labels): the
@@ -45,6 +54,7 @@ from fishsense_services_api.regions import (
     is_pool,
     nearest_region,
     region_of_place,
+    region_of_site,
 )
 from fishsense_services_api.slate_presence_store import detector_slate_frame
 
@@ -54,12 +64,12 @@ __all__ = ["Source", "TenantRegion", "TenantRegions", "combine", "tenant_regions
 Source = Literal["human", "automatic"]
 
 _HUMAN_SQL = """
-    SELECT m.source_path, o.latitude, o.longitude, count(*) AS fish
+    SELECT m.source_path, m.site, o.latitude, o.longitude, count(*) AS fish
     FROM observations o
     LEFT JOIN missions m
       ON m.tenant_id = o.tenant_id AND m.id = o.mission_id
     WHERE o.tenant_id = :t AND o.fish_model IS NULL
-    GROUP BY m.source_path, o.latitude, o.longitude
+    GROUP BY m.source_path, m.site, o.latitude, o.longitude
 """
 
 #: The automatic lengths, by the rules of the view `current_automatic_measurements`
@@ -110,22 +120,22 @@ _AUTOMATIC_SQL = f"""
         SELECT DISTINCT o.capture_id FROM observations o
         WHERE o.tenant_id = :t AND o.fish_model IS NOT NULL
     )
-    SELECT d.source_path, c.latitude, c.longitude, count(*) AS fish
+    SELECT d.source_path, d.site, c.latitude, c.longitude, count(*) AS fish
     FROM am
     JOIN captures c ON c.tenant_id = :t AND c.id = am.capture_id
     JOIN missions d ON d.tenant_id = c.tenant_id AND d.id = c.mission_id
     WHERE am.length_m IS NOT NULL
       AND NOT {detector_slate_frame()}
       AND NOT EXISTS (SELECT 1 FROM fish_model f WHERE f.capture_id = c.id)
-    GROUP BY d.source_path, c.latitude, c.longitude
+    GROUP BY d.source_path, d.site, c.latitude, c.longitude
     UNION ALL
-    SELECT d.source_path, c.latitude, c.longitude, count(*) AS fish
+    SELECT d.source_path, d.site, c.latitude, c.longitude, count(*) AS fish
     FROM current_phone_measurements p
     JOIN captures c ON c.tenant_id = p.tenant_id AND c.id = p.capture_id
     JOIN missions d ON d.tenant_id = c.tenant_id AND d.id = c.mission_id
     WHERE p.tenant_id = :t AND p.status = 'measured' AND p.length_m IS NOT NULL
       AND NOT EXISTS (SELECT 1 FROM fish_model f WHERE f.capture_id = c.id)
-    GROUP BY d.source_path, c.latitude, c.longitude
+    GROUP BY d.source_path, d.site, c.latitude, c.longitude
 """
 
 
@@ -158,9 +168,10 @@ async def tenant_regions(
         place = place_of(row.source_path) if row.source_path else None
         if source == "automatic" and is_pool(place):
             continue
-        region = region_of_place(place)
-        if region is None and row.latitude is not None and row.longitude is not None:
+        if row.latitude is not None and row.longitude is not None:
             region = nearest_region(row.latitude, row.longitude)
+        else:
+            region = region_of_place(place) or region_of_site(row.site)
         if region is None:
             elsewhere += row.fish
         else:

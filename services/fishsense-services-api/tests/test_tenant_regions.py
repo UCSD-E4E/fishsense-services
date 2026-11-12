@@ -49,6 +49,24 @@ class TestRegionRules:
         assert regions.region_of_place("Pool", pools=False) is None
         assert regions.region_of_place("Islamorada", pools=False) == KEYS
 
+    @pytest.mark.parametrize(
+        "site, region",
+        [
+            ("Oceanside SEA Center", SOCAL),
+            ("SIO", SOCAL),
+            ("Outer Limits Charters Inc", SOCAL),
+            (" sio ", SOCAL),
+            ("Scripps Canyon", None),  # only the sites named
+            ("", None),
+            (None, None),
+        ],
+    )
+    def test_ccfrps_sites_are_in_southern_california(self, site, region):
+        """CCFRP's phone captures have no GPS, and every photo is from San
+        Diego (the owner, 2026-11-11), so its three sites are placed by name
+        (the owner, 2026-11-12)."""
+        assert regions.region_of_site(site) == region
+
     def test_gps_joins_the_nearest_region_within_300_km(self):
         assert regions.nearest_region(32.8665, -117.2546) == SOCAL  # La Jolla
         assert regions.nearest_region(24.55, -81.78) == KEYS  # Key West
@@ -138,6 +156,33 @@ class TestTenantRegions:
         assert {r.name: r.fish for r in found.regions} == {SOCAL: 1}
         assert found.elsewhere == 1
 
+    @pytest.mark.parametrize(
+        "latitude, longitude, expected",
+        [
+            (32.8665, -117.2546, ({SOCAL: 1}, 0)),  # La Jolla
+            (48.85, 2.35, ({}, 1)),  # Paris: no region, and the folder is not asked
+        ],
+    )
+    async def test_gps_wins_over_the_folder(
+        self, owner_engine, app_engine, tenants, latitude, longitude, expected
+    ):
+        """GPS wins outright (the owner, 2026-11-12: "it is an actual
+        measurement of where we are"): a folder names a place only when the
+        capture has no GPS."""
+        lab = tenants["lab"]
+        await _filed(owner_engine, lab, "102724_Islamorada")
+        await exec_(
+            owner_engine,
+            "UPDATE captures SET latitude = :la, longitude = :lo WHERE tenant_id = :t",
+            la=latitude,
+            lo=longitude,
+            t=lab,
+        )
+
+        found = await _regions(app_engine, lab)
+
+        assert ({r.name: r.fish for r in found.regions}, found.elsewhere) == expected
+
     async def test_a_fish_with_no_place_is_elsewhere(
         self, owner_engine, app_engine, tenants
     ):
@@ -146,6 +191,22 @@ class TestTenantRegions:
         found = await _regions(app_engine, tenants["lab"])
 
         assert (found.regions, found.elsewhere) == ([], 1)
+
+    async def test_a_fish_with_no_folder_or_gps_is_placed_by_its_site(
+        self, owner_engine, app_engine, tenants
+    ):
+        capture_id, _ = await lite(owner_engine, tenants["lab"], species=("A b", "C"))
+        await exec_(
+            owner_engine,
+            "UPDATE missions SET site = 'Outer Limits Charters Inc' WHERE id = "
+            "(SELECT mission_id FROM captures WHERE id = :c)",
+            c=capture_id,
+        )
+
+        found = await _regions(app_engine, tenants["lab"])
+
+        assert {r.name: r.fish for r in found.regions} == {SOCAL: 1}
+        assert found.elsewhere == 0
 
     async def test_only_the_tenants_own_fish_count(
         self, owner_engine, app_engine, tenants
@@ -493,6 +554,65 @@ class TestPhoneMeasurementsOnTheAutomaticMap:
         found = await _automatic_regions(app_engine, lab)
 
         assert (found.regions, found.elsewhere) == ([], 1)
+
+    async def test_a_capture_without_gps_is_placed_by_its_site(
+        self, owner_engine, app_engine
+    ):
+        """CCFRP's case: no GPS, and the mission's site is one of its three."""
+        from depth_measure_seed import tenant
+
+        lab = await tenant(owner_engine)
+        c = await _phone_measured(app_engine, lab, {})
+        await exec_(
+            owner_engine,
+            "UPDATE captures SET latitude = NULL, longitude = NULL WHERE id = :c",
+            c=c,
+        )
+        await exec_(
+            owner_engine,
+            "UPDATE missions SET site = 'SIO' WHERE id = "
+            "(SELECT mission_id FROM captures WHERE id = :c)",
+            c=c,
+        )
+
+        found = await _automatic_regions(app_engine, lab)
+
+        assert {r.name: r.fish for r in found.regions} == {SOCAL: 1}
+        assert found.elsewhere == 0
+
+    @pytest.mark.parametrize(
+        "latitude, longitude, expected",
+        [
+            (24.55, -81.78, ({KEYS: 1}, 0)),  # Key West
+            (48.85, 2.35, ({}, 1)),  # Paris: no region, and the site is not asked
+        ],
+    )
+    async def test_gps_wins_over_the_site(
+        self, owner_engine, app_engine, latitude, longitude, expected
+    ):
+        """GPS wins (the owner, 2026-11-12): the site is asked only when the
+        capture has none."""
+        from depth_measure_seed import tenant
+
+        lab = await tenant(owner_engine)
+        c = await _phone_measured(app_engine, lab, {})
+        await exec_(
+            owner_engine,
+            "UPDATE captures SET latitude = :la, longitude = :lo WHERE id = :c",
+            la=latitude,
+            lo=longitude,
+            c=c,
+        )
+        await exec_(
+            owner_engine,
+            "UPDATE missions SET site = 'SIO' WHERE id = "
+            "(SELECT mission_id FROM captures WHERE id = :c)",
+            c=c,
+        )
+
+        found = await _automatic_regions(app_engine, lab)
+
+        assert ({r.name: r.fish for r in found.regions}, found.elsewhere) == expected
 
     async def test_the_human_map_does_not_count_them(self, owner_engine, app_engine):
         from depth_measure_seed import tenant
