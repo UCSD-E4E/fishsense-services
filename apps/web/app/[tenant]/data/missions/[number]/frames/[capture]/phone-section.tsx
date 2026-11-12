@@ -1,5 +1,5 @@
 import { formatLength } from "@/lib/captures";
-import { phoneStatusLabel, type PhoneMeasurement } from "@/lib/phone-measurement";
+import { phoneSpeciesLabel, phoneStatusLabel, type PhoneMeasurement } from "@/lib/phone-measurement";
 
 /**
  * What the server measured on a phone capture nobody measured (the owner,
@@ -19,6 +19,7 @@ export function PhoneSection({
   const width = m.mask_width ?? 1920;
   const height = m.mask_height ?? 1440;
   const r = width / 110;
+  const species = phoneSpeciesLabel(m.species);
   return (
     <section className="rounded-card border border-line bg-surface px-6 py-5">
       <div className="mb-3 flex flex-wrap items-baseline gap-3">
@@ -89,6 +90,17 @@ export function PhoneSection({
         <dl className="grid min-w-0 flex-[1_1_260px] grid-cols-[max-content_minmax(0,1fr)] gap-x-5 gap-y-2.5 text-sm">
           <Row label="Result">{phoneStatusLabel(m.status)}</Row>
           <Row label="Length">{m.length_m != null ? formatLength(m.length_m) : "—"}</Row>
+          <Row label="Species">
+            {species ? (
+              <>
+                {species.name}
+                {species.detail && <span className="text-fg-2"> · {species.detail}</span>}
+                <span className="block text-xs text-fg-2">Named by BioCLIP from the region&apos;s fish; nobody has checked it.</span>
+              </>
+            ) : (
+              "—"
+            )}
+          </Row>
           <Row label="Depth">
             {m.snout_depth_m != null && m.fork_depth_m != null
               ? `snout ${m.snout_depth_m.toFixed(2)} m · fork ${m.fork_depth_m.toFixed(2)} m`

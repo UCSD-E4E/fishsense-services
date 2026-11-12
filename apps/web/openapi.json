@@ -3632,6 +3632,16 @@
             ],
             "title": "Snout Depth M"
           },
+          "species": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhoneSpecies"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -3673,6 +3683,44 @@
           "y"
         ],
         "title": "PhonePoint",
+        "type": "object"
+      },
+      "PhoneSpecies": {
+        "description": "BioCLIP's species for the measurement's fish (0090): automatic,\nunvalidated.",
+        "properties": {
+          "common_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Common Name"
+          },
+          "probability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Probability"
+          },
+          "scientific_name": {
+            "title": "Scientific Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scientific_name",
+          "common_name",
+          "probability"
+        ],
+        "title": "PhoneSpecies",
         "type": "object"
       },
       "PhotoSize": {

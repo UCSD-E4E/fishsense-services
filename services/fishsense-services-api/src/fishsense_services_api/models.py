@@ -217,6 +217,19 @@ class RegionalSpecies(Base):
     obis_records: Mapped[int] = mapped_column(Integer)
 
 
+class RegionalSpeciesAddition(Base):
+    """A fish a region's 0085 list lacks, added by hand with its source, which
+    the phone species run offers there (0090); global, written only by the
+    migration."""
+
+    __tablename__ = "regional_species_additions"
+
+    region: Mapped[str] = mapped_column(Text, primary_key=True)
+    scientific_name: Mapped[str] = mapped_column(Text, primary_key=True)
+    common_name: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(Text)
+
+
 class CalibrationTarget(Base):
     """A checkerboard; versioned by ``valid_from``, pitch per axis."""
 
@@ -1981,6 +1994,43 @@ class PhoneMeasurement(Base):
     core_version: Mapped[str | None] = mapped_column(Text)
     algorithm: Mapped[str] = mapped_column(Text)
     error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class PhoneSpeciesPrediction(Base):
+    """BioCLIP's species for the fish on a phone capture, cropped to a server
+    measurement's mask, from a region's fish (0090); unvalidated;
+    append-only."""
+
+    __tablename__ = "phone_species_predictions"
+    __table_args__ = (
+        _fk(("tenant_id", "capture_id"), "captures"),
+        _fk(("tenant_id", "phone_measurement_id"), "phone_measurements"),
+        Index(None, "tenant_id", "capture_id", "seq"),
+        CheckConstraint(
+            "status IN ('predicted', 'decode_failed')",
+            name="phone_species_predictions_status_check",
+        ),
+        CheckConstraint(
+            "status <> 'predicted' OR predicted_choice IS NOT NULL",
+            name="phone_species_predictions_predicted_check",
+        ),
+    )  # fmt: skip
+
+    id: Mapped[uuid.UUID] = _id()
+    tenant_id: Mapped[uuid.UUID] = _tenant_id()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    capture_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    phone_measurement_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    status: Mapped[str] = mapped_column(Text)
+    predictor_version: Mapped[int] = mapped_column(Integer)
+    model_id: Mapped[str] = mapped_column(Text)
+    predicted_choice: Mapped[str | None] = mapped_column(Text)
+    top1_probability: Mapped[float | None] = mapped_column(Double)
+    margin: Mapped[float | None] = mapped_column(Double)
+    top5: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    species_region: Mapped[str] = mapped_column(Text)
+    species_list_version: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = _created_at()
 
 

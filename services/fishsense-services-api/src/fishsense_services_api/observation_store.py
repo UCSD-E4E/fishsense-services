@@ -297,6 +297,12 @@ _PERSON_MEASURED = """EXISTS (
 #: maximus)": the last parenthesized part (as `automatic_lengths_store`).
 _CHOICE_SCIENTIFIC = r"substring(s.predicted_choice from '\(([^()]*)\)\s*$')"
 
+#: The common name in such a choice, "Hogfish", for a region's fish the
+#: species table may not list (0085, 0090).
+_CHOICE_COMMON = (
+    r"substring(s.predicted_choice from '^[^,]*,\s*(.*?)\s*\([^()]*\)\s*$')"
+)
+
 #: Every fish in the tenant, each with how much we trust it (the owner,
 #: 2026-11-11): a person's (the observations), each current automatic length
 #: on a Lite frame (with its calibration's uncertainty; never a slate frame,
@@ -338,7 +344,9 @@ _FISH = f"""
       AND CAST(:trust AS text) IS DISTINCT FROM 'person'
     UNION ALL
     SELECT c.tenant_id, c.id, p.id, 'lidar', p.length_m, c.captured_at,
-           dv.kind, dv.name, d.number, d.name, NULL, NULL, NULL, NULL,
+           dv.kind, dv.name, d.number, d.name,
+           {_CHOICE_SCIENTIFIC}, COALESCE(sp.common_name, {_CHOICE_COMMON}),
+           NULL, NULL,
            c.latitude, c.longitude, mc.place_name, c.client_capture_uuid,
            c.raw_object_key, 'automatic', NULL
     FROM current_phone_measurements p
@@ -348,6 +356,11 @@ _FISH = f"""
       ON dv.tenant_id = c.tenant_id AND dv.id = COALESCE(c.device_id, d.device_id)
     LEFT JOIN mobile_captures mc
       ON mc.tenant_id = c.tenant_id AND mc.capture_id = c.id
+    -- BioCLIP's species (0090), only for the measurement it was cropped to.
+    LEFT JOIN current_phone_species_predictions s
+      ON s.tenant_id = p.tenant_id AND s.capture_id = p.capture_id
+     AND s.phone_measurement_id = p.id AND s.status = 'predicted'
+    LEFT JOIN species sp ON sp.scientific_name = {_CHOICE_SCIENTIFIC}
     WHERE p.tenant_id = :tenant_id AND p.status = 'measured'
       AND p.length_m IS NOT NULL AND c.is_canonical AND NOT {_PERSON_MEASURED}
       AND CAST(:trust AS text) IS DISTINCT FROM 'person'

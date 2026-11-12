@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { phoneCardLabel, phoneStatusLabel } from "./phone-measurement";
+import { phoneCardLabel, phoneSpeciesLabel, phoneStatusLabel } from "./phone-measurement";
 
 describe("phoneCardLabel", () => {
   it("shows a measured length, marked unvalidated", () => {
@@ -31,5 +31,25 @@ describe("phoneStatusLabel", () => {
 
   it("passes an unknown status through", () => {
     expect(phoneStatusLabel("something_new")).toBe("something_new");
+  });
+});
+
+describe("phoneSpeciesLabel", () => {
+  it("names the species BioCLIP chose, with how sure it was", () => {
+    expect(
+      phoneSpeciesLabel({ scientific_name: "Sebastes dallii", common_name: "Calico Rockfish", probability: 0.814 }),
+    ).toEqual({ name: "Calico Rockfish", detail: "Sebastes dallii · 81%" });
+  });
+
+  it("falls back to the scientific name", () => {
+    expect(phoneSpeciesLabel({ scientific_name: "Sebastes dallii", common_name: null, probability: null })).toEqual({
+      name: "Sebastes dallii",
+      detail: null,
+    });
+  });
+
+  it("is nothing when no species was predicted", () => {
+    expect(phoneSpeciesLabel(null)).toBeNull();
+    expect(phoneSpeciesLabel(undefined)).toBeNull();
   });
 });
