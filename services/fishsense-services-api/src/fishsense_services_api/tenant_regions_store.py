@@ -20,6 +20,12 @@ labeled cannot be told from a wild fish, so a pool's lengths are left off
 whole: the lab's map showed 11 fish in Southern California, unlabeled frames
 of a Nathan's Pool trial (mission 509) whose 162 labeled fish were all fish
 models (the owner, 2026-11-10). The human map keeps a pool's wild fish.
+
+The server's phone measurement counts there too (the owner, 2026-11-12): a
+capture's current result (`current_phone_measurements`) when it measured a
+fish, placed by the phone's GPS like any phone fish. CCFRP's 546 phone frames
+were measured by it (v0.79.0) and were on no map, the Dataset page's
+included. Unvalidated, as every automatic length.
 """
 
 from __future__ import annotations
@@ -110,6 +116,14 @@ _AUTOMATIC_SQL = f"""
     JOIN missions d ON d.tenant_id = c.tenant_id AND d.id = c.mission_id
     WHERE am.length_m IS NOT NULL
       AND NOT {detector_slate_frame()}
+      AND NOT EXISTS (SELECT 1 FROM fish_model f WHERE f.capture_id = c.id)
+    GROUP BY d.source_path, c.latitude, c.longitude
+    UNION ALL
+    SELECT d.source_path, c.latitude, c.longitude, count(*) AS fish
+    FROM current_phone_measurements p
+    JOIN captures c ON c.tenant_id = p.tenant_id AND c.id = p.capture_id
+    JOIN missions d ON d.tenant_id = c.tenant_id AND d.id = c.mission_id
+    WHERE p.tenant_id = :t AND p.status = 'measured' AND p.length_m IS NOT NULL
       AND NOT EXISTS (SELECT 1 FROM fish_model f WHERE f.capture_id = c.id)
     GROUP BY d.source_path, c.latitude, c.longitude
 """

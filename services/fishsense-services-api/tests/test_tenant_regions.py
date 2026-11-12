@@ -425,3 +425,81 @@ async def _rows(engine, sql, **params):
 #: sha256 of `current_automatic_measurements`'s definition (0086: the rules
 #: unchanged; the pick asked per length, keyed by mission).
 VIEW_SHA256 = "f7140c53178aa34c5906cfa9cccf175f3024d1b711a1200d1f12d7f0a9459642"
+
+
+async def _phone_measured(app_engine, lab, *results_of):
+    """A phone capture (La Jolla Cove's GPS) and the server's results for it,
+    oldest first: each a `_measured` change set."""
+    from test_phone_measurement_store import _measured
+    from test_phone_measurement_store import _phone as _synced
+
+    from fishsense_services_api.phone_measurement_store import (
+        record_phone_measurements,
+    )
+
+    c, _ = await _synced(app_engine, lab)
+    for changes in results_of:
+        async with tenant_transaction(app_engine, lab) as conn:
+            await record_phone_measurements(conn, lab, [_measured(c, **changes)])
+    return c
+
+
+class TestPhoneMeasurementsOnTheAutomaticMap:
+    """The server's phone measurement is an automatic length too (the owner,
+    2026-11-12): CCFRP's 546 phone frames were measured by it (v0.79.0) and
+    were on no map. A capture's current result counts when it measured a
+    fish, placed by the phone's GPS as the human map places a phone fish.
+    Unvalidated, as every automatic length."""
+
+    async def test_a_measured_capture_is_counted_by_its_gps(
+        self, owner_engine, app_engine
+    ):
+        from depth_measure_seed import tenant
+
+        lab = await tenant(owner_engine)
+        await _phone_measured(app_engine, lab, {})
+
+        found = await _automatic_regions(app_engine, lab)
+
+        assert {r.name: r.fish for r in found.regions} == {SOCAL: 1}
+        assert found.elsewhere == 0
+
+    async def test_only_the_current_result_counts(self, owner_engine, app_engine):
+        from depth_measure_seed import tenant
+
+        lab = await tenant(owner_engine)
+        await _phone_measured(app_engine, lab, {}, {"length_m": 0.3})
+        no_fish = dict.fromkeys(
+            ("length_m", "snout_x", "snout_y", "fork_x", "fork_y", "snout_depth_m",
+             "fork_depth_m", "mask"),
+        )  # fmt: skip
+        await _phone_measured(app_engine, lab, {}, {"status": "no_fish", **no_fish})
+
+        found = await _automatic_regions(app_engine, lab)
+
+        assert {r.name: r.fish for r in found.regions} == {SOCAL: 1}
+
+    async def test_a_capture_without_gps_is_elsewhere(self, owner_engine, app_engine):
+        from depth_measure_seed import tenant
+
+        lab = await tenant(owner_engine)
+        c = await _phone_measured(app_engine, lab, {})
+        await exec_(
+            owner_engine,
+            "UPDATE captures SET latitude = NULL, longitude = NULL WHERE id = :c",
+            c=c,
+        )
+
+        found = await _automatic_regions(app_engine, lab)
+
+        assert (found.regions, found.elsewhere) == ([], 1)
+
+    async def test_the_human_map_does_not_count_them(self, owner_engine, app_engine):
+        from depth_measure_seed import tenant
+
+        lab = await tenant(owner_engine)
+        await _phone_measured(app_engine, lab, {})
+
+        found = await _regions(app_engine, lab)
+
+        assert (found.regions, found.elsewhere) == ([], 0)

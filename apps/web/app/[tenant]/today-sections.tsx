@@ -96,7 +96,8 @@ export function RegionsOnMap({ found, automatic }: { found: TenantRegions; autom
     <div className="flex flex-col gap-2">
       {automatic && (
         <p className="text-sm text-fg-2">
-          The automatic run&apos;s lengths, not reviewed by a person: one per frame, slate frames left out.
+          The automatic lengths, not reviewed by a person: the automatic run&apos;s on camera frames, slate frames left
+          out, and the server&apos;s phone measurement on phone captures. One per frame.
         </p>
       )}
       <RegionMap regions={found.regions} />

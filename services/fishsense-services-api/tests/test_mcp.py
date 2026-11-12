@@ -459,3 +459,12 @@ async def test_every_missions_laser_colors_in_one_call(
     (row,) = listed["missions"]
     assert row["mission_number"] == number
     assert row["automatic"] == {"red": 1, "green": 0, "unread": 0}
+
+
+async def test_the_automatic_map_comes_unvalidated(agent):
+    human = await agent.call("get_tenant_regions", slug="lab")
+    automatic = await agent.call("get_tenant_regions", slug="lab", source="automatic")
+
+    assert human == {"regions": [], "elsewhere": 0}
+    assert automatic["validated"] is False
+    assert automatic["result"] == {"regions": [], "elsewhere": 0}
