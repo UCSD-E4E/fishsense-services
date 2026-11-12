@@ -60,4 +60,21 @@ describe("the main navigation (docs/design/README.md, Navigation)", () => {
     // A prefix that is not a path segment is not the section.
     expect(active("/lab/fishing")).toEqual([]);
   });
+
+  it("adds Dataset for a system admin, and for nobody else", () => {
+    // The whole dataset, every tenant's (the owner, 2026-11-11).
+    const admin = navItems("/", { staff: true, lastTenant: null, systemAdmin: true });
+
+    expect(labels(admin)).toEqual(["Today", "Fish", "Data", "Labeling", "Dataset"]);
+    expect(admin.find((i) => i.label === "Dataset")?.href).toBe("/admin/dataset");
+    expect(labels(navItems("/", { staff: true, lastTenant: null }))).not.toContain("Dataset");
+  });
+
+  it("marks Dataset on its page", () => {
+    const active = navItems("/admin/dataset", { staff: false, lastTenant: "lab", systemAdmin: true })
+      .filter((i) => i.active)
+      .map((i) => i.label);
+
+    expect(active).toEqual(["Dataset"]);
+  });
 });

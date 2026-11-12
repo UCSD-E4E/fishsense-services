@@ -4657,6 +4657,56 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/admin/regions": {
+      "get": {
+        "description": "The whole dataset's fish by broad region, for a system admin: every\ntenant's Today map added up, opted in to the public page or not (the\nowner, 2026-11-11). Each tenant is read in its own transaction, so RLS\nstill scopes every read, and one the caller is not a member of is\nopened as its pages are, which records the visit (0056). 404 for\nanyone else. ``source=automatic`` counts the automatic lengths:\nunvalidated.",
+        "operationId": "get_dataset_regions",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "human",
+              "enum": [
+                "human",
+                "automatic"
+              ],
+              "title": "Source",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantRegionsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Dataset Regions"
+      }
+    },
     "/admin/tenants": {
       "get": {
         "description": "Every tenant, for a system admin's switcher; 404 for anyone else.",

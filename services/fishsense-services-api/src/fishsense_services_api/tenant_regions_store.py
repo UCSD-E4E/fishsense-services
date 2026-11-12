@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import uuid
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -41,7 +42,7 @@ from fishsense_services_api.regions import (
 )
 from fishsense_services_api.slate_presence_store import detector_slate_frame
 
-__all__ = ["Source", "TenantRegion", "TenantRegions", "tenant_regions"]
+__all__ = ["Source", "TenantRegion", "TenantRegions", "combine", "tenant_regions"]
 
 #: Whose labels the map counts.
 Source = Literal["human", "automatic"]
@@ -150,6 +151,23 @@ async def tenant_regions(
             elsewhere += row.fish
         else:
             by_region[region] += row.fish
+    return _regions(by_region, elsewhere)
+
+
+def combine(maps: Iterable[TenantRegions]) -> TenantRegions:
+    """Several tenants' maps as one: each region's fish added up by name, as
+    the system admins' map of the whole dataset needs (the owner,
+    2026-11-11)."""
+    by_region: Counter[str] = Counter()
+    elsewhere = 0
+    for found in maps:
+        for region in found.regions:
+            by_region[region.name] += region.fish
+        elsewhere += found.elsewhere
+    return _regions(by_region, elsewhere)
+
+
+def _regions(by_region: Counter[str], elsewhere: int) -> TenantRegions:
     return TenantRegions(
         regions=[
             TenantRegion(name, *REGIONS[name], fish=fish)
