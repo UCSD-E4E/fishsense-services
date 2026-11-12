@@ -33,10 +33,12 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from fishsense_services_api.laser_colour_store import LABEL_COLOURS
 from fishsense_services_api.renders_store import newest_render
+from fishsense_services_api.slate_presence_store import detector_slate_frame
 from fishsense_services_api.thumbnails_store import THUMBNAIL_WIDTH
 
 __all__ = [
     "DEVICE_GROUPS",
+    "TRUSTS",
     "DevicePoints",
     "LaserEvidence",
     "Observation",
@@ -55,6 +57,9 @@ Point = tuple[float, float]
 #: The device kinds of each named group; ``other`` is every kind not named
 #: here, and a fish with no device.
 DEVICE_GROUPS = {"lite": ("lite", "lite_flatport"), "mobile": ("mobile",)}
+
+#: How much a fish is trusted (the owner, 2026-11-11); None keeps both.
+TRUSTS = (None, "person", "automatic")
 _NAMED_KINDS = [kind for kinds in DEVICE_GROUPS.values() for kind in kinds]
 
 
@@ -85,6 +90,11 @@ class Observation:
     #: The capture's image in its tenant's bucket: a phone's own, else the
     #: capture's newest render there (0051) -- its thumbnail in a list (0053).
     photo_key: str | None
+    #: How much it is trusted (the owner, 2026-11-11): ``person``, measured
+    #: by a person; ``automatic``, a model's and unreviewed.
+    trust: str = "person"
+    #: One standard deviation of the length, where its calibration says.
+    length_sd_m: float | None = None
 
     @property
     def cursor(self) -> tuple[datetime, uuid.UUID, uuid.UUID]:
@@ -180,6 +190,7 @@ async def list_observations(
     photo_bucket: str | None = None,
     mission: int | None = None,
     species: str | None = None,
+    trust: str | None = None,
 ) -> list[Observation]:
     """Newest first; ``before`` is the previous page's last ``cursor``;
     ``device`` keeps one of :data:`DEVICE_GROUPS` or ``other`` (None: all);
@@ -196,6 +207,7 @@ async def list_observations(
         photo_bucket=photo_bucket,
         mission=mission,
         species=species,
+        trust=trust,
     )
     return found.observations
 
@@ -211,6 +223,7 @@ async def observation_page(
     photo_bucket: str | None = None,
     mission: int | None = None,
     species: str | None = None,
+    trust: str | None = None,
 ) -> ObservationPage:
     """:func:`list_observations`, from the ``offset``-th, with the total.
 
@@ -221,8 +234,11 @@ async def observation_page(
     ignores it, as it does the page."""
     if device is not None and device != "other" and device not in DEVICE_GROUPS:
         raise ValueError(f"no device group {device!r}")
+    if trust not in TRUSTS:
+        raise ValueError(f"no trust {trust!r}")
     params = {
         "tenant_id": tenant_id,
+        "trust": trust,
         "device": device,
         "mission": mission,
         "species": species,
@@ -240,7 +256,8 @@ async def observation_page(
     rows = (
         await conn.execute(
             text(f"""
-            SELECT {_COLUMNS}, coalesce(o.photo_key, h.key) AS photo_key, o.total
+            SELECT {_COLUMNS}, coalesce(o.photo_key, h.key) AS photo_key,
+                   o.trust, o.length_sd_m, o.total
             FROM (
                 SELECT * FROM ({_KEPT}) o
                 WHERE CAST(:before_at AS timestamptz) IS NULL
@@ -269,12 +286,78 @@ async def observation_page(
     return ObservationPage([_observation(row) for row in rows], total)
 
 
-#: The tenant's observations that the device and mission filters keep, each
+#: A capture a person measured: their fish is the frame's, so an automatic
+#: length on it is not listed again. ``current_measurements`` narrows by
+#: capture id (its ``DISTINCT ON`` key).
+_PERSON_MEASURED = """EXISTS (
+    SELECT 1 FROM current_measurements cm
+    WHERE cm.tenant_id = c.tenant_id AND cm.capture_id = c.id)"""
+
+#: The scientific name in a BioCLIP choice, "Fish, Hogfish (Lachnolaimus
+#: maximus)": the last parenthesized part (as `automatic_lengths_store`).
+_CHOICE_SCIENTIFIC = r"substring(s.predicted_choice from '\(([^()]*)\)\s*$')"
+
+#: Every fish in the tenant, each with how much we trust it (the owner,
+#: 2026-11-11): a person's (the observations), each current automatic length
+#: on a Lite frame (with its calibration's uncertainty; never a slate frame,
+#: as `automatic_lengths_store` leaves them out), and each phone capture's
+#: current server length. A frame a person measured is their fish alone.
+#: ``:trust`` keeps one kind, and the others are never read: the automatic
+#: lengths are the cost of the read (5.5 s of 6.5 s for the lab's 23,253 on
+#: 2026-11-11), so a reader that wants a person's fish alone skips them.
+_FISH = f"""
+    SELECT o.tenant_id, o.capture_id, o.fish_id, o.method, o.length_m,
+           o.captured_at, o.device_kind, o.device_name, o.mission_number,
+           o.mission_name, o.scientific_name, o.common_name, o.fish_model,
+           o.known_length_m, o.latitude, o.longitude, o.place_name,
+           o.client_capture_uuid, o.photo_key,
+           'person' AS trust, CAST(NULL AS double precision) AS length_sd_m
+    FROM observations o WHERE o.tenant_id = :tenant_id
+      AND CAST(:trust AS text) IS DISTINCT FROM 'automatic'
+    UNION ALL
+    SELECT c.tenant_id, c.id, m.id, 'laser', m.length_m, c.captured_at,
+           dv.kind, dv.name, d.number, d.name,
+           {_CHOICE_SCIENTIFIC}, sp.common_name, NULL, NULL,
+           c.latitude, c.longitude, NULL, c.client_capture_uuid, NULL,
+           'automatic',
+           m.length_m * calibration_sd_at(alc.scale_sd_by_range, alc.scale_sd,
+                                          m.depth_m)
+    FROM current_automatic_measurements m
+    JOIN captures c ON c.tenant_id = m.tenant_id AND c.id = m.capture_id
+    JOIN missions d ON d.tenant_id = c.tenant_id AND d.id = c.mission_id
+    LEFT JOIN devices dv
+      ON dv.tenant_id = c.tenant_id AND dv.id = COALESCE(c.device_id, d.device_id)
+    LEFT JOIN automatic_laser_calibrations alc
+      ON alc.tenant_id = m.tenant_id AND alc.id = m.automatic_laser_calibration_id
+    LEFT JOIN current_automatic_species_predictions s
+      ON s.tenant_id = m.tenant_id AND s.capture_id = m.capture_id
+     AND s.automatic_head_tail_prediction_id = m.automatic_head_tail_prediction_id
+    LEFT JOIN species sp ON sp.scientific_name = {_CHOICE_SCIENTIFIC}
+    WHERE m.tenant_id = :tenant_id AND m.length_m IS NOT NULL AND c.is_canonical
+      AND NOT {detector_slate_frame()} AND NOT {_PERSON_MEASURED}
+      AND CAST(:trust AS text) IS DISTINCT FROM 'person'
+    UNION ALL
+    SELECT c.tenant_id, c.id, p.id, 'lidar', p.length_m, c.captured_at,
+           dv.kind, dv.name, d.number, d.name, NULL, NULL, NULL, NULL,
+           c.latitude, c.longitude, mc.place_name, c.client_capture_uuid,
+           c.raw_object_key, 'automatic', NULL
+    FROM current_phone_measurements p
+    JOIN captures c ON c.tenant_id = p.tenant_id AND c.id = p.capture_id
+    JOIN missions d ON d.tenant_id = c.tenant_id AND d.id = c.mission_id
+    LEFT JOIN devices dv
+      ON dv.tenant_id = c.tenant_id AND dv.id = COALESCE(c.device_id, d.device_id)
+    LEFT JOIN mobile_captures mc
+      ON mc.tenant_id = c.tenant_id AND mc.capture_id = c.id
+    WHERE p.tenant_id = :tenant_id AND p.status = 'measured'
+      AND p.length_m IS NOT NULL AND c.is_canonical AND NOT {_PERSON_MEASURED}
+      AND CAST(:trust AS text) IS DISTINCT FROM 'person'
+"""
+
+#: The tenant's fish that the device, mission and species filters keep, each
 #: with how many there are in all.
-_KEPT = """
-    SELECT o.*, count(*) OVER () AS total FROM observations o
-    WHERE o.tenant_id = :tenant_id
-      AND (CAST(:device AS text) IS NULL
+_KEPT = f"""
+    SELECT o.*, count(*) OVER () AS total FROM ({_FISH}) o
+    WHERE (CAST(:device AS text) IS NULL
            OR (:device = 'other'
                AND (o.device_kind IS NULL
                     OR o.device_kind <> ALL(CAST(:named AS text[]))))
@@ -315,6 +398,7 @@ async def observation_species(
             "device": device,
             "mission": None,
             "species": None,
+            "trust": None,
             "named": _NAMED_KINDS,
             "kinds": list(DEVICE_GROUPS.get(device, ())),
         },
@@ -446,6 +530,8 @@ def _observation(row) -> Observation:
         derived_place_name=row.derived_place_name,
         client_capture_uuid=row.client_capture_uuid,
         photo_key=row.photo_key,
+        trust=getattr(row, "trust", "person"),
+        length_sd_m=getattr(row, "length_sd_m", None),
     )
 
 

@@ -24,6 +24,14 @@ export function deviceFilter(value: string | undefined): Device | undefined {
     : undefined;
 }
 
+/** How much a fish is trusted (the owner, 2026-11-11). */
+export type Trust = "person" | "automatic";
+
+/** The `?trust=` filters the API knows; anything else means both. */
+export function trustFilter(value: string | undefined): Trust | undefined {
+  return value === "person" || value === "automatic" ? value : undefined;
+}
+
 /** One page of the tenant's fish, newest first. */
 export async function getObservationPage(
   accessToken: string,
@@ -31,6 +39,7 @@ export async function getObservationPage(
   options: {
     device?: Device;
     species?: string;
+    trust?: Trust;
     before?: string;
     mission?: number;
     limit?: number;
@@ -40,6 +49,7 @@ export async function getObservationPage(
   const query: {
     device?: Device;
     species?: string;
+    trust?: Trust;
     before?: string;
     mission?: number;
     limit?: number;
@@ -48,6 +58,7 @@ export async function getObservationPage(
   if (options.device) query.device = options.device;
   // A query value, never a path: the API matches it as a name.
   if (options.species) query.species = options.species;
+  if (options.trust) query.trust = options.trust;
   // The API bounds it (and says so in its schema); a number can't forge a path.
   if (options.limit !== undefined) query.limit = options.limit;
   if (options.mission !== undefined) {
@@ -173,5 +184,20 @@ export function where(o: Observation): string | null {
 /** A fish's own page, for Lite and Mobile alike: a mobile fish's page shows
  *  its capture's evidence too (`fish-evidence.ts`). */
 export function observationHref(slug: string, o: Observation): string {
+  // An automatic fish has no fish page of its own (the owner, 2026-11-11):
+  // its frame's page shows the photo, the mask and the points.
+  if (o.trust === "automatic" && o.mission?.number != null) {
+    return paths.frame(slug, o.mission.number, o.capture_id);
+  }
   return paths.fishDetail(slug, o.capture_id, o.fish_id);
+}
+
+/** How much to trust the length (the owner, 2026-11-11). */
+export function trustLabel(o: Observation): string {
+  return o.trust === "automatic" ? "Automatic · unvalidated" : "Measured by a person";
+}
+
+/** One standard deviation of the length, where its calibration gives one. */
+export function uncertainty(o: Observation): string | null {
+  return o.length_sd_m == null ? null : `± ${Math.round(o.length_sd_m * 1000)} mm`;
 }

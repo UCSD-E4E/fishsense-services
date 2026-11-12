@@ -771,6 +771,9 @@ export interface paths {
          * @description Newest first, a page at a time: by number (``page``, from 1, of
          *     ``limit`` each) or after a cursor (``before``, the last page's
          *     ``next``), not both. ``total`` is how many there are in all.
+         *     ``trust`` keeps a person's fish or the automatic ones; the default,
+         *     every fish, reads the automatic lengths too, which costs seconds in a
+         *     large tenant.
          */
         get: operations["list_observations"];
         put?: never;
@@ -1790,6 +1793,8 @@ export interface components {
             fish_model: components["schemas"]["FishModelView"] | null;
             /** Length M */
             length_m: number | null;
+            /** Length Sd M */
+            length_sd_m?: number | null;
             location: components["schemas"]["Coordinates"] | null;
             /** Method */
             method: string;
@@ -1799,6 +1804,12 @@ export interface components {
             /** Place Name */
             place_name: string | null;
             species: components["schemas"]["SpeciesView"] | null;
+            /**
+             * Trust
+             * @default person
+             * @enum {string}
+             */
+            trust: "person" | "automatic";
         };
         /** PhoneLengthView */
         PhoneLengthView: {
@@ -3639,6 +3650,7 @@ export interface operations {
                 device?: ("lite" | "mobile" | "other") | null;
                 mission?: number | null;
                 species?: string | null;
+                trust?: ("person" | "automatic") | null;
                 limit?: number;
                 before?: string | null;
                 page?: number | null;

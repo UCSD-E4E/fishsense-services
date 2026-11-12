@@ -23,6 +23,9 @@ import {
   knownLengthError,
   methodLabel,
   observationHref,
+  trustFilter,
+  trustLabel,
+  uncertainty,
   where,
   type Observation,
 } from "./observations";
@@ -64,11 +67,30 @@ function observation(overrides: Partial<Observation> = {}): Observation {
     place_name: null,
     client_capture_uuid: null,
     photo_url: null,
+    trust: "person",
+    length_sd_m: null,
     ...overrides,
   };
 }
 
 describe("getObservationPage", () => {
+  it("keeps one trust: Today asks for a person's fish alone (2026-11-11)", async () => {
+    const fetchMock = vi.fn<FetchSig>(async () => jsonResponse({ observations: [], next: null }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getObservationPage("t", "lab", { trust: "person", limit: 3 });
+
+    expect(fetchMock.mock.calls[0][0].url).toBe(
+      "http://api.test/tenants/lab/observations?trust=person&limit=3",
+    );
+  });
+
+  it("reads only the trusts the API knows", () => {
+    expect(trustFilter("person")).toBe("person");
+    expect(trustFilter("automatic")).toBe("automatic");
+    expect(trustFilter("anything")).toBeUndefined();
+  });
+
   it("lists one mission's fish (phase 7b)", async () => {
     const fetchMock = vi.fn<FetchSig>(async () => jsonResponse({ observations: [], next: null }));
     vi.stubGlobal("fetch", fetchMock);
@@ -318,6 +340,28 @@ describe("observationHref", () => {
     expect(observationHref("lab", observation())).toBe(
       `/lab/fish/${CAPTURE}/${FISH}`,
     );
+  });
+
+  // The owner, 2026-11-11: every fish on the Fish page. An automatic one has
+  // no fish page of its own; its frame's page shows its photo, mask and points.
+  it("sends an automatic fish to its frame's page", () => {
+    const o = observation({ trust: "automatic", mission: { number: 539, name: "x" } });
+    expect(observationHref("lab", o)).toBe(`/lab/data/missions/539/frames/${CAPTURE}`);
+  });
+});
+
+describe("trustLabel", () => {
+  it("says who measured it", () => {
+    expect(trustLabel(observation())).toBe("Measured by a person");
+    expect(trustLabel(observation({ trust: "automatic" }))).toBe("Automatic · unvalidated");
+  });
+});
+
+describe("uncertainty", () => {
+  it("gives one standard deviation in millimeters, where there is one", () => {
+    expect(uncertainty(observation({ length_sd_m: 0.0123 }))).toBe("± 12 mm");
+    expect(uncertainty(observation({ length_sd_m: null }))).toBeNull();
+    expect(uncertainty(observation())).toBeNull();
   });
 });
 

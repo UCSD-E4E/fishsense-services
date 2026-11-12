@@ -14,21 +14,25 @@ import {
   getObservationPage,
   getObservationSpecies,
   speciesFilter,
+  trustFilter,
   knownLengthError,
   methodLabel,
   observationHref,
+  trustLabel,
+  uncertainty,
   where,
   type Device,
   type Observation,
   type ObservationPage,
   type SpeciesCount,
+  type Trust,
 } from "@/lib/observations";
 
 export const dynamic = "force-dynamic";
 
 type Props = {
   params: Promise<{ tenant: string }>;
-  searchParams: Promise<{ device?: string; species?: string; page?: string }>;
+  searchParams: Promise<{ device?: string; species?: string; trust?: string; page?: string }>;
 };
 
 const PER_PAGE = 50;
@@ -40,28 +44,38 @@ const FILTERS: { label: string; device?: Device }[] = [
   { label: "Other devices", device: "other" },
 ];
 
-/** The page's address: its device and species filters, and its page. */
-type Filters = { device?: Device; species?: string };
+const TRUSTS: { label: string; trust?: Trust }[] = [
+  { label: "Every fish" },
+  { label: "Measured by a person", trust: "person" },
+  { label: "Automatic", trust: "automatic" },
+];
 
-function href(tenant: string, { device, species }: Filters, page = 1): string {
+/** The page's address: its device, species and trust filters, and its page. */
+type Filters = { device?: Device; species?: string; trust?: Trust };
+
+function href(tenant: string, { device, species, trust }: Filters, page = 1): string {
   const query = new URLSearchParams();
   if (device) query.set("device", device);
   if (species) query.set("species", species);
+  if (trust) query.set("trust", trust);
   if (page > 1) query.set("page", String(page));
   return `${paths.fish(tenant)}${query.size ? `?${query}` : ""}`;
 }
 
 /**
- * Every measured fish in a tenant, Lite and Mobile together (PLAN.md §4.9,
- * Phase 1 of §9.26), newest first. Any member sees their tenant's. Fifty to
+ * Every fish in a tenant, Lite and Mobile together (PLAN.md §4.9, Phase 1 of
+ * §9.26), newest first: a person's and the automatic ones alike, each saying
+ * how much to trust its length (the owner, 2026-11-11). Any member sees their tenant's. Fifty to
  * a page, by number (`?page=`), with how many there are in all.
  */
 export default async function FishPage({ params, searchParams }: Props) {
   const { tenant: slug } = await params;
-  const { device: rawDevice, species: rawSpecies, page: rawPage } = await searchParams;
+  const { device: rawDevice, species: rawSpecies, trust: rawTrust, page: rawPage } =
+    await searchParams;
   const device = deviceFilter(rawDevice);
   const species = speciesFilter(rawSpecies);
-  const filters = { device, species };
+  const trust = trustFilter(rawTrust);
+  const filters = { device, species, trust };
   const current = parsePage(rawPage);
   const session = await requireSignedIn(href(slug, filters, current));
   const token = session.accessToken ?? "";
@@ -73,7 +87,7 @@ export default async function FishPage({ params, searchParams }: Props) {
   try {
     tenant = await tenantFor(token, slug);
     [page, choices] = await Promise.all([
-      getObservationPage(token, tenant.slug, { device, species, page: current, limit: PER_PAGE }),
+      getObservationPage(token, tenant.slug, { device, species, trust, page: current, limit: PER_PAGE }),
       getObservationSpecies(token, tenant.slug, device),
     ]);
   } catch (error) {
@@ -93,8 +107,9 @@ export default async function FishPage({ params, searchParams }: Props) {
       <header className="flex flex-col gap-1.5">
         <h1 className="text-3xl font-bold tracking-tight">Fish</h1>
         <p className="text-fg-2">
-          Every measured fish{tenant ? ` in ${tenant.name}` : ""}, from FishSense Lite and
-          FishSense Mobile.
+          Every fish{tenant ? ` in ${tenant.name}` : ""}, from FishSense Lite and FishSense
+          Mobile. Each says whether a person measured it or it is automatic and not yet
+          checked by a person.
         </p>
       </header>
 
@@ -104,11 +119,23 @@ export default async function FishPage({ params, searchParams }: Props) {
             {FILTERS.map((f) => (
               <Link
                 key={f.label}
-                href={href(tenant.slug, { device: f.device, species })}
+                href={href(tenant.slug, { device: f.device, species, trust })}
                 aria-current={f.device === device ? "page" : undefined}
                 className="inline-flex h-11 items-center rounded-chip border border-line bg-surface px-4 text-sm font-medium aria-[current=page]:border-teal aria-[current=page]:bg-teal-tint aria-[current=page]:font-semibold aria-[current=page]:text-teal-fg"
               >
                 {f.label}
+              </Link>
+            ))}
+          </nav>
+          <nav aria-label="Trust" className="flex flex-wrap gap-2">
+            {TRUSTS.map((t) => (
+              <Link
+                key={t.label}
+                href={href(tenant.slug, { device, species, trust: t.trust })}
+                aria-current={t.trust === trust ? "page" : undefined}
+                className="inline-flex h-11 items-center rounded-chip border border-line bg-surface px-4 text-sm font-medium aria-[current=page]:border-teal aria-[current=page]:bg-teal-tint aria-[current=page]:font-semibold aria-[current=page]:text-teal-fg"
+              >
+                {t.label}
               </Link>
             ))}
           </nav>
@@ -119,7 +146,7 @@ export default async function FishPage({ params, searchParams }: Props) {
             hrefFor={Object.fromEntries(
               ["", ...choices.map((c) => c.scientific_name), ...(species ? [species] : [])].map((name) => [
                 name,
-                href(tenant.slug, { device, species: name || undefined }),
+                href(tenant.slug, { device, species: name || undefined, trust }),
               ]),
             )}
           />
@@ -134,7 +161,7 @@ export default async function FishPage({ params, searchParams }: Props) {
         <p className="text-fg-2">This account isn&apos;t a member of any tenant yet.</p>
       ) : page && page.observations.length === 0 ? (
         <p className="text-fg-2">
-          {species || device ? "No measured fish match these filters." : `No measured fish from ${tenant.name} yet.`}
+          {species || device || trust ? "No fish match these filters." : `No fish from ${tenant.name} yet.`}
         </p>
       ) : (
         <>
@@ -218,6 +245,8 @@ function FishCard({ slug, observation: o }: { slug: string; observation: Observa
   const fish = fishName(o);
   const error = knownLengthError(o);
   const place = where(o);
+  const spread = uncertainty(o);
+  const automatic = o.trust === "automatic";
   return (
     <Link
       href={observationHref(slug, o)}
@@ -245,6 +274,18 @@ function FishCard({ slug, observation: o }: { slug: string; observation: Observa
             {millimeters(o.length_m)}
             {o.length_m != null && <span className="text-sm font-medium text-fg-2"> mm</span>}
           </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span
+            className={
+              automatic
+                ? "inline-flex h-6 items-center rounded-chip border border-line px-2 text-xs font-medium text-fg-2"
+                : "inline-flex h-6 items-center rounded-chip bg-teal-tint px-2 text-xs font-semibold text-teal-fg"
+            }
+          >
+            {trustLabel(o)}
+          </span>
+          {spread && <span className="text-xs text-fg-2">{spread}</span>}
         </div>
         {fish.detail && (
           <div className="text-sm text-fg-2">
