@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.85.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.84.0...v0.85.0) (2026-11-12)
+
+
+### Features
+
+* name the fish on phone captures with BioCLIP, among a region's fish ([fbb2d05](https://github.com/UCSD-E4E/fishsense-services/commit/fbb2d05b348c0101c319b4a37d7cbdde67e37500))
+* name the fish on phone captures with BioCLIP, among a region's fish ([4878f00](https://github.com/UCSD-E4E/fishsense-services/commit/4878f00aaf3aac40084976ad01e7fdc70f8b717a))
+
 ## [0.84.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.83.0...v0.84.0) (2026-11-12)
 
 
