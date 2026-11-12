@@ -1,9 +1,11 @@
 // Ported from fishsense-lite@77e8f8e5 apps/fishsense-lite-web/app/layout.tsx.
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
+import { Suspense } from "react";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import pkg from "../package.json";
 import { AppHeader } from "./_shell/app-header";
+import { PageTimings } from "./_shell/page-timings";
 import { parseTheme, THEME_COOKIE, themeAttribute } from "@/lib/theme";
 import "./globals.css";
 
@@ -42,6 +44,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       data-theme={themeAttribute(theme)}
     >
       <body className="flex min-h-screen flex-col bg-ground font-sans text-fg antialiased">
+        {/* Every page's timings (lib/page-timings.ts). Suspense: it reads the
+            query, which would otherwise make every page render in the browser. */}
+        <Suspense fallback={null}>
+          <PageTimings />
+        </Suspense>
         <AppHeader />
         <div className="flex-1">{children}</div>
         <footer className="border-t border-line px-6 py-3 text-xs text-fg-2">

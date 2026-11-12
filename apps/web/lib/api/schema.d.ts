@@ -146,6 +146,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/telemetry/page-timings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record Page Timings */
+        post: operations["record_page_timings"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{slug}/automatic/lengths": {
         parameters: {
             query?: never;
@@ -1839,6 +1856,30 @@ export interface components {
              */
             trust: "person" | "automatic";
         };
+        /** PageTiming */
+        PageTiming: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "load" | "navigation";
+            /**
+             * Metric
+             * @enum {string}
+             */
+            metric: "TTFB" | "FCP" | "LCP" | "INP" | "CLS" | "NAV";
+            /** Route */
+            route: string;
+            /** Value */
+            value: number;
+        };
+        /** PageTimings */
+        PageTimings: {
+            /** Release */
+            release?: string | null;
+            /** Timings */
+            timings: components["schemas"]["PageTiming"][];
+        };
         /** PhoneLengthView */
         PhoneLengthView: {
             /** Length M */
@@ -2438,6 +2479,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PublicSummaryView"];
+                };
+            };
+        };
+    };
+    record_page_timings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PageTimings"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

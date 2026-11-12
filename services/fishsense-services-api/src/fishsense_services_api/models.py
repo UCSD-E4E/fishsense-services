@@ -24,6 +24,7 @@ from sqlalchemy import (
     Identity,
     Integer,
     MetaData,
+    REAL,
     SmallInteger,
     Text,
     UniqueConstraint,
@@ -140,6 +141,63 @@ class ApiToken(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ApiTiming(Base):
+    """One API request's time to first byte and its time in Postgres (0091).
+    Function-only: written by ``record_api_timings``, read as the admin."""
+
+    __tablename__ = "api_timings"
+    __table_args__ = (
+        CheckConstraint("total_ms >= 0"),
+        CheckConstraint("db_ms >= 0"),
+        CheckConstraint("db_queries >= 0"),
+        Index("api_timings_recorded_at_idx", "recorded_at"),
+        Index("api_timings_route_idx", "route", "recorded_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    method: Mapped[str] = mapped_column(Text)
+    #: The route's template (``/tenants/{slug}/devices``), never the path.
+    route: Mapped[str] = mapped_column(Text)
+    status: Mapped[int] = mapped_column(SmallInteger)
+    total_ms: Mapped[float] = mapped_column(REAL)
+    db_ms: Mapped[float] = mapped_column(REAL)
+    db_queries: Mapped[int] = mapped_column(Integer)
+
+
+class PageTiming(Base):
+    """What a visitor's browser measured of a web page (0091). Function-only:
+    written by ``record_page_timings``, read as the admin."""
+
+    __tablename__ = "page_timings"
+    __table_args__ = (
+        CheckConstraint(
+            "metric IN ('TTFB', 'FCP', 'LCP', 'INP', 'CLS', 'NAV')",
+            name="page_timings_metric_check",
+        ),
+        CheckConstraint("value >= 0"),
+        CheckConstraint("kind IN ('load', 'navigation')"),
+        Index("page_timings_recorded_at_idx", "recorded_at"),
+        Index("page_timings_route_idx", "route", "recorded_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    #: The page's template (``/[tenant]/fish``), never the path.
+    route: Mapped[str] = mapped_column(Text)
+    metric: Mapped[str] = mapped_column(Text)
+    #: Milliseconds; ``CLS`` alone is a unitless score.
+    value: Mapped[float] = mapped_column(REAL)
+    #: ``load`` (a page opened from its address) or ``navigation`` (a click).
+    kind: Mapped[str] = mapped_column(Text)
+    #: The web's release.
+    release: Mapped[str | None] = mapped_column(Text)
 
 
 class Membership(Base):

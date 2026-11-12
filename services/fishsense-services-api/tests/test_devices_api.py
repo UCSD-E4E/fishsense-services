@@ -270,6 +270,7 @@ async def test_every_operation_has_an_explicit_operation_id(offline_client):
         "list_observation_species",
         "list_observations",
         "raise_needs_reprocess",
+        "record_page_timings",
         "record_review",
         "request_mobile_capture_uploads",
         "revoke_my_token",

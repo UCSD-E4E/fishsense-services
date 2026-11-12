@@ -369,3 +369,52 @@ def test_the_runbooks_membership_grant_is_idempotent(with_lab):
         ("sub-admin", "admin", lab),
         ("sub-web-sa", "member", lab),
     ]
+
+
+# ── what each statement costs (the owner, 2026-11-12) ───────────────────────
+
+
+def _admin_scalar(container, sql: str, database: str = "postgres"):
+    engine = _admin(container, database)
+    try:
+        with engine.connect() as conn:
+            return conn.execute(text(sql)).scalar_one()
+    finally:
+        engine.dispose()
+
+
+def test_every_statement_is_counted_by_pg_stat_statements(migrated):
+    """Preloaded by postgres.conf, the extension made in the admin's own
+    database by bootstrap.sh: it sees the whole cluster's statements, and puts
+    no view in v2's schema for the tenancy audit to judge."""
+    assert "pg_stat_statements" in _admin_scalar(
+        migrated, "SHOW shared_preload_libraries"
+    )
+    # The app role's calls in v2, by total: a statement's text is its first
+    # caller's (aliases and constants aren't part of its identity), so a
+    # pattern on the text can miss a count filed under another's.
+    apps_calls = (
+        "SELECT coalesce(sum(s.calls), 0) FROM pg_stat_statements s"
+        f" JOIN pg_database d ON d.oid = s.dbid AND d.datname = '{V2}'"
+        " JOIN pg_roles r ON r.oid = s.userid AND r.rolname = 'fishsense_app'"
+    )
+    before = _admin_scalar(migrated, apps_calls)
+    _scalar(_login(migrated, "fishsense_app"), "SELECT 1")
+
+    assert _admin_scalar(migrated, apps_calls) > before
+    assert (
+        _admin_scalar(
+            migrated,
+            "SELECT count(*) FROM pg_extension WHERE extname = 'pg_stat_statements'",
+            database=V2,
+        )
+        == 0
+    )
+
+
+def test_slow_statements_are_logged_without_their_values(migrated):
+    """Over 250 ms, a statement is logged; its bound values never are, since
+    they may name a person or carry a token's hash."""
+    assert _admin_scalar(migrated, "SHOW log_min_duration_statement") == "250ms"
+    assert _admin_scalar(migrated, "SHOW log_parameter_max_length") == "0"
+    assert _admin_scalar(migrated, "SHOW track_io_timing") == "on"

@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from fishsense_services_api.schema_audit import (
+    FUNCTION_ONLY_TABLES,
     GLOBAL_REFERENCE_TABLES,
     tenancy_violations,
 )
@@ -296,3 +297,45 @@ async def test_a_research_role_that_bypasses_rls_is_flagged(scratch):
     await scratch.execute(text(f"ALTER ROLE {RESEARCH} BYPASSRLS"))
 
     assert any(RESEARCH in v and "BYPASSRLS" in v for v in await _audit(scratch))
+
+
+# ── function-only tables (api_timings, page_timings; 0091) ──────────────────
+
+
+async def _function_only(scratch, name: str) -> None:
+    await scratch.execute(text(f"CREATE TABLE {name} (id int PRIMARY KEY)"))
+    await scratch.execute(text(f"ALTER TABLE {name} ENABLE ROW LEVEL SECURITY"))
+    await scratch.execute(text(f"ALTER TABLE {name} FORCE ROW LEVEL SECURITY"))
+
+
+async def test_a_function_only_table_is_fine(scratch):
+    await _function_only(scratch, "log")
+
+    assert await _audit(scratch, function_only=FUNCTION_ONLY_TABLES | {"log"}) == []
+
+
+async def test_a_function_only_table_the_app_role_can_read_is_flagged(scratch):
+    await _function_only(scratch, "log")
+    await scratch.execute(text(f"GRANT SELECT ON log TO {APP_ROLE}"))
+
+    violations = await _audit(scratch, function_only=FUNCTION_ONLY_TABLES | {"log"})
+
+    assert any("log" in v and "app role" in v for v in violations)
+
+
+async def test_a_function_only_table_with_a_policy_is_flagged(scratch):
+    await _function_only(scratch, "log")
+    await scratch.execute(text("CREATE POLICY everyone ON log USING (true)"))
+
+    violations = await _audit(scratch, function_only=FUNCTION_ONLY_TABLES | {"log"})
+
+    assert any("log" in v and "everyone" in v for v in violations)
+
+
+async def test_a_function_only_table_whose_rls_is_not_forced_is_flagged(scratch):
+    await scratch.execute(text("CREATE TABLE log (id int PRIMARY KEY)"))
+    await scratch.execute(text("ALTER TABLE log ENABLE ROW LEVEL SECURITY"))
+
+    violations = await _audit(scratch, function_only=FUNCTION_ONLY_TABLES | {"log"})
+
+    assert any("log" in v and "forced" in v for v in violations)

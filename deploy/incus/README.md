@@ -69,6 +69,41 @@ images, v1's volume names, the renders' shape) and runs the bootstrap and
 `migrate` against a Postgres shaped like the slot's. `deploy/rehearsal/` stages
 this compose on a dev box without touching production (docs/cutover.md §1.6).
 
+## How fast it is
+
+Three measurements, all kept across deploys (the owner, 2026-11-12):
+
+- **Pages** (`page_timings`, 90 days): what visitors' browsers measured. On
+  a page load (`kind = 'load'`), `TTFB` (time to first byte: the server's
+  whole share) and the Core Web Vitals `FCP`, `LCP`, `INP`, `CLS`. On a
+  click within the app (`'navigation'`), `NAV`: click to the next page shown.
+  Routes are templates (`/[tenant]/fish`); `release` is the web's version.
+- **API requests** (`api_timings`, 90 days): every request's time to its
+  response's headers, and the time and statement count it spent in Postgres,
+  by route template. Each response also carries a `Server-Timing` header.
+- **Statements** (`pg_stat_statements`, in the `postgres` database): what
+  each statement costs across the cluster. Statements over 250 ms are also
+  logged (`docker logs fishsense-postgres-1`), without their values.
+
+All three are read as the admin (`Q` in the root CLAUDE.md). For example:
+
+```sh
+# p50/p95 time to first byte per page, last 7 days
+Q "SELECT route, count(*), round(percentile_cont(0.5) WITHIN GROUP (ORDER BY value)::numeric),
+          round(percentile_cont(0.95) WITHIN GROUP (ORDER BY value)::numeric)
+   FROM page_timings WHERE metric = 'TTFB' AND recorded_at > now() - interval '7 days'
+   GROUP BY route ORDER BY 4 DESC"
+# the slowest API routes, and how much of them is Postgres
+Q "SELECT route, count(*), round(percentile_cont(0.95) WITHIN GROUP (ORDER BY total_ms)::numeric) AS p95_ms,
+          round(avg(db_ms)::numeric) AS avg_db_ms, round(avg(db_queries)) AS avg_queries
+   FROM api_timings WHERE recorded_at > now() - interval '7 days'
+   GROUP BY route ORDER BY p95_ms DESC LIMIT 20"
+# the statements that take the most time in all
+docker exec fishsense-postgres-1 psql -U postgres -d postgres -Atc \
+  "SELECT round(total_exec_time), calls, round(mean_exec_time::numeric, 1), left(query, 120)
+   FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 20"
+```
+
 ## Operating notes (v1's, still true)
 
 - **The converge is a trigger, not a CI gate**: `deploy.yml`'s `verify-incus`
