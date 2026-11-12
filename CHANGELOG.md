@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.82.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.81.0...v0.82.0) (2026-11-12)
+
+
+### Features
+
+* **api:** put every phone mission in a deployment ([3d86d39](https://github.com/UCSD-E4E/fishsense-services/commit/3d86d3939c93211c68eead10d0f36c3d8973c611))
+* **api:** put every phone mission in a deployment ([8a11690](https://github.com/UCSD-E4E/fishsense-services/commit/8a116902ae4c84186c1208453bbefe342000bd20))
+
 ## [0.81.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.80.1...v0.81.0) (2026-11-11)
 
 
