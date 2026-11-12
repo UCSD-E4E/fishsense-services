@@ -402,9 +402,16 @@ def _server(get) -> MCPServer:
         return await get(ctx, _path("tenants", slug, "summary"))
 
     @tool
-    async def get_tenant_regions(ctx: Context, slug: Slug) -> dict:
-        """Where a tenant's wild fish were measured, by broad region."""
-        return await get(ctx, _path("tenants", slug, "regions"))
+    async def get_tenant_regions(
+        ctx: Context, slug: Slug, source: Literal["human", "automatic"] = "human"
+    ) -> dict:
+        """Where a tenant's wild fish were measured, by broad region: by the
+        human labels, or by the automatic lengths (the automatic run's and the
+        server's phone measurement's; unvalidated)."""
+        found = await get(
+            ctx, _path("tenants", slug, "regions"), params={"source": source}
+        )
+        return _automatic(found) if source == "automatic" else found
 
     @tool
     async def list_missions(ctx: Context, slug: Slug) -> dict:
