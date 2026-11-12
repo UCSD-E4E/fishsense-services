@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.84.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.83.0...v0.84.0) (2026-11-12)
+
+
+### Features
+
+* **web:** a Dataset page for system admins, with every tenant's fish on the map ([3956e9b](https://github.com/UCSD-E4E/fishsense-services/commit/3956e9b342d4df58e543a7c2ddf0c74528ad9883))
+* **web:** a Dataset page for system admins, with every tenant's fish on the map ([d21c9d0](https://github.com/UCSD-E4E/fishsense-services/commit/d21c9d0cacfd44f8ece42bd494f36426955ef6af))
+
 ## [0.83.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.82.0...v0.83.0) (2026-11-12)
 
 
