@@ -47,6 +47,8 @@ class PhoneMeasurementView(BaseModel):
     mask_url: str | None
     mask_width: int | None
     mask_height: int | None
+    #: The mask's SHA-256 as stored, so a copy can be checked.
+    mask_sha256: str | None = None
     model_id: str | None
     core_version: str | None
     #: The app commit the measurement follows (``fishsense-mobile@<sha>``).
@@ -100,6 +102,7 @@ def add_phone_measurement_routes(
             mask_url=link(slug, found.mask_bucket, found.mask_key),
             mask_width=found.mask_width,
             mask_height=found.mask_height,
+            mask_sha256=found.mask_sha256,
             model_id=found.model_id,
             core_version=found.core_version,
             algorithm=found.algorithm,

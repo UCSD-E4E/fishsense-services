@@ -116,6 +116,8 @@ class AutomaticFrame:
     mask_key: str | None
     mask_width: int | None
     mask_height: int | None
+    #: The mask's SHA-256 as stored, so a copy can be checked.
+    mask_sha256: str | None
     #: The current length, or the refusal; None when there is none now.
     length_m: float | None
     depth_m: float | None
@@ -148,6 +150,7 @@ async def automatic_frame(
                        r.width AS render_width, r.height AS render_height,
                        pm.bucket AS mask_bucket, pm.object_key AS mask_key,
                        pm.width AS mask_width, pm.height AS mask_height,
+                       pm.sha256 AS mask_sha256,
                        m.length_m, m.depth_m, m.refusal, m.calibration_source,
                        m.length_m * calibration_sd_at(alc.scale_sd_by_range, alc.scale_sd, m.depth_m)
                            AS length_sd_m,
@@ -236,6 +239,7 @@ async def automatic_frame(
         mask_key=row.mask_key,
         mask_width=row.mask_width,
         mask_height=row.mask_height,
+        mask_sha256=row.mask_sha256,
         length_m=row.length_m,
         depth_m=row.depth_m,
         refusal=row.refusal,

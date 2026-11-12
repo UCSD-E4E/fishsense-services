@@ -87,6 +87,7 @@ class AutomaticFrameView(BaseModel):
     mask_url: str | None
     mask_width: int | None
     mask_height: int | None
+    mask_sha256: str | None = None
     length_m: float | None
     depth_m: float | None
     refusal: str | None
@@ -288,6 +289,7 @@ def add_automatic_routes(
             mask_url=link(slug, found.mask_bucket, found.mask_key),
             mask_width=found.mask_width,
             mask_height=found.mask_height,
+            mask_sha256=found.mask_sha256,
             length_m=found.length_m,
             depth_m=found.depth_m,
             refusal=found.refusal,
