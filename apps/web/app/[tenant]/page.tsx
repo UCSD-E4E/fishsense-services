@@ -79,7 +79,7 @@ export default async function TodayPage({ params, searchParams }: Props) {
             <div className="flex flex-wrap items-center gap-3">
               <h2 className="text-xl font-semibold">Where we&apos;ve measured</h2>
               <div className="ml-auto">
-                <MapSourceToggle slug={slug} source={source} />
+                <MapSourceToggle base={paths.tenant(slug)} source={source} />
               </div>
             </div>
             {/* Keyed by the labels, so a switch shows the map loading again. */}

@@ -256,8 +256,8 @@ describe("MapSourceToggle", () => {
   }
 
   it("links to each map and marks the one shown", () => {
-    const human = renderToStaticMarkup(MapSourceToggle({ slug: "lab", source: "human" }));
-    const automatic = renderToStaticMarkup(MapSourceToggle({ slug: "lab", source: "automatic" }));
+    const human = renderToStaticMarkup(MapSourceToggle({ base: "/lab", source: "human" }));
+    const automatic = renderToStaticMarkup(MapSourceToggle({ base: "/lab", source: "automatic" }));
 
     expect(link(human, "Human labels")).toContain('href="/lab"');
     expect(link(human, "Human labels")).toContain('aria-current="page"');

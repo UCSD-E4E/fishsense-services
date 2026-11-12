@@ -44,7 +44,10 @@ inferred one.
 
 - **Web:** Today · Fish · Data · Map · Labeling, with Settings in the nav.
   Labeling is the triage and calibration tools, shown to staff. Missions and
-  Deployments live under Data.
+  Deployments live under Data. System admins also see **Dataset**
+  (`/admin/dataset`): the whole dataset's numbers, for now a map of every
+  tenant's fish by broad region, opted in to the public page or not (the owner,
+  2026-11-11).
 - **Phone:** Camera · Fish · Data · Settings. Photos becomes Fish, and Map becomes
   a list-or-map switch on Fish and Data, as on the web.
 

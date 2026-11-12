@@ -16,6 +16,7 @@ Each request goes through the same four steps before touching tenant data:
 """
 
 import math
+from dataclasses import asdict
 import uuid
 from datetime import datetime
 from typing import Annotated, Literal
@@ -64,10 +65,15 @@ from fishsense_services_api.mcp_server import mount_mcp
 from fishsense_services_api.mobile_api import add_mobile_routes
 from fishsense_services_api.place_names import Geocoder
 from fishsense_services_api.missions_api import add_mission_routes
-from fishsense_services_api.observations_api import add_observation_routes
+from fishsense_services_api.observations_api import (
+    TenantRegionsView,
+    TenantRegionView,
+    add_observation_routes,
+)
 from fishsense_services_api.place_naming import PlaceNamer
 from fishsense_services_api.public_api import add_public_routes
 from fishsense_services_api.portal_api import add_portal_routes
+from fishsense_services_api.tenant_regions_store import Source, combine, tenant_regions
 from fishsense_services_api.tenant_stores import TenantStores
 from fishsense_services_api.users import provision_user, record_profile
 
@@ -282,6 +288,48 @@ def create_app(
                 raise HTTPException(status.HTTP_404_NOT_FOUND)
             rows = await conn.execute(text("SELECT * FROM system_admin_tenants()"))
             return [AdminTenant(**row._mapping) for row in rows]
+
+    @app.get(
+        "/admin/regions",
+        operation_id="get_dataset_regions",
+        response_model=TenantRegionsView,
+    )
+    async def dataset_regions(
+        principal: Caller, source: Source = "human"
+    ) -> TenantRegionsView:
+        """The whole dataset's fish by broad region, for a system admin: every
+        tenant's Today map added up, opted in to the public page or not (the
+        owner, 2026-11-11). Each tenant is read in its own transaction, so RLS
+        still scopes every read, and one the caller is not a member of is
+        opened as its pages are, which records the visit (0056). 404 for
+        anyone else. ``source=automatic`` counts the automatic lengths:
+        unvalidated."""
+        async with principal_transaction(
+            engine, principal.sub, org=principal.org
+        ) as conn:
+            if not (
+                await conn.execute(text("SELECT caller_is_system_admin()"))
+            ).scalar_one():
+                raise HTTPException(status.HTTP_404_NOT_FOUND)
+            slugs = (
+                (await conn.execute(text("SELECT slug FROM system_admin_tenants()")))
+                .scalars()
+                .all()
+            )
+            tenant_ids = []
+            for slug in slugs:
+                found = await resolve_membership(conn, principal.sub, slug)
+                if found is not None:
+                    tenant_ids.append(found.tenant_id)
+        maps = []
+        for tenant_id in tenant_ids:
+            async with tenant_transaction(engine, tenant_id) as conn:
+                maps.append(await tenant_regions(conn, tenant_id, source=source))
+        found = combine(maps)
+        return TenantRegionsView(
+            regions=[TenantRegionView(**asdict(r)) for r in found.regions],
+            elsewhere=found.elsewhere,
+        )
 
     @app.post(
         "/tenants/{slug}/system-admin/unlock",

@@ -4,6 +4,32 @@
  */
 
 export interface paths {
+    "/admin/regions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dataset Regions
+         * @description The whole dataset's fish by broad region, for a system admin: every
+         *     tenant's Today map added up, opted in to the public page or not (the
+         *     owner, 2026-11-11). Each tenant is read in its own transaction, so RLS
+         *     still scopes every read, and one the caller is not a member of is
+         *     opened as its pages are, which records the visit (0056). 404 for
+         *     anyone else. ``source=automatic`` counts the automatic lengths:
+         *     unvalidated.
+         */
+        get: operations["get_dataset_regions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/tenants": {
         parameters: {
             query?: never;
@@ -2219,6 +2245,37 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_dataset_regions: {
+        parameters: {
+            query?: {
+                source?: "human" | "automatic";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantRegionsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_all_tenants: {
         parameters: {
             query?: never;
