@@ -145,4 +145,11 @@ WHERE EXISTS (SELECT FROM pg_roles WHERE rolname = 'fishsense_superset')
 \gexec
 SQL
 
+# What each statement costs (the owner, 2026-11-12), preloaded by
+# postgres.conf. Made in the admin's own database: its view covers the whole
+# cluster, and v2's schema stays free of a view the tenancy audit would judge.
+# Not a migration: the extension is not trusted, and the owner is no superuser.
+echo "db-bootstrap: pg_stat_statements"
+psql_ -d postgres -c 'CREATE EXTENSION IF NOT EXISTS pg_stat_statements'
+
 echo "db-bootstrap: done"

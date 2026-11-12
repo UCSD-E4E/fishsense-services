@@ -74,7 +74,9 @@ from fishsense_services_api.place_naming import PlaceNamer
 from fishsense_services_api.public_api import add_public_routes
 from fishsense_services_api.portal_api import add_portal_routes
 from fishsense_services_api.tenant_regions_store import Source, combine, tenant_regions
+from fishsense_services_api.telemetry_api import add_telemetry_routes
 from fishsense_services_api.tenant_stores import TenantStores
+from fishsense_services_api.timings import TimingMiddleware, TimingRecorder, instrument
 from fishsense_services_api.users import provision_user, record_profile
 
 UNIQUE_VIOLATION = "23505"  # Postgres SQLSTATE
@@ -155,11 +157,17 @@ def create_app(
     validator: Validator,
     stores: TenantStores | None = None,
     geocoder: Geocoder | None = None,
+    timings: TimingRecorder | None = None,
 ) -> FastAPI:
     """``stores``: each tenant's own bucket; None means no tenant has one, so
     no tenant can sync mobile captures. ``geocoder``: our own, to name the
     places of captures the app couldn't; None, no names are derived."""
     app = FastAPI(title="FishSense Services API")
+    # Every request's time to first byte and its time in Postgres (0091), kept
+    # in api_timings; `app.state.timings` is flushed at shutdown (main.py).
+    instrument(engine)
+    app.state.timings = timings or TimingRecorder(engine)
+    app.add_middleware(TimingMiddleware, recorder=app.state.timings)
 
     @app.exception_handler(RequestValidationError)
     async def invalid(_: Request, error: RequestValidationError) -> JSONResponse:
@@ -472,6 +480,7 @@ def create_app(
         app, engine=engine, membership=membership, stores=stores
     )
     add_review_routes(app, engine=engine, membership=membership)
+    add_telemetry_routes(app, engine=engine, authenticate=authenticate)
     add_mobile_routes(
         app,
         engine=engine,

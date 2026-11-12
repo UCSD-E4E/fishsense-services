@@ -5,6 +5,10 @@ Every table in ``public`` is classified, and each class has rules:
 - **caller-scoped** (``users``, ``memberships``, ``tenants``, ``api_tokens``):
   resolved before any tenant is active; RLS enabled and forced, and *only* their
   known policies (``api_tokens`` has none: only its functions reach it, 0066).
+- **function-only** (``api_timings``, ``page_timings``; 0091): no tenant's
+  data and no person's, reached only through their ``SECURITY DEFINER``
+  functions: RLS enabled and forced, no permissive policy, and no privilege
+  of any kind for the app role.
 - **global reference** (e.g. species): shared by all tenants; the app role may
   read but never write.
 - **tenant-scoped** -- everything else, by default: a non-null ``tenant_id``
@@ -41,6 +45,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 CALLER_SCOPED_TABLES = frozenset({"users", "memberships", "tenants", "api_tokens"})
+FUNCTION_ONLY_TABLES = frozenset({"api_timings", "page_timings"})
 GLOBAL_REFERENCE_TABLES = frozenset(
     {
         "species",
@@ -104,6 +109,10 @@ _TABLES = text("""
            ) AS references_tenants,
            has_table_privilege(:app_role, c.oid, 'INSERT, UPDATE, DELETE, TRUNCATE')
                AS app_can_write,
+           has_table_privilege(
+               :app_role, c.oid,
+               'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER'
+           ) AS app_has_any,
            -- has_table_privilege raises for an unknown role; CASE guards it.
            CASE WHEN to_regrole(:research_role) IS NULL THEN false
                 ELSE has_table_privilege(:research_role, c.oid, 'SELECT')
@@ -183,6 +192,7 @@ async def tenancy_violations(
     app_role: str,
     global_tables: Collection[str] = GLOBAL_REFERENCE_TABLES,
     caller_scoped: Collection[str] = CALLER_SCOPED_TABLES,
+    function_only: Collection[str] = FUNCTION_ONLY_TABLES,
     research_role: str = RESEARCH_ROLE,
 ) -> list[str]:
     """Every way the schema breaks the tenancy rules; empty when it holds."""
@@ -205,6 +215,17 @@ async def tenancy_violations(
             if not (t.rls and t.forced):
                 violations.append(f"{t.name}: RLS not enabled and forced")
             violations += _caller_policy_violations(t.name, policies[t.name])
+        elif t.name in function_only:
+            if not (t.rls and t.forced):
+                violations.append(f"{t.name}: RLS not enabled and forced")
+            if t.app_has_any:
+                violations.append(
+                    f"{t.name}: function-only table the app role holds a grant on"
+                )
+            violations += [
+                f"{t.name}: unexpected permissive policy {p.name!r} ({p.cmd})"
+                for p in policies[t.name]
+            ]
         else:
             if not (t.has_tenant_id and t.references_tenants):
                 violations.append(
@@ -233,7 +254,7 @@ async def tenancy_violations(
 
     violations += await _research_role_violations(conn, research_role)
 
-    not_tenant_scoped = set(global_tables) | set(caller_scoped)
+    not_tenant_scoped = set(global_tables) | set(caller_scoped) | set(function_only)
     for fk in await conn.execute(_FOREIGN_KEYS):
         between_tenant_tables = (
             fk.table not in not_tenant_scoped and fk.referenced not in not_tenant_scoped

@@ -76,6 +76,7 @@ def create_app_from_env() -> FastAPI:
     async def lifespan(running: FastAPI) -> AsyncIterator[None]:
         async with serve(running):
             yield
+        await app.state.timings.close()  # the last batch of request timings
         await engine.dispose()
 
     app.router.lifespan_context = lifespan

@@ -3477,6 +3477,80 @@
         "title": "ObservationView",
         "type": "object"
       },
+      "PageTiming": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "load",
+              "navigation"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "metric": {
+            "enum": [
+              "TTFB",
+              "FCP",
+              "LCP",
+              "INP",
+              "CLS",
+              "NAV"
+            ],
+            "title": "Metric",
+            "type": "string"
+          },
+          "route": {
+            "maxLength": 200,
+            "pattern": "^/",
+            "title": "Route",
+            "type": "string"
+          },
+          "value": {
+            "maximum": 600000.0,
+            "minimum": 0.0,
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "route",
+          "metric",
+          "value",
+          "kind"
+        ],
+        "title": "PageTiming",
+        "type": "object"
+      },
+      "PageTimings": {
+        "properties": {
+          "release": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release"
+          },
+          "timings": {
+            "items": {
+              "$ref": "#/components/schemas/PageTiming"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Timings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "timings"
+        ],
+        "title": "PageTimings",
+        "type": "object"
+      },
       "PhoneLengthView": {
         "properties": {
           "length_m": {
@@ -4980,6 +5054,42 @@
           }
         },
         "summary": "Summary"
+      }
+    },
+    "/telemetry/page-timings": {
+      "post": {
+        "operationId": "record_page_timings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PageTimings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Record Page Timings"
       }
     },
     "/tenants/{slug}/automatic/lengths": {
