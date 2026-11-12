@@ -33,8 +33,8 @@ How the groupings are made, in two steps:
 
 | Step | Lite | Mobile |
 |---|---|---|
-| Capture → mission | Ingest: the folder a session was offloaded into is its mission | **Not built.** One phone's captures close in time and place form a mission. Thresholds not decided (proposed: 2 h, 1 km). |
-| Mission → deployment | `infer-deployments` (live since 2026-10-20): one place, on dates at most two days apart. A mission's place and date come from its folder names. | The same rule, with the place and date taken from the captures' location and time. **Not built.** |
+| Capture → mission | Ingest: the folder a session was offloaded into is its mission | Sync (`phone_missions`, live since 2026-10-21): one phone's captures at most 2 h and 1 km apart form a mission. |
+| Mission → deployment | `infer-deployments` (live since 2026-10-20): one place, on dates at most two days apart. A mission's place and date come from its folder names. | The same rule as each mission is made (`phone_deployments`, 2026-11-11): its place is its site, its date its local day; one place across phones, at most two days apart. A mission with no place is its phone's own trip until a place is found. `deploy-phone-missions` grouped the ones made before. |
 | Enterprise mode (later) | An operator states the deployment and its missions first (e4edm's datasets) | The phone records into the active mission |
 
 Every grouping records how it was made. A stated grouping is never replaced by an

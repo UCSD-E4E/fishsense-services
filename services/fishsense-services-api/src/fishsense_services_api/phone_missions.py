@@ -22,6 +22,9 @@ The mission's place (``site``) is the first one known for any of its captures:
 the phone's own name, or the one the server derives later from the coordinates
 (0041, :func:`place_a_phone_mission`). A mission still named ``…FishSense.Mobile``
 takes that place into its name. A place once known is kept (phase 7b).
+
+Every phone mission is in a deployment, decided as it is made or placed
+(`phone_deployments`; the owner, 2026-11-11).
 """
 
 from __future__ import annotations
@@ -32,6 +35,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
+
+from fishsense_services_api.phone_deployments import (
+    deploy_phone_mission,
+    place_phone_deployment,
+)
 
 #: The owner's thresholds (2026-10-21): more than this apart is another mission.
 GAP = timedelta(hours=2)
@@ -72,7 +80,7 @@ async def place_a_phone_mission(
     place = (place or "").strip()
     if not place:
         return
-    await conn.execute(
+    placed = await conn.execute(
         text("""
             UPDATE missions
             SET site = :place,
@@ -81,6 +89,8 @@ async def place_a_phone_mission(
             """),
         {"t": tenant_id, "m": mission_id, "place": place},
     )
+    if placed.rowcount:
+        await place_phone_deployment(conn, tenant_id, mission_id)
 
 
 async def assign_phone_mission(
@@ -162,4 +172,7 @@ async def assign_phone_mission(
         text("UPDATE captures SET mission_id = :m WHERE tenant_id = :t AND id = :c"),
         {"t": tenant_id, "m": mission_id, "c": capture_id},
     )
+    # Every phone mission is in a deployment (`phone_deployments`); one made
+    # before that rule joins one when a capture joins it.
+    await deploy_phone_mission(conn, tenant_id, mission_id)
     return mission_id
