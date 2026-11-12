@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.86.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.85.0...v0.86.0) (2026-11-12)
+
+
+### Features
+
+* **mcp:** phone depth, confidence and masks, exactly as stored ([3adf238](https://github.com/UCSD-E4E/fishsense-services/commit/3adf238d817c2f942b88e3ab54853dbcdd52bd06))
+
 ## [0.85.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.84.0...v0.85.0) (2026-11-12)
 
 
