@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.87.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.86.0...v0.87.0) (2026-11-12)
+
+
+### Features
+
+* **api:** the server's phone lengths on the automatic map ([81c2046](https://github.com/UCSD-E4E/fishsense-services/commit/81c2046544f8bdb286cee2114771e44de571d3a9))
+
 ## [0.86.0](https://github.com/UCSD-E4E/fishsense-services/compare/v0.85.0...v0.86.0) (2026-11-12)
 
 
