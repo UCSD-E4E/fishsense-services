@@ -3371,6 +3371,17 @@
             ],
             "title": "Length M"
           },
+          "length_sd_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Length Sd M"
+          },
           "location": {
             "anyOf": [
               {
@@ -3426,6 +3437,15 @@
                 "type": "null"
               }
             ]
+          },
+          "trust": {
+            "default": "person",
+            "enum": [
+              "person",
+              "automatic"
+            ],
+            "title": "Trust",
+            "type": "string"
           }
         },
         "required": [
@@ -7147,7 +7167,7 @@
     },
     "/tenants/{slug}/observations": {
       "get": {
-        "description": "Newest first, a page at a time: by number (``page``, from 1, of\n``limit`` each) or after a cursor (``before``, the last page's\n``next``), not both. ``total`` is how many there are in all.",
+        "description": "Newest first, a page at a time: by number (``page``, from 1, of\n``limit`` each) or after a cursor (``before``, the last page's\n``next``), not both. ``total`` is how many there are in all.\n``trust`` keeps a person's fish or the automatic ones; the default,\nevery fish, reads the automatic lengths too, which costs seconds in a\nlarge tenant.",
         "operationId": "list_observations",
         "parameters": [
           {
@@ -7213,6 +7233,26 @@
                 }
               ],
               "title": "Species"
+            }
+          },
+          {
+            "in": "query",
+            "name": "trust",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "person",
+                    "automatic"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Trust"
             }
           },
           {

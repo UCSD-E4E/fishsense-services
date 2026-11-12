@@ -125,7 +125,7 @@ export function MapSourceToggle({ slug, source }: { slug: string; source: MapSou
 export async function RecentFish({ token, slug }: Section) {
   let fish;
   try {
-    fish = (await getObservationPage(token, slug, { limit: 3 })).observations;
+    fish = (await getObservationPage(token, slug, { trust: "person", limit: 3 })).observations;
   } catch (error) {
     unstable_rethrow(error);
     return <Failure>Could not load the recent fish: {reason(error)}</Failure>;

@@ -115,7 +115,7 @@ describe("RecentFish", () => {
 
     const out = await html(RecentFish(SECTION));
 
-    expect(fetchMock.mock.calls[0][0].url).toBe("http://api.test/tenants/lab/observations?limit=3");
+    expect(fetchMock.mock.calls[0][0].url).toBe("http://api.test/tenants/lab/observations?trust=person&limit=3");
     expect(out).toContain("No measured fish yet.");
   });
 

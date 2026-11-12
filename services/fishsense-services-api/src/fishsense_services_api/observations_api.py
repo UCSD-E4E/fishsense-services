@@ -1,4 +1,5 @@
-"""Observations over HTTP: every measured fish, Lite and Mobile alike.
+"""Observations over HTTP: every fish, Lite and Mobile alike, each with how
+much it is trusted: a person's, or automatic (the owner, 2026-11-11).
 
 PLAN.md §4.9, Phase 1 of §9.26. For any member of the tenant:
 
@@ -95,6 +96,13 @@ class ObservationView(BaseModel):
     #: A presigned GET of the photo, valid for an hour: a phone's own image,
     #: or a Lite frame's render; None until a Lite frame is rendered.
     photo_url: str | None
+    #: How much the length is trusted (the owner, 2026-11-11): ``person``,
+    #: measured by a person; ``automatic``, a model's and not yet reviewed.
+    #: An automatic fish's page is its frame's
+    #: (``/missions/{number}/frames/{capture_id}``), not ``/observations``.
+    trust: Literal["person", "automatic"] = "person"
+    #: One standard deviation of the length, where its calibration says.
+    length_sd_m: float | None = None
 
 
 class SpeciesCountView(BaseModel):
@@ -250,6 +258,8 @@ def add_observation_routes(
             place_name=found.place_name or found.derived_place_name,
             client_capture_uuid=found.client_capture_uuid,
             photo_url=photo_url(slug, found),
+            trust=found.trust,
+            length_sd_m=found.length_sd_m,
         )
 
     @app.get(
@@ -360,13 +370,17 @@ def add_observation_routes(
         device: Literal["lite", "mobile", "other"] | None = None,
         mission: Annotated[int | None, Query(ge=0)] = None,
         species: Annotated[str | None, Query(min_length=1, max_length=200)] = None,
+        trust: Literal["person", "automatic"] | None = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         before: str | None = None,
         page: Annotated[int | None, Query(ge=1)] = None,
     ) -> ObservationPage:
         """Newest first, a page at a time: by number (``page``, from 1, of
         ``limit`` each) or after a cursor (``before``, the last page's
-        ``next``), not both. ``total`` is how many there are in all."""
+        ``next``), not both. ``total`` is how many there are in all.
+        ``trust`` keeps a person's fish or the automatic ones; the default,
+        every fish, reads the automatic lengths too, which costs seconds in a
+        large tenant."""
         if page is not None and before is not None:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -384,6 +398,7 @@ def add_observation_routes(
                 photo_bucket=bucket(slug),
                 mission=mission,
                 species=species,
+                trust=trust,
             )
         listed, more = found.observations[:limit], len(found.observations) > limit
         if namer is not None:

@@ -228,3 +228,18 @@ async def test_a_mask_recorded_in_another_bucket_is_not_served(
     response = await _get(client, f"/tenants/lab/captures/{c}/phone-measurement/mask")
 
     assert response.status_code == 404
+
+
+async def test_the_fish_list_carries_the_server_length_as_automatic(
+    client, lab, owner_engine, app_engine
+):
+    """The owner, 2026-11-11: every fish on the Fish page, with its trust."""
+    c, _ = await _phone(owner_engine, app_engine, lab)
+    await _record(app_engine, lab, _measured(c))
+
+    found = (await _get(client, "/tenants/lab/observations")).json()
+
+    (fish,) = found["observations"]
+    assert (fish["capture_id"], fish["length_m"]) == (str(c), 0.284)
+    assert (fish["trust"], fish["length_sd_m"]) == ("automatic", None)
+    assert fish["mission"]["number"] is not None
