@@ -54,6 +54,7 @@ from starlette.types import Receive, Scope, Send
 from fishsense_services_api import api_tokens
 from fishsense_services_api.api_tokens import READ, TOKEN_PREFIX
 from fishsense_services_api.auth import IN_PROCESS_PRINCIPAL, Principal
+from fishsense_services_api.tenant_stores import DEFAULT_EXPIRES_SECONDS
 
 log = logging.getLogger(__name__)
 
@@ -75,7 +76,13 @@ INSTRUCTIONS = (
     "(labellers, the human path's predictions, the automatic dot): say which "
     "you use, and say so when they disagree. An automatic dot's "
     "`laser_color_source` is `dot` (read with the dot) or `render` (read off "
-    "its render later, by a backfill). When you report "
+    "its render later, by a backfill). A phone capture's depth, confidence and "
+    "mask (get_phone_capture_maps), the server's phone mask "
+    "(get_phone_measurement_mask) and the automatic run's mask "
+    "(get_automatic_mask) come as links to the exact stored bytes, with each "
+    "file's format and SHA-256: download them, check the hash, and read them as "
+    "the format says; never estimate values from a description. The links "
+    "expire. When you report "
     "numbers, give how many fish or frames they rest on. These tools only "
     "read; changes are made in the web app."
 )
@@ -202,6 +209,69 @@ def _automatic(result: Any) -> dict:
 def _automatic_page(page: dict) -> dict:
     """A page of automatic lengths, marked as `_automatic` marks a result."""
     return {"validated": False, "note": UNVALIDATED, **page}
+
+
+def _stored(found: dict, role: str) -> dict | None:
+    """A phone capture's file as stored: its hash, size and a link to it."""
+    for f in found["files"]:
+        if f["role"] == role:
+            return {"sha256": f["sha256"], "size": f["size"], "url": f["url"]}
+    return None
+
+
+def _phone_maps(found: dict) -> dict:
+    """A phone capture's LiDAR depth, its confidence and the phone's own mask,
+    each as the app synced it (docs/handoff/fishsense-mobile/SYNC.md): never
+    re-encoded, so nothing is lost (the owner, 2026-11-12)."""
+    depth, confidence, mask = found["depth"], found["confidence"], found["mask"]
+    confidence_row = confidence["row_bytes"] or confidence["width"]
+    mask_file = _stored(found, "mask_u8")
+    return {
+        "capture_id": found["capture_id"],
+        "client_capture_uuid": found["client_capture_uuid"],
+        "captured_at": found["captured_at"],
+        #: Row-major K, 3x3, of the RGB frame the depth is aligned to.
+        "intrinsics": found["intrinsics"],
+        "orientation": found["orientation"],
+        "links_expire_in_s": DEFAULT_EXPIRES_SECONDS,
+        "depth": {
+            "width": depth["width"],
+            "height": depth["height"],
+            "row_bytes": depth["row_bytes"],
+            "dtype": "float32",
+            "byte_order": "little",
+            "units": "meters",
+            "layout": (
+                f"row-major: {depth['height']} rows of row_bytes bytes; the bytes "
+                "after width * 4 in each row are padding"
+            ),
+            **(_stored(found, "depth_f32") or {}),
+        },
+        "confidence": {
+            "width": confidence["width"],
+            "height": confidence["height"],
+            "row_bytes": confidence_row,
+            "dtype": "uint8",
+            "levels": {"0": "low", "1": "medium", "2": "high"},
+            "layout": (
+                f"row-major: {confidence['height']} rows of row_bytes bytes; the "
+                "bytes after width in each row are padding"
+            ),
+            **(_stored(found, "confidence_u8") or {}),
+        },
+        "mask": (
+            None
+            if mask is None or mask_file is None
+            else {
+                "width": mask["width"],
+                "height": mask["height"],
+                "dtype": "uint8",
+                "layout": "row-major: width * height bytes, nonzero on the fish",
+                "made_by": "FishSense Mobile's Fishial model, on the phone",
+                **mask_file,
+            }
+        ),
+    }
 
 
 class McpEndpoint:
@@ -389,6 +459,74 @@ def _server(get) -> MCPServer:
         """The automatic pipeline's result for one capture. Unvalidated."""
         return _automatic(
             await get(ctx, _path("tenants", slug, "captures", capture_id, "automatic"))
+        )
+
+    @tool
+    async def get_automatic_mask(
+        ctx: Context, slug: Slug, capture_id: uuid.UUID
+    ) -> dict:
+        """The automatic run's SAM 3 mask of the fish in one frame: a link to
+        the exact PNG as stored, its size and SHA-256. Unvalidated."""
+        found = await get(
+            ctx, _path("tenants", slug, "captures", capture_id, "automatic")
+        )
+        if found["mask_url"] is None:
+            raise ToolError("404: no mask for this frame")
+        return _automatic(
+            {
+                "width": found["mask_width"],
+                "height": found["mask_height"],
+                "format": "8-bit grayscale PNG, 255 on the fish",
+                "made_by": "SAM 3, in the automatic run",
+                "predictor_version": found["predictor_version"],
+                "checkpoint": found["checkpoint"],
+                "sha256": found["mask_sha256"],
+                "url": found["mask_url"],
+                "links_expire_in_s": DEFAULT_EXPIRES_SECONDS,
+            }
+        )
+
+    @tool
+    async def get_phone_capture_maps(
+        ctx: Context, slug: Slug, client_capture_uuid: uuid.UUID
+    ) -> dict:
+        """A phone capture's LiDAR depth map (float32 meters), its confidence
+        map (0 low, 1 medium, 2 high) and the fish mask FishSense Mobile made
+        on the phone (Fishial; null when it found none): each a link to the
+        exact bytes the phone synced, with its geometry, layout and SHA-256.
+        `client_capture_uuid` is the capture's, as list_observations and
+        get_observation give it."""
+        return _phone_maps(
+            await get(
+                ctx, _path("tenants", slug, "mobile", "captures", client_capture_uuid)
+            )
+        )
+
+    @tool
+    async def get_phone_measurement_mask(
+        ctx: Context, slug: Slug, capture_id: uuid.UUID
+    ) -> dict:
+        """The fish mask from the server's run of the phone measurement
+        (Fishial): a link to the exact PNG as stored, its size and SHA-256.
+        Unvalidated."""
+        found = await get(
+            ctx, _path("tenants", slug, "captures", capture_id, "phone-measurement")
+        )
+        if found["mask_url"] is None:
+            raise ToolError(f"404: no mask for this capture ({found['status']})")
+        return _automatic(
+            {
+                "width": found["mask_width"],
+                "height": found["mask_height"],
+                "format": "8-bit grayscale PNG, the frame's size, 255 on the fish",
+                "made_by": "Fishial, in the server's run of the phone measurement",
+                "model_id": found["model_id"],
+                "algorithm": found["algorithm"],
+                "measured_at": found["measured_at"],
+                "sha256": found["mask_sha256"],
+                "url": found["mask_url"],
+                "links_expire_in_s": DEFAULT_EXPIRES_SECONDS,
+            }
         )
 
     @tool

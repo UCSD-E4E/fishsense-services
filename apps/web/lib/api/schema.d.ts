@@ -1000,6 +1000,8 @@ export interface components {
             mask_bbox: number[] | null;
             /** Mask Height */
             mask_height: number | null;
+            /** Mask Sha256 */
+            mask_sha256?: string | null;
             /** Mask Url */
             mask_url: string | null;
             /** Mask Width */
@@ -1859,6 +1861,8 @@ export interface components {
             length_m: number | null;
             /** Mask Height */
             mask_height: number | null;
+            /** Mask Sha256 */
+            mask_sha256?: string | null;
             /** Mask Url */
             mask_url: string | null;
             /** Mask Width */
