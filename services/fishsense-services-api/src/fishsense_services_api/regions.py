@@ -18,6 +18,7 @@ __all__ = [
     "is_pool",
     "nearest_region",
     "region_of_place",
+    "region_of_site",
 ]
 
 #: Each region's place on the map: broad, never a site.
@@ -46,6 +47,18 @@ _POOLS = {
     "Nathan's Pool": "Southern California, USA",
 }
 
+#: Mission sites (``missions.site``, a phone mission's) and their regions,
+#: matched whole, ignoring case. CCFRP's phone captures have no GPS, and every
+#: CCFRP photo is from San Diego (the owner, 2026-11-11): its 530 lengths were
+#: all "elsewhere" on the automatic map (v0.87.0) until its three sites were
+#: placed by name (the owner, 2026-11-12). Only these sites: a new one is
+#: "elsewhere" until it is added here.
+_SITES = {
+    "oceanside sea center": "Southern California, USA",
+    "sio": "Southern California, USA",
+    "outer limits charters inc": "Southern California, USA",
+}
+
 #: How far a phone's fish may be from a region's point and still join it.
 NEAREST_WITHIN_KM = 300.0
 
@@ -58,6 +71,11 @@ def region_of_place(place: str | None, *, pools: bool = True) -> str | None:
     if place is None:
         return None
     return _FIELD.get(place) or (_POOLS.get(place) if pools else None)
+
+
+def region_of_site(site: str | None) -> str | None:
+    """The region a mission's site is in, for the sites :data:`_SITES` names."""
+    return _SITES.get((site or "").strip().casefold())
 
 
 def is_pool(place: str | None) -> bool:
