@@ -70,3 +70,18 @@ export function phoneCardLabel(
   }
   return { text: phoneStatusLabel(phone.status), unvalidated: false };
 }
+
+export type PhoneSpecies = Schemas["PhoneSpecies"];
+
+/** BioCLIP's species for the server measurement's fish (0090), as the frame
+ *  page names it: automatic and unvalidated, like the length. */
+export function phoneSpeciesLabel(
+  species: PhoneSpecies | null | undefined,
+): { name: string; detail: string | null } | null {
+  if (!species) return null;
+  const sure = species.probability != null ? `${Math.round(species.probability * 100)}%` : null;
+  if (species.common_name) {
+    return { name: species.common_name, detail: [species.scientific_name, sure].filter(Boolean).join(" · ") };
+  }
+  return { name: species.scientific_name, detail: sure };
+}

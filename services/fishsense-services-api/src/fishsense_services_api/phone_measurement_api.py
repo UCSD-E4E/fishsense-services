@@ -10,6 +10,7 @@ own origin (as `automatic_api`'s mask) to tint the fish. A capture the caller
 can't see, or the server never measured, is 404.
 """
 
+import re
 import uuid
 from datetime import datetime
 from typing import Annotated
@@ -24,13 +25,28 @@ from fishsense_services_api.memberships import Membership
 from fishsense_services_api.phone_measurement_store import current_phone_measurement
 from fishsense_services_api.tenant_stores import NoTenantStore, TenantStores
 
-__all__ = ["PhonePoint", "PhoneMeasurementView", "add_phone_measurement_routes"]
+__all__ = [
+    "PhonePoint",
+    "PhoneMeasurementView",
+    "PhoneSpecies",
+    "add_phone_measurement_routes",
+]
 
 
 class PhonePoint(BaseModel):
     #: Full-frame pixels of the capture's JPEG.
     x: float
     y: float
+
+
+class PhoneSpecies(BaseModel):
+    """BioCLIP's species for the measurement's fish (0090): automatic,
+    unvalidated."""
+
+    scientific_name: str
+    common_name: str | None
+    #: Its top-1 probability among the region's fish.
+    probability: float | None
 
 
 class PhoneMeasurementView(BaseModel):
@@ -53,6 +69,20 @@ class PhoneMeasurementView(BaseModel):
     algorithm: str
     error: str | None
     measured_at: datetime
+    species: PhoneSpecies | None = None
+
+
+_CHOICE = re.compile(r"^[^,]*,\s*(.*?)\s*\(([^()]*)\)\s*$")
+
+
+def _species(choice: str | None, probability: float | None) -> PhoneSpecies | None:
+    """A choice, "Fish, Calico Rockfish (Sebastes dallii)", as its names."""
+    found = None if choice is None else _CHOICE.match(choice)
+    if found is None:
+        return None
+    return PhoneSpecies(scientific_name=found.group(2),
+                        common_name=found.group(1) or None,
+                        probability=probability)  # fmt: skip
 
 
 def _point(x: float | None, y: float | None) -> PhonePoint | None:
@@ -105,6 +135,7 @@ def add_phone_measurement_routes(
             algorithm=found.algorithm,
             error=found.error,
             measured_at=found.created_at,
+            species=_species(found.species_choice, found.species_probability),
         )
 
     @app.get(

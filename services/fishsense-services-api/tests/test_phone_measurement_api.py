@@ -243,3 +243,55 @@ async def test_the_fish_list_carries_the_server_length_as_automatic(
     assert (fish["capture_id"], fish["length_m"]) == (str(c), 0.284)
     assert (fish["trust"], fish["length_sd_m"]) == ("automatic", None)
     assert fish["mission"]["number"] is not None
+
+
+async def _species(app_engine, lab, capture_id, choice, probability=0.81):
+    from fishsense_services_api.phone_species_store import (
+        PhoneSpeciesResult,
+        record_phone_species,
+    )
+
+    async with tenant_transaction(app_engine, lab) as conn:
+        current = (
+            await conn.execute(
+                text("SELECT id FROM current_phone_measurements WHERE capture_id = :c"),
+                {"c": capture_id},
+            )
+        ).scalar_one()
+        await record_phone_species(conn, lab, "Southern California, USA", [
+            PhoneSpeciesResult(
+                capture_id=capture_id, phone_measurement_id=current, status="predicted",
+                predictor_version=1, model_id="hf-hub:imageomics/bioclip-2.5-vith14",
+                predicted_choice=choice, top1_probability=probability, margin=0.5,
+                top5=[{"choice": choice, "probability": probability}],
+            )
+        ])  # fmt: skip
+
+
+async def test_the_measurement_carries_its_automatic_species(
+    client, lab, owner_engine, app_engine
+):
+    c, _ = await _phone(owner_engine, app_engine, lab)
+    await _record(app_engine, lab, _measured(c))
+    await _species(app_engine, lab, c, "Fish, Calico Rockfish (Sebastes dallii)")
+
+    found = (await _get(client, f"/tenants/lab/captures/{c}/phone-measurement")).json()
+
+    assert found["species"] == {
+        "scientific_name": "Sebastes dallii",
+        "common_name": "Calico Rockfish",
+        "probability": 0.81,
+    }
+
+
+async def test_a_species_for_an_older_measurement_is_not_carried(
+    client, lab, owner_engine, app_engine
+):
+    c, _ = await _phone(owner_engine, app_engine, lab)
+    await _record(app_engine, lab, _measured(c))
+    await _species(app_engine, lab, c, "Fish, Calico Rockfish (Sebastes dallii)")
+    await _record(app_engine, lab, _measured(c))
+
+    found = (await _get(client, f"/tenants/lab/captures/{c}/phone-measurement")).json()
+
+    assert found["species"] is None

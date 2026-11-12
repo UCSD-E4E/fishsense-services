@@ -1875,6 +1875,7 @@ export interface components {
             snout: components["schemas"]["PhonePoint"] | null;
             /** Snout Depth M */
             snout_depth_m: number | null;
+            species?: components["schemas"]["PhoneSpecies"] | null;
             /** Status */
             status: string;
         };
@@ -1884,6 +1885,19 @@ export interface components {
             x: number;
             /** Y */
             y: number;
+        };
+        /**
+         * PhoneSpecies
+         * @description BioCLIP's species for the measurement's fish (0090): automatic,
+         *     unvalidated.
+         */
+        PhoneSpecies: {
+            /** Common Name */
+            common_name: string | null;
+            /** Probability */
+            probability: number | null;
+            /** Scientific Name */
+            scientific_name: string;
         };
         /** PhotoSize */
         PhotoSize: {

@@ -50,6 +50,7 @@ GLOBAL_REFERENCE_TABLES = frozenset(
         "slate_templates",
         "species_length_references",
         "regional_species",
+        "regional_species_additions",
     }
 )
 

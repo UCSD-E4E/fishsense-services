@@ -234,6 +234,9 @@ class CurrentPhoneMeasurement:
     created_at: datetime
     photo_bucket: str | None
     photo_key: str | None
+    #: BioCLIP's choice for this measurement's fish (0090), unvalidated.
+    species_choice: str | None = None
+    species_probability: float | None = None
 
 
 async def current_phone_measurement(
@@ -249,11 +252,17 @@ async def current_phone_measurement(
                        p.mask_bucket, p.mask_key, p.mask_width, p.mask_height,
                        p.model_id, p.core_version, p.algorithm, p.error,
                        p.created_at, rgb.bucket AS photo_bucket,
-                       rgb.object_key AS photo_key
+                       rgb.object_key AS photo_key,
+                       s.predicted_choice AS species_choice,
+                       s.top1_probability AS species_probability
                 FROM current_phone_measurements p
                 LEFT JOIN capture_objects rgb
                   ON rgb.tenant_id = p.tenant_id AND rgb.capture_id = p.capture_id
                  AND rgb.role = 'rgb_jpeg'
+                -- Only a species cropped to this measurement's mask.
+                LEFT JOIN current_phone_species_predictions s
+                  ON s.tenant_id = p.tenant_id AND s.capture_id = p.capture_id
+                 AND s.phone_measurement_id = p.id AND s.status = 'predicted'
                 WHERE p.tenant_id = :t AND p.capture_id = :c
                 """),
             {"t": tenant_id, "c": capture_id},
